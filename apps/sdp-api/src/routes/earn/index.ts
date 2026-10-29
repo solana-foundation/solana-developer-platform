@@ -1,20 +1,13 @@
 import { type Context, Hono, type Next } from "hono";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
-import { optionalAuth, unifiedAuthMiddleware } from "@/middleware/auth";
-import { optionalClerkAuth } from "@/middleware/clerk-auth";
-import {
-  type AnonymousMeteredQuotaConfig,
-  anonymousMeteredQuota,
-  authenticatedMeteredQuota,
-  meteredQuota,
-} from "@/middleware/metered-quota";
+import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
-import { requireAction, requireActionWhenAuthenticated } from "@/middleware/require-action";
+import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { isEarnExitOrRead } from "./exits";
 import {
@@ -62,6 +55,7 @@ import {
 } from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
+  admitEarnVaultDeposit,
   admitEarnVaultRuntimeExecution,
   assertEarnVaultWithdrawalFloor,
   createEarnVaultDeposit,
@@ -103,7 +97,6 @@ import {
 } from "./schemas";
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
-const optionalAuthEarn = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
 
 // Gate the whole family behind the Earn feature flag until it is ready for
@@ -119,81 +112,16 @@ async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
 
 earnRoutes.use("*", requireEarnFeature);
 
-// Public routes authenticate a presented credential without requiring one.
-// Keep the same API-key -> Clerk precedence as unified auth so a second
-// credential can never replace the tenant identity selected by the first one.
-const tryApiKey = optionalAuth({ rejectInvalid: true });
-const tryClerk = optionalClerkAuth({ rejectInvalid: true });
-async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
-  const presentedApiKey = extractApiKey(c);
-  await tryApiKey(c, async () => {
-    // Do not reinterpret an sk_-shaped token as Clerk auth. Unknown, revoked,
-    // or expired keys were already rejected by strict optional auth.
-    if (c.get("apiKey") || (presentedApiKey && looksLikeApiKey(presentedApiKey))) {
-      await next();
-      return;
-    }
-    await tryClerk(c, next);
-  });
-}
-
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
     isEarnExitOrRead(c.req.method, c.req.path),
 };
 
-// Authenticated callers keep their verified project selection. Anonymous
-// callers have no organization or project to resolve and continue untouched.
-const resolveProjectContext = projectContextMiddleware(earnProjectContextOptions);
-function hasEarnAuth(c: Context<{ Bindings: Env }>): boolean {
-  return Boolean(c.get("apiKey") || c.get("clerk"));
-}
-
-async function optionalEarnProjectContext(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!hasEarnAuth(c)) {
-    await next();
-    return;
-  }
-  await resolveProjectContext(c, next);
-}
-
-async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) {
-  try {
-    await next();
-  } finally {
-    getLogger().info(
-      {
-        event: "sdp_api_earn_tier_request",
-        tier: hasEarnAuth(c) ? "keyed" : "anonymous",
-        method: c.req.method,
-        route: c.req.path.startsWith("/v1/earn/strategies/")
-          ? "/v1/earn/strategies/:strategyId"
-          : c.req.path,
-        status: c.res?.status,
-      },
-      "Earn tier request"
-    );
-  }
-}
-
-// Hono flattens sub-app `use("*")` middleware into the parent at mount time.
-// Keep this tuple on the eight optional-auth declarations so it can never run on
-// the keyed router that shares the same mount point.
-const OPTIONAL_EARN_ACCESS_MIDDLEWARE = [
-  optionalEarnAuth,
-  optionalEarnProjectContext,
-  observeEarnAccessTier,
-] as const;
-
-const EARN_CATALOGUE_CACHE_CONTROL = "public, max-age=30, stale-while-revalidate=30";
-const EARN_AUTHENTICATED_CATALOGUE_CACHE_CONTROL = "private, max-age=30";
+const EARN_CATALOGUE_CACHE_CONTROL = "private, max-age=30";
 async function cacheEarnCatalogue(c: Context<{ Bindings: Env }>, next: Next) {
   await next();
   if (c.res.status >= 200 && c.res.status < 300) {
-    c.header(
-      "Cache-Control",
-      hasEarnAuth(c) ? EARN_AUTHENTICATED_CATALOGUE_CACHE_CONTROL : EARN_CATALOGUE_CACHE_CONTROL
-    );
+    c.header("Cache-Control", EARN_CATALOGUE_CACHE_CONTROL);
   }
 }
 
@@ -204,105 +132,12 @@ const EARN_PROVIDER_READ_QUOTA = {
 } as const;
 const EARN_CHAIN_READ_QUOTA = { name: "earn-chain-read", actorMax: 30, orgMax: 120 } as const;
 
-function positiveInteger(value: string | undefined, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-export const EARN_ANONYMOUS_RPC_QUOTA: AnonymousMeteredQuotaConfig = {
-  name: "earn-rpc",
-  maxRequests: (env) => positiveInteger(env.EARN_ANONYMOUS_RPC_MAX_REQUESTS, 20),
-  windowMs: (env) => positiveInteger(env.EARN_ANONYMOUS_RPC_WINDOW_SECONDS, 60) * 1_000,
-};
-
-const anonymousEarnRpcQuota = anonymousMeteredQuota(EARN_ANONYMOUS_RPC_QUOTA);
-// Strategy catalogue (source: DB, admitted only by the sync cron). A
-// credential narrows the request exactly as before; without one, the handler
-// reads only the deployment-scoped global catalogue.
-optionalAuthEarn.get(
-  "/strategies",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  cacheEarnCatalogue,
-  listEarnStrategies
-);
-optionalAuthEarn.get(
-  "/strategies/:strategyId",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  cacheEarnCatalogue,
-  getEarnStrategy
-);
-
-// Catalogue/chain-only quotes and builds. These are declared exactly once on
-// the optional-auth router: authenticated callers retain tenant entitlement
-// and durable build behavior inside the shared handlers, while anonymous
-// callers never acquire a tenant identity or write a row.
-//
-// On the two money-IN routes the body is validated BEFORE either meter runs:
-// the keyed counter is shared by the whole organization, so a malformed
-// request must not be able to spend the pool that later valid builds and
-// provider reads draw from.
-optionalAuthEarn.post(
-  "/vault-deposit-previews",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  validateBody(earnVaultDepositPreviewSchema),
-  authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
-  anonymousEarnRpcQuota,
-  createEarnVaultDepositPreview
-);
-// The deposit BUILD is money-IN, so it takes the same keyed meter as the
-// deposit quote above (PRO-1994). Its exit siblings below carry none: see the
-// keyed-router comment on why every exit route stays unmetered.
-optionalAuthEarn.post(
-  "/external-wallet/deposit-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.execute"),
-  validateBody(earnExternalWalletDepositTransactionSchema),
-  authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
-  anonymousEarnRpcQuota,
-  createEarnExternalWalletDepositTransaction
-);
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-previews",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalPreviewSchema),
-  createEarnExternalWalletWithdrawalPreview
-);
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.execute"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalTransactionSchema),
-  createEarnExternalWalletWithdrawalTransaction
-);
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-options",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalOptionsSchema),
-  getEarnExternalWalletWithdrawalOptions
-);
-optionalAuthEarn.post(
-  "/external-wallet/queued-withdrawal-previews",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requireActionWhenAuthenticated("earn.read"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
-  createEarnExternalWalletQueuedWithdrawalPreview
-);
-// Queue action builds live on the keyed router below. Unlike an instant exit,
-// their durable request id and recovery lifecycle are part of the contract.
-// Keyed routes retain dashboard auth, project membership checks, and their
-// existing permission matrix. Give anonymous callers the API-facing contract
-// before projectContextMiddleware can turn a missing project into a 400.
+// Every Earn route requires a credential and runs in the caller's project.
+// A request with none gets the API-facing 401 before projectContextMiddleware
+// can turn a missing project into a 400.
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!c.req.header("Authorization")) {
+  // A credential in Authorization, or a key the gateway authenticated.
+  if (!c.req.header("Authorization") && !presentsApiKey(c)) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
   }
   await next();
@@ -329,6 +164,28 @@ earn.use("*", projectContextMiddleware(earnProjectContextOptions));
 //
 // Money-IN carries no such rule, so the deposit quote and the external-wallet
 // deposit build are metered.
+// Strategy catalogue (source: DB, admitted only by the sync cron), read in
+// the caller's project environment.
+earn.get("/strategies", requireAction("earn.read"), cacheEarnCatalogue, listEarnStrategies);
+earn.get(
+  "/strategies/:strategyId",
+  requireAction("earn.read"),
+  cacheEarnCatalogue,
+  getEarnStrategy
+);
+
+// The deposit QUOTE is money-IN shaped, so it is metered. The body is validated
+// BEFORE the meter: the counter is shared by the whole organization, so a
+// malformed request must not spend the pool that later valid quotes and builds
+// draw from.
+earn.post(
+  "/vault-deposit-previews",
+  requireAction("earn.read"),
+  validateBody(earnVaultDepositPreviewSchema),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  createEarnVaultDepositPreview
+);
+
 // B2B2C live holdings (PRO-1724). The owner is a REQUIRED query filter on
 // every per-owner read of this surface (positions, movements, earnings) — one
 // addressing style for one concept, and no literal segment (`summary`) can
@@ -408,7 +265,12 @@ earn.post(
   requestGate({
     extract: extractEarnVaultDeposit,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
-    admit: admitEarnVaultRuntimeExecution,
+    // The money-in gates run AFTER the completed-replay exit so a recorded
+    // deposit stays replayable when its strategy pauses or a policy flips.
+    admit: async (c, extraction) => {
+      await admitEarnVaultDeposit(c, extraction);
+      await admitEarnVaultRuntimeExecution(c, extraction);
+    },
   }),
   createEarnVaultDeposit
 );
@@ -494,10 +356,12 @@ earn.get(
 // Recovery is intentionally not request-gated: it only releases the caller's
 // provider request. Solver queues return escrowed shares after their deadline;
 // operator redemptions revoke the claim and leave the redeemed intermediate
-// asset in the same owner wallet.
+// asset in the same owner wallet. `earn.manage`, the action its movement
+// (`earn.queued_withdraw_cancel`) needs at the signer, so a key without it is
+// refused here rather than after sponsorship, a build and a simulation.
 earn.post(
   "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnVaultWithdrawalRequestCancelSchema),
   cancelEarnVaultWithdrawalRequest
 );
@@ -520,16 +384,47 @@ earn.get(
   getEarnVaultShareReconciliation
 );
 
-// External-wallet SUBMIT routes remain keyed. Instant deposit/withdrawal builds
-// and all previews live on the optional-auth router above. Queued request and
-// cancellation builds stay keyed with the durable lifecycle they create.
+// External-wallet builds, previews and submits. The deposit BUILD is money-IN,
+// so it takes the same meter as the deposit quote (PRO-1994), validated first;
+// the exit builds and previews carry none (see the metered-quotas note above).
 //
 // Deliberately NO `requestGate` and no wallet scope: a key's wallet scope
 // governs the org's own custody at `createOrgSignerForCustodyWallet`. These
 // routes never resolve a signer and never touch custody — the owner's own
 // signature is the authorization, and there is no signing sink here for the
-// value-moving conformance inventory to find. `earn.execute` gates the submits
-// because they create and broadcast recorded movements.
+// value-moving conformance inventory to find. `earn.execute` gates the builds
+// and submits because they create and broadcast recorded movements.
+earn.post(
+  "/external-wallet/deposit-transactions",
+  requireAction("earn.execute"),
+  validateBody(earnExternalWalletDepositTransactionSchema),
+  meteredQuota(EARN_PROVIDER_READ_QUOTA),
+  createEarnExternalWalletDepositTransaction
+);
+earn.post(
+  "/external-wallet/withdrawal-previews",
+  requireAction("earn.read"),
+  validateBody(earnExternalWalletWithdrawalPreviewSchema),
+  createEarnExternalWalletWithdrawalPreview
+);
+earn.post(
+  "/external-wallet/withdrawal-transactions",
+  requireAction("earn.execute"),
+  validateBody(earnExternalWalletWithdrawalTransactionSchema),
+  createEarnExternalWalletWithdrawalTransaction
+);
+earn.post(
+  "/external-wallet/withdrawal-options",
+  requireAction("earn.read"),
+  validateBody(earnExternalWalletWithdrawalOptionsSchema),
+  getEarnExternalWalletWithdrawalOptions
+);
+earn.post(
+  "/external-wallet/queued-withdrawal-previews",
+  requireAction("earn.read"),
+  validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
+  createEarnExternalWalletQueuedWithdrawalPreview
+);
 earn.post(
   "/external-wallet/deposits",
   requireAction("earn.execute"),
@@ -632,5 +527,4 @@ earn.get(
   getEarnProgramWithdrawal
 );
 
-earnRoutes.route("/", optionalAuthEarn);
 earnRoutes.route("/", earn);

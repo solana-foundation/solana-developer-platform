@@ -20,6 +20,7 @@ const MODULE_METADATA = [
     directory: "apps/sdp-api",
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
+      "@sdp/api-catalog",
       "@sdp/custody",
       "@sdp/dvp",
       "@sdp/earn",
@@ -48,7 +49,12 @@ const MODULE_METADATA = [
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",
-    allowedDependencies: ["@sdp/env-config", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/api-catalog",
+      "@sdp/design-tokens",
+      "@sdp/env-config",
+      "@sdp/types",
+    ],
   },
   {
     name: "sdp-web",
@@ -57,6 +63,7 @@ const MODULE_METADATA = [
     // @sdp/issuance is imported only through its mosaic-free `capabilities`
     // subpath (the advanced-settings catalog + lookups the editor renders).
     allowedDependencies: [
+      "@sdp/api-catalog",
       "@sdp/design-tokens",
       "@sdp/issuance",
       "@sdp/private-channels",
@@ -65,6 +72,13 @@ const MODULE_METADATA = [
       "@sdp/types",
       "@sdp/ui",
     ],
+  },
+  {
+    name: "@sdp/api-catalog",
+    directory: "packages/sdp-api-catalog",
+    purpose:
+      "The public API's reference model and request snippets, shared by the API, the dashboard and the docs.",
+    allowedDependencies: ["@sdp/types"],
   },
   {
     name: "@sdp/api-integration",

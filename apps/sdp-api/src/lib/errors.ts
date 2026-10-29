@@ -4,11 +4,9 @@
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import type { Action } from "@sdp/types/actions";
-import type { CountryCode } from "@sdp/types/countries";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
 import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 
 export type ErrorCode =
   | "BAD_REQUEST"
@@ -26,8 +24,6 @@ export type ErrorCode =
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
   | "OPERATION_NOT_ALLOWED"
-  | "INVALID_INVITATION"
-  | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
@@ -60,10 +56,12 @@ export type ErrorCode =
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
   | "VAULT_EXPOSURE_CAP"
+  // Native SOL sent to an account that does not exist (HOO-2375)
+  | "AMOUNT_BELOW_RENT_MINIMUM"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
-export interface ApiError {
+interface ApiError {
   code: ErrorCode;
   message: string;
   details?: Record<string, unknown>;
@@ -89,8 +87,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
   OPERATION_NOT_ALLOWED: 403,
-  INVALID_INVITATION: 400,
-  EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
@@ -127,6 +123,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP: 409,
+  // 409, never stored under an Idempotency-Key: the request is well-formed, and
+  // the same request is admissible once the address is funded.
+  AMOUNT_BELOW_RENT_MINIMUM: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -152,8 +151,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
   OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
-  INVALID_INVITATION: "Invalid invitation token",
-  EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",
@@ -189,6 +186,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP:
     "This deposit would take SDP's total holdings in the vault past its exposure cap",
+  AMOUNT_BELOW_RENT_MINIMUM:
+    "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
@@ -249,10 +248,6 @@ export function badRequestParams(details?: Record<string, unknown>): AppError {
 
 export function unauthorized(message?: string): AppError {
   return new AppError("UNAUTHORIZED", message);
-}
-
-export function insufficientPermissions(message?: string): AppError {
-  return new AppError("INSUFFICIENT_PERMISSIONS", message);
 }
 
 /**
@@ -335,6 +330,18 @@ export function vaultExposureCapExceeded(
   return new AppError("VAULT_EXPOSURE_CAP", message, details);
 }
 
+/**
+ * Native SOL recipients whose address holds no account and whose amount is
+ * below the rent-exempt minimum (HOO-2375): the chain refuses such a transfer
+ * in preflight, and its whole transaction with it.
+ */
+export function amountBelowRentMinimum(
+  message?: string,
+  details?: Record<string, unknown>
+): AppError {
+  return new AppError("AMOUNT_BELOW_RENT_MINIMUM", message, details);
+}
+
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("PROVIDER_UNAVAILABLE", message, details);
 }
@@ -358,14 +365,6 @@ export function unsupportedRampCorridor(
   );
 }
 
-export function unsupportedCounterparty(
-  provider: RampProviderId,
-  direction: RampDirection,
-  reason: string
-): CounterpartyRequirements {
-  return { provider, direction, status: "unsupported", reason };
-}
-
 export function counterpartyNotProvisioned(
   provider: RampProviderId,
   direction: RampDirection,
@@ -376,45 +375,4 @@ export function counterpartyNotProvisioned(
     `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
     { ...details, provider, direction }
   );
-}
-
-/**
- * Creates the error returned when more than one active external account matches a payout corridor.
- *
- * @param provider - Ramp provider owning the external accounts.
- * @param fiatCurrency - Fiat currency of the payout corridor.
- * @param destinationCountry - Destination country of the payout corridor.
- * @returns A bad-request error describing the ambiguous corridor.
- */
-export function counterpartyExternalAccountAmbiguous(
-  provider: RampProviderId,
-  fiatCurrency: string,
-  destinationCountry: CountryCode
-): AppError {
-  return badRequest(
-    `Counterparty has multiple active ${provider} external accounts for ${fiatCurrency} to ${destinationCountry}; explicit external-account selection is required.`
-  );
-}
-
-/**
- * Resolves a promise whose expected miss is signalled by throwing a specific
- * error class.
- *
- * @param promise - The in-flight operation.
- * @param expected - The error class that represents an expected miss.
- * @returns The result, or null when the operation threw an instance of
- *   `expected`; any other error rethrows.
- */
-export async function nullOnExpected<T>(
-  promise: Promise<T>,
-  expected: new (message?: string) => Error
-): Promise<T | null> {
-  try {
-    return await promise;
-  } catch (err) {
-    if (err instanceof expected) {
-      return null;
-    }
-    throw err;
-  }
 }

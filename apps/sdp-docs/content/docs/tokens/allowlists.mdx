@@ -88,7 +88,7 @@ After adding, the entry appears below the form with a **Remove entry** button.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "address": "7xKXz...9fGh",
@@ -102,7 +102,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ address: "7xKXz...9fGh", label: "Treasury wallet" }),
@@ -136,7 +136,7 @@ Use the search field to find a specific address by label or public key.
 
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="list-allowlist.ts"
@@ -157,7 +157,7 @@ includes `total`, the unfiltered entry count, for a summary display):
 
 ```bash
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript
@@ -187,7 +187,7 @@ In **Operations → Approved recipients**, click **Remove entry** next to the ad
 ```bash title="Terminal"
 curl -X DELETE \
   https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Use the `entry.id` returned when the address was added.

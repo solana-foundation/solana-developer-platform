@@ -12,11 +12,8 @@
  * registry deliberately when a new operational entry point needs this.
  */
 
-import { getDb } from "@/db/client";
 import { runWithDatabaseIdentity } from "@/db/identity";
-import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
-import { AuditService } from "@/services/audit.service";
-import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
+import { createSystemAuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 export interface OperatorAccessGrant {
@@ -37,10 +34,7 @@ export async function runWithOperatorDatabaseAccess<T>(
     throw new Error("Operator database access requires a non-empty actor and reason");
   }
 
-  const audit = new AuditService(
-    getDb(env),
-    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
-  );
+  const audit = createSystemAuditService(env);
   return runWithDatabaseIdentity({ kind: "operator", actor, reason }, async () => {
     // Fail closed: if the bypass cannot be recorded, it does not happen.
     await audit.logSystem({

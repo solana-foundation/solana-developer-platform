@@ -265,8 +265,9 @@ the whole raw registry and not the curated catalogue. Census failures propagate
 rather than becoming a false empty portfolio.
 
 The API injects a read/build runner that retries transient nested RPC failures
-against genesis-verified alternatives within one shared workflow deadline.
-Explicit cluster pins stay pinned. This runner never signs or broadcasts, and
+against genesis-verified alternatives from the cluster's managed pool within one
+shared workflow deadline; the URL it hands this package is always one of that
+cluster's pool endpoints. This runner never signs or broadcasts, and
 a stalled primary can exhaust the deadline before fallback. `VAULT_UNREADABLE`
 preserves its cause; an unreadable account alone does not prove a wrong cluster.
 

@@ -65,9 +65,9 @@
     "@sdp/types": "workspace:*",
     "@solana-program/token": "catalog:",
     "@solana/kit": "catalog:",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   }
 }

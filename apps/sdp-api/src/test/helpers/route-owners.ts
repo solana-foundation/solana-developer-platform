@@ -1,5 +1,5 @@
 import {
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
 } from "@sdp/types/release-channels";
@@ -36,7 +36,7 @@ function covers(pattern: string, path: string): boolean {
  */
 export function stableMutatingRouteSteps(): StableMutatingRouteStep[] {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const steps: StableMutatingRouteStep[] = [];
   const middleware: { pattern: string; position: number; handler: RouteHandler }[] = [];

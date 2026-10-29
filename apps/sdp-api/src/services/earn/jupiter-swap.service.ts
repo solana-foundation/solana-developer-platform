@@ -90,14 +90,14 @@ export const RETRY_SWAP_MAX_ACCOUNTS = 24;
  * builds fail closed until the id is added here.
  */
 // biome-ignore lint/security/noSecrets: Jupiter aggregator v6 program id, public on-chain address.
-export const JUPITER_AGGREGATOR_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+const JUPITER_AGGREGATOR_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 // biome-ignore lint/security/noSecrets: SPL Associated Token Account program id, public.
 const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
 // biome-ignore lint/security/noSecrets: Jupiter v6 event authority, public on-chain address.
 const JUPITER_EVENT_AUTHORITY = "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf";
 
-export const EARN_SWAP_ALLOWED_PROGRAM_IDS: ReadonlySet<string> = new Set([
+const EARN_SWAP_ALLOWED_PROGRAM_IDS: ReadonlySet<string> = new Set([
   JUPITER_AGGREGATOR_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 ]);
@@ -145,7 +145,7 @@ function exactInMinimumOutAtoms(quotedOutAtoms: bigint, slippageBps: number): bi
  * The instruction is constructed HERE, never taken from the wire, so it is
  * not part of the upstream trust boundary above.
  */
-export const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
 export const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 /** 15% headroom over the simulated consumption, the buffer Jupiter suggests. */
 const COMPUTE_UNIT_HEADROOM_PCT = 15;

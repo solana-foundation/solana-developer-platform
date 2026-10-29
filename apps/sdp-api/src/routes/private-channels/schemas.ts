@@ -13,10 +13,6 @@ export const connectPrivateChannelInstanceSchema = z.intersection(
   z.object({ confirmReactivate: z.boolean().optional() })
 );
 
-export type ConnectPrivateChannelInstanceInput = z.infer<
-  typeof connectPrivateChannelInstanceSchema
->;
-
 /** Reconfigure the active instance only when the URL still names that exact row. */
 export const updatePrivateChannelInstanceSchema = z.intersection(
   privateChannelInstanceInputSchema,
@@ -152,9 +148,4 @@ export const addPrincipalMembershipBodySchema = z.object({
 /** Selects which project principal owns a verified custody wallet. */
 export const verifyWalletBodySchema = z.object({
   principalId: z.string().min(1).optional(),
-});
-
-/** Body for `POST /channels/:channelId/memberships`. */
-export const addMembershipBodySchema = z.object({
-  privateChannelUserId: z.string().min(1),
 });

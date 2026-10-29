@@ -468,6 +468,20 @@ describe("requests", () => {
     );
     expect(created?.body.data).not.toHaveProperty("walletId");
   });
+
+  it("cancels an open request once, and refuses a paid one", () => {
+    const id: string = request({})?.body.data.id;
+    const cancel = (requestId: string) =>
+      write("POST", `/v1/payments/requests/${requestId}/cancel`);
+
+    expect(refusal(cancel("demo_preq_lumen_retainer"))).toEqual([409, "conflict"]);
+    expect(cancel(id)?.body.data).toEqual(
+      expect.objectContaining({ id, status: "canceled", canceledAt: NOW.toISOString() })
+    );
+    expect(cancel(id)?.status).toBe(200);
+    expect(ops.filter((op) => op.k === "request-cancel")).toHaveLength(1);
+    expect(world().requests.find((candidate) => candidate.id === id)?.status).toBe("canceled");
+  });
 });
 
 describe("schedules", () => {

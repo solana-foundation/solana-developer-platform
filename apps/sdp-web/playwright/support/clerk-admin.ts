@@ -164,7 +164,7 @@ async function resolveExistingAdminIdentity(
   throw new Error(`Unable to resolve an admin Clerk identity for organization '${organizationId}'`);
 }
 
-export async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
+async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
   const env = getE2EEnv();
   const client = createClerkClient({ secretKey: env.clerkSecretKey });
   const organizationId = await resolveOrganizationId(client, env);

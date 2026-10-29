@@ -1,5 +1,4 @@
 import type { KycProvider, KycStatus } from "@sdp/types/kyc";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateKycWalletId(): string {
   return `kyc_wallet_${crypto.randomUUID()}`;
@@ -52,10 +51,6 @@ export interface SetKycStatusByCounterpartyInput {
   status: KycStatus;
   provider?: KycProvider | null;
   providerRef?: string | null;
-}
-
-export interface KycWalletsRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface KycWalletsRepository {

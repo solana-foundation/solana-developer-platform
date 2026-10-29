@@ -88,7 +88,7 @@ function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
  * every funder — creator and counterparty run the same safety properties, so
  * they cannot drift apart.
  */
-export interface DvpFundingPlan {
+interface DvpFundingPlan {
   leg: DvpSdpLeg;
   /** Whose wallet authorizes the transfer. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
@@ -109,7 +109,7 @@ export interface DvpFundingPlan {
  * on `dvp_leg_funding_claims` keyed (trade, side) and owned by the FUNDING
  * org — opposite legs are different rows, so they never share a lock.
  */
-export function fundingPlan(
+function fundingPlan(
   env: Env,
   trade: DvpTradeRow,
   side: DvpTradeSide,
@@ -175,7 +175,7 @@ export async function fundDvpTradeLeg(
  *
  * Shared by every funder; Kora pays while the custody wallet authorizes the transfer.
  */
-export async function executeDvpFunding(
+async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   plan: DvpFundingPlan,

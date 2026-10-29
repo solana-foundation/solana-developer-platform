@@ -37,7 +37,10 @@ export interface RpcEnv extends ManagedRpcEnv {
   SOLANA_RPC_NODIT_URL?: string;
   SOLANA_RPC_NODIT_API_KEY?: string;
   SOLANA_NETWORK?: "devnet" | "mainnet-beta";
-  /** Per-cluster RPC overrides; the non-default cluster needs one (see `resolveClusterRpcUrl`). */
+  /**
+   * Per-cluster overrides read only by the deprecated `createClusterRpc(env, cluster)` in
+   * `./solana` (Private Channels, HOO-1879). Earn reads each cluster's managed pool instead.
+   */
   SOLANA_DEVNET_RPC_URL?: string;
   SOLANA_MAINNET_RPC_URL?: string;
 }

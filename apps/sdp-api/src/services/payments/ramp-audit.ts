@@ -4,9 +4,12 @@ import { getDb } from "@/db/client";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
-import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
-import { type AuditAction, AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
-import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
+import {
+  type AuditAction,
+  AuditService,
+  createSystemAuditService,
+  type SystemAuditLogEntry,
+} from "@/services/audit.service";
 import type { Env } from "@/types/env";
 
 /** The ramp steps the audit ledger records: a quote, a cancel, a settlement, a provider failure. */
@@ -40,14 +43,6 @@ export function rampAuditEntry(
   };
 }
 
-/** The audit ledger for provider events and jobs, which have no request. */
-export function systemRampAuditService(env: Env): AuditService {
-  return new AuditService(
-    getDb(env),
-    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
-  );
-}
-
 /**
  * A ramp step a request takes: its transfer write and audit row commit
  * together, or neither does. A write that changed nothing records nothing.
@@ -76,7 +71,7 @@ export function auditedRampWriteSystem(
   write: (tx: DatabaseClient) => Promise<PaymentTransferRow | null>,
   extra: Record<string, unknown> = {}
 ): Promise<PaymentTransferRow | null> {
-  return systemRampAuditService(env).logSystemWithin(async (tx) => {
+  return createSystemAuditService(env).logSystemWithin(async (tx) => {
     const written = await write(tx);
     return { entry: written ? rampAuditEntry(action, written, extra) : null, result: written };
   });

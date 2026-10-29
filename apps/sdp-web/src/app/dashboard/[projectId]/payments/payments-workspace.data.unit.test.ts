@@ -124,6 +124,41 @@ describe("Payments write requests", () => {
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
   });
+
+  it("surfaces a disabled batch movement with the API's actionable refusal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            },
+          },
+          403
+        )
+      )
+    );
+
+    await expect(
+      createTransferBatch(
+        {
+          sourceCustodyWalletId: "cwlt_1",
+          token: "USDC",
+          recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
+        },
+        t,
+        { value: "idem_batch_disabled", persisted: true }
+      )
+    ).rejects.toMatchObject({
+      name: "TransferBatchRequestError",
+      status: 403,
+      code: "FORBIDDEN",
+      message: "This movement is disabled for the project",
+    });
+  });
 });
 
 describe("fetchRampEstimates", () => {

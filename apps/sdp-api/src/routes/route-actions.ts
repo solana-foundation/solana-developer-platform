@@ -14,8 +14,8 @@ export interface RegisteredRouteAuthorization {
 
 /**
  * Every endpoint the app registers, with the authorization declarations in
- * its own handler chain (`requireAction`, `requireActionWhenAuthenticated`,
- * `publicRoute`). A declaration mounted with `.use()` does not count: each
+ * its own handler chain (`requireAction`, `publicRoute`). A declaration
+ * mounted with `.use()` does not count: each
  * route states its own. Read from `hono/dev`'s `inspectRoutes`, like the
  * route-ownership inventory, so no list is kept by hand.
  */

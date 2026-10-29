@@ -6,41 +6,20 @@ orchestration, transaction construction, persistence, submission, and
 reconciliation. Provider packages remain implementation details and are not a
 client integration boundary.
 
-## Hosted API tiers
+## Hosted API access
 
-The `/v1/earn` surface has two access tiers implemented by one route and one
-handler per operation:
-
-| Capability | Without an API key | With an API key |
-| --- | --- | --- |
-| List and inspect strategies | Yes | Yes |
-| Preview deposits and direct withdrawals | Yes | Yes |
-| Build instant deposit and direct-withdrawal transactions | Yes, owner pays | Yes, owner or caller-provided fee payer |
-| Discover and preview queued withdrawals | Yes | Yes |
-| Build, submit, track, or cancel a queued withdrawal | No | Yes |
-| Submit signed transactions | No | Yes |
-| Record movements and positions | No | Yes |
-| Read positions, activity, and earnings | No | Yes |
-
-Anonymous requests have no organization or project identity. They read the
-caller-selected global catalogue shelf and write no build, advisory, movement,
-or position rows. The caller signs, broadcasts, and tracks an anonymous build.
-
-Authenticated requests preserve the established project boundary. A keyed
-build is durable and may be submitted through SDP, which verifies signatures,
-records the movement before broadcast, and reconciles its final state.
+Every `/v1/earn` operation requires an API key, or a dashboard session with a
+selected project, and is implemented by one route and one handler. A build is
+durable and is submitted through SDP, which verifies signatures, records the
+movement before broadcast, and reconciles its final state.
 
 ## Environment selection
 
-An authenticated project determines its own environment, and every deployment
-serves both clusters by project. A keyless request has no project, so the
-caller picks the shelf: `GET /v1/earn/strategies?environment=` names it
-(production when omitted), and a quote or build follows the environment of the
-strategy it names. On an authenticated strategy list, an `?environment=` value
-that disagrees with the API-key project is refused with 400. The deployment's
-own `ENVIRONMENT` never selects a cluster. This revisits the
-earlier "request input never selects production" rule: an anonymous production
-build moves no funds, and its RPC spend is metered per client address.
+The authenticated project determines the environment, and every deployment
+serves both clusters by project. A strategy read, quote or build answers for
+the project's environment only: a strategy row from the other environment is
+404. No request parameter selects the environment, and the deployment's own
+`ENVIRONMENT` never selects a cluster.
 
 ## Contract ownership
 
@@ -49,7 +28,7 @@ guide describes the supported integration flow. Generated API reference and AI
 discovery resources must be regenerated from those sources rather than edited
 by hand.
 
-Changing which Earn routes are public or keyless is a security-boundary change.
+Changing which Earn routes are public is a security-boundary change.
 It requires the PRO-1872 security review gate and a named security sign-off.
 Provider-specific code, credentials, and operational details stay outside the
 public contract.

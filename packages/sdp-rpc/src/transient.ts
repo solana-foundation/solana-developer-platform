@@ -56,27 +56,32 @@ export function isTransientRpcError(error: unknown): boolean {
 
 /**
  * Returns `true` when an RPC failure is a gateway HTTP 401. `@solana/kit`'s HTTP
- * transport puts that on `error.context.statusCode`; do not widen past 401 (see
- * `withGatewayRpc` for the one-shot refresh retry that depends on this).
+ * transport puts that on `error.context.statusCode`, and SDP's own guarded
+ * transports (`createCustomerRpcTransport`, the Private Channels gateway
+ * transport) throw the same status as an `RpcHttpStatusError`. Do not widen
+ * past 401 (see `withGatewayRpc` for the one-shot refresh retry that depends on this).
  */
 export function isUnauthorizedRpcError(error: unknown): boolean {
   return (
-    isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
-    error.context.statusCode === 401
+    (isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      error.context.statusCode === 401) ||
+    (error instanceof RpcHttpStatusError && error.httpStatus === 401)
   );
 }
 
 /**
  * Returns `true` when an RPC failure is a gateway HTTP 403. `@solana/kit`'s HTTP
- * transport puts that on `error.context.statusCode`. The SPC gateway answers 403
- * (`-32002 "account not owned by caller"`) for a token account that does not
- * exist yet, so a channel read treats a never-credited owner as an empty balance
- * rather than an error — see `getChannelTokenBalance`.
+ * transport puts that on `error.context.statusCode`, and SDP's own guarded
+ * transports throw the same status as an `RpcHttpStatusError`. The SPC gateway
+ * answers 403 (`-32002 "account not owned by caller"`) for a token account that
+ * does not exist yet, so a channel read treats a never-credited owner as an
+ * empty balance rather than an error — see `getChannelTokenBalance`.
  */
 export function isForbiddenRpcError(error: unknown): boolean {
   return (
-    isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
-    error.context.statusCode === 403
+    (isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      error.context.statusCode === 403) ||
+    (error instanceof RpcHttpStatusError && error.httpStatus === 403)
   );
 }
 

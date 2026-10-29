@@ -4,6 +4,21 @@ import {
   type PaymentsDashboardWallet,
 } from "@sdp/types/payments";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
+import { isDemoRecordId } from "@/lib/payments-demo/demo-cookie";
+
+/**
+ * What the detail page shows when its schedule can't be read. A 404 says there is no such
+ * schedule: a demo schedule's page, once demo mode is off, goes back to the list, since that
+ * schedule only ever existed in the demo; any other id is not found. Anything else (a 5xx, a
+ * network failure, a body that doesn't parse) is a failure to find out, not an absence.
+ */
+export function recurringPaymentReadFailureOutcome(
+  recurringPaymentId: string,
+  status: number | null
+): "list" | "not_found" | "failed" {
+  if (status !== 404) return "failed";
+  return isDemoRecordId(recurringPaymentId) ? "list" : "not_found";
+}
 
 export function getRecurringPaymentDetailState({
   sourceCustodyWalletId,

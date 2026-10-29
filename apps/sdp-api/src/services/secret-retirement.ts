@@ -20,11 +20,7 @@
 
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { createSecretRetirementsRepository } from "@/db/repositories/repository-factory";
-import {
-  cancelUnclaimedSecretRetirement,
-  insertSecretRetirement,
-} from "@/db/repositories/secret-retirement.repository.postgres";
-import { serviceUnavailable } from "@/lib/errors";
+import { insertSecretRetirement } from "@/db/repositories/secret-retirement.repository.postgres";
 import { getLogger } from "@/runtime/logger";
 import {
   createCredentialSecretStore,
@@ -78,18 +74,6 @@ const QUEUE_BACKOFF_MS = 50;
 // nothing on record.
 const DESTROY_ATTEMPTS = 3;
 const DESTROY_BACKOFF_MS = 50;
-
-// How long a PROVISIONAL obligation is withheld from the sweeper.
-//
-// That row is committed before the transaction that would reference its
-// version, so for a moment the queue says "destroy this" about a version a
-// request is still about to make live. Due immediately, a sweep landing inside
-// that window destroys the key and the transaction then commits rows pointing
-// at nothing — the credential is installed dead. The grace period covers the
-// rest of the request by a wide margin; worker loss is still collected, just a
-// few minutes later, and lateness costs nothing here while destroying a live
-// credential costs the tenant their connection.
-const PROVISIONAL_GRACE_MS = 15 * 60 * 1000;
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -168,126 +152,6 @@ function logOrphanRisk(
 }
 
 /**
- * Record, BEFORE anything external exists, that the version a coming write
- * will create needs destroying unless a row commits to reference it. The
- * predicted ref comes from `CredentialSecretStore.predictFirstVersionRef`.
- * Fails closed with nothing to clean up: at this point the backend holds
- * nothing, so refusing the request leaves a clean slate — which is exactly why
- * this runs first. A version covered by this record can never become the
- * "readable credential with no durable obligation" orphan: the obligation
- * exists before the version does.
- *
- * @throws AppError SERVICE_UNAVAILABLE when the obligation cannot be recorded.
- */
-export async function reserveSecretVersionIntent(
-  env: Env,
-  predicted: { storageBackend: string; secretRef: string | null; secretVersionRef: string },
-  context: SecretRetirementContext
-): Promise<void> {
-  const queued = await queueRetirement(
-    env,
-    context,
-    predicted as StoredCredentialSecret,
-    "reserved for a write that has not happened yet",
-    new Date(Date.now() + PROVISIONAL_GRACE_MS).toISOString()
-  );
-  if (queued) {
-    return;
-  }
-  throw serviceUnavailable(
-    "Credential cleanup could not be durably reserved; nothing was created — retry the request"
-  );
-}
-
-/**
- * Record, BEFORE the row that will reference it is attempted, that a freshly
- * written version currently has no reader. The transaction that commits the
- * reference cancels this via `clearQueuedSecretVersion`; a transaction that
- * fails — or a process that dies before running one — leaves the obligation
- * standing for the sweeper.
- *
- * Fails closed: this record is the ONLY thing that makes worker loss safe, so
- * if it cannot be written the create must not proceed into the unprotected
- * window. The version is taken back instead and the request refused — the
- * caller retries against a clean slate, and no credential is ever live with
- * nothing on record that it exists.
- *
- * @throws AppError SERVICE_UNAVAILABLE when the obligation cannot be recorded.
- */
-export async function queuePendingSecretVersion(
-  env: Env,
-  stored: StoredCredentialSecret | null | undefined,
-  context: SecretRetirementContext
-): Promise<void> {
-  if (!destroyableVersionRef(stored)) {
-    return;
-  }
-  const queued = await queueRetirement(
-    env,
-    context,
-    stored as StoredCredentialSecret,
-    "written for a row that has not committed yet",
-    // Held back from the sweeper: this version is not orphaned yet, it is
-    // unreferenced only because the request that will reference it is still
-    // running. Acting on it now would destroy a key about to go live.
-    new Date(Date.now() + PROVISIONAL_GRACE_MS).toISOString()
-  );
-  if (queued) {
-    return;
-  }
-  // Destroy now, while this process still remembers the version — with the
-  // queue unwritable this is the only thing that can stop the leak, so it
-  // retries, and it re-attempts the queue if it cannot.
-  const outcome = await destroySecretVersion(env, stored, context);
-  if (outcome === "orphaned") {
-    // The version outlived every attempt to destroy it AND every attempt to
-    // record it. No row was created, so nothing references it — but saying
-    // "nothing was created" full stop would describe a clean slate over a
-    // credential still readable in the backend. `destroySecretVersion` has
-    // already logged it with queuedForRetry:false, which is what summons a
-    // human; this wording is the same admission in the response.
-    throw serviceUnavailable(
-      "Credential cleanup could not be completed and could not be recorded; no connection was created — retry the request"
-    );
-  }
-  throw serviceUnavailable(
-    "Credential cleanup could not be durably recorded; nothing was created — retry the request"
-  );
-}
-
-/**
- * Cancel the provisional obligation recorded by `queuePendingSecretVersion`,
- * inside the transaction that commits the row referencing the version — the
- * only ordering in which a rejected write cannot leave a credential nobody
- * knows about.
- *
- * A compare-and-swap, not a delete: the obligation MUST still be standing, and
- * finding it gone aborts the transaction. That is what makes the grace period
- * in `queuePendingSecretVersion` a courtesy rather than a load-bearing timing
- * assumption — nothing enforces how long the caller's transaction takes, so if
- * a sweep ever does reach the version first, the credential and connection
- * rows must not commit pointing at a secret that no longer exists. The caller
- * retries and writes a fresh version instead.
- *
- * @throws AppError SERVICE_UNAVAILABLE when the obligation is already gone.
- */
-export async function clearQueuedSecretVersion(
-  exec: Pick<AppDb, "prepare">,
-  stored: StoredCredentialSecret | null | undefined
-): Promise<void> {
-  const secretVersionRef = destroyableVersionRef(stored);
-  if (!secretVersionRef) {
-    return;
-  }
-  const cleared = await cancelUnclaimedSecretRetirement(exec, secretVersionRef);
-  if (!cleared) {
-    throw serviceUnavailable(
-      "The credential secret was retired while this request was still running; nothing was created — retry the request"
-    );
-  }
-}
-
-/**
  * Record, inside the caller's transaction, that a version this write orphans
  * still needs destroying — the pattern for a delete or deactivation whose
  * commit is exactly what makes the version garbage. The caller still attempts
@@ -323,8 +187,7 @@ export async function queueOrphanedSecretVersion(
  * work that actually happened.
  *
  * Returns what became of the version rather than nothing, so a caller whose
- * own error message depends on the answer — `queuePendingSecretVersion`, which
- * tells the tenant the create was abandoned — cannot claim a clean slate over
+ * own error message depends on the answer cannot claim a clean slate over
  * a version that is still readable with nothing on record.
  */
 export async function destroySecretVersion(
@@ -352,8 +215,7 @@ export async function destroySecretVersion(
       break;
     } catch (error) {
       // A version that is already gone is the outcome this call wanted — the
-      // answer Secret Manager gives when a sweep got there first, which is
-      // exactly the race `clearQueuedSecretVersion` aborts on. Treating it as
+      // answer Secret Manager gives when a sweep got there first. Treating it as
       // a failure would queue work for a version that no longer exists.
       if (isAlreadyDestroyed(error)) {
         destroyed = true;

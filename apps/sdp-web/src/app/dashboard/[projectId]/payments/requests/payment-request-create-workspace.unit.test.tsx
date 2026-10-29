@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
@@ -14,7 +14,6 @@ import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestCreateWorkspace } from "./payment-request-create-workspace";
 import { deriveTokenOptions } from "./payment-requests-page.data";
-import { PaymentRequestsWorkspace as LegacyPaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 /** The fields these tests read from a sent create body; the rest is kept for equality checks. */
 const sentCreateBodySchema = z.looseObject({
@@ -346,37 +345,5 @@ describe("New request page", () => {
     expect(
       screen.getByRole("button", { name: "Create and copy link" }).hasAttribute("disabled")
     ).toBe(true);
-  });
-});
-
-describe("Previous design requests", () => {
-  it("sends the selected internal ID when provider references coincide", async () => {
-    const writes: unknown[] = [];
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      writes.push(JSON.parse(String(init?.body)));
-      return Response.json({ data: { id: "preq_settlement" } });
-    });
-    render(
-      <LegacyPaymentRequestsWorkspace
-        initialPaymentRequests={[]}
-        apiBaseUrl={null}
-        wallets={[wallet, { ...wallet, id: "cwlt_settlement", label: "Settlement" }]}
-      />,
-      { wrapper }
-    );
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Create" }));
-    const form = within(screen.getByRole("dialog", { name: "Create payment request" }));
-    await user.type(form.getByRole("spinbutton", { name: "Amount" }), "25");
-    await user.click(form.getAllByRole("combobox")[0]);
-    await user.click(await screen.findByRole("option", { name: "SOL" }));
-    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
-    await user.click(form.getAllByRole("combobox")[1]);
-    await user.click(await screen.findByRole("option", { name: "Settlement" }));
-    await user.click(form.getByRole("button", { name: "Create link" }));
-    await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toMatchObject({ custodyWalletId: "cwlt_settlement" });
-    expect(writes[0]).not.toHaveProperty("walletId");
-    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
   });
 });

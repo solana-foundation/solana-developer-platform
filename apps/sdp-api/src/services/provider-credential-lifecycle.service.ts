@@ -1,3 +1,4 @@
+import { denormalizeFireblocksWalletId } from "@sdp/custody/provider-wallet-ids";
 import { hashString } from "@sdp/payments/hash";
 import { isProviderCredentialCreationInProgress } from "@sdp/types/custody";
 import type { Context } from "hono";
@@ -6,6 +7,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
+  badRequest,
   conflict,
   forbidden,
   internalError,
@@ -25,10 +27,17 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
-  checkPrivyCredential,
-  getPrivyProviderAccountFingerprint,
-  type PrivyCredentialAuthentication,
-} from "@/services/custody/privy-credential";
+  type ByokCredentialAuthentication,
+  type ByokCredentialFields,
+  type ByokRegistration,
+  checkByokCredential,
+  credentialDisplayMetadata,
+  parseByokCredential,
+} from "@/services/custody/byok-credential";
+import {
+  resolveRegistrationPayload,
+  retireFireblocksCsr,
+} from "@/services/custody/fireblocks-registration.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import {
   assertCredentialCreationSettled,
@@ -40,6 +49,7 @@ import {
 } from "@/services/provider-credential-submission.service";
 import {
   type CredentialReferenceRow,
+  type CredentialWalletReferenceRow,
   type LifecycleCredentialRow,
   type LifecycleCredentialWithSecretRow,
   type ProviderCredentialRow,
@@ -53,7 +63,7 @@ const CREDENTIAL_DEACTIVATION_UNAVAILABLE =
   "Credential cannot be deactivated from its current state";
 const CREDENTIAL_IN_USE = "Credential cannot be deactivated while it is in use";
 
-export type RotationFailureCode = "invalid_credentials" | "provider_account_mismatch";
+type RotationFailureCode = "invalid_credentials" | "provider_account_mismatch";
 
 export interface ProviderCredentialLifecycle {
   providerCredential: LifecycleProviderCredential;
@@ -68,7 +78,7 @@ export interface ProviderCredentialLifecycle {
   } | null;
 }
 
-export interface LifecycleProviderCredential extends SafeProviderCredential {
+interface LifecycleProviderCredential extends SafeProviderCredential {
   source: LifecycleCredentialRow["source"];
 }
 
@@ -144,7 +154,7 @@ export async function getProviderCredentialLifecycle(
 export async function rotateProviderCredential(
   c: Context<{ Bindings: Env }>,
   currentCredentialId: string,
-  fields: { appId: string; appSecret: string },
+  registration: ByokRegistration,
   idempotencyKey: string
 ): Promise<ProviderCredentialRotationResult> {
   const context = createContext(c);
@@ -152,6 +162,10 @@ export async function rotateProviderCredential(
     context,
     await requireChannelScopedCredential(context, currentCredentialId)
   );
+  if (registration.provider !== target.credential.provider) {
+    throw badRequest("Rotation provider does not match the credential");
+  }
+  const { fields } = registration;
   const fingerprint = await rotationFingerprint(context, currentCredentialId, fields);
   const existing = await context.store.findReplayByKey(context.organizationId, idempotencyKey);
   if (existing) {
@@ -160,7 +174,11 @@ export async function rotateProviderCredential(
     }
     const authorizedReplay = await loadAuthorizedCandidate(context, existing.id, true);
     const replay = await resolveIdempotencyReplay(() => Promise.resolve(existing), fingerprint);
-    if (replay) return replayRotationCandidate(c, authorizedReplay);
+    if (replay) {
+      const result = await replayRotationCandidate(c, authorizedReplay);
+      await retireFireblocksCsr(c, fields, result.providerCredential);
+      return result;
+    }
   }
   const current = await loadAuthorizedCurrent(context, currentCredentialId, ROTATION_UNAVAILABLE);
   if (
@@ -169,13 +187,22 @@ export async function rotateProviderCredential(
     throw conflict(ROTATION_UNAVAILABLE);
   }
 
-  return submitRotationCandidate(context, current, fields, idempotencyKey, fingerprint);
+  await resolveRegistrationPayload(c, target.credential.provider, fields, idempotencyKey);
+  const result = await submitRotationCandidate(
+    context,
+    current,
+    fields,
+    idempotencyKey,
+    fingerprint
+  );
+  await retireFireblocksCsr(c, fields, result.providerCredential);
+  return result;
 }
 
 async function submitRotationCandidate(
   context: LifecycleContext,
   current: AuthorizedCredential,
-  fields: { appId: string; appSecret: string },
+  fields: ByokCredentialFields,
   idempotencyKey: string,
   fingerprint: string
 ): Promise<ProviderCredentialRotationResult> {
@@ -189,7 +216,7 @@ async function submitRotationCandidate(
     resourceId: candidateId,
     metadata: {
       event: "provider_credential_rotation_submission_started",
-      provider: "privy",
+      provider: current.credential.provider,
       scope: current.credential.scope,
       predecessorCredentialId: current.credential.id,
     },
@@ -212,8 +239,9 @@ async function submitRotationCandidate(
         context,
         secretStore,
         candidateId,
-        fields.appId,
-        fields.appSecret
+        current.credential.provider,
+        fields,
+        idempotencyKey
       );
     }
   } catch (error) {
@@ -253,12 +281,12 @@ async function submitRotationCandidate(
         id: candidateId,
         organizationId: context.organizationId,
         projectId: current.credential.project_id,
-        provider: "privy",
+        provider: current.credential.provider,
         label: current.credential.label,
         scope: current.credential.scope,
         source: "stored",
         stored,
-        displayMetadata: fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {},
+        displayMetadata: credentialDisplayMetadata(fields),
         version: await store.nextCredentialVersion(context.organizationId, current.credential.id),
         rotatedFromId: current.credential.id,
         idempotencyKey,
@@ -355,7 +383,7 @@ async function finishGcpRotationCreation(
   current: AuthorizedCredential,
   candidate: LifecycleCredentialRow,
   secretStore: CredentialSecretStore,
-  fields: { appId: string; appSecret: string },
+  fields: ByokCredentialFields,
   auditIntent: AuditIntent,
   existingSecretRef?: string
 ): Promise<ProviderCredentialRotationResult> {
@@ -371,12 +399,14 @@ async function finishGcpRotationCreation(
   }
   let written: StoredCredentialSecret | undefined;
   try {
+    if (!candidate.idempotency_key) throw internalError();
     written = await writeRotationSecret(
       context,
       secretStore,
       candidateId,
-      fields.appId,
-      fields.appSecret,
+      current.credential.provider,
+      fields,
+      candidate.idempotency_key,
       existingSecretRef
     );
     const { secretRef, secretVersionRef } = written;
@@ -466,7 +496,7 @@ export async function completeRotationCandidate(
     resourceId: loaded.candidate.id,
     metadata: {
       event: "provider_credential_rotation_started",
-      provider: "privy",
+      provider: loaded.candidate.provider,
       scope: loaded.candidate.scope,
       fromProviderCredentialId: loaded.predecessor.id,
       toProviderCredentialId: loaded.candidate.id,
@@ -475,28 +505,36 @@ export async function completeRotationCandidate(
     },
   });
   let candidateSecret: LifecycleCredentialWithSecretRow;
-  let authentication: PrivyCredentialAuthentication;
+  let authentication: ByokCredentialAuthentication;
   try {
     candidateSecret = await requireLifecycleCredentialSecret(context, loaded.candidate.id);
     const secretStore = createPersistedSecretStore(c, candidateSecret.storage_backend, candidateId);
-    authentication = await readPrivyCredential(secretStore, context, candidateSecret);
+    authentication = await readByokCredential(secretStore, context, candidateSecret);
   } catch (error) {
     return reconcileCandidateSecretReadFailure(c, context, loaded.candidate.id, error, auditIntent);
   }
-  const check = await checkPrivyCredential(c.env, authentication);
+  const wallets =
+    authentication.provider === "fireblocks"
+      ? await context.store.listCredentialWalletReferences(
+          context.organizationId,
+          loaded.predecessor.id
+        )
+      : [];
+  const checked = await checkCredentialReplacement(
+    c.env,
+    authentication,
+    loaded.references,
+    wallets
+  );
+  const check = checked.status;
   if (check === "retry_unknown") {
     const race = await settleCandidateOutcome(context, loaded, "retry_unknown", auditIntent);
     if (race) return race;
     return rotationResult(loaded.candidate, "retry_unknown", "provider_response_unknown");
   }
 
-  const accountMatches =
-    check === "success" &&
-    (await continuityFingerprint(authentication.appId)) ===
-      uniqueReferenceFingerprint(loaded.references);
-  if (check === "failed" || !accountMatches) {
-    const code: RotationFailureCode =
-      check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
+  if (checked.status === "failed") {
+    const code = checked.code;
     const race = await settleCandidateOutcome(context, loaded, code, auditIntent);
     if (race?.rotation.status === "success") return race;
     await cleanupTerminalCredential(c, candidateSecret);
@@ -531,6 +569,13 @@ export async function completeRotationCandidate(
       );
       assertCandidateSnapshot(lockedCandidate, lockedPredecessor, lockedReferences, loaded);
       if (lockedCandidateReferences.length > 0) throw conflict(ROTATION_UNAVAILABLE);
+      await assertCredentialWalletSnapshot(
+        context,
+        store,
+        loaded.predecessor,
+        wallets,
+        ROTATION_UNAVAILABLE
+      );
       const changed = await store.cutOverRotation({
         organizationId: context.organizationId,
         predecessorId: loaded.predecessor.id,
@@ -563,7 +608,7 @@ export async function completeRotationCandidate(
     throw conflict(ROTATION_UNAVAILABLE);
   }
   await context.audit.completeCritical(c, auditIntent, {
-    metadata: { event: "provider_credential_rotated", provider: "privy" },
+    metadata: { event: "provider_credential_rotated", provider: loaded.candidate.provider },
   });
   return rotationResult({ ...loaded.candidate, status: "active" }, "success");
 }
@@ -596,7 +641,7 @@ export async function rollbackProviderCredential(
     resourceId: predecessor.id,
     metadata: {
       event: "provider_credential_rollback_started",
-      provider: "privy",
+      provider: current.credential.provider,
       scope: current.credential.scope,
       fromProviderCredentialId: current.credential.id,
       toProviderCredentialId: predecessor.id,
@@ -605,8 +650,9 @@ export async function rollbackProviderCredential(
     },
   });
   let failureCode = "credential_storage_unavailable";
+  let wallets: CredentialWalletReferenceRow[] = [];
   try {
-    let authentication: PrivyCredentialAuthentication;
+    let authentication: ByokCredentialAuthentication;
     try {
       const predecessorSecret = await requireLifecycleCredentialSecret(context, predecessor.id);
       const secretStore = createPersistedSecretStore(
@@ -614,7 +660,7 @@ export async function rollbackProviderCredential(
         predecessorSecret.storage_backend,
         predecessor.id
       );
-      authentication = await readPrivyCredential(secretStore, context, predecessorSecret);
+      authentication = await readByokCredential(secretStore, context, predecessorSecret);
     } catch (error) {
       const refreshedCurrent = await loadAuthorizedCurrent(
         context,
@@ -631,16 +677,24 @@ export async function rollbackProviderCredential(
       throw error;
     }
     failureCode = "provider_response_unknown";
-    const check = await checkPrivyCredential(c.env, authentication);
+    if (authentication.provider === "fireblocks") {
+      wallets = await context.store.listCredentialWalletReferences(
+        context.organizationId,
+        current.credential.id
+      );
+    }
+    const checked = await checkCredentialReplacement(
+      c.env,
+      authentication,
+      current.references,
+      wallets
+    );
+    const check = checked.status;
     if (check === "retry_unknown") {
       throw providerUnavailable("Credential provider is temporarily unavailable");
     }
-    failureCode = check === "failed" ? "invalid_credentials" : "provider_account_mismatch";
-    if (
-      check === "failed" ||
-      (await continuityFingerprint(authentication.appId)) !==
-        uniqueReferenceFingerprint(current.references)
-    ) {
+    if (checked.status === "failed") {
+      failureCode = checked.code;
       throw conflict(ROLLBACK_UNAVAILABLE);
     }
   } catch (error) {
@@ -671,6 +725,13 @@ export async function rollbackProviderCredential(
         { lock: true }
       );
       assertRollbackSnapshot(lockedCurrent, lockedPredecessor, lockedReferences, current);
+      await assertCredentialWalletSnapshot(
+        context,
+        store,
+        current.credential,
+        wallets,
+        ROLLBACK_UNAVAILABLE
+      );
       if (
         await store.findUnfinishedDirectChild(context.organizationId, current.credential.id, {
           lock: true,
@@ -712,7 +773,7 @@ export async function rollbackProviderCredential(
     throw conflict(ROLLBACK_UNAVAILABLE);
   }
   await context.audit.completeCritical(c, auditIntent, {
-    metadata: { event: "provider_credential_rolled_back", provider: "privy" },
+    metadata: { event: "provider_credential_rolled_back", provider: current.credential.provider },
   });
   return {
     providerCredential: mapProviderCredential({ ...predecessor, status: "active" }),
@@ -774,7 +835,7 @@ export async function deactivateProviderCredential(
       event: rotationCancellation
         ? "provider_credential_rotation_cancellation_started"
         : "provider_credential_deactivation_started",
-      provider: "privy",
+      provider: loaded.credential.provider,
     },
   });
   let applied = false;
@@ -897,7 +958,7 @@ export async function deactivateProviderCredential(
   }
   await cleanupTerminalCredential(c, secret);
   await context.audit.completeCritical(c, auditIntent, {
-    metadata: { event: completedEvent, provider: "privy" },
+    metadata: { event: completedEvent, provider: loaded.credential.provider },
   });
   return {
     providerCredential: mapProviderCredential({ ...loaded.credential, status: "deactivated" }),
@@ -919,7 +980,7 @@ async function auditCredentialDeactivationRefusal(
       status: "failure",
       metadata: {
         event: "provider_credential_deactivation_blocked",
-        provider: "privy",
+        provider: target.credential.provider,
         scope: target.credential.scope,
         projectId: context.projectId,
         credentialStatus: target.credential.status,
@@ -1351,7 +1412,7 @@ async function settleCandidateOutcome(
         outcome === "retry_unknown"
           ? "provider_credential_rotation_retry_unknown"
           : "provider_credential_rotation_rejected",
-      provider: "privy",
+      provider: expected.candidate.provider,
       failureCode: outcome === "retry_unknown" ? "provider_response_unknown" : outcome,
     },
   });
@@ -1520,16 +1581,68 @@ async function deactivationCommitIsVisible(
   }
 }
 
+/** One live keychain address read per distinct vault, including the primary vault. */
+async function checkCredentialReplacement(
+  env: Env,
+  authentication: ByokCredentialAuthentication,
+  references: readonly CredentialReferenceRow[],
+  wallets: readonly CredentialWalletReferenceRow[]
+): Promise<ProviderCredentialRotationResult["rotation"]> {
+  const primary = await checkByokCredential(env, authentication);
+  if (primary.status !== "success")
+    return primary.status === "failed"
+      ? { status: "failed", code: "invalid_credentials" }
+      : { status: "retry_unknown", code: "provider_response_unknown" };
+  if (primary.fingerprint !== uniqueReferenceFingerprint(references))
+    return { status: "failed", code: "provider_account_mismatch" };
+  if (authentication.provider !== "fireblocks") return { status: "success" };
+  if (!primary.wallet) return { status: "retry_unknown", code: "provider_response_unknown" };
+  const addresses = new Map([[authentication.vaultAccountId, primary.wallet.address]]);
+  for (const wallet of wallets) {
+    const vaultId = denormalizeFireblocksWalletId(wallet.wallet_id);
+    if (!/^\d{1,100}$/.test(vaultId))
+      return { status: "failed", code: "provider_account_mismatch" };
+    let address = addresses.get(vaultId);
+    if (address === undefined) {
+      const checked = await checkByokCredential(env, {
+        ...authentication,
+        vaultAccountId: vaultId,
+      });
+      if (checked.status === "failed") return { status: "failed", code: "invalid_credentials" };
+      if (checked.status !== "success" || !checked.wallet)
+        return { status: "retry_unknown", code: "provider_response_unknown" };
+      address = checked.wallet.address;
+      addresses.set(vaultId, address);
+    }
+    if (address !== wallet.public_key)
+      return { status: "failed", code: "provider_account_mismatch" };
+  }
+  return { status: "success" };
+}
+
+async function assertCredentialWalletSnapshot(
+  context: LifecycleContext,
+  store: ProviderCredentialStore,
+  credential: LifecycleCredentialRow,
+  expected: readonly CredentialWalletReferenceRow[],
+  message: string
+): Promise<void> {
+  if (credential.provider !== "fireblocks") return;
+  // Connection rows are already locked, so imports cannot add wallets during cutover.
+  const current = await store.listCredentialWalletReferences(
+    context.organizationId,
+    credential.id,
+    { lock: true }
+  );
+  if (JSON.stringify(current) !== JSON.stringify(expected)) throw conflict(message);
+}
+
 function uniqueReferenceFingerprint(references: readonly CredentialReferenceRow[]): string | null {
   const fingerprints = new Set(
     references.map((reference) => reference.provider_account_fingerprint)
   );
   if (fingerprints.size !== 1) return null;
   return fingerprints.values().next().value ?? null;
-}
-
-async function continuityFingerprint(appId: string): Promise<string> {
-  return getPrivyProviderAccountFingerprint(appId);
 }
 
 function rotationResult(
@@ -1566,7 +1679,7 @@ function safeRotationFailureCode(value: string | null): RotationFailureCode | nu
 async function rotationFingerprint(
   context: LifecycleContext,
   credentialId: string,
-  fields: { appId: string; appSecret: string }
+  fields: ByokCredentialFields
 ): Promise<string> {
   const pepper = context.c.env.CREDENTIAL_FINGERPRINT_PEPPER;
   if (!pepper) throw internalError();
@@ -1613,16 +1726,17 @@ async function writeRotationSecret(
   context: LifecycleContext,
   store: CredentialSecretStore,
   candidateId: string,
-  appId: string,
-  appSecret: string,
+  provider: "privy" | "fireblocks",
+  fields: ByokCredentialFields,
+  idempotencyKey: string,
   existingSecretRef?: string
 ): Promise<StoredCredentialSecret> {
   try {
     return await store.write({
       orgId: context.organizationId,
-      provider: "privy",
+      provider,
       providerCredentialId: candidateId,
-      payload: { appId, appSecret },
+      payload: await resolveRegistrationPayload(context.c, provider, fields, idempotencyKey),
       existingSecretRef,
     });
   } catch (error) {
@@ -1637,11 +1751,11 @@ async function writeRotationSecret(
   }
 }
 
-async function readPrivyCredential(
+async function readByokCredential(
   store: CredentialSecretStore,
   context: LifecycleContext,
   row: LifecycleCredentialWithSecretRow
-): Promise<PrivyCredentialAuthentication> {
+): Promise<ByokCredentialAuthentication> {
   let payload: CredentialSecretPayload;
   try {
     payload = await store.read({ orgId: context.organizationId, stored: storedSecret(row) });
@@ -1652,10 +1766,7 @@ async function readPrivyCredential(
     }
     throw internalError();
   }
-  const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";
-  const appSecret = typeof payload.appSecret === "string" ? payload.appSecret : "";
-  if (!appId || !appSecret) throw internalError();
-  return { appId, appSecret };
+  return parseByokCredential(row.provider, payload);
 }
 
 function storedSecret(row: LifecycleCredentialWithSecretRow): StoredCredentialSecret {
@@ -1693,9 +1804,9 @@ function logUnresolvedAuditIntent(
   // Keep this intent unresolved until its own transaction outcome is proven.
   logEvent("warn", {
     event: "sdp_api_credential_lifecycle_audit_unresolved",
+    provider: intent.entry.metadata?.provider,
     organization_id: context.organizationId,
     project_id: context.projectId,
-    provider: "privy",
     provider_credential_id: credentialId,
     audit_intent_id: intent.id,
     request_id: context.c.get("requestId"),
@@ -1717,7 +1828,6 @@ function logLifecycleFailure(
     stage,
     organization_id: auth.organizationId,
     project_id: auth.projectId,
-    provider: "privy",
     provider_credential_id: credentialId,
     request_id: c.get("requestId"),
     ...describeError(cause),
@@ -1732,7 +1842,6 @@ function logCleanupFailure(
   getLogger().error(
     {
       providerCredentialId: credentialId,
-      provider: "privy",
       storageBackend,
       requestId: c.get("requestId"),
       reason: "secret_cleanup_failed",
@@ -1750,7 +1859,6 @@ function logSecretWriteOutcomeUnknown(
   getLogger().error(
     {
       providerCredentialId: credentialId,
-      provider: "privy",
       storageBackend,
       requestId: c.get("requestId"),
       reason: "secret_write_outcome_unknown",

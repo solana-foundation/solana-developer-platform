@@ -1,12 +1,42 @@
-import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL, SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import {
+  DEFAULT_SDP_API_URL,
+  DEFAULT_SDP_DOCS_URL,
+  SDP_AI_GUIDE_DOCS_SLUG,
+  SDP_GITHUB_REPO_URL,
+} from "@sdp/types/site";
 
 export function normalizeDocsPageSlug(pageSlug: string): string {
   return pageSlug.replace(/\/index$/, "");
 }
 
+/** A `(name)` folder: Fumadocs shows it in the sidebar and leaves it out of its pages' URLs. */
+const FOLDER_GROUP = /^\(.+\)$/;
+
+/**
+ * A page's slug from its path in `content/docs` (`reference/api/payments/(transfers)/list.mdx`):
+ * as Fumadocs makes it, without the extension or any `(name)` folder.
+ */
+export function docsPageSlugOf(relativePath: string): string {
+  return relativePath
+    .replace(/\.mdx$/, "")
+    .split("/")
+    .filter((segment) => !FOLDER_GROUP.test(segment))
+    .join("/");
+}
+
+/** Whether a folder in `content/docs` is a `(name)` folder, a group of its parent's pages. */
+export function isDocsFolderGroup(folderName: string): boolean {
+  return FOLDER_GROUP.test(folderName);
+}
+
 export function getDocsPagePath(pageSlug: string): string {
   const normalized = normalizeDocsPageSlug(pageSlug);
   return normalized ? `/docs/${normalized}` : "/docs";
+}
+
+/** The page's Markdown, as the `.md` route serves it: `/docs.md` for the home. */
+export function getDocsMarkdownPath(pageSlug: string): string {
+  return `${getDocsPagePath(pageSlug)}.md`;
 }
 
 /**
@@ -15,9 +45,11 @@ export function getDocsPagePath(pageSlug: string): string {
  */
 function buildSiteUrls(docsUrl: string, apiUrl: string) {
   const docsOrigin = new URL(docsUrl).origin;
-  const aiGuidePath = getDocsPagePath("reference/docs-for-ai");
+  const aiGuidePath = getDocsPagePath(SDP_AI_GUIDE_DOCS_SLUG);
   const aiLlmsPath = "/docs/ai/llms.txt";
   const aiLlmsFullPath = "/docs/ai/llms-full.txt";
+  // Served from public/ at the docs root, and by sdp-web at the site root.
+  const aiSkillPath = "/SKILL.md";
   return {
     docsUrl,
     docsOrigin,
@@ -30,7 +62,11 @@ function buildSiteUrls(docsUrl: string, apiUrl: string) {
     aiLlmsUrl: `${docsOrigin}${aiLlmsPath}`,
     aiLlmsFullPath,
     aiLlmsFullUrl: `${docsOrigin}${aiLlmsFullPath}`,
+    aiSkillPath,
+    aiSkillUrl: `${docsOrigin}${aiSkillPath}`,
     getDocsPageUrl: (pageSlug: string): string => `${docsOrigin}${getDocsPagePath(pageSlug)}`,
+    getDocsMarkdownUrl: (pageSlug: string): string =>
+      `${docsOrigin}${getDocsMarkdownPath(pageSlug)}`,
   };
 }
 
@@ -60,5 +96,8 @@ export const {
   aiLlmsUrl,
   aiLlmsFullPath,
   aiLlmsFullUrl,
+  aiSkillPath,
+  aiSkillUrl,
   getDocsPageUrl,
+  getDocsMarkdownUrl,
 } = site;

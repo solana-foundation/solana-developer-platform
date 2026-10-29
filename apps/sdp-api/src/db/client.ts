@@ -674,7 +674,7 @@ export function asTransactionalClient(tx: DatabaseExecutor): DatabaseClient {
   };
 }
 
-export function getConnectionString(bindings: DatabaseBindings): string {
+function getConnectionString(bindings: DatabaseBindings): string {
   const databaseUrl = bindings.DATABASE_URL?.trim() ?? process.env.DATABASE_URL?.trim();
   if (databaseUrl) {
     return databaseUrl;

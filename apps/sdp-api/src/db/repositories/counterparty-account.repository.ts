@@ -4,7 +4,6 @@ import type {
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
 } from "@sdp/types/counterparties";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateCounterpartyAccountId(): string {
   return `counterparty_account_${crypto.randomUUID()}`;
@@ -66,7 +65,7 @@ export interface ListCounterpartyAccountsResult {
   total: number;
 }
 
-export interface BatchRecipientRow {
+interface BatchRecipientRow {
   counterparty_id: string;
   counterparty_display_name: string;
   account_id: string;
@@ -74,7 +73,7 @@ export interface BatchRecipientRow {
   address: string;
 }
 
-export interface ListBatchRecipientsInput {
+interface ListBatchRecipientsInput {
   organizationId: string;
   projectId: string;
   search?: string;
@@ -83,13 +82,9 @@ export interface ListBatchRecipientsInput {
   offset: number;
 }
 
-export interface ListBatchRecipientsResult {
+interface ListBatchRecipientsResult {
   rows: BatchRecipientRow[];
   total: number;
-}
-
-export interface CounterpartyAccountsRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface CounterpartyAccountsRepository {

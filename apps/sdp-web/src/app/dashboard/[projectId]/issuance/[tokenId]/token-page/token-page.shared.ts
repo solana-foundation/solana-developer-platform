@@ -6,14 +6,14 @@ import type { AccessControlMode } from "@/app/dashboard/[projectId]/issuance/acc
 import {
   type TokenLifecycle,
   tokenLifecycle,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 
 type Translate = ReturnType<typeof useTranslations>;
 
 /** The tabs of one token's page, in the header's order. */
-export const TOKEN_TABS = [
+const TOKEN_TABS = [
   "overview",
   "details",
   "public",

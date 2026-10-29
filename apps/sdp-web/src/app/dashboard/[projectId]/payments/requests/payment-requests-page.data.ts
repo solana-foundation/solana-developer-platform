@@ -11,6 +11,7 @@ import {
   type WellKnownToken,
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -30,7 +31,11 @@ const paymentRequestDetailResponseSchema = z.object({
     status: z.enum(PAYMENT_REQUEST_STATUSES),
     expiresAt: z.string().nullable(),
     fulfilledByTransferId: z.string().nullable(),
-    canceledBy: z.string().nullable(),
+    paidLate: z.boolean(),
+    lastCheckedAt: z.string().nullable().optional(),
+    canceledByApiKeyId: z.string().nullable(),
+    canceledByUserId: z.string().nullable(),
+    canceledAt: z.string().nullable(),
     lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
     createdBy: z.string().nullable(),
     createdAt: z.string(),
@@ -310,4 +315,22 @@ export async function fetchPaymentRequestLinkToken(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : undefined };
   }
+}
+
+/**
+ * Cancel a payment request from the browser, through the dashboard's proxy, which sends it under
+ * the action's Idempotency-Key. The page reads the request again afterwards, so the answer's
+ * body is not kept.
+ *
+ * @param requestId - The request's id.
+ * @returns Whether the API canceled it, with its error message when not; never throws.
+ */
+export async function cancelPaymentRequest(
+  requestId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await dashboardFetch(
+    `/api/dashboard/payments/requests/${encodeURIComponent(requestId)}/cancel`,
+    { method: "POST", body: {} }
+  );
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }

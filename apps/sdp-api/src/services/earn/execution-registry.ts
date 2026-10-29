@@ -4,7 +4,6 @@ import {
   supportsVaultQueuedWithdraw,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
-import { providerNotConfigured } from "@sdp/earn/errors";
 import type {
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
@@ -25,13 +24,6 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo/client";
-import { createRpc } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  GENESIS_HASH_BY_CLUSTER,
-  type SolanaCluster,
-} from "@sdp/types/well-known-tokens";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
@@ -43,6 +35,7 @@ import {
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
+import { assertClusterEndpoint } from "./cluster-rpc";
 import { createHastraSwapPort } from "./hastra-swap-port";
 import { createOndoSwapPort } from "./ondo-swap-port";
 import type { VaultDeadline } from "./vault-deadline";
@@ -58,116 +51,11 @@ import { createVaultRpcFailover } from "./vault-rpc-failover";
  * only by routes that move money, and it is the ONE place a provider id is
  * mapped to an executing client. Everything downstream narrows with
  * `supportsVaultDirect`, never an id check.
- */
-
-/**
- * The RPC endpoint used to build instructions for `cluster`: per-cluster by
- * construction, because one API process serves BOTH (a sandbox project is
- * devnet, a production project is mainnet-beta). The rule lives in @sdp/rpc so
- * the sponsorship budget's network-fee read resolves the SAME endpoint without
- * importing this module's chain SDKs; `assertClusterEndpoint` below still makes
- * every selected URL prove which chain it serves before work begins.
- */
-/**
- * Briefly memoised genesis observations, keyed by `cluster\nurl`.
  *
- * The genesis hash returned by one backend is immutable, but a URL is not: DNS,
- * a load balancer, or deployment configuration can repoint the same string at a
- * different cluster. Cache only a short burst so concurrent/page fan-out stays
- * affordable without turning one old observation into a process-lifetime funds
- * authorization.
- *
- * A rejected RPC call is NOT an observation. Timeouts, 429s and network failures
- * are evicted immediately; successful matches and mismatches share the same
- * short TTL.
+ * Every client gets its endpoints from the open cluster scope's managed pool
+ * (`./cluster-rpc`), one pinned per operation attempt, each proven to serve
+ * that cluster before the provider touches it.
  */
-export const CLUSTER_ENDPOINT_PROOF_TTL_MS = 30_000;
-
-interface ClusterEndpointProof {
-  promise: Promise<string>;
-  /** Null while the shared probe is still in flight. */
-  expiresAt: number | null;
-}
-
-const clusterProofs = new Map<string, ClusterEndpointProof>();
-
-/**
- * Refuse to build against an endpoint that has not proved it serves `cluster`.
- *
- * This is the check the execution path was missing. The catalogue path already
- * had it — `listKaminoDevnetVaults` verifies genesis before returning anything —
- * but the money path trusted its URL, and a cluster mismatch does NOT surface as
- * an error: Kamino's mainnet kvault program id also resolves on devnet with no
- * accounts under it, so the failure mode is "this vault does not exist", or a
- * transaction built for the wrong deployment.
- *
- * Called before every build and every position read. Concurrent calls coalesce,
- * and a later call re-proves the URL after the short trust window expires.
- */
-export async function assertClusterEndpoint(
-  env: Env,
-  cluster: SolanaCluster,
-  rpcUrl: string
-): Promise<void> {
-  if (rpcUrl === "") {
-    throw providerNotConfigured(
-      `No Solana RPC endpoint is configured for ${cluster}. Set SOLANA_${
-        cluster === "devnet" ? "DEVNET" : "MAINNET"
-      }_RPC_URL, or configure the canonical default for ${cluster}.`
-    );
-  }
-
-  const key = `${cluster}\n${rpcUrl}`;
-  let proof = clusterProofs.get(key);
-  if (proof && proof.expiresAt !== null && proof.expiresAt <= Date.now()) {
-    clusterProofs.delete(key);
-    proof = undefined;
-  }
-  if (!proof) {
-    proof = { promise: getGenesisHash(env, rpcUrl), expiresAt: null };
-    clusterProofs.set(key, proof);
-  }
-
-  let observed: string;
-  try {
-    observed = await proof.promise;
-    if (clusterProofs.get(key) === proof && proof.expiresAt === null) {
-      proof.expiresAt = Date.now() + CLUSTER_ENDPOINT_PROOF_TTL_MS;
-    }
-  } catch (cause) {
-    // Delete only if this is still the promise stored for the key. Concurrent
-    // callers may all observe the same rejection; none may delete a newer probe
-    // started after this one failed.
-    if (clusterProofs.get(key) === proof) clusterProofs.delete(key);
-    throw providerNotConfigured(
-      `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`
-    );
-  }
-
-  const expected = GENESIS_HASH_BY_CLUSTER[cluster];
-  if (observed !== expected) {
-    throw providerNotConfigured(
-      `The RPC endpoint configured for ${cluster} reports genesis ${observed}, not ${expected}. ` +
-        "Building against it would address the wrong chain — refusing. Set " +
-        `SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to a ${cluster} endpoint.`
-    );
-  }
-}
-
-async function getGenesisHash(env: Env, rpcUrl: string): Promise<string> {
-  const rpc = createRpc(env, { rpcUrl });
-  return String(await rpc.getGenesisHash().send());
-}
-
-/** Test seam: forget cached genesis verdicts. */
-export function resetClusterEndpointProofs(): void {
-  clusterProofs.clear();
-}
-
-export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {
-  return CLUSTER_BY_SDP_ENVIRONMENT[environment];
-}
 
 /**
  * Build the executing client for a provider, or `null` when this deployment has
@@ -184,7 +72,6 @@ export function resolveEarnExecutionClient(
   // await this resolver only when a chain method is invoked, so an idempotent
   // replay can return from durable state during an RPC outage.
   const { resolve: provenRpcUrl, run: runOperation } = createVaultRpcFailover(
-    env,
     deadline,
     assertClusterEndpoint
   );

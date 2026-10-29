@@ -1,6 +1,6 @@
 "use client";
 
-import type { TransactionFilters } from "./transactions-query";
+import type { TransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 
 export function useCursorPagination(
   filters: TransactionFilters,

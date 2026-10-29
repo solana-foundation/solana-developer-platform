@@ -1,8 +1,10 @@
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -179,5 +181,34 @@ describe("Payments routes — subscription plan wallets before the key", () => {
     expect(first.status).toBe(201);
     expect(retry.status).toBe(201);
     expect(await retry.json()).toEqual(await first.clone().json());
+  });
+});
+
+describe("Payments routes — SOL payment requests below the rent minimum (HOO-2375)", () => {
+  installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcStub();
+
+  it("refuses a SOL request below the minimum to a wallet with no account, storing nothing", async () => {
+    rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: [null] });
+    const response = await postPaymentRequest(
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.0001" },
+      "payreq-sol-below-rent"
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { recipientIndexes: [0] } },
+    });
+    expect(await storedKeyCount("payreq-sol-below-rent")).toBe(0);
+  });
+
+  it("creates a SOL request at or above the minimum without reading the wallet", async () => {
+    const response = await postPaymentRequest(
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.001" },
+      "payreq-sol-above-rent"
+    );
+
+    expect(response.status).toBe(201);
+    expect(rpc.calls.filter((call) => call.method === "getMultipleAccounts")).toHaveLength(0);
   });
 });

@@ -3,7 +3,7 @@ import { badRequest } from "@/lib/errors";
 // Strict positive-integer query param: absent → fallback; anything that isn't an
 // integer >= 1 (0, negatives, floats, garbage) → 400. Prevents NaN/negative values
 // from reaching SQL LIMIT/OFFSET.
-export function parsePositiveIntegerQuery(
+function parsePositiveIntegerQuery(
   value: string | undefined,
   fallback: number,
   name: string

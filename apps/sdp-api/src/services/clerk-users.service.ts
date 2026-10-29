@@ -1,10 +1,9 @@
-import type { OrganizationJSON } from "@clerk/backend";
 import { AppError } from "@/lib/errors";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { describeClerkFailure } from "./clerk-error";
 
-export interface ClerkEmailAddress {
+interface ClerkEmailAddress {
   id: string;
   email_address: string;
   verification?: {
@@ -28,16 +27,6 @@ export function verifiedPrimaryEmailFromClerkUser(user: ClerkUser): string | nul
     return null;
   }
   return primary.email_address.toLowerCase();
-}
-
-export interface ClerkOrganizationMembership {
-  role: string;
-  organization: OrganizationJSON;
-}
-
-interface ClerkOrganizationMembershipPage {
-  data: ClerkOrganizationMembership[];
-  total_count: number;
 }
 
 export class ClerkUsersService {
@@ -96,21 +85,5 @@ export class ClerkUsersService {
 
   async getUser(userId: string): Promise<ClerkUser> {
     return this.request<ClerkUser>(`/users/${userId}`);
-  }
-
-  async getOrganizationMemberships(userId: string): Promise<ClerkOrganizationMembership[]> {
-    const memberships: ClerkOrganizationMembership[] = [];
-    const limit = 500;
-
-    while (true) {
-      const page = await this.request<ClerkOrganizationMembershipPage>(
-        `/users/${userId}/organization_memberships?limit=${limit}&offset=${memberships.length}`
-      );
-      memberships.push(...page.data);
-
-      if (page.data.length === 0 || memberships.length >= page.total_count) {
-        return memberships;
-      }
-    }
   }
 }

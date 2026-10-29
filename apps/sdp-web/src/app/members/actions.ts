@@ -1,135 +1,256 @@
 "use server";
 
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import { MEMBER_STATUSES } from "@sdp/types/organizations";
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { type ApiAnswer, IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency";
+import {
+  createOrgSdpApiClient,
+  createSdpApiClient,
+  requestProjectHref,
+  sdpApiAnswer,
+} from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 
-// createSdpApiClient is project-scoped rather than org-scoped on purpose:
-// /v1/members applies projectContextMiddleware to every route
-// (routes/members/index.ts), so it rejects a request without an x-project-id
-// header even though membership itself is organization-level.
+// Membership is organization-wide, so reads use the org client. Mutations go
+// through the project client: their idempotency keys are scoped to a project
+// (routes/members/index.ts).
 
-export interface Member {
-  id: string;
-  role: string;
-  status: string;
-  createdAt: string;
+const memberSchema = z.object({
+  id: z.string(),
+  role: z.enum(ORGANIZATION_ROLES),
+  status: z.enum(MEMBER_STATUSES),
+  createdAt: z.string(),
   /** Set by the API; the client holds emails, not the actor's user id. */
-  isSelf?: boolean;
-  user: {
-    id: string;
-    email: string;
-    name: string | null;
-  };
-}
+  isSelf: z.boolean(),
+  user: z.object({ id: z.string(), email: z.string(), name: z.string().nullable() }),
+});
 
-export interface PendingInvitation {
-  id: string;
-  email: string;
-  role: string;
-  status: string;
-  createdAt: string;
-  expiresAt: string;
-  /** Clerk's shareable accept link; null when Clerk could not be reached. */
-  acceptUrl: string | null;
-}
+const pendingInvitationSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: z.enum(ORGANIZATION_ROLES),
+  status: z.literal("pending"),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+});
 
-export interface MemberDirectory {
-  members: Member[];
-  invitations: PendingInvitation[];
-  meta: {
-    total: number;
-    page: number;
-    pageSize: number;
-    hasMore: boolean;
-    activeAdminCount: number;
-  };
-}
+const memberDirectorySchema = z.object({
+  members: z.array(memberSchema),
+  invitations: z.array(pendingInvitationSchema),
+  meta: z.object({
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    hasMore: z.boolean(),
+    activeAdminCount: z.number(),
+  }),
+});
 
-export type RevokeInvitationResult = { ok: true } | { ok: false; error: string };
-export type RemoveMemberResult = { ok: true } | { ok: false; error: string };
+export type Member = z.infer<typeof memberSchema>;
+export type PendingInvitation = z.infer<typeof pendingInvitationSchema>;
+export type MemberDirectory = z.infer<typeof memberDirectorySchema>;
 
-export async function removeMember(memberId: string): Promise<RemoveMemberResult> {
+/** What a member action reports, in the shape `useActionIdempotencyKey` settles. */
+export type MemberActionResult =
+  | { status: "success" }
+  | { status: "error"; message: string; answer: ApiAnswer };
+
+const idSchema = z.string().min(1).max(200);
+const idempotencyKeySchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN);
+
+/**
+ * Runs one member mutation and refreshes the settings page it renders on.
+ *
+ * @param path - The members API path.
+ * @param init - The request.
+ * @returns The outcome, with what sdp-api answered when it refused.
+ */
+async function mutateMembers(path: string, init: RequestInit): Promise<MemberActionResult> {
   try {
     const client = await createSdpApiClient();
-    await client.fetch(`/v1/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
+    await client.fetch(path, init);
   } catch (error) {
-    return { ok: false, error: readableApiError(error) };
+    return { status: "error", message: readableApiError(error), answer: sdpApiAnswer(error) };
   }
 
   revalidatePath(await requestProjectHref("/dashboard/settings"));
-  return { ok: true };
+  return { status: "success" };
 }
 
-export async function revokeInvitation(invitationId: string): Promise<RevokeInvitationResult> {
+/**
+ * Removes another member. A retry with the same key finishes a removal whose
+ * Clerk half failed.
+ *
+ * @param memberId - The member to remove.
+ * @param idempotencyKey - The key the browser minted for this removal.
+ * @returns The outcome.
+ */
+export async function removeMember(
+  memberId: string,
+  idempotencyKey: string
+): Promise<MemberActionResult> {
+  const input = z
+    .object({ memberId: idSchema, idempotencyKey: idempotencyKeySchema })
+    .parse({ memberId, idempotencyKey });
+  return mutateMembers(`/v1/members/${encodeURIComponent(input.memberId)}`, {
+    method: "DELETE",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: input.idempotencyKey },
+  });
+}
+
+/**
+ * Changes another member's Organization Role.
+ *
+ * @param memberId - The member.
+ * @param role - Their new role.
+ * @param idempotencyKey - The key the browser minted for this change.
+ * @returns The outcome.
+ */
+export async function changeMemberRole(
+  memberId: string,
+  role: OrganizationRole,
+  idempotencyKey: string
+): Promise<MemberActionResult> {
+  const input = z
+    .object({
+      memberId: idSchema,
+      role: z.enum(ORGANIZATION_ROLES),
+      idempotencyKey: idempotencyKeySchema,
+    })
+    .parse({ memberId, role, idempotencyKey });
+  return mutateMembers(`/v1/members/${encodeURIComponent(input.memberId)}`, {
+    method: "PATCH",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: input.idempotencyKey },
+    body: JSON.stringify({ role: input.role }),
+  });
+}
+
+/**
+ * Ends the caller's own membership. Not retryable: once it commits the API
+ * refuses the caller, so the page leaves the organization even when the
+ * request reports a failure after the membership ended.
+ *
+ * @returns The outcome.
+ */
+export async function leaveOrganization(): Promise<MemberActionResult> {
   try {
     const client = await createSdpApiClient();
-    await client.fetch(`/v1/members/invitations/${encodeURIComponent(invitationId)}`, {
-      method: "DELETE",
-    });
+    await client.fetch("/v1/members/me", { method: "DELETE" });
   } catch (error) {
-    return { ok: false, error: readableApiError(error) };
+    return { status: "error", message: readableApiError(error), answer: sdpApiAnswer(error) };
   }
+  return { status: "success" };
+}
 
-  revalidatePath(await requestProjectHref("/dashboard/settings"));
-  return { ok: true };
+/**
+ * Withdraws a pending invitation.
+ *
+ * @param invitationId - The invitation.
+ * @param idempotencyKey - The key the browser minted for this revocation.
+ * @returns The outcome.
+ */
+export async function revokeInvitation(
+  invitationId: string,
+  idempotencyKey: string
+): Promise<MemberActionResult> {
+  const input = z
+    .object({ invitationId: idSchema, idempotencyKey: idempotencyKeySchema })
+    .parse({ invitationId, idempotencyKey });
+  return mutateMembers(`/v1/members/invitations/${encodeURIComponent(input.invitationId)}`, {
+    method: "DELETE",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: input.idempotencyKey },
+  });
 }
 
 const MEMBERS_PAGE_SIZE = 25;
 
-export async function listMembers(page = 1): Promise<MemberDirectory> {
-  const client = await createSdpApiClient();
+export async function listMembers(page: number): Promise<MemberDirectory> {
+  const client = await createOrgSdpApiClient();
   const query = new URLSearchParams({
     page: String(Math.max(1, page)),
     pageSize: String(MEMBERS_PAGE_SIZE),
   });
-  const response = await client.fetch<{
-    members: Member[];
-    invitations?: PendingInvitation[];
-    meta?: MemberDirectory["meta"];
-  }>(`/v1/members?${query.toString()}`);
-
-  return {
-    members: response.members,
-    invitations: response.invitations ?? [],
-    meta: response.meta ?? {
-      total: response.members.length,
-      page: 1,
-      pageSize: MEMBERS_PAGE_SIZE,
-      hasMore: false,
-      activeAdminCount: response.members.filter((member) => member.role === "admin").length,
-    },
-  };
+  return memberDirectorySchema.parse(
+    await client.fetch<unknown>(`/v1/members?${query.toString()}`)
+  );
 }
 
-export type InviteMemberResult = { ok: true; email: string } | { ok: false; error: string };
+const memberApiKeysSchema = z.object({
+  apiKeys: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      keyPrefix: z.string(),
+      projectId: z.string(),
+      projectName: z.string(),
+      environment: z.enum(SDP_ENVIRONMENTS),
+      createdAt: z.string(),
+    })
+  ),
+});
+
+export type MemberApiKey = z.infer<typeof memberApiKeysSchema>["apiKeys"][number];
+
+/**
+ * The active keys a member created, in every project: removing the member
+ * leaves them working, so the removal dialog lists them.
+ *
+ * @param memberId - The member.
+ * @returns The keys, newest first.
+ */
+export async function listMemberApiKeys(memberId: string): Promise<MemberApiKey[]> {
+  const client = await createOrgSdpApiClient();
+  const response = await client.fetch<unknown>(
+    `/v1/members/${encodeURIComponent(idSchema.parse(memberId))}/api-keys`
+  );
+  return memberApiKeysSchema.parse(response).apiKeys;
+}
+
+export type InviteMemberResult =
+  | { status: "success"; email: string }
+  | { status: "error"; message: string; answer?: ApiAnswer };
+
+const inviteFormSchema = z.object({
+  email: z.string().trim().toLowerCase().min(1),
+  role: z.enum(ORGANIZATION_ROLES),
+  idempotencyKey: idempotencyKeySchema,
+});
 
 /**
  * Returns the failure instead of throwing so the form can render it inline. A
  * thrown server action surfaces as an error boundary, which discards the
  * typed-in address and tells the user nothing actionable.
+ *
+ * @param formData - The invite form: `email`, `role` and the browser's `idempotencyKey`.
+ * @returns The outcome, with what sdp-api answered when it refused.
  */
 export async function inviteMember(formData: FormData): Promise<InviteMemberResult> {
   const t = await getTranslations();
-  const email = String(formData.get("email") ?? "").trim();
-  const role = String(formData.get("role") ?? "member").trim();
-
-  if (!email) {
-    return { ok: false, error: t("Shared.members.emailRequired") };
+  const parsed = inviteFormSchema.safeParse({
+    email: formData.get("email"),
+    role: formData.get("role"),
+    idempotencyKey: formData.get("idempotencyKey"),
+  });
+  if (!parsed.success) {
+    return { status: "error", message: t("Shared.members.emailRequired") };
   }
 
   try {
     const client = await createSdpApiClient();
     await client.fetch("/v1/members/invite", {
       method: "POST",
-      body: JSON.stringify({ email, role }),
+      headers: { [IDEMPOTENCY_KEY_HEADER]: parsed.data.idempotencyKey },
+      body: JSON.stringify({ email: parsed.data.email, role: parsed.data.role }),
     });
   } catch (error) {
-    return { ok: false, error: readableApiError(error) };
+    return { status: "error", message: readableApiError(error), answer: sdpApiAnswer(error) };
   }
 
   // Members render inside the settings page; /members only redirects there.
   revalidatePath(await requestProjectHref("/dashboard/settings"));
-  return { ok: true, email };
+  return { status: "success", email: parsed.data.email };
 }

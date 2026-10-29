@@ -20,10 +20,7 @@ const HUMAN_ONLY_PATHS = [
   /^\/v1\/members(\/|$)/,
   /^\/v1\/projects\/:projectId\/(members|api-keys)(\/|$)/,
 ];
-const HUMAN_ONLY_ROUTES = new Set([
-  "PATCH /v1/organizations/:orgId",
-  "DELETE /v1/organizations/:orgId",
-]);
+const HUMAN_ONLY_ROUTES = new Set(["PATCH /v1/organizations/:orgId"]);
 
 function humanOnlyRoutes(): string[] {
   const routes = new Set<string>();
@@ -56,22 +53,21 @@ describe("human-only routes", () => {
       "DELETE /v1/api-keys/:keyId",
       "DELETE /v1/members/:memberId",
       "DELETE /v1/members/invitations/:invitationId",
-      "DELETE /v1/organizations/:orgId",
-      "DELETE /v1/projects/:projectId/members/:memberId",
+      "DELETE /v1/members/me",
       "GET /v1/api-keys",
       "GET /v1/api-keys/:keyId",
       "GET /v1/members",
+      "GET /v1/members/:memberId/api-keys",
+      "GET /v1/members/me",
       "GET /v1/projects/:projectId/api-keys",
       "GET /v1/projects/:projectId/members",
       "PATCH /v1/api-keys/:keyId",
+      "PATCH /v1/members/:memberId",
       "PATCH /v1/organizations/:orgId",
-      "PATCH /v1/projects/:projectId/members/:memberId",
       "POST /v1/api-keys",
       "POST /v1/api-keys/:keyId/rotate",
-      "POST /v1/members/accept",
       "POST /v1/members/invite",
       "POST /v1/projects/:projectId/api-keys",
-      "POST /v1/projects/:projectId/members",
     ]);
   });
 

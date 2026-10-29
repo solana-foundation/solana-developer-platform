@@ -7,7 +7,7 @@ Clients time out, connections drop and workers die mid-run. Send an `Idempotency
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
   -d '{ ... }'
@@ -57,7 +57,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
       response = await fetch("https://api.solana.com/v1/payments/transfers", {
         method: "POST",
         headers: {
-          Authorization: "Bearer sk_test_...",
+          Authorization: "Bearer sf_...",
           "Content-Type": "application/json",
           "Idempotency-Key": payout.idempotencyKey,
         },

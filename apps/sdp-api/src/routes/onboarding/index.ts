@@ -7,12 +7,12 @@
  */
 
 import { Hono } from "hono";
+import { authorize } from "@/middleware/authorize";
 import { clerkOnboardingMiddleware } from "@/middleware/clerk-onboarding";
 import { publicRoute } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
-import { completeOnboarding, getOnboardingStatus } from "./handlers";
-import { completeOnboardingSchema } from "./schemas";
+import { authorizeOnboardingSession } from "./access";
+import { getOnboardingStatus } from "./handlers";
 
 export const onboarding = new Hono<{ Bindings: Env }>();
 
@@ -20,11 +20,6 @@ onboarding.use("*", clerkOnboardingMiddleware());
 onboarding.get(
   "/status",
   publicRoute("onboarding: a Clerk session before its organization is provisioned"),
+  authorize(authorizeOnboardingSession),
   getOnboardingStatus
-);
-onboarding.post(
-  "/complete",
-  publicRoute("onboarding: a Clerk session before its organization is provisioned"),
-  validateBody(completeOnboardingSchema),
-  completeOnboarding
 );

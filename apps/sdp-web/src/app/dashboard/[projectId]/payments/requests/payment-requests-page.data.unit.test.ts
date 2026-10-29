@@ -26,7 +26,10 @@ function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): Paymen
     status: "awaiting_payment",
     expiresAt: null,
     fulfilledByTransferId: null,
-    canceledBy: null,
+    paidLate: false,
+    canceledByApiKeyId: null,
+    canceledByUserId: null,
+    canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
     createdBy: null,
     createdAt: "2026-09-14T00:00:00.000Z",
@@ -113,6 +116,16 @@ describe("fetchPaymentRequestDetail", () => {
     const api = detailApi(new Response(null, { status: 404 }));
     expect(await fetchPaymentRequestDetail(api.request, "preq_missing")).toEqual({
       status: "not_found",
+    });
+  });
+
+  it("retains the last reconciliation time on a request", async () => {
+    const row = requestRow("preq_checked", { lastCheckedAt: "2026-10-29T12:00:00.000Z" });
+    const api = detailApi(Response.json({ data: row }));
+
+    expect(await fetchPaymentRequestDetail(api.request, row.id)).toEqual({
+      status: "found",
+      request: row,
     });
   });
 });

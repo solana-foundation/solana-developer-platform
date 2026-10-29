@@ -1,10 +1,13 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
+import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   type RpcTransport,
 } from "@solana/kit";
+import { z } from "zod";
 
 /**
  * Maximum time a single Veda RPC request may hold a worker open.
@@ -25,13 +28,14 @@ export function withVedaRpcTimeout(
   const scopedTransport = withRpcReadContext(transport);
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const controller = new AbortController();
+    const deadlineSignal = markRpcAttemptDeadline(controller.signal);
     // A distinct reason lets the catch path tell our deadline from a caller
     // cancellation even if both signals abort before the transport rejects.
     const deadlineReason = new Error("Veda RPC deadline elapsed");
     const timer = setTimeout(() => controller.abort(deadlineReason), timeoutMs);
     const signal = config.signal
-      ? AbortSignal.any([config.signal, controller.signal])
-      : controller.signal;
+      ? AbortSignal.any([config.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
@@ -53,7 +57,7 @@ export function withVedaRpcTimeout(
  * payload the read context prepared.
  */
 function vedaTransport(rpcUrl: string): RpcTransport {
-  return withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }));
+  return withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl);
 }
 
 /** One deadline-aware RPC client shared by this package and the pinned SDK. */
@@ -66,9 +70,9 @@ export const VEDA_BLOCK_TIME_TTL_MS = 60_000;
 const VEDA_BLOCK_TIME_CAPACITY = 256;
 
 /**
- * The reads a position read sends, and the only methods the read transport
- * shares. Anything else, above all a send, a simulation or a blockhash, always
- * goes out as its own request.
+ * The reads the SDK's position, quote and build methods send, and the only
+ * methods the read transport shares. Anything else, above all a send, a
+ * simulation or a blockhash, always goes out as its own request.
  */
 const VEDA_SHARED_READ_METHODS: ReadonlySet<string> = new Set([
   "getAccountInfo",
@@ -94,8 +98,151 @@ interface InFlightRead {
   controller: AbortController;
 }
 
+/** Most `getMultipleAccounts` answers one operation holds. */
+const VEDA_OPERATION_HELD_CAPACITY = 16;
+
 /**
- * De-duplication for the long-lived position-read client only.
+ * A `getMultipleAccounts` an operation may hold or serve: a list of addresses
+ * and the SDK's plain config, never a data slice.
+ */
+const heldAccountsRequestSchema = z.object({
+  method: z.literal("getMultipleAccounts"),
+  params: z.union([
+    z.tuple([z.array(z.string())]),
+    z.tuple([
+      z.array(z.string()),
+      z.looseObject({
+        // Kit sends it as the SDK passed it, a bigint, and downcasts only on the wire.
+        minContextSlot: z
+          .union([z.number().int().nonnegative(), z.bigint().nonnegative()])
+          .optional(),
+        dataSlice: z.never().optional(),
+      }),
+    ]),
+  ]),
+});
+
+/** A successful `getMultipleAccounts` answer: account values at one context slot. */
+const heldAccountsAnswerSchema = z.looseObject({
+  error: z.never().optional(),
+  result: z.looseObject({
+    context: z.looseObject({
+      slot: z.union([z.number().int().nonnegative(), z.bigint().nonnegative()]),
+    }),
+    value: z.array(z.unknown()),
+  }),
+});
+
+type HeldAccountsAnswer = z.infer<typeof heldAccountsAnswerSchema>;
+
+/** One `getMultipleAccounts` answer an operation holds. */
+interface HeldAccounts {
+  /** `stableKey` of the request's config without `minContextSlot`. */
+  config: string;
+  /** The context slot that answered it. */
+  slot: number;
+  /** `readStamp()` of the request that answered it. */
+  stamp: number;
+  /** Each requested address and its position in the answer's `value`. */
+  index: ReadonlyMap<string, number>;
+  answer: HeldAccountsAnswer;
+}
+
+const operationReads = new AsyncLocalStorage<HeldAccounts[]>();
+
+/**
+ * Run one provider operation so it fetches each account once.
+ *
+ * The SDK re-reads the vault state in every public method and reads the rest of
+ * an operation's accounts in several small batches, so one queue build fetched
+ * the vault state 15 times. Inside this scope, a `getMultipleAccounts` whose
+ * addresses all appear in an answer the SAME operation already holds, under the
+ * same config and at a slot no older than its `minContextSlot`, is served from
+ * that answer: exactly what the narrower request would have returned at that
+ * slot, which is the one consistent snapshot the SDK's own
+ * `minContextSlot: preflight.slot` re-read asks for. An operation that reads
+ * every account it needs in one request first therefore sends nothing else but
+ * a block time. "Live" means read once per operation, never across operations:
+ * the held answers die with the scope.
+ *
+ * Only plain `getMultipleAccounts` is served, never a data slice, another
+ * method or an error. It sits below the read context, so a scoped read's
+ * minimum slot is checked against the held answer's slot, and an answer is
+ * served only to a caller whose read floor it postdates. `VedaVaultDirectClient`
+ * opens one per operation attempt, so a failover re-attempt starts with nothing
+ * held; a nested scope joins the one already open.
+ */
+export function withVedaOperationReads<T>(operation: () => Promise<T>): Promise<T> {
+  return operationReads.getStore() ? operation() : operationReads.run([], operation);
+}
+
+/** What an operation may hold or serve of a `getMultipleAccounts` request. */
+interface AccountsRead {
+  addresses: readonly string[];
+  /** `stableKey` of its config without `minContextSlot`. */
+  config: string;
+  /** Its `minContextSlot`, when it names one. */
+  minimumSlot: number | undefined;
+}
+
+function accountsRead(request: z.infer<typeof heldAccountsRequestSchema>): AccountsRead {
+  const [addresses, config] = request.params;
+  if (config === undefined) return { addresses, config: stableKey({}), minimumSlot: undefined };
+  const { minContextSlot, ...rest } = config;
+  return {
+    addresses,
+    config: stableKey(rest),
+    minimumSlot: minContextSlot === undefined ? undefined : Number(minContextSlot),
+  };
+}
+
+/** The held answer, newest slot first, that covers every requested address. */
+function serveHeld(
+  held: readonly HeldAccounts[],
+  read: AccountsRead,
+  floor: number | undefined
+): HeldAccountsAnswer | undefined {
+  let best: { from: HeldAccounts; value: unknown[] } | undefined;
+  for (const from of held) {
+    if (from.config !== read.config) continue;
+    if (read.minimumSlot !== undefined && from.slot < read.minimumSlot) continue;
+    if (floor !== undefined && from.stamp <= floor) continue;
+    if (best && best.from.slot >= from.slot) continue;
+    const value: unknown[] = [];
+    for (const key of read.addresses) {
+      const position = from.index.get(key);
+      if (position === undefined) break;
+      value.push(from.answer.result.value[position]);
+    }
+    if (value.length === read.addresses.length) best = { from, value };
+  }
+  if (!best) return undefined;
+  return { ...best.from.answer, result: { ...best.from.answer.result, value: best.value } };
+}
+
+function holdAnswer(
+  held: HeldAccounts[],
+  read: AccountsRead,
+  stamp: number,
+  answer: HeldAccountsAnswer
+): void {
+  if (answer.result.value.length !== read.addresses.length) return;
+  const index = new Map<string, number>();
+  read.addresses.forEach((key, position) => {
+    if (!index.has(key)) index.set(key, position);
+  });
+  held.push({
+    config: read.config,
+    slot: Number(answer.result.context.slot),
+    stamp,
+    index,
+    answer,
+  });
+  while (held.length > VEDA_OPERATION_HELD_CAPACITY) held.shift();
+}
+
+/**
+ * De-duplication for the long-lived shared clients (`sdk.ts`).
  *
  * The SDK re-reads vault state inside every public method and follows every
  * `getMultipleAccounts` with a `getBlockTime` for the slot that served it. Two
@@ -107,6 +254,9 @@ interface InFlightRead {
  *   are ever shared.
  * - A slot's block time is a fact of that slot, so a non-null answer is reused
  *   for a short window. Errors and nulls are never remembered.
+ *
+ * Inside `withVedaOperationReads`, an account read the operation already holds
+ * is answered from it first.
  *
  * Applied BELOW `withRpcReadContext`: the key already carries any
  * `minContextSlot` a scoped read adds, and every consumer still validates the
@@ -131,53 +281,85 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
     }
   };
 
+  /** An identical request sent after the caller's floor and inside the join window, or a new one. */
+  const inFlightRead = (
+    key: string,
+    method: string,
+    config: Parameters<RpcTransport>[0],
+    floor: number | undefined
+  ): InFlightRead => {
+    const entry = inFlight.get(key);
+    if (
+      entry &&
+      (floor === undefined || entry.stamp > floor) &&
+      Date.now() - entry.sentAt < VEDA_SHARED_READ_JOIN_WINDOW_MS
+    ) {
+      return entry;
+    }
+    const controller = new AbortController();
+    const created: InFlightRead = {
+      stamp: readStamp(),
+      sentAt: Date.now(),
+      response: transport<unknown>({ ...config, signal: controller.signal }),
+      consumers: 0,
+      controller,
+    };
+    created.response.then(
+      (response) => {
+        if (inFlight.get(key) === created) inFlight.delete(key);
+        if (method === "getBlockTime" && isBlockTimeAnswer(response)) remember(key, response);
+      },
+      () => {
+        if (inFlight.get(key) === created) inFlight.delete(key);
+      }
+    );
+    inFlight.set(key, created);
+    return created;
+  };
+
+  /** One shared read, answered from the operation's held reads, a remembered block time, or the wire. */
+  const sharedRead = async (
+    key: string,
+    method: string,
+    config: Parameters<RpcTransport>[0]
+  ): Promise<unknown> => {
+    const floor = readFloor();
+    const held = operationReads.getStore();
+    const parsed = heldAccountsRequestSchema.safeParse(config.payload);
+    const operation =
+      held !== undefined && parsed.success ? { held, read: accountsRead(parsed.data) } : undefined;
+    const served = operation && serveHeld(operation.held, operation.read, floor);
+    if (served) {
+      if (config.signal?.aborted) throw config.signal.reason;
+      return served;
+    }
+
+    const remembered = blockTimes.get(key);
+    if (remembered && remembered.expiresAt > Date.now()) return remembered.response;
+    if (remembered) blockTimes.delete(key);
+
+    const joined = inFlightRead(key, method, config, floor);
+    const answer = await consume(joined, config.signal, () => {
+      if (inFlight.get(key) === joined) inFlight.delete(key);
+    });
+    if (operation) {
+      const heldAnswer = heldAccountsAnswerSchema.safeParse(answer);
+      if (heldAnswer.success) {
+        holdAnswer(operation.held, operation.read, joined.stamp, heldAnswer.data);
+      }
+    }
+    return answer;
+  };
+
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const request = jsonRpcRequest(config.payload);
     if (!request || !VEDA_SHARED_READ_METHODS.has(request.method)) {
       return transport<TResponse>(config);
     }
     const key = stableKey([request.method, request.params]);
-
-    const remembered = blockTimes.get(key);
-    if (remembered && remembered.expiresAt > Date.now()) return remembered.response as TResponse;
-    if (remembered) blockTimes.delete(key);
-
-    const floor = readFloor();
-    let entry = inFlight.get(key);
-    if (
-      entry &&
-      ((floor !== undefined && entry.stamp <= floor) ||
-        Date.now() - entry.sentAt >= VEDA_SHARED_READ_JOIN_WINDOW_MS)
-    ) {
-      entry = undefined;
-    }
-    if (!entry) {
-      const controller = new AbortController();
-      const created: InFlightRead = {
-        stamp: readStamp(),
-        sentAt: Date.now(),
-        response: transport<unknown>({ ...config, signal: controller.signal }),
-        consumers: 0,
-        controller,
-      };
-      created.response.then(
-        (response) => {
-          if (inFlight.get(key) === created) inFlight.delete(key);
-          if (request.method === "getBlockTime" && isBlockTimeAnswer(response)) {
-            remember(key, response);
-          }
-        },
-        () => {
-          if (inFlight.get(key) === created) inFlight.delete(key);
-        }
-      );
-      inFlight.set(key, created);
-      entry = created;
-    }
-    const joined = entry;
-    return consume(joined, config.signal, () => {
-      if (inFlight.get(key) === joined) inFlight.delete(key);
-    }) as Promise<TResponse>;
+    // SAFETY: every shared answer is the envelope a transport returned for this
+    // exact method and params, which is the response `TResponse` names.
+    return (await sharedRead(key, request.method, config)) as TResponse;
   };
 }
 
@@ -244,10 +426,11 @@ function stableKey(value: unknown): string {
 }
 
 /**
- * The position-read client: the same deadline and confirmation context as
- * `createVedaRpc`, over the de-duplicating transport. Never used to build. The
- * socket re-send sits below the de-duplication, so one re-send serves every
- * consumer of a shared read.
+ * The shared clients' RPC: the same deadline and confirmation context as
+ * `createVedaRpc`, over the de-duplicating transport. Queue builds use it too:
+ * the SDK's `build*` methods only read, and a send, a simulation or a
+ * blockhash never takes a shared path. The socket re-send sits below the
+ * de-duplication, so one re-send serves every consumer of a shared read.
  */
 export function createVedaReadRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS) {
   const transport = withVedaReadDeduplication(vedaTransport(rpcUrl));

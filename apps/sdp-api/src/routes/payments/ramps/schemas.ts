@@ -1,4 +1,3 @@
-import { COUNTRY_CODES } from "@sdp/types/countries";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import { RAMPS_MEMO_LIMITS } from "@sdp/types/payments";
@@ -13,7 +12,6 @@ export const rampFiatCurrencySchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim().toUpperCase() : value),
   z.enum(RAMP_FIAT_CURRENCIES)
 );
-export const rampDestinationCountrySchema = z.enum(COUNTRY_CODES);
 
 export const rampsMemoSchema = z
   .record(

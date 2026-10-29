@@ -293,10 +293,15 @@ function isAdminOnlyAction(action: Action): boolean {
   );
 }
 
-/** The actions a signed-in person holds through their organization role. */
+/**
+ * The actions a signed-in person holds through their organization role. A
+ * `viewer` holds every `read` and nothing else: no money, no issuance, no
+ * keys, no members.
+ */
 export const ORGANIZATION_ROLE_ACTIONS = {
   admin: ACTIONS,
   member: ACTIONS.filter((action) => !isAdminOnlyAction(action)),
+  viewer: ACTIONS.filter((action) => actionVerbOf(action) === "read"),
 } as const satisfies Record<OrganizationRole, readonly Action[]>;
 
 export function organizationRoleMayPerform(role: OrganizationRole, action: Action): boolean {

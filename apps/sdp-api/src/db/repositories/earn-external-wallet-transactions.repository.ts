@@ -17,7 +17,7 @@ import type { DatabaseClient as AppDb } from "@/db/client";
  * holds expires with its recorded blockhash window.
  */
 
-export const EARN_EXTERNAL_WALLET_TRANSACTION_ID_PREFIX = "earn_external_wallet_transaction_";
+const EARN_EXTERNAL_WALLET_TRANSACTION_ID_PREFIX = "earn_external_wallet_transaction_";
 
 export function generateEarnExternalWalletTransactionId(): string {
   return `${EARN_EXTERNAL_WALLET_TRANSACTION_ID_PREFIX}${crypto.randomUUID()}`;
@@ -67,7 +67,7 @@ export interface EarnExternalWalletTransactionRow {
   updated_at: string;
 }
 
-export interface CreateEarnExternalWalletTransactionInput {
+interface CreateEarnExternalWalletTransactionInput {
   id: string;
   organizationId: string;
   projectId: string;

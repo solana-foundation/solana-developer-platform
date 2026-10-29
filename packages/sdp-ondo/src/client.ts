@@ -18,6 +18,7 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
+import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
@@ -623,7 +624,7 @@ export class OndoVaultDirectClient
           method: "getTokenAccountsByOwner",
           params: [owner, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }],
         }),
-        signal: AbortSignal.timeout(RPC_READ_TIMEOUT_MS),
+        signal: markRpcAttemptDeadline(AbortSignal.timeout(RPC_READ_TIMEOUT_MS)),
       });
     } catch (cause) {
       throw new SdpOndoError("POSITION_UNREADABLE", "The Solana RPC read failed", { cause });

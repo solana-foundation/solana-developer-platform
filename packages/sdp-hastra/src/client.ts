@@ -31,6 +31,7 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
+import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type HastraDeployment,
@@ -325,7 +326,7 @@ async function rpcRequest<T>(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      signal: AbortSignal.timeout(RPC_READ_TIMEOUT_MS),
+      signal: markRpcAttemptDeadline(AbortSignal.timeout(RPC_READ_TIMEOUT_MS)),
     });
   } catch (cause) {
     throw new SdpHastraError(code, `The Solana RPC failed while ${description}.`, { cause });

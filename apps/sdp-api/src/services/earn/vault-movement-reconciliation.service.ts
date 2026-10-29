@@ -1,11 +1,13 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino/deposit-receipt";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
-  createRpc,
+  getChainHeight,
   getSignatureStatuses,
   getTransaction,
+  reReadExpiredStatuses,
   type SignatureStatusInfo,
   type SolanaRpc,
   tokenBalanceDelta,
@@ -17,8 +19,7 @@ import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   earnProviderDepositSettlement,
 } from "@sdp/types/provider-access";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import type { Signature } from "@solana/kit";
+import type { Signature, Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
@@ -28,8 +29,6 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
-  assertClusterEndpoint,
-  earnClusterFor,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
@@ -128,12 +127,16 @@ async function observeEarnVaultMovement(
     throw new Error(`Earn vault movement ${movement.id} is missing its transaction signature`);
   }
 
+  // Rows are scoped to the caller before this read; one from another environment would be read on
+  // the wrong cluster, so it falls back to the durable row instead.
+  const { environment } = currentClusterScope();
+  if (movement.environment !== environment) {
+    throw new Error(
+      `Earn vault movement ${movement.id} belongs to ${movement.environment}, not the ${environment} scope`
+    );
+  }
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const cluster = earnClusterFor(movement.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
-
-  await assertClusterEndpoint(env, cluster, rpcUrl);
+  const rpc = createClusterRpc({ timeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
   const [status] = await getSignatureStatuses(rpc, [movement.signature as Signature], {
     searchTransactionHistory: true,
     retryDelaysMs: [],
@@ -143,8 +146,6 @@ async function observeEarnVaultMovement(
   // into a rebroadcast or expiry decision. Passing no block height makes the
   // shared transition function leave an unknown signature for the durable job.
   await reconcileMovement(env, ledger, movement, status ?? null, {
-    cluster,
-    rpcUrl,
     rpc,
     currentBlockHeight: null,
   });
@@ -206,62 +207,28 @@ function emptyStats(claimed: number): EarnVaultReconciliationStats {
   };
 }
 
-/** Reconcile a claimed batch for the scheduled durable recovery job. */
+/**
+ * Reconcile a batch the scheduled durable recovery job claimed in the open
+ * cluster scope's environment, against that environment's cluster. The sweep
+ * runs once per environment (a `cluster` Cron Definition), so one cluster's RPC
+ * outage never holds up the other's batch.
+ */
 export async function reconcileEarnVaultMovementBatch(
   env: Env,
-  movements: EarnMovementRow[]
-): Promise<EarnVaultReconciliationStats> {
-  const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const byEnvironment = groupByEnvironment(movements);
-  const stats = emptyStats(movements.length);
-
-  // Sequential on purpose. Each environment opens its own RPC client and polls
-  // a batch of signatures, so parallel environments only multiply endpoint load.
-  // One environment's RPC outage is counted and reported, never allowed to
-  // skip the other environment's batch.
-  for (const [environment, rows] of byEnvironment) {
-    const outcome = await reconcileEnvironment(env, ledger, environment, rows);
-    stats.settled += outcome.settled;
-    stats.failed += outcome.failed;
-    stats.confirmed += outcome.confirmed;
-    stats.finalized += outcome.finalized;
-    stats.resubmitted += outcome.resubmitted;
-    stats.unchanged += outcome.unchanged;
-    stats.movementErrors += outcome.movementErrors;
-    stats.statusReadFailures += outcome.statusReadFailures;
-    stats.blockHeightReadFailures += outcome.blockHeightReadFailures;
-  }
-  return stats;
-}
-
-function groupByEnvironment(movements: EarnMovementRow[]) {
-  const byEnvironment = new Map<EarnMovementRow["environment"], EarnMovementRow[]>();
-  for (const movement of movements) {
-    const rows = byEnvironment.get(movement.environment);
-    if (rows) rows.push(movement);
-    else byEnvironment.set(movement.environment, [movement]);
-  }
-  return byEnvironment;
-}
-
-async function reconcileEnvironment(
-  env: Env,
-  ledger: EarnMovementsLedger,
-  environment: SdpEnvironment,
   rows: EarnMovementRow[]
 ): Promise<EarnVaultReconciliationStats> {
   const stats = emptyStats(rows.length);
-  const cluster = earnClusterFor(environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const rpc = createRpc(env, { rpcUrl });
+  if (rows.length === 0) return stats;
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const { environment } = currentClusterScope();
+  // SAFETY: claims are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)
+  // makes NOT NULL: the base58 signature SDP recorded from the transaction it signed.
+  const signatures = rows.map((row) => row.signature as Signature);
+  let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
-    statuses = await getSignatureStatuses(
-      rpc,
-      rows.map((row) => row.signature as Signature),
-      { searchTransactionHistory: true }
-    );
+    rpc = createClusterRpc();
+    statuses = await getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true });
   } catch (error) {
     // The whole batch went unjudged: nothing settles this tick and the caller
     // must not report an ok tick (EARN-006). Structured so Loki can alert on
@@ -291,10 +258,10 @@ async function reconcileEnvironment(
   const needsBlockHeight = rows.some(
     (row, index) => (statuses[index] ?? null) === null && row.status !== "confirmed"
   );
-  let currentBlockHeight: bigint | null = null;
+  let finalized: FinalizedHeight | null = null;
   if (needsBlockHeight) {
     try {
-      currentBlockHeight = await rpc.getBlockHeight({ commitment: "finalized" }).send();
+      finalized = await getChainHeight(rpc, "finalized");
     } catch (error) {
       // Unknown signatures cannot be rebroadcast or expired without a height,
       // so those rows are left for the next tick; the tick still must not
@@ -308,18 +275,30 @@ async function reconcileEnvironment(
       stats.blockHeightReadFailures = 1;
     }
   }
+  const expiry =
+    finalized === null
+      ? { statuses, unproven: new Set<number>() }
+      : await proveExpiredAbsence(rpc, environment, rows, signatures, statuses, finalized);
+  if (expiry.unproven.size > 0) stats.statusReadFailures = 1;
+  const currentBlockHeight = finalized?.blockHeight ?? null;
 
   // Sequential pacing protects the RPC endpoint and database pool from a
   // 256-way rebroadcast and write fanout.
   for (const [index, movement] of rows.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-      const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
-        cluster,
-        rpcUrl,
-        rpc,
-        currentBlockHeight,
-      });
+      const outcome = await reconcileMovement(
+        env,
+        ledger,
+        movement,
+        expiry.statuses[index] ?? null,
+        {
+          rpc,
+          // An expired row whose absence could not be proven gets no height, so this tick
+          // neither rebroadcasts nor expires it.
+          currentBlockHeight: expiry.unproven.has(index) ? null : currentBlockHeight,
+        }
+      );
       if (outcome === "settled") stats.settled += 1;
       else if (outcome === "failed") stats.failed += 1;
       else if (outcome === "confirmed") stats.confirmed += 1;
@@ -337,9 +316,63 @@ async function reconcileEnvironment(
   return stats;
 }
 
+interface FinalizedHeight {
+  blockHeight: bigint;
+  absoluteSlot: Slot;
+}
+
+/**
+ * Prove the absence of every row whose blockhash the finalized height shows expired while its
+ * batch status was null, by re-reading those statuses at the height's slot
+ * (`reReadExpiredStatuses`).
+ *
+ * @param rpc - The cluster's pool client.
+ * @param environment - The environment the rows belong to, for the failure event.
+ * @param rows - The claimed rows.
+ * @param signatures - Each row's signature, by index.
+ * @param statuses - The batch statuses, by index.
+ * @param finalized - The finalized height read and the slot it was read at.
+ * @returns The statuses with every expired row's re-read applied, and the indexes of expired rows
+ * whose re-read failed, which stay unjudged this tick.
+ */
+async function proveExpiredAbsence(
+  rpc: SolanaRpc,
+  environment: SdpEnvironment,
+  rows: readonly EarnMovementRow[],
+  signatures: readonly Signature[],
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  finalized: FinalizedHeight
+): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
+  const expired = rows.flatMap((row, index) => {
+    const signature = signatures[index];
+    const lastValidBlockHeight = row.last_valid_block_height;
+    return signature !== undefined &&
+      (statuses[index] ?? null) === null &&
+      row.status !== "confirmed" &&
+      lastValidBlockHeight !== null &&
+      finalized.blockHeight > BigInt(lastValidBlockHeight)
+      ? [{ index, signature }]
+      : [];
+  });
+  try {
+    return {
+      statuses: await reReadExpiredStatuses(rpc, statuses, expired, finalized.absoluteSlot),
+      unproven: new Set(),
+    };
+  } catch (error) {
+    logEvent("error", {
+      event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+      environment,
+      rows: expired.length,
+      min_context_slot: finalized.absoluteSlot.toString(),
+      ...describeError(error),
+      error_message: errorMessage(error),
+    });
+    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
+  }
+}
+
 interface ChainObservation {
-  cluster: SolanaCluster;
-  rpcUrl: string;
   rpc: SolanaRpc;
   currentBlockHeight: bigint | null;
 }
@@ -431,11 +464,9 @@ async function reconcileMovement(
   }
   if (chain.currentBlockHeight === null) return "unchanged";
 
-  await broadcastVaultTransaction(env, {
-    cluster: chain.cluster,
+  await broadcastVaultTransaction({
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(signedTransaction, "base64")),
-    rpcUrl: chain.rpcUrl,
   });
   await markSubmitted(ledger, movement);
   return "resubmitted";
@@ -595,7 +626,7 @@ async function settleMovement(
       : null;
   const depositReceipt =
     position && movement.direction === "deposit" && movement.provider === "kamino"
-      ? await observeKaminoDepositReceipt(chain, movement, position)
+      ? await observeKaminoDepositReceipt(chain.rpc, movement, position)
       : null;
 
   const observedAt = new Date().toISOString();
@@ -614,7 +645,7 @@ async function settleMovement(
 }
 
 async function observeKaminoDepositReceipt(
-  chain: Pick<ChainObservation, "cluster" | "rpcUrl">,
+  rpc: SolanaRpc,
   movement: EarnMovementRow,
   position: EarnPositionRow
 ): Promise<KaminoDepositReceipt | null> {
@@ -630,14 +661,17 @@ async function observeKaminoDepositReceipt(
   )
     return null;
   try {
-    return await readKaminoDepositReceipt(chain, {
-      signature: movement.signature,
-      owner,
-      vault: position.vault_address,
-      tokenMint: position.token_mint,
-      shareMint: position.share_mint,
-      requestedAmount: movement.amount_requested,
-    });
+    return await readKaminoDepositReceipt(
+      { cluster: currentClusterScope().cluster, rpc },
+      {
+        signature: movement.signature,
+        owner,
+        vault: position.vault_address,
+        tokenMint: position.token_mint,
+        shareMint: position.share_mint,
+        requestedAmount: movement.amount_requested,
+      }
+    );
   } catch (error) {
     getLogger().warn(
       { movementId: movement.id, signature: movement.signature, error: errorMessage(error) },
@@ -647,57 +681,55 @@ async function observeKaminoDepositReceipt(
   }
 }
 
-/** Repair missing receipts without guessing from intent, wallet net deltas or current balances. */
+/**
+ * Repair missing receipts in the open cluster scope's environment without
+ * guessing from intent, wallet net deltas or current balances.
+ */
 export async function repairUnvaluedKaminoDeposits(
   env: Env,
   { limit = 25, now = Date.now() }: { limit?: number; now?: number } = {}
 ): Promise<WithdrawalPayoutRepairStats> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const { environment } = currentClusterScope();
   const movements = await ledger.claimUnvaluedKaminoDeposits({
+    environment,
     limit,
     retryBefore: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS).toISOString(),
   });
   const stats = { claimed: movements.length, repaired: 0, unobserved: 0, errors: 0 };
-  for (const [environment, rows] of groupByEnvironment(movements)) {
-    const cluster = earnClusterFor(environment);
-    const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  if (movements.length === 0) return stats;
+  let rpc: SolanaRpc;
+  try {
+    rpc = createClusterRpc();
+  } catch (error) {
+    stats.errors += movements.length;
+    getLogger().error({ error, environment }, "earn Kamino deposit repair: no RPC for the cluster");
+    return stats;
+  }
+  for (const movement of movements) {
     try {
-      await assertClusterEndpoint(env, cluster, rpcUrl);
-    } catch (error) {
-      stats.errors += rows.length;
-      getLogger().error(
-        { error, environment },
-        "earn Kamino deposit repair: cluster verification failed"
-      );
-      continue;
-    }
-    for (const movement of rows) {
-      try {
-        const position = await ledger.getPositionById({
-          organizationId: movement.organization_id,
-          environment: movement.environment,
-          positionId: movement.position_id,
-        });
-        const receipt = position
-          ? await observeKaminoDepositReceipt({ cluster, rpcUrl }, movement, position)
-          : null;
-        if (!receipt) {
-          stats.unobserved += 1;
-          continue;
-        }
-        const recorded = await ledger.recordKaminoDepositReceipt({
-          movementId: movement.id,
-          organizationId: movement.organization_id,
-          ...receipt,
-        });
-        if (recorded) stats.repaired += 1;
-      } catch (error) {
-        stats.errors += 1;
-        getLogger().error(
-          { movementId: movement.id, error: errorMessage(error) },
-          "earn Kamino deposit receipt repair failed"
-        );
+      const position = await ledger.getPositionById({
+        organizationId: movement.organization_id,
+        environment: movement.environment,
+        positionId: movement.position_id,
+      });
+      const receipt = position ? await observeKaminoDepositReceipt(rpc, movement, position) : null;
+      if (!receipt) {
+        stats.unobserved += 1;
+        continue;
       }
+      const recorded = await ledger.recordKaminoDepositReceipt({
+        movementId: movement.id,
+        organizationId: movement.organization_id,
+        ...receipt,
+      });
+      if (recorded) stats.repaired += 1;
+    } catch (error) {
+      stats.errors += 1;
+      getLogger().error(
+        { movementId: movement.id, error: errorMessage(error) },
+        "earn Kamino deposit receipt repair failed"
+      );
     }
   }
   return stats;
@@ -761,6 +793,7 @@ async function closePositionIfEmpty(
   try {
     const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
     if (!client) return;
+    const { cluster } = currentClusterScope();
     // A close decision never reuses a provider request sent before this one.
     const snapshots = await withReadFloor(readStamp(), () =>
       client.readVaultPositions(
@@ -772,7 +805,7 @@ async function closePositionIfEmpty(
       (candidate) =>
         candidate.providerReference === vault &&
         candidate.owner === owner &&
-        candidate.cluster === earnClusterFor(movement.environment) &&
+        candidate.cluster === cluster &&
         candidate.tokenMint === position.token_mint &&
         candidate.shareMint === position.share_mint
     );
@@ -796,9 +829,9 @@ async function closePositionIfEmpty(
 }
 
 /** How far back the payout repair looks: RPC transaction history is finite. */
-export const WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
+const WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
 /** Minimum spacing between two repair attempts on the same movement. */
-export const WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS = 15 * 60 * 1_000;
+const WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS = 15 * 60 * 1_000;
 const WITHDRAWAL_PAYOUT_REPAIR_BATCH_SIZE = 25;
 
 export interface WithdrawalPayoutRepairStats {
@@ -821,7 +854,7 @@ export interface WithdrawalPayoutRepairStats {
  * bounded, retry-spaced claim of unvalued finalized withdrawals inside the RPC
  * history window; a row older than the window stays NULL and keeps reporting
  * the honest reason. Idempotent by construction: the write refuses a row that
- * is already valued.
+ * is already valued. Claims only the open cluster scope's environment.
  */
 export async function repairUnvaluedWithdrawalPayouts(
   env: Env,
@@ -831,7 +864,9 @@ export async function repairUnvaluedWithdrawalPayouts(
   }: { limit?: number; now?: number } = {}
 ): Promise<WithdrawalPayoutRepairStats> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const { environment } = currentClusterScope();
   const movements = await ledger.claimUnvaluedWithdrawalPayouts({
+    environment,
     limit,
     settledAfter: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS).toISOString(),
     retryBefore: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS).toISOString(),
@@ -842,34 +877,43 @@ export async function repairUnvaluedWithdrawalPayouts(
     unobserved: 0,
     errors: 0,
   };
-  for (const [environment, rows] of groupByEnvironment(movements)) {
-    const rpc = createRpc(env, { rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(environment)) });
-    for (const movement of rows) {
-      try {
-        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-        const position = await ledger.getPositionById({
-          organizationId: movement.organization_id,
-          environment: movement.environment,
-          positionId: movement.position_id,
-        });
-        const payout = position ? await observeWithdrawalPayout(rpc, movement, position) : null;
-        if (payout === null) {
-          stats.unobserved += 1;
-          continue;
-        }
-        const recorded = await ledger.recordWithdrawalPayout({
-          movementId: movement.id,
-          organizationId: movement.organization_id,
-          tokenAmountSettled: payout,
-        });
-        if (recorded) stats.repaired += 1;
-      } catch (error) {
-        stats.errors += 1;
-        getLogger().error(
-          { movementId: movement.id, error: errorMessage(error) },
-          "earn vault reconciliation: withdrawal payout repair failed"
-        );
+  if (movements.length === 0) return stats;
+  let rpc: SolanaRpc;
+  try {
+    rpc = createClusterRpc();
+  } catch (error) {
+    stats.errors += movements.length;
+    getLogger().error(
+      { error, environment },
+      "earn vault reconciliation: withdrawal payout repair has no RPC for the cluster"
+    );
+    return stats;
+  }
+  for (const movement of movements) {
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
+      const position = await ledger.getPositionById({
+        organizationId: movement.organization_id,
+        environment: movement.environment,
+        positionId: movement.position_id,
+      });
+      const payout = position ? await observeWithdrawalPayout(rpc, movement, position) : null;
+      if (payout === null) {
+        stats.unobserved += 1;
+        continue;
       }
+      const recorded = await ledger.recordWithdrawalPayout({
+        movementId: movement.id,
+        organizationId: movement.organization_id,
+        tokenAmountSettled: payout,
+      });
+      if (recorded) stats.repaired += 1;
+    } catch (error) {
+      stats.errors += 1;
+      getLogger().error(
+        { movementId: movement.id, error: errorMessage(error) },
+        "earn vault reconciliation: withdrawal payout repair failed"
+      );
     }
   }
   return stats;

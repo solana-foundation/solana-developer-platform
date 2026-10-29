@@ -1,6 +1,10 @@
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { notFound, walletNotFound } from "@/lib/errors";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { AuthorizeInput } from "@/middleware/authorize";
+import { paymentRequestParamsSchema } from "@/routes/payments/payment-requests/schemas";
 import {
   type AppContext,
   getCounterpartiesRepository,
@@ -32,6 +36,32 @@ export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInp
   if (!(await findRetainedPaymentWallet(c, custodyWalletId))) {
     throw walletNotFound();
   }
+}
+
+/**
+ * A write to an existing payment request (cancel): the request, in the caller's project,
+ * whatever its status. Whether it can still be canceled is the handler's.
+ *
+ * @param c - The request context.
+ * @param input - The validated request; its params name the payment request.
+ * @returns The payment request as read.
+ * @throws AppError `NOT_FOUND` when the request is not in the caller's project.
+ */
+export async function authorizeExistingPaymentRequest(
+  c: AppContext,
+  input: AuthorizeInput
+): Promise<PaymentRequestRow> {
+  const { paymentRequestId } = paymentRequestParamsSchema.parse(input.params);
+  const row = await createPaymentRequestsRepository(
+    c.env,
+    getRequestTenantScope(c)
+  ).getPaymentRequestById({
+    requestId: paymentRequestId,
+    organizationId: getAuth(c).organizationId,
+    projectId: requireProjectId(c),
+  });
+  if (!row) throw notFound("Payment request");
+  return row;
 }
 
 /**

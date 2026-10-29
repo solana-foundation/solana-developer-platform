@@ -11,6 +11,7 @@ import {
 } from "@sdp/types/well-known-tokens";
 import { providerNotConfigured } from "#/errors";
 import { StubEarnClient } from "#/providers/stub";
+import { resolveCatalogueRpcUrl } from "#/solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
@@ -168,7 +169,7 @@ export class VedaEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listVaultStrategies(ctx.env.SOLANA_RPC_URL ?? "", cluster, deployment);
+    return this._listVaultStrategies(resolveCatalogueRpcUrl(ctx, cluster), cluster, deployment);
   }
 
   /**

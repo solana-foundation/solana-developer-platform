@@ -473,7 +473,7 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
 }
 
 /** Looks up the live (not failed) attempt a request's Idempotency-Key claimed. */
-export interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
+interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
   organizationId: string;
   projectId: string;
   idempotencyKey: string;

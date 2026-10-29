@@ -937,13 +937,13 @@ serve orphaned "production catalogue" rows forever after production stopped
 vouching for them. The repository enforces that an authorized-empty delist is
 cluster-scoped, never environment-wide.
 
-PRO-1943 changed the storage half of delisting without changing that active-set
-contract. An unlisted active row is now marked `deprecated` with a
+Migration 0099 changed the storage half of delisting without changing that
+active-set contract. An unlisted active row is now marked `deprecated` with a
 `catalogue_delisted_at` tombstone instead of being deleted. It remains absent
-from catalogue lists and deposit admission, but preserves the stable provider,
-vault, and mint identity required to build an anonymous exit. A later provider
-relist clears only this sync-owned marker and reactivates the same id; an
-operator pause or deprecation has no marker and remains sticky.
+from catalogue lists and deposit admission, while its stable id keeps resolving
+to the provider, vault, and mint identity. A later provider relist clears only
+this sync-owned marker and reactivates the same id; an operator pause or
+deprecation has no marker and remains sticky.
 
 **Accepted cap: the mirror is faithful only for cluster-distinct references.**
 The upsert key stays (provider, provider_reference, environment) with no
@@ -993,10 +993,6 @@ review-surface fidelity gaps, not deposit paths: `fundable: false` holds
 throughout.
 
 ## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
-
-This section describes the authenticated build-and-submit contract. The
-PRO-1943 addendum below adds an anonymous unsigned-build tier whose caller
-broadcasts directly and whose build is not persisted.
 
 The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
@@ -1209,14 +1205,14 @@ claim there when the report can attribute it, and the claim carries
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum for authenticated callers. Both authenticated external-wallet BUILD
-routes now take an optional `feePayer`: a
+addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
 signature alongside the owner's; the partner co-signs OUTSIDE SDP before the
 submit. This is deliberately not PRO-1744 (Kora, SDP paying): no paymaster, no
-budget, no SDP co-signature. The partner funds and signs with its own wallet,
+budget, no SDP co-signature, and the build's `sponsored` field (SDP paid) stays
+`false`. The partner funds and signs with its own wallet,
 which is why no new policy gate exists — the same authorization-by-signature
 rule the surface was built on, now with two signatures.
 
@@ -1260,79 +1256,13 @@ swap-funded builds fall to the split flow slightly more often; and the
 blockhash window now has to fit the partner's co-signature too, which is why
 the docs tell partners to co-sign programmatically.
 
-## Addendum: 2026-09-14 Keyless catalogue and unsigned builds (PRO-1943)
-
-The hosted Earn API now has two access tiers over one set of route handlers.
-A valid SDP credential enriches a request with its existing organization,
-project, permission, entitlement, and environment context. With no credential,
-only this deliberate keyless subset is reachable:
-
-- `GET /v1/earn/strategies`
-- `GET /v1/earn/strategies/:strategyId`
-- `POST /v1/earn/vault-deposit-previews`
-- `POST /v1/earn/external-wallet/deposit-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-previews`
-- `POST /v1/earn/external-wallet/withdrawal-transactions`
-
-Submits, movements, positions, earnings, programs, custody vault operations,
-and the aggregate movement feed remain authenticated. No second anonymous
-route tree exists; duplicating endpoint definitions would let the two contracts
-drift.
-
-Anonymous calls have no tenant identity. They use the operator-controlled
-`SDP_ENVIRONMENT`, may not supply a different fee payer, and do not evaluate an
-organization entitlement. Most importantly, they never persist an external
-wallet build, split-swap advisory, movement, or position. The owner pays, signs,
-broadcasts, and tracks the returned transaction. `sponsored` means SDP paid and
-is therefore `false`; a caller-provided fee payer on a keyed build is not SDP
-sponsorship.
-
-Withdrawal lookup follows the identity boundary. A keyed request names a
-tenant-scoped `positionId`. A keyless request names `{strategyId,
-ownerAddress, shares}` and never probes the position table. Both paths enforce
-the provider's withdrawal capability and live quote floor without turning a
-money-in entitlement into a money-out gate.
-
-Abuse controls are also tiered. Public catalogue reads receive a generous
-per-IP limit and cache headers. Anonymous previews and builds receive a tighter
-per-IP limit plus a separate RPC budget that fails closed. Authenticated
-metering continues to use the project API key. Structured request and rejection
-logs carry the normalized route and access tier so operations can derive
-traffic and saturation counters without route-specific code.
-
-The OpenAPI document, generated API reference, Embedded Yield guide, and AI
-discovery files are one public contract. Changing an operation's OpenAPI
-`security` declaration still requires the named security review mandated by
-PRO-1872 before those generated artifacts are published.
-
 ## Addendum: 2026-09-22 Queued withdrawals enter the Embedded Yield contract
 
 PR #1987 completed the PRO-1872 / EARN-027 security gate at exact head
 `b2d313803`, with named approval from `cutbow7`, and published the
 external-wallet queued-withdrawal lifecycle. The public Earn document now pins
-21 operations. Exactly eight are optional-auth:
-
-- `GET /v1/earn/strategies`
-- `GET /v1/earn/strategies/{strategyId}`
-- `POST /v1/earn/vault-deposit-previews`
-- `POST /v1/earn/external-wallet/deposit-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-previews`
-- `POST /v1/earn/external-wallet/withdrawal-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-options`
-- `POST /v1/earn/external-wallet/queued-withdrawal-previews`
-
-This supersedes two details in the 2026-09-14 addendum. Anonymous strategy
-lists accept `?environment=sandbox|production` and default to production;
-preview and build requests inherit the environment from the named strategy.
-For authenticated requests, the API-key project environment remains
-authoritative. The optional-auth list also grew from six to the eight
-operations pinned above.
-
-Queued request and cancellation builds, submits, list/detail history, movement
-and position reads, and earnings remain API-keyed. Anonymous callers can inspect
-live route and queue terms but cannot create a durable escrow lifecycle. A
-presented invalid credential still fails with 401 rather than falling back to
-anonymous access.
+21 operations, every one requiring an API key; the project behind the key
+decides the environment.
 
 A queued request transaction escrows shares and is not a payout. A cancellation
 returns shares and is not a payout. Only a verified provider fulfilment projects
@@ -1341,9 +1271,10 @@ Clients restore non-terminal requests through the cursor-paginated history,
 poll until a terminal state, and expose recovery only when server state is
 `expiredCancelable`; a client clock does not authorize cancellation.
 
-Custody queue routes remain internal. Any future operation-list or OpenAPI
-security change is another EARN-027 scope change and requires a new named
-security approval.
+Custody queue routes remain internal. The OpenAPI document, generated API
+reference, Embedded Yield guide, and AI discovery files are one public
+contract. Any future operation-list or OpenAPI security change is another
+EARN-027 scope change and requires a new named security approval.
 
 
 ## Addendum: 2026-09-29 Kamino observed deposits and rent provenance

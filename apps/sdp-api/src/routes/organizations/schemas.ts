@@ -2,7 +2,7 @@ import { z } from "zod";
 import { canonicalizeIpAllowlistEntry } from "@/lib/ip-allowlist";
 
 /** Rebuilt per authenticated request, so bounded; 100 dwarfs any real footprint. */
-export const MAX_ORGANIZATION_ALLOWED_IPS = 100;
+const MAX_ORGANIZATION_ALLOWED_IPS = 100;
 
 /**
  * Validates and canonicalizes in one pass: an invalid stored entry fails the
@@ -20,6 +20,10 @@ const organizationAllowedIpSchema = z.string().transform((value, ctx) => {
     return z.NEVER;
   }
   return canonical;
+});
+
+export const createOrganizationSchema = z.object({
+  name: z.string().trim().min(1).max(100),
 });
 
 export const updateOrgSchema = z.object({

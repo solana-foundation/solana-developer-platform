@@ -9,14 +9,14 @@ Authenticated API requests carry an API key in the `Authorization` header:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
 
 ## Key scope
 
-Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+Keys are issued per **project** and inherit that project's environment: a key from a sandbox project reaches devnet, one from a production project mainnet-beta. The key itself does not name its environment; the dashboard shows it next to each key. A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
 
 ## Authorization layers
 

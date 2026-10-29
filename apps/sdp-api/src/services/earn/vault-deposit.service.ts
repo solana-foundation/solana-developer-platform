@@ -1,8 +1,7 @@
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
+import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
@@ -15,7 +14,7 @@ import {
 import { badRequest, internalError } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import { resolveVaultDirectClient } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
 import {
@@ -26,6 +25,7 @@ import {
   RETRY_SWAP_MAX_ACCOUNTS,
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
+import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   appendVaultRequestMemo,
@@ -45,10 +45,10 @@ import { resolveVaultSponsorship, type VaultFeeMode, vaultRentPayer } from "./va
  * recoverable by signature, and lets an idempotency loser stop before sending.
  */
 
+/** A custody deposit. The open cluster scope decides its environment and cluster. */
 export interface VaultDepositInput {
   organizationId: string;
   projectId: string;
-  environment: SdpEnvironment;
   provider: EarnProviderId;
   /** Vault address — the strategy's providerReference. */
   providerReference: string;
@@ -91,7 +91,7 @@ async function replayResult(
 ): Promise<VaultDepositResult> {
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment: input.environment,
+    environment: currentClusterScope().environment,
     positionId: movement.position_id,
   });
   if (!position) {
@@ -143,9 +143,10 @@ export async function depositIntoVault(
   env: Env,
   input: VaultDepositInput
 ): Promise<VaultDepositResult> {
+  const { environment, cluster } = currentClusterScope();
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultDepositFingerprint({
-    environment: input.environment,
+    environment,
     provider: input.provider,
     providerReference: input.providerReference,
     custodyWalletId: input.wallet.id,
@@ -193,12 +194,7 @@ export async function depositIntoVault(
   if (!client) {
     throw notImplemented(input.provider, "direct vault deposits");
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  const runtime: EarnRuntimeContext = {
-    env,
-    environment: input.environment,
-  };
+  const runtime = earnRuntime(env);
 
   // Provider-side KYC/eligibility, before any sponsorship resolution or build:
   // an ineligible wallet's deposit would settle nowhere (see the helper), so
@@ -226,7 +222,6 @@ export async function depositIntoVault(
         organizationId: input.organizationId,
         projectId: input.projectId,
         walletId: input.wallet.id,
-        cluster,
         deadline,
       });
   const rentPayer = vaultRentPayer(fee);
@@ -298,13 +293,11 @@ export async function depositIntoVault(
     // plan before signing. Wallet-pays is already forced above, so the probe
     // asks the same question signing will.
     if (swapLeg) {
-      const probe = await simulateVaultPlan(env, {
-        cluster,
+      const probe = await simulateVaultPlan({
         deadline,
         expectedAssetIdentity,
         plan: withComputeUnitLimit(plan, MAX_COMPUTE_UNIT_LIMIT),
         owner: address(input.wallet.publicKey),
-        rpcUrl,
         fee,
       });
       if (!probe.ok) {
@@ -328,17 +321,15 @@ export async function depositIntoVault(
       walletId: input.wallet.id,
       walletPublicKey: input.wallet.publicKey,
       signerMismatchMessage: "Resolved signing wallet does not match the deposit wallet",
-      cluster,
       deadline,
       expectedAssetIdentity,
       plan,
-      rpcUrl,
       fee,
       persist: (db, signed) =>
         createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({
           organizationId: input.organizationId,
           projectId: input.projectId,
-          environment: input.environment,
+          environment,
           provider: input.provider,
           vaultAddress: input.providerReference,
           custodyWalletId: input.wallet.id,
@@ -358,7 +349,6 @@ export async function depositIntoVault(
           // from landing over the cap together. Signed, not yet broadcast, so
           // a refusal here records and sends nothing.
           admit: ledgerVaultExposureGate(env, {
-            environment: input.environment,
             provider: input.provider,
             vaultAddress: input.providerReference,
             amount: depositAmount,

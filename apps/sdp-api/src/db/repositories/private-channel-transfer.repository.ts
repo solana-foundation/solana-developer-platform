@@ -3,7 +3,6 @@ import type {
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelTransferId(): string {
   return `pct_${crypto.randomUUID()}`;
@@ -96,10 +95,6 @@ export interface ListEligiblePrivateChannelTransferRecipientsInput
   channelId: string;
   /** Marks results as `isSelf` and sorts them first; never excludes them. */
   initiatingPrivateChannelUserId: string;
-}
-
-export interface PrivateChannelTransferRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelTransferRepository {

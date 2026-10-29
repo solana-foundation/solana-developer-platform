@@ -29,7 +29,7 @@ export type DvpTradeKind = "principal" | "agent" | "bilateral";
  * The caller's custody wallet behind a party address, as the API resolves it.
  * `name` is the wallet's display name, or null when none was set.
  */
-export interface DvpCallerWallet {
+interface DvpCallerWallet {
   id: string;
   name: string | null;
 }
@@ -40,7 +40,7 @@ export const dvpActionWalletSchema = z.object({
   isRuntimeExecutionAllowed: z.boolean(),
 });
 
-export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
+type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
 
 /**
  * A DvP endpoint's refusal envelope. Only the message — and, when the refusal
@@ -173,7 +173,7 @@ export function isDvpTradeClosed(trade: { status: DvpTradeStatus }): boolean {
 }
 
 /** What the reconciler last saw in an escrow. Null before it has looked. */
-export interface DvpLegFunding {
+interface DvpLegFunding {
   observedAmount: string;
   funded: boolean;
   /** Amount above the target, or null. A settlement risk, not a bonus. */

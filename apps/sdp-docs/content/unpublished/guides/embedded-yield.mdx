@@ -5,81 +5,24 @@ description: Offer yield from your own app. SDP builds the transactions, your cu
 
 {/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
 
-Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet and the customer signs it in your app. With an API key, your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Without a key, you broadcast and track the signed transaction yourself. Withdrawals work the same way in reverse.
+Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet, the customer signs it in your app, and your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Withdrawals work the same way in reverse.
 
 Two properties define the surface:
 
 - **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
-- **Backend-safe.** If you use an SDP API key, it stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones; the keyless tier needs no secret.
+- **Backend-safe.** Your SDP API key stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones.
 
 All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@solana/kit`; nothing here needs `@solana/web3.js`.
 
-## Choose an access tier
+## Authenticate
 
-| Capability | Without an API key | With an API key |
-| --- | --- | --- |
-| List and inspect strategies | Yes | Yes |
-| Preview deposits and withdrawals | Yes | Yes |
-| Build instant deposit and withdrawal transactions | Yes, owner pays | Yes, owner or your `feePayer` |
-| Discover and preview asynchronous withdrawals | Yes | Yes |
-| Build, submit, track, and recover an asynchronous withdrawal | No | Yes |
-| Submit signed transactions through SDP | No | Yes, `earn.execute` |
-| Track movements, positions, balances, and earnings | No | Yes, `earn.read` |
-
-Keyless requests carry no project, so you pick the shelf: `GET /v1/earn/strategies?environment=sandbox` lists devnet strategies, the default `production` lists mainnet ones, and an instant quote or build follows the strategy you name. They create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. A signed production build moves real funds. Asynchronous request and cancellation builds are intentionally keyed-only because durable status and recovery are part of that money-out contract. Keyed requests carry your project's environment (sandbox runs on devnet), can name a `feePayer`, and can be submitted to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
+Every request sends `Authorization: Bearer <SDP_API_KEY>` and runs in your project's environment (sandbox runs on devnet). A build can name a `feePayer`, and your backend submits the signed bytes to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
 
 **The key.** Create an API key for your project in the dashboard and grant it Earn `execute` (which includes `earn.read`); grant `earn.manage` too if it builds external-wallet withdrawal cancellations or manages programs. Cancelling a queued withdrawal signs or sponsors a transaction, so it takes `execute`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
 
-## Without an API key
+## Endpoints
 
-List the sandbox shelf, inspect `depositSlippage`, and build with nothing but a strategy id and the customer's funded devnet wallet. Drop `?environment=sandbox` for the production shelf. When `depositSlippage` is non-null, quote first and set `<MIN_SHARES_OUT>` to the quote's `sharesOut` less the tolerance your customer accepts (`defaultToleranceBps` is the suggested start; see [Floors and previews](#floors-and-previews)). A next-NAV subscription may publish null because its later share settlement has no enforceable on-chain floor.
-
-```bash
-export SDP_API_URL=https://api.solana.com
-
-curl --fail-with-body --silent --show-error "$SDP_API_URL/v1/earn/strategies?environment=sandbox"
-
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{ "strategyId": "<STRATEGY_ID>", "amount": "1" }' \
-  "$SDP_API_URL/v1/earn/vault-deposit-previews"
-
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{ "strategyId": "<STRATEGY_ID>", "ownerAddress": "<OWNER_ADDRESS>", "amount": "1", "minSharesOut": "<MIN_SHARES_OUT>" }' \
-  "$SDP_API_URL/v1/earn/external-wallet/deposit-transactions"
-```
-
-Sign and broadcast the response's base64 `transaction.transaction` yourself. `build` is the parsed JSON of the build response; `owner` is a kit `CryptoKeyPair` here, or your wallet's signer in a real app:
-
-```ts
-import {
-  createSolanaRpc,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getSignatureFromTransaction,
-  getTransactionDecoder,
-  partiallySignTransaction,
-} from "@solana/kit";
-
-const rpc = createSolanaRpc("https://api.devnet.solana.com"); // mainnet-beta for the production shelf
-const transaction = getTransactionDecoder().decode(
-  getBase64Encoder().encode(build.data.transaction.transaction),
-);
-const signed = await partiallySignTransaction([owner], transaction);
-await rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: "base64" }).send();
-const signature = getSignatureFromTransaction(signed);
-// Poll rpc.getSignatureStatuses([signature]) until finalized, and give up once
-// the block height passes build.data.transaction.lastValidBlockHeight.
-```
-
-Do not call SDP's submit endpoint for a keyless build; there is no server-side row to consume. For a keyless withdrawal, preview and build take `{ strategyId, ownerAddress, shares }`; an anonymous caller never supplies a `positionId`.
-
-## With an API key
-
-Authenticate with `Authorization: Bearer <SDP_API_KEY>`. The dashboard's **Embedded Yield → Integrate** page generates a complete server module for the strategy you pick; the calls below are the same ones, in order.
+The dashboard's **Embedded Yield → Integrate** page generates a complete server module for the strategy you pick; the calls below are the same ones, in order.
 
 | Step | Endpoint |
 | --- | --- |
@@ -469,7 +412,7 @@ Pass `sourceTokenMint` to accept a stablecoin the vault does not take: SDP prepe
 
 If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
 
-Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. For keyed builds SDP records that it handed the swap out and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so a dropped follow-up will be noticed; it will not be repaired for you. Keyless builds store nothing.
+Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. SDP records that it handed the swap out and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so a dropped follow-up will be noticed; it will not be repaired for you.
 
 ## Idempotency and errors, in one place
 

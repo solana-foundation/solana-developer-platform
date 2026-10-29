@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import type { Env } from "@/types/env";
 
@@ -10,5 +10,5 @@ import type { Env } from "@/types/env";
  * @returns Resolves once stored ramp webhooks have been replayed.
  */
 export async function reconcileRampTransfers(env: Env): Promise<void> {
-  await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+  await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 }

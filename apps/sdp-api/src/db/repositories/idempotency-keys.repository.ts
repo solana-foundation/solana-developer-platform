@@ -42,7 +42,7 @@ export interface IdempotencyKeyClaimInput {
 }
 
 /** What a completed request answered, replayed as-is. */
-export const storedIdempotentResponseSchema = z.object({
+const storedIdempotentResponseSchema = z.object({
   status: z.number().int(),
   headers: z.record(z.string(), z.string()),
   /** Null for a response without a body (204, 205, 304). */
@@ -52,7 +52,7 @@ export const storedIdempotentResponseSchema = z.object({
 export type StoredIdempotentResponse = z.infer<typeof storedIdempotentResponseSchema>;
 
 /** The result of claiming a key. */
-export const idempotencyKeyClaimSchema = z.discriminatedUnion("kind", [
+const idempotencyKeyClaimSchema = z.discriminatedUnion("kind", [
   /**
    * This request holds the key. `fresh` is false when it took over an
    * `in_progress` row whose lease had ended, which an earlier attempt may have
@@ -81,7 +81,7 @@ export const idempotencyKeyClaimSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("outcome_unknown") }),
 ]);
 
-export type IdempotencyKeyClaim = z.infer<typeof idempotencyKeyClaimSchema>;
+type IdempotencyKeyClaim = z.infer<typeof idempotencyKeyClaimSchema>;
 
 export interface IdempotencyKeyRepository {
   claim(input: IdempotencyKeyClaimInput): Promise<IdempotencyKeyClaim>;

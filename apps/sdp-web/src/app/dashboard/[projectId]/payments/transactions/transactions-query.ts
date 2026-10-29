@@ -4,8 +4,19 @@ import {
 } from "@sdp/types/unified-transactions";
 import { z } from "zod";
 
+/** Rows per page the list offers; 25 is the default and carries no URL param. */
+export const TRANSACTION_PAGE_SIZES = [10, 25, 50, 100] as const;
+export const DEFAULT_TRANSACTION_PAGE_SIZE = 25;
+
 const rawFiltersSchema = z.object({
+  module: z.string().optional().catch(undefined),
+  // Links written before the module moved out of the header tabs carry it in `tab`.
   tab: z.string().optional().catch(undefined),
+  pageSize: z.coerce
+    .number()
+    .refine((value) => TRANSACTION_PAGE_SIZES.some((size) => size === value))
+    .optional()
+    .catch(undefined),
   kind: z.string().trim().min(1).optional().catch(undefined),
   status: z.enum(UNIFIED_TRANSACTION_STATUSES).optional().catch(undefined),
   custodyWalletId: z.string().trim().max(128).min(1).optional().catch(undefined),
@@ -18,7 +29,10 @@ const rawFiltersSchema = z.object({
   cursors: z.string().optional().catch(undefined),
 });
 
-export type TransactionFilters = Omit<z.infer<typeof rawFiltersSchema>, "tab" | "cursors"> & {
+export type TransactionFilters = Omit<
+  z.infer<typeof rawFiltersSchema>,
+  "module" | "tab" | "cursors"
+> & {
   module?: UnifiedTransactionModule;
   cursors: string[];
 };
@@ -53,14 +67,19 @@ export function parseTransactionFilters(
   const parsed = rawFiltersSchema.parse(
     Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
   );
-  const { tab, kind, cursors: rawCursors, ...rest } = parsed;
+  const { module: rawModule, tab, kind, pageSize, cursors: rawCursors, ...fields } = parsed;
+  const rest = {
+    ...fields,
+    ...(pageSize === undefined || pageSize === DEFAULT_TRANSACTION_PAGE_SIZE ? {} : { pageSize }),
+  };
   const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
-  const module = parseTransactionModule(tab, modules);
+  const requested = rawModule ?? tab;
+  const module = parseTransactionModule(requested, modules);
   if (module !== undefined) return { ...rest, module, kind, cursors };
   // A kind belongs to its module (the API refuses one without it), so All never carries one.
-  if (tab === undefined || tab === "all") return { ...rest, cursors };
-  // The link named a module tab that is hidden or unknown: open All from its first page,
-  // since that tab's cursor would skip newer transactions on All.
+  if (requested === undefined || requested === "all") return { ...rest, cursors };
+  // The link named a module that is hidden or unknown: open All from its first page, since that
+  // module's cursor would skip newer transactions on All.
   const { cursor: _discardedCursor, ...unpaged } = rest;
   return { ...unpaged, cursors: [] };
 }
@@ -89,7 +108,12 @@ export function toTransactionUrlUpdates(
   filters: TransactionFilters
 ): Record<string, string | null> {
   return {
-    tab: filters.module === undefined ? null : filters.module,
+    module: filters.module === undefined ? null : filters.module,
+    tab: null,
+    pageSize:
+      filters.pageSize === undefined || filters.pageSize === DEFAULT_TRANSACTION_PAGE_SIZE
+        ? null
+        : String(filters.pageSize),
     ...Object.fromEntries(
       TRANSACTION_URL_PARAM_KEYS.map((key) => [
         key,

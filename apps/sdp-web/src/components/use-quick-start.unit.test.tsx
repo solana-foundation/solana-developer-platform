@@ -9,7 +9,7 @@ import {
   invalidateQuickStartStatus,
   type QuickStartStatus,
   quickStartKey,
-} from "@/lib/dashboard-quick-start.redesign";
+} from "@/lib/dashboard-quick-start";
 
 const STATUS: QuickStartStatus = {
   custodyProvider: "privy",
@@ -69,6 +69,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -91,6 +92,32 @@ describe("useQuickStart", () => {
     const { result } = renderHook(() => useQuickStart(), { wrapper });
     expect(result.current.complete).toBe(true);
     expect(result.current.visible).toBe(false);
+  });
+
+  it("polls every two minutes until the read that completes the guide", async () => {
+    vi.useFakeTimers();
+    const spy = answer({ status: { ...STATUS, lastCallAt: "2026-09-25T10:00:00Z" } });
+    const { result } = renderHook(() => useQuickStart(), { wrapper });
+
+    await vi.advanceTimersByTimeAsync(119_000);
+    expect(statusReads(spy)).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(statusReads(spy)).toBe(1);
+    expect(result.current.complete).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(statusReads(spy)).toBe(1);
+  });
+
+  it("never polls a guide the page loaded complete", async () => {
+    vi.useFakeTimers();
+    const finished = { ...STATUS, lastCallAt: "2026-09-25T10:00:00Z" };
+    mocks.workspace.initialQuickStartStatus = finished;
+    const spy = answer({ status: finished });
+    renderHook(() => useQuickStart(), { wrapper });
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(statusReads(spy)).toBe(0);
   });
 
   it("re-reads the status when a flow marks it stale", async () => {

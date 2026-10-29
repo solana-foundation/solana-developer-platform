@@ -164,7 +164,7 @@ export async function getOrCreateDvpSettlementWallet(
  * @throws 404 when the project is not in the organization.
  * @throws 409 when no Managed config is taken and the project has zero or more than one active Privy connection.
  */
-export async function resolveDvpSettlementOwner(
+async function resolveDvpSettlementOwner(
   env: Env,
   scope: Scope
 ): Promise<CustodyWalletOwnerTarget> {

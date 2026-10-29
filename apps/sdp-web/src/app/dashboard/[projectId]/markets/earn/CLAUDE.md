@@ -22,19 +22,24 @@ api/dashboard/markets/earn/
   kamino-allocations/route.ts        NOT a proxy: the one route that fetches a
                                      THIRD PARTY (Kamino's public allocations
                                      endpoint) server-side for the Treasury
-                                     "Information" column, TTL-cached 45s and
-                                     zod-parsed through the schema module in
-                                     treasury-solutions/. Auth comes from the
-                                     proxy middleware; failures answer 502 so
-                                     the cell degrades to its placeholder.
-                                     Kamino's allocations source is
-                                     mainnet-only, so the handler refuses any
-                                     other cluster with a 400 before reading
-                                     anything else, and a vault that is not
-                                     even a public key is a client bug —
-                                     400 before anything downstream. The
-                                     rest of the request is policed by the
-                                     store module —
+                                     "Information" column. One batched read
+                                     per table (`?vaults=a,b,c`, zod-parsed,
+                                     at most 100 per request; the hook splits
+                                     a longer list and merges the answers)
+                                     fans out to a per-vault TTL cache (45s,
+                                     in-flight reads shared), so the browser
+                                     sends one request and Kamino still sees
+                                     one read per vault (its API has no batch
+                                     path). Zod-parsed through the schema
+                                     module in treasury-solutions/. Auth comes
+                                     from the proxy middleware. Kamino's
+                                     allocations source is mainnet-only, so
+                                     the handler refuses any other cluster
+                                     with a 400 before reading anything else,
+                                     and a vault that is not even a public key
+                                     is a client bug — 400 before anything
+                                     downstream. The rest of the request is
+                                     policed by the store module —
                                      the server boundary: Kamino would answer
                                      any well-formed mainnet vault, so the
                                      store admits a vault only if it is a
@@ -43,16 +48,19 @@ api/dashboard/markets/earn/
                                      from `/v1/earn/strategies` (provider
                                      kamino, mainnet-beta) through
                                      `createSdpApiClient`, cached beside the
-                                     allocations cache, and a failed catalogue
-                                     read fails closed into the same generic
-                                     502 — a refused vault is
-                                     indistinguishable from an outage.
-                                     Answers the BARE parsed payload, never an
-                                     envelope: `dashboardFetch` hands the body
-                                     straight to the SWR hook, which re-parses
-                                     it with the same schema (an envelope once
-                                     failed every cell to "—" while both unit
-                                     suites stayed green; the seam test in
+                                     allocations cache. A refused vault, a
+                                     failed upstream read and a failed
+                                     catalogue read all leave the vault out
+                                     of a 200 (fail closed, nothing cached),
+                                     so a refusal is indistinguishable from
+                                     an outage and its cell degrades to the
+                                     placeholder. Answers the BARE parsed
+                                     batch, never an envelope:
+                                     `dashboardFetch` hands the body straight
+                                     to the SWR hook, which re-parses it with
+                                     the same schema (an envelope once failed
+                                     every cell to "—" while both unit suites
+                                     stayed green; the seam test in
                                      treasury-solutions/kamino-allocations-bff
                                      wires route → dashboardFetch → hook).
   strategies/route.ts
@@ -111,9 +119,13 @@ nothing else; the program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio and entry point for configuration. Its strategy drawer
-  renders the positions already hydrated by the project summary; it must not
-  fan out one metered request per customer wallet.
+  customer portfolio. It opens with the portfolio's live value in dollars (the
+  token totals summed at par, withheld while any position is unread or a token
+  is not a dollar stablecoin) over a stat line of wallets, positions and assets,
+  then a borderless table by strategy. Integrate is the shell's page action. A
+  row opens its customer wallets from the positions already hydrated by the
+  project summary; it must not fan out one metered request per customer
+  wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
@@ -142,66 +154,67 @@ nothing else; the program create still sends the body `requestId` form.
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the docs guide
   (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, unpublished
-  until PRO-2038). That guide
-  also owns the keyless quickstart; these dashboard snippets intentionally stay
-  keyed because they include submit and tenant read routes. Keep the shared
-  authenticated flow aligned across both. The guide is
-  entirely derived from the strategy catalogue: nothing is persisted, there is
-  no styling to save, and no public handoff token exists. (The UI builder that
-  used to hold those — styled previews, saved per-project configuration, the
-  public `/embedded-yield/integrate/:token` handoff page and its
-  `/v1/earn/button-configurations/*` API — was removed; migration 0074 dropped
-  its table. Do not reintroduce persisted presentation state here.)
+  until PRO-2038). Keep the shared authenticated flow aligned across both. The
+  guide is entirely derived from the strategy catalogue: nothing is persisted,
+  there is no styling to save, and no public handoff token exists. (The UI
+  builder that used to hold those was removed with its styled previews, saved
+  per-project configuration, the public `/embedded-yield/integrate/:token`
+  handoff page and its `/v1/earn/button-configurations/*` API; migration 0074
+  dropped its table. Do not reintroduce persisted presentation state here.)
 - Both routes are `dynamic = "force-dynamic"` and resolve
   `loadEarnProviderAccess()` server-side per request. Provider access is
   organization-scoped; caching it would hand one org's entitlement to another.
-- No layout of its own: `../layout.tsx` gates the whole Markets segment on
-  both `markets()` and `earn()` (`notFound()`), enforced once there so no child
-  layout suspends on a flag read (which would paint the parent's loading
-  boundary on hard navigations). Pages hold no flag checks: add new Earn routes
-  under this segment and they inherit both gates.
+- Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
+  surface shares, and each Earn segment (`../embedded-yield`,
+  `../treasury-solutions`, and this directory's legacy alias routes) holds
+  `earn()` in its own layout (`notFound()`), so DvP is not hidden by it. Pages
+  hold no flag checks: a new Earn route goes under one of those segments.
 - Loading states come from `../markets-route-skeletons`, with distinct portfolio,
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card alone: the three
-  metric tiles are hidden at zero positions because all-zero tiles with empty
-  charts read as data rather than "nothing yet". The removed UI builder
-  persisted the only former configuration state, so there is no honest
-  "configured but awaiting a deposit" distinction to infer from the live
-  position summary.
+- The portfolio's zero-position state is the empty state alone: the live value
+  and its counts are hidden at zero positions because a zero hero and empty
+  counts read as data rather than "nothing yet". Its Integrate action repeats
+  the page's, so the state hides the header's copy (`hidesPageAction`). The
+  removed UI builder persisted the only former configuration state, so there
+  is no honest "configured but awaiting a deposit" distinction to infer from
+  the live position summary.
 
 ## Module map
 
-- `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
-  `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+- `earn-surfacing.ts` — the availability brain. `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`,
+  `earnVaultDepositAvailability` and
   `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
   verdict points at, so Jupiter/Ondo read "Production only" rather than the
   sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
   is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
-- `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads
-  `/v1/onboarding/status` then provider availability for that organization.
+- `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads the
+  onboarding status through `requestOnboardingStatus()` (`@/lib/sdp-api`, one
+  `/v1/onboarding/status` call per request, shared with the layout's quick
+  start) then provider availability for that organization.
   Every failure path returns `null`, and `null` disables deposit actions. A
   catalogue row says a strategy EXISTS; it never says this organization may
   fund it.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
-  visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability sit in one plain line under the dropdown ("Kamino · Instant
-  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
-  copyable code block. A short intro paragraph explains the loop, then five
-  freely navigable reference tabs (client setup, deposits, reads, direct
-  withdraw, queued withdraw).
+  visible but disabled, with the reason beside their APY. The selected
+  strategy's provider, liquidity and APY sit in one plain line under the
+  dropdown ("Kamino · Instant liquidity · 6.2% APY", APY omitted when unknown)
+  with the ID as its own copyable code block; only a fundable strategy gets
+  there, so no availability is restated. The shell sets the way back and the
+  title; a short intro paragraph explains the loop, then one segmented control
+  of five freely navigable reference sections (client setup, deposits, reads,
+  direct withdraw, queued withdraw), tightened on a phone so all five fit.
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  an info callout that links to the API keys page (a Developer key includes
-  earn:read and earn:write), because the module they document carries a secret
-  API key. The module needs only the strategy id and that key: no strategy
-  object, no `sourceTokenMint` on a direct deposit. Do not imply that catalogue,
-  preview, or unsigned build access always needs the key; the public guide
-  documents their keyless tier.
+  an info callout that links to the API keys page, because the module they
+  document carries a secret API key. Keys hold explicit grants, not roles: the
+  module needs Earn Read and Execute, plus Manage, which the queued-withdrawal
+  cancellation build (`withdrawal-request-cancel-transactions`) requires. The
+  module needs only the strategy id and that key: no strategy object, no
+  `sourceTokenMint` on a direct deposit.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -218,7 +231,9 @@ nothing else; the program create still sends the body `requestId` form.
   loaded renders, a failed or slow shelf is reported inline above the other's
   rows, and the full-card error is reserved for both failing. Devnet rows are
   the only ones sandbox can deposit into, so a mirror outage must never hide
-  them. The program,
+  them. Neither shelf refetches on focus: catalogue figures move only on the
+  five-minute metrics cron, so a reload or the page's Refresh reads them. The
+  program,
   vault-position and vault-deposit seams serve Treasury Solutions next door (see
   "Where these seams are consumed"). **No provider id is spelled in this file** — surfacing comes
   from `./earn-surfacing`, and reads are provider-agnostic on purpose so a
@@ -466,7 +481,9 @@ Treasury's balance display lives in `../treasury-solutions/treasury-vault-balanc
 `use-treasury-balances.ts` coordinates modal submission, the shared movement
 cache, and paired wallet/position refreshes. Submission observers start before
 any POST and release only their own attempt. An early chain read cannot reveal
-changed balances while that movement is still pending. Atomic movements show
+changed balances while that movement is still pending, so a submit reads
+nothing: the confirmation's floored pair is the one read per movement (a POST
+that answers already confirmed triggers it at once). Atomic movements show
 Done at confirmation; affected amounts wait for a verified read and the paired
 wallet refresh. A failed wallet read never releases an affected position; only a
 successful pair clears that gate, including retries and overlapping completions.
@@ -510,7 +527,16 @@ freshness remains an external dependency.
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
-a deposit signed before a reload, or in another tab becomes visible again. `useEarnVaultDepositOutcome` is the
+a deposit signed before a reload, or in another tab becomes visible again.
+An empty list idles at 120s (`earnLedgerRefreshInterval`, the same for the
+withdrawal and queued-request lists); a local submit adds its watch directly,
+so only another tab's movement waits for the slower pass. Position values
+idle the same way while no position exists (`earnVaultPositionsRefreshInterval`).
+These list, feed and program cadences reach SWR as numbers through
+`useCadencedSWR` (`@/lib`): a stable function never starts after a cold mount,
+and an inline one is restarted by every render of this busy page. Only the
+short, self-stopping per-movement watches keep inline functions.
+`useEarnVaultDepositOutcome` is the
 adaptive **outcome** tier per watched deposit, self-stopping on terminal. Each
 detail read is a scoped, fail-soft chain observation that advances the guarded
 ledger row immediately; the scheduled reconciler remains the recovery path.
@@ -615,9 +641,10 @@ Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
 importing a *value* from a client module receives a **client-reference proxy,
-not the value** — an object, so always truthy. `if (!EARN_PROGRAM_CREATION_ENABLED)`
-was therefore dead code and the deposit route happily rendered the full wizard
-with no provider that could create anything.
+not the value** — an object, so always truthy. The program-creation guard (since
+retired with the custodial provider) was therefore dead code and the deposit
+route happily rendered the full wizard with no provider that could create
+anything.
 
 What makes this worth a section: **nothing catches it but a browser.** The types
 are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
@@ -628,11 +655,12 @@ browser pass on `/dashboard/markets/embedded-yield` and
 
 ## Rules
 
-- **Flags: declare in `src/flags.ts`, gate by segment.** `markets`
+- **Flags: declare in `src/flags/definitions.ts`, gate by segment.** `markets`
   (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
-  declarations resolved in the dashboard layout and enforced once in the
-  Markets segment layout (`../layout.tsx`). A bespoke env helper, a
-  `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong.
+  declarations resolved in the dashboard layout and enforced by segment
+  layouts: `markets()` in `../layout.tsx`, `earn()` in each Earn segment's (see
+  "Routes"). A bespoke env helper, a `process.env` read, or a `NEXT_PUBLIC_*`
+  twin is wrong.
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
   copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
   `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions
@@ -648,19 +676,46 @@ browser pass on `/dashboard/markets/embedded-yield` and
   Visibility and eligibility are different questions: a row is visible because
   the API returned it, and selectable because `earnVaultDepositAvailability`
   said so. Do not collapse them, and do not filter a row out of the table to
-  express "not available" — that is what the badge is for.
+  express "not available" — that is what the availability label is for.
 - **Two visibility rules live in the API and this module never sees either.**
   `/strategies` omits Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
   and every row of a provider SDP does not currently offer
   (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both so the DB stays
   a truthful provider inventory. Do not reimplement either here: a client-side
   copy would drift, and a hidden row never reaches the browser to begin with.
-- Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
-  Inter only — monospace is forbidden, including for addresses; use
-  `tabular-nums` for numeric alignment. The ONE exception is a genuine code
-  surface: the integration guide's `ui/code-block`, which is mono by design. Selection
-  state is `border-primary bg-fill-subtle` across the whole module. `Badge` is
-  status-only.
+- Design system: the 2026 refresh on the routes `lib/theme-scope-routes.ts`
+  lists. Type, colour and shapes come from `@sdp/design-tokens` in the
+  `refresh` scope; pages compose the shared refresh blocks (`RecordStack` and
+  `RecordBlock`, `StatusText` for status as words, the borderless design-system
+  `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
+  bordered cards. Treasury and Embedded Yield share their summary hero and a
+  row's identity (`EarnSummary`, `EarnRowIdentity` in `earn-page-blocks.tsx`)
+  and their table frame (`earn-table-layout.ts`). Monospace is forbidden,
+  including for addresses; use `tabular-nums` for numeric alignment. The ONE
+  exception is a genuine code surface: the integration guide's
+  `ui/code-block`, which is mono by design.
+  Selection state is `border-primary bg-fill-subtle` across the whole module.
+  `Badge` is status-only.
+- **Transaction dialogs share one frame.** Every deposit, withdrawal, exit,
+  queued and par dialog, and the placeholder Treasury shows while one loads,
+  spreads `EARN_TRANSACTION_MODAL_FRAME` (`earn-modal.ts`): one width, and a
+  top edge that stays put as steps change height. A step that only gathers
+  input is a `<form>`, so Enter continues; a step whose primary action moves
+  money never submits on Enter: its button is the only way to confirm.
+- **Zero layout shift on Treasury and Embedded Yield.** Every loading, empty
+  and error state keeps the ready footprint: the route skeleton and the
+  in-page states share the column widths (`treasury-solutions/treasury-layout.ts`
+  with the positions body's two-row floor, `embedded-yield-layout.ts`), the
+  summary's geometry (`EarnSummarySkeleton`) and `markets-route-skeletons.tsx`,
+  and sections that most treasuries never show (queued requests, custodial
+  programs) render nothing until they have rows. A table's columns drop below
+  `@2xl`, never its action; a dropped status reads under the row's balance.
+  The integration guide's skeleton draws its intro and API key callout at the
+  English copy's wrap widths, so editing `guideIntro` or the callout copy means
+  re-measuring it against the page from 360 to 1440. Those blocks query their
+  own width (`@container` on the block), not the work area: the page's side
+  padding steps from 16px to 24px at the `md` viewport, so one work-area
+  breakpoint cannot match a wrap point in both layouts.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes
@@ -668,7 +723,9 @@ browser pass on `/dashboard/markets/embedded-yield` and
   after `.whitespace-normal`), and under `table-fixed` the still-unwrapped text
   overflows into the next column. Declare wrapping and clamping on the child
   spans, where nothing competes. Long text wraps inside a bounded clamp or truncates with
-  a `title` carrying the full string; numbers never truncate.
+  a `title` carrying the full string; numbers never truncate. In a dialog's
+  `DetailRow`, an amount takes `fit="figure"` (whole on one line, its label
+  wraps) and a name `fit="wrap"`.
 - Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
   the asymmetry: the money-in writes answer 403 even for *missing credentials*,
   so read `error.code`, not just the status, before labelling a failure.

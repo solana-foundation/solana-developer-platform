@@ -3,7 +3,6 @@ import type {
   PrivateChannelEventStatus,
   PrivateChannelEventType,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelEventId(): string {
   return `pce_${crypto.randomUUID()}`;
@@ -80,10 +79,6 @@ export interface ListProjectPrivateChannelEventsParams {
   beforeOccurredAt?: string;
   /** Cursor tiebreaker: id of the last row from the previous page. */
   beforeId?: string;
-}
-
-export interface PrivateChannelEventRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelEventRepository {

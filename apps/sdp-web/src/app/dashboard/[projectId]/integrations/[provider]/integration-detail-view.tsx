@@ -15,6 +15,7 @@ import {
   CustodyConnectionsSection,
 } from "@/app/dashboard/[projectId]/integrations/custody-connections-section";
 import type { IntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
+import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
 import { docsHref } from "@/components/dashboard-nav";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
@@ -100,10 +101,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * The header's state-correct action, if the provider's state offers one.
  *
  * @param detail - The resolved provider detail.
+ * @param canManageCustody - Whether the viewer may set up a custody provider; setup is hidden otherwise.
  * @param t - The translator.
  * @returns The action button, or `null` when no action applies.
  */
-async function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
+async function resolvePrimaryAction(
+  detail: IntegrationDetail,
+  canManageCustody: boolean,
+  t: Translate
+) {
   // With the connection state unreadable, no state-dependent action is honest.
   if (detail.status === "unknown") {
     return null;
@@ -117,7 +123,7 @@ async function resolvePrimaryAction(detail: IntegrationDetail, t: Translate) {
       </Button>
     );
   }
-  if (detail.family === "custody" && detail.status === "available") {
+  if (detail.family === "custody" && detail.status === "available" && canManageCustody) {
     return (
       <Button asChild>
         <Link
@@ -150,11 +156,13 @@ export type CustodyConnectionsContext =
 async function DetailHeader({
   detail,
   connectionCount,
+  canManageCustody,
   t,
 }: {
   detail: IntegrationDetail;
   /** `null` on every family but custody, and on custody when unreadable. */
   connectionCount: number | null;
+  canManageCustody: boolean;
   t: Translate;
 }) {
   const entry = detail.custodyEntry;
@@ -191,7 +199,7 @@ async function DetailHeader({
           </p>
         </div>
       </div>
-      {await resolvePrimaryAction(detail, t)}
+      {await resolvePrimaryAction(detail, canManageCustody, t)}
     </header>
   );
 }
@@ -256,7 +264,7 @@ function CapabilitiesSection({
   return (
     <Section title={t("Shared.integrations.detailCapabilities")}>
       <ul className="flex flex-wrap gap-2">
-        {entry.useCases.map((useCase) => (
+        {custodyUseCasesInDeploymentReleaseChannel(entry.useCases).map((useCase) => (
           <li
             key={useCase}
             className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
@@ -356,7 +364,12 @@ export async function IntegrationDetailView({
 
   return (
     <div className="w-full space-y-6 px-4 py-6 md:px-6" data-integration-detail={detail.provider}>
-      <DetailHeader detail={detail} connectionCount={connectionCount} t={t} />
+      <DetailHeader
+        detail={detail}
+        connectionCount={connectionCount}
+        canManageCustody={canManageCustody}
+        t={t}
+      />
 
       <CustodyConnectionsBlock
         detail={detail}

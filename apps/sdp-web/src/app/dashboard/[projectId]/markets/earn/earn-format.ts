@@ -86,6 +86,11 @@ function isBelowOneCent(value: string): boolean {
   return /[1-9]/.test(fraction.slice(2));
 }
 
+/** The parts of a table row's detail line, joined by the design's middle dot. */
+export function earnDetailLine(parts: readonly string[]): string {
+  return parts.join(" · ");
+}
+
 export function tokenSymbol(mint: string): string {
   return WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol ?? truncateMiddle(mint, 4, 4);
 }

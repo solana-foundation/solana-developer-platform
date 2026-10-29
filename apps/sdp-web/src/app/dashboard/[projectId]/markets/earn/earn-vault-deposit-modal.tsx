@@ -11,15 +11,26 @@ import {
 } from "@sdp/types/earn";
 import { earnProviderDepositSettlement } from "@sdp/types/provider-access";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { cn } from "@sdp/ui/cn";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { ArrowRightLeftIcon, Loader2Icon } from "lucide-react";
+import { StatusText } from "@sdp/ui/status-text";
+import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
@@ -45,6 +56,7 @@ import {
 import { EarnErrorNote } from "./earn-error-note";
 import { formatTokenValue, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import {
   createEarnVaultDeposit,
   type EarnVaultDepositPreview,
@@ -83,6 +95,7 @@ import {
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
+  earnStatusTextTone,
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
   vaultOutcomeTone,
@@ -149,16 +162,14 @@ function DepositQuoteSummaryRows({
   return (
     <>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <div className="flex items-baseline justify-between gap-5 py-1">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultExpectedShares")}</dt>
-          <dd className="text-right tabular-nums text-primary">{quote.preview.sharesOut}</dd>
-        </div>
+        <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultExpectedShares")}>
+          <span className="tabular-nums">{quote.preview.sharesOut}</span>
+        </DetailRow>
       ) : null}
       {minSharesOut !== undefined ? (
-        <div className="flex items-baseline justify-between gap-5 py-1">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultMinShares")}</dt>
-          <dd className="text-right tabular-nums text-primary">{minSharesOut}</dd>
-        </div>
+        <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultMinShares")}>
+          <span className="tabular-nums">{minSharesOut}</span>
+        </DetailRow>
       ) : null}
     </>
   );
@@ -184,7 +195,7 @@ function DepositConfirmNote({
   const t = useTranslations();
   const sponsored = feeSponsored && !swapActive;
   return (
-    <p id="earn-vault-deposit-note" className="mt-3 text-xs leading-5 text-tertiary">
+    <p id="earn-vault-deposit-note" className="mt-4 text-meta text-tertiary">
       {sponsored
         ? t("DashboardEarn.deposit.vaultConfirmNoteSponsored")
         : t("DashboardEarn.deposit.vaultConfirmNote")}
@@ -372,27 +383,24 @@ function DepositWalletPicker({
   let walletContent: ReactNode;
   if (walletsLoading && wallets === undefined) {
     walletContent = (
-      <div className="flex items-center gap-2 rounded-lg border border-border-default p-4 text-sm text-secondary">
+      <div className="flex items-center gap-2 rounded-card border border-border-default p-4 text-body text-secondary">
         <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
         {t("DashboardEarn.withdraw.availableChecking")}
       </div>
     );
   } else if (walletsError) {
     walletContent = (
-      <p
-        className="rounded-lg border border-destructive-border bg-destructive-bg p-4 text-sm text-error"
-        role="alert"
-      >
+      <Callout live variant="danger">
         {t("DashboardEarn.deposit.walletsLoadError")}
-      </p>
+      </Callout>
     );
   } else if ((wallets?.length ?? 0) === 0) {
     walletContent = (
-      <div className="rounded-lg border border-border-default bg-fill-subtle p-4">
-        <p className="text-sm font-medium text-primary">
+      <div className="rounded-card bg-surface-tile p-4">
+        <p className="text-body font-medium text-primary">
           {t("DashboardEarn.deposit.walletsEmptyTitle")}
         </p>
-        <p className="mt-1 text-sm leading-5 text-secondary">
+        <p className="mt-1 text-body text-secondary">
           {t("DashboardEarn.deposit.walletsEmptyBody")}
         </p>
         {custodyEnabled && canManageCustody ? (
@@ -416,7 +424,7 @@ function DepositWalletPicker({
         <label
           aria-disabled={!executable}
           className={cn(
-            "flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+            "flex items-center gap-3 rounded-control border px-3 py-2.5 transition-colors",
             executable ? "cursor-pointer" : "cursor-not-allowed opacity-60",
             checked
               ? "border-primary bg-fill-subtle"
@@ -436,14 +444,14 @@ function DepositWalletPicker({
             value={wallet.id}
           />
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-primary">
+            <span className="block truncate text-body font-medium text-primary">
               {walletDisplayName(wallet, t("DashboardEarn.deposit.walletUnnamed"))}
             </span>
-            <span className="mt-0.5 block text-xs text-tertiary">
+            <span className="block text-meta text-tertiary">
               {shortenMarketAddress(wallet.publicKey)}
             </span>
           </span>
-          <span className="shrink-0 text-right text-xs tabular-nums text-secondary">
+          <span className="shrink-0 text-right text-meta tabular-nums text-secondary">
             {!executable
               ? t("DashboardEarn.deposit.vaultWalletUnavailable")
               : balance === undefined
@@ -459,7 +467,7 @@ function DepositWalletPicker({
 
   return (
     <fieldset className="mt-5" disabled={submitting}>
-      <legend className="text-sm font-medium text-primary">
+      <legend className="text-body font-medium text-primary">
         {t("DashboardEarn.deposit.vaultWalletTitle")}
       </legend>
       <div className="mt-2 flex max-h-52 flex-col gap-1.5 overflow-y-auto">{walletContent}</div>
@@ -544,41 +552,37 @@ function DepositResult({
   return (
     <>
       {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
-      <div className="flex items-center gap-2 pr-8">
+      <div className="flex items-center gap-3 pr-8">
         <h2
-          className="text-base font-medium text-primary outline-none"
+          className="text-subheading font-medium text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >
           {copy.title}
         </h2>
-        <Badge variant={statusVariant}>{status}</Badge>
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(statusVariant)}>
+          {status}
+        </StatusText>
       </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
+      <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">{deposit.strategy.name}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
-          <dd className="text-right tabular-nums text-primary">
+      <DetailList className="mt-5" variant="summary">
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
+          {deposit.strategy.name}
+        </DetailRow>
+        <DetailRow fit="figure" label={t("DashboardEarn.withdraw.amountLabel")}>
+          <span className="tabular-nums">
             {formatTokenValue(outcome.amount, fundingMint, locale)}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
-          <dd className="max-w-64 text-right text-primary">{outcome.walletName}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
-          <dd className="text-right">
-            <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
-          </dd>
-        </div>
-      </dl>
-      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
+          </span>
+        </DetailRow>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultFrom")}>
+          {outcome.walletName}
+        </DetailRow>
+        <DetailRow label={t("DashboardEarn.deposit.vaultTransaction")}>
+          <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
+        </DetailRow>
+      </DetailList>
+      <p className="mt-4 text-meta text-tertiary">{copy.note}</p>
       <div className="mt-5 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
@@ -690,14 +694,14 @@ function DepositFundingTokenPicker({
 }) {
   return (
     <fieldset className="mt-4" disabled={disabled}>
-      <legend className="text-sm font-medium text-primary">{title}</legend>
+      <legend className="text-body font-medium text-primary">{title}</legend>
       <div className="mt-2 flex flex-wrap gap-2">
         {tokens.map((token) => {
           const checked = token.mint === selectedMint;
           return (
             <label
               className={cn(
-                "cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors",
+                "cursor-pointer rounded-control border px-3 py-1.5 text-body transition-colors",
                 checked
                   ? "border-primary bg-fill-subtle text-primary"
                   : "border-border-default text-secondary hover:border-border-strong"
@@ -732,10 +736,9 @@ function DepositSwapSummaryRow({
 }) {
   if (!active) return null;
   return (
-    <div className="flex items-baseline justify-between gap-5 py-1">
-      <dt className="text-tertiary">{label}</dt>
-      <dd className="text-right text-primary">{value}</dd>
-    </div>
+    <DetailRow fit="figure" label={label}>
+      {value}
+    </DetailRow>
   );
 }
 
@@ -752,23 +755,13 @@ function DepositSwapReviewNotice({
   if (!active) return null;
 
   return (
-    <div
-      className="mt-5 flex items-start gap-3 rounded-xl border border-warning-border bg-warning-bg px-4 py-3"
-      data-earn-swap-review="true"
-      role="note"
-    >
-      <ArrowRightLeftIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-primary">
-          {t("DashboardEarn.deposit.vaultSwapReviewTitle")}
-        </p>
-        <p className="mt-1 text-xs leading-5 text-secondary">
-          {t("DashboardEarn.deposit.vaultSwapReviewBody", {
-            source: fundingSymbol,
-            target: symbol,
-          })}
-        </p>
-      </div>
+    <div className="mt-5" data-earn-swap-review="true" role="note">
+      <Callout title={t("DashboardEarn.deposit.vaultSwapReviewTitle")} variant="warning">
+        {t("DashboardEarn.deposit.vaultSwapReviewBody", {
+          source: fundingSymbol,
+          target: symbol,
+        })}
+      </Callout>
     </div>
   );
 }
@@ -800,34 +793,23 @@ function DepositReviewDetails({
   const locale = useLocale();
 
   return (
-    <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultAmount")}</dt>
-        <dd className="text-right tabular-nums text-primary">
-          {formatTokenValue(amount, fundingMint, locale)}
-        </dd>
-      </div>
+    <DetailList className="mt-5" variant="summary">
+      <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultAmount")}>
+        <span className="tabular-nums">{formatTokenValue(amount, fundingMint, locale)}</span>
+      </DetailRow>
       {selectedWallet ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
-          <dd className="text-right text-primary">
-            {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
-          </dd>
-        </div>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultFrom")}>
+          {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
+        </DetailRow>
       ) : null}
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultPayWith")}</dt>
-        <dd className="text-right text-primary">{fundingSymbol}</dd>
-      </div>
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-        <dd className="max-w-64 text-right text-primary">{strategyName}</dd>
-      </div>
+      <DetailRow label={t("DashboardEarn.deposit.vaultPayWith")}>{fundingSymbol}</DetailRow>
+      <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
+        {strategyName}
+      </DetailRow>
       {backing ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultBacking")}</dt>
-          <dd className="text-right text-primary">{backing}</dd>
-        </div>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultBacking")}>
+          {backing}
+        </DetailRow>
       ) : null}
       <DepositSwapSummaryRow
         active={swapActive}
@@ -838,7 +820,7 @@ function DepositReviewDetails({
         })}
       />
       <DepositQuoteSummaryRows minSharesOut={minSharesOut} quote={quote} />
-    </dl>
+    </DetailList>
   );
 }
 
@@ -890,9 +872,14 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
   } = props;
   const locale = useLocale();
   const t = useTranslations();
+  // A form, so Enter in the amount continues to the review as the button does.
+  const continueFromForm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!continueBlocked) onContinue();
+  };
 
   return (
-    <>
+    <form noValidate onSubmit={continueFromForm}>
       <DepositWalletPicker
         decimals={fundingDecimals}
         depositMint={fundingToken?.mint ?? depositMint}
@@ -952,23 +939,23 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
             : null}
         </div>
         {amountError ? (
-          <p className="text-xs text-error" role="alert">
+          <p className="text-meta text-error" role="alert">
             {amountError}
           </p>
         ) : null}
         {overKnownBalance ? (
-          <p className="text-xs text-warning" role="status">
+          <p className="text-meta text-warning" role="status">
             {t("DashboardEarn.deposit.vaultOverBalance")}
           </p>
         ) : null}
       </div>
 
       <div className="mt-6">
-        <Button className="!w-full" disabled={continueBlocked} onClick={onContinue}>
+        <Button className="!w-full" disabled={continueBlocked} type="submit">
           {t("DashboardEarn.deposit.continueAction")}
         </Button>
       </div>
-    </>
+    </form>
   );
 }
 
@@ -1026,7 +1013,6 @@ function DepositReviewStep(props: DepositReviewStepProps) {
 
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
       <DepositSwapReviewNotice active={swapActive} fundingSymbol={fundingSymbol} symbol={symbol} />
       <DepositReviewDetails
         amount={amount}
@@ -1429,7 +1415,7 @@ export function EarnVaultDepositModal({
         ariaLabel={modalLabel}
         contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
         onClose={onClose}
-        size="sm"
+        {...EARN_TRANSACTION_MODAL_FRAME}
       >
         <div className="p-6" ref={contentRef}>
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
@@ -1446,12 +1432,18 @@ export function EarnVaultDepositModal({
   }
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="sm">
+    <Modal
+      isOpen
+      ariaLabel={modalLabel}
+      closeDisabled={submitting}
+      onClose={onClose}
+      {...EARN_TRANSACTION_MODAL_FRAME}
+    >
       <div aria-busy={submitting} className="p-6" ref={contentRef}>
         <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
         <EarnFlowTransition stepKey={step}>
           <h2
-            className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
+            className="pr-8 text-subheading font-medium text-primary outline-none"
             data-modal-focus-target
             tabIndex={-1}
           >

@@ -13,6 +13,8 @@ import { createChannelAction, deleteChannelAction } from "./actions";
 
 interface Props {
   initialChannels: PrivateChannelDto[];
+  /** False for a read-only member: the create form and delete controls are hidden. */
+  canWrite: boolean;
 }
 
 function formatDate(iso: string): string {
@@ -20,7 +22,7 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }
 
-export function ChannelsManager({ initialChannels }: Props) {
+export function ChannelsManager({ initialChannels, canWrite }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isCreating, startCreate] = useTransition();
@@ -64,37 +66,41 @@ export function ChannelsManager({ initialChannels }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-3 rounded-lg border border-border-default p-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="channel-name">{t("DashboardPrivateChannels.channels.newChannel")}</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              id="channel-name"
-              placeholder={t("DashboardPrivateChannels.channels.namePlaceholder")}
-              value={name}
-              maxLength={64}
-              disabled={isCreating}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreate();
-              }}
-            />
-            <Input
-              placeholder={t("DashboardPrivateChannels.channels.descriptionPlaceholder")}
-              value={description}
-              disabled={isCreating}
-              onChange={(e) => setDescription(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreate();
-              }}
-            />
-            <Button onClick={handleCreate} disabled={isCreating || !name.trim()}>
-              {isCreating && !deletingId ? <Loader2Icon className="animate-spin" /> : null}
-              {t("DashboardPrivateChannels.channels.add")}
-            </Button>
+      {canWrite ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-border-default p-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="channel-name">
+              {t("DashboardPrivateChannels.channels.newChannel")}
+            </Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="channel-name"
+                placeholder={t("DashboardPrivateChannels.channels.namePlaceholder")}
+                value={name}
+                maxLength={64}
+                disabled={isCreating}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreate();
+                }}
+              />
+              <Input
+                placeholder={t("DashboardPrivateChannels.channels.descriptionPlaceholder")}
+                value={description}
+                disabled={isCreating}
+                onChange={(e) => setDescription(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreate();
+                }}
+              />
+              <Button onClick={handleCreate} disabled={isCreating || !name.trim()}>
+                {isCreating && !deletingId ? <Loader2Icon className="animate-spin" /> : null}
+                {t("DashboardPrivateChannels.channels.add")}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {channels.length === 0 ? (
         <p className="text-sm text-secondary">{t("DashboardPrivateChannels.channels.empty")}</p>
@@ -120,26 +126,28 @@ export function ChannelsManager({ initialChannels }: Props) {
                   })}
                 </span>
               </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("DashboardPrivateChannels.channels.deleteAria", {
-                  name: channel.name,
-                })}
-                disabled={channel.isDefault || isCreating}
-                title={
-                  channel.isDefault
-                    ? t("DashboardPrivateChannels.channels.deleteDefaultTitle")
-                    : t("DashboardPrivateChannels.channels.deleteTitle")
-                }
-                onClick={() => handleDelete(channel)}
-              >
-                {deletingId === channel.id ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : (
-                  <Trash2Icon />
-                )}
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("DashboardPrivateChannels.channels.deleteAria", {
+                    name: channel.name,
+                  })}
+                  disabled={channel.isDefault || isCreating}
+                  title={
+                    channel.isDefault
+                      ? t("DashboardPrivateChannels.channels.deleteDefaultTitle")
+                      : t("DashboardPrivateChannels.channels.deleteTitle")
+                  }
+                  onClick={() => handleDelete(channel)}
+                >
+                  {deletingId === channel.id ? (
+                    <Loader2Icon className="animate-spin" />
+                  ) : (
+                    <Trash2Icon />
+                  )}
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
