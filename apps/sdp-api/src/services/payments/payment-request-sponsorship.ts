@@ -33,6 +33,7 @@ import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, rateLimited } from "@/lib/errors";
+import { enforceRateLimit } from "@/middleware/rate-limit";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
@@ -45,6 +46,15 @@ import {
 } from "@/services/sponsorship.service";
 import { sponsoredMessageDigest } from "@/services/sponsorship-budget.service";
 import type { Env } from "@/types/env";
+
+/**
+ * Sponsor signatures one payment request may ask Kora for per hour. A request is paid once, so its
+ * payer needs one or two; a claim lasts one blockhash lifetime, and every signature counts against
+ * Kora's quota and reserves budget whether or not it lands. Six leaves a payer room to retry a
+ * failed or expired transaction.
+ */
+export const PAY_SPONSOR_SIGNATURES_PER_HOUR = 6;
+const PAY_SPONSOR_SIGNATURE_WINDOW_MS = 3_600_000;
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
 export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
@@ -90,8 +100,10 @@ function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): v
  * @param params.recipient - The request's destination address.
  * @param params.reference - The request's Solana Pay reference account.
  * @returns The partially signed transaction, or the hold another payer's live claim places.
- * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, or a
- *   concurrent claim superseded this one.
+ * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, a
+ *   concurrent claim superseded this one, or the request has asked for
+ *   `PAY_SPONSOR_SIGNATURES_PER_HOUR` sponsor signatures in the last hour.
+ * @throws AppError `SERVICE_UNAVAILABLE` when the signature counter store is unavailable.
  * @throws AppError `BAD_REQUEST` when the payer is the sponsor, a SOL amount is not positive, or
  *   the request stopped being payable before its claim (canceled, paid or expired).
  */
@@ -130,6 +142,21 @@ export async function issuePaymentRequestTransaction(
     return signAndStore(claim.unsignedTransaction);
   };
 
+  // Counted once per call, before the first round trip toward a new signature: before a fresh
+  // claim is built, or before a stored unsigned claim is signed. A claim lost to a concurrent
+  // payer still counts, which only under-admits. Replays of signed bytes never reach it.
+  let signatureAdmitted = false;
+  const admitSponsorSignature = async (): Promise<void> => {
+    if (signatureAdmitted) return;
+    signatureAdmitted = true;
+    await enforceRateLimit(
+      c,
+      `pay-sponsor-signature:request:${request.id}`,
+      PAY_SPONSOR_SIGNATURES_PER_HOUR,
+      { failClosed: true, windowMs: PAY_SPONSOR_SIGNATURE_WINDOW_MS, metricTier: "pay_sponsor" }
+    );
+  };
+
   let feePaymentInstance: SponsorshipFeePayment | null = null;
   const getFeePayment = async () => {
     feePaymentInstance ??= createSponsorshipFeePayment(
@@ -148,6 +175,7 @@ export async function issuePaymentRequestTransaction(
 
   const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
     assertNotExpired(request);
+    await admitSponsorSignature();
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     // The intent is durable before signAsFeePayer reserves budget and Kora
@@ -221,6 +249,7 @@ export async function issuePaymentRequestTransaction(
     return served;
   }
 
+  await admitSponsorSignature();
   const feePayment = await getFeePayment();
   const feePayer = await feePayment.getFeePayer();
   if (payer === feePayer) {

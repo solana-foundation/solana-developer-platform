@@ -25,6 +25,7 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { AuditService } from "@/services/audit.service";
+import { PAY_SPONSOR_SIGNATURES_PER_HOUR } from "@/services/payments/payment-request-sponsorship";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -594,6 +595,41 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(200);
       expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("caps one request's sponsor signatures per hour and still replays its signed claim", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const other = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      // Past the claims' last valid block height, every post re-claims and asks Kora again.
+      rpc.answer("getBlockHeight", 2_000);
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+      const blockhashReads = getRecentBlockhashMock.mock.calls.length;
+
+      const refused = await postTransaction(request.public_token);
+      expect(refused.status).toBe(429);
+      expect(Number(refused.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+      expect(getRecentBlockhashMock.mock.calls.length).toBe(blockhashReads);
+
+      // Another request on the same wallet keeps its own allowance.
+      expect((await postTransaction(other.public_token)).status).toBe(200);
+      // A live signed claim replays without asking Kora, so the cap never refuses it.
+      rpc.answer("getBlockHeight", 900);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR + 1);
     });
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
