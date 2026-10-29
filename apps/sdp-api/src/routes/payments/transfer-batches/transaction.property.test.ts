@@ -34,6 +34,7 @@ import {
   buildInstructionGroups,
   chunkInstructionGroups,
   type RecipientInstructionGroup,
+  type SponsoredRentLimit,
 } from "./transaction";
 import type { ResolvedRecipient, TokenContext } from "./types";
 
@@ -222,13 +223,21 @@ function build(params: {
   return buildInstructionGroups({ ...params, sourceSigner, feePayer: FEE_PAYER });
 }
 
-function chunk(groups: RecipientInstructionGroup[], maxRecipientsPerTransaction: number) {
+/** A batch that creates no token account, so only the count and size limits pack it. */
+const NO_SPONSORED_RENT: SponsoredRentLimit = { rentByTokenAccount: new Map(), capLamports: null };
+
+function chunk(
+  groups: RecipientInstructionGroup[],
+  maxRecipientsPerTransaction: number,
+  sponsoredRent: SponsoredRentLimit = NO_SPONSORED_RENT
+) {
   return chunkInstructionGroups({
     groups,
     sourceSigner,
     feePayer: FEE_PAYER,
     lifetime: LIFETIME,
     maxRecipientsPerTransaction,
+    sponsoredRent,
   });
 }
 
@@ -295,6 +304,55 @@ describe("batch transfer builder (property)", () => {
             expect(c.recipientIndexes.length).toBeGreaterThan(0);
             expect(c.recipientIndexes.length).toBeLessThanOrEqual(maxRecipientsPerTransaction);
             expect(isTransactionWithinSizeLimit(compileTransaction(c.message))).toBe(true);
+          }
+        }
+      ),
+      propertyParameters({ numRuns: 50 })
+    );
+  });
+
+  it("keeps every chunk's sponsored rent within the cap and still packs every recipient once (HOO-2024)", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        batchArb.filter(({ tokenContext }) => tokenContext.kind === "spl"),
+        fc.infiniteStream(fc.boolean()),
+        fc.bigInt({ min: 1_000_000n, max: 2_000_000n }),
+        fc.bigInt({ min: 0n, max: 8_000_000n }),
+        async (
+          { tokenContext, recipients, maxRecipientsPerTransaction },
+          missing,
+          rent,
+          headroom
+        ) => {
+          const groups = await build({ tokenContext, recipients });
+          const rentByTokenAccount = new Map<Address, bigint>();
+          for (const group of groups) {
+            const tokenAccount = group.destinationTokenAccount;
+            if (tokenAccount !== undefined && missing.next().value) {
+              rentByTokenAccount.set(tokenAccount, rent);
+            }
+          }
+          // At least one account's rent, so every recipient fits a chunk on its own.
+          const capLamports = rent + headroom;
+          const chunks = chunk(groups, maxRecipientsPerTransaction, {
+            rentByTokenAccount,
+            capLamports,
+          });
+
+          expect(chunks.flatMap((c) => c.recipientIndexes)).toEqual(
+            recipients.map((recipient) => recipient.index)
+          );
+          for (const c of chunks) {
+            const created = new Set(
+              c.recipientIndexes.flatMap((index) => {
+                const tokenAccount = groups[index].destinationTokenAccount;
+                return tokenAccount !== undefined && rentByTokenAccount.has(tokenAccount)
+                  ? [tokenAccount]
+                  : [];
+              })
+            );
+            expect(BigInt(created.size) * rent).toBeLessThanOrEqual(capLamports);
+            expect(c.recipientIndexes.length).toBeLessThanOrEqual(maxRecipientsPerTransaction);
           }
         }
       ),
