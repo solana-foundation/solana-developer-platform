@@ -54,10 +54,14 @@ async function main(): Promise<void> {
   const files = await mdxFiles(docsDir);
   const used = new Set<string>();
 
-  for (const file of files) {
-    const source = await fs.readFile(file, "utf8");
-    if (!isPageSourcePublished(source, file)) continue;
-    for (const name of operationsIn(source, file)) used.add(name);
+  const fileOperations = await Promise.all(
+    files.map(async (file) => {
+      const source = await fs.readFile(file, "utf8");
+      return isPageSourcePublished(source, file) ? operationsIn(source, file) : new Set<string>();
+    })
+  );
+  for (const names of fileOperations) {
+    for (const name of names) used.add(name);
   }
 
   const examples: GuideApiExamples = {
