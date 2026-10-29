@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listApiCatalogOperations } from "@sdp/api-catalog/catalog";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import {
   operationGroups,
@@ -41,8 +42,7 @@ const loadReference = async () => {
   return apiReferenceSchema.parse(JSON.parse(json));
 };
 
-const renderIndexPage = ({ families }) => {
-  const operationCount = families.reduce((total, family) => total + family.operations.length, 0);
+const renderIndexPage = ({ families, operationCount }) => {
   const sections = families
     .map((family) => {
       const slug = slugify(family.name);
@@ -233,12 +233,9 @@ const run = async () => {
       ]);
     })
   );
-  const exposedOperationsCount = families.reduce(
-    (total, family) => total + family.operations.length,
-    0
-  );
+  const exposedOperationsCount = listApiCatalogOperations({ families }).length;
 
-  const indexContent = renderIndexPage({ families });
+  const indexContent = renderIndexPage({ families, operationCount: exposedOperationsCount });
 
   await fs.writeFile(path.join(outputDir, "index.mdx"), indexContent, "utf8");
 
