@@ -31,7 +31,7 @@ import {
   rpcFailureOutcome,
   rpcProviderForEndpoint,
 } from "./telemetry";
-import { isTransientRpcError, transientJsonRpcVerdict } from "./transient";
+import { isTransientJsonRpcError, isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
 const GENESIS_PROOF_TTL_MS = 30_000;
@@ -255,6 +255,35 @@ function withKeyRefusalMemo(endpointTransport: RpcTransport, refusalKey: string)
   };
 }
 
+/**
+ * The error a pool raises when its last endpoint refused SDP's key, so the API answers
+ * `503 RPC_UNAVAILABLE` rather than an unclassified provider 401/403.
+ *
+ * @param cluster - The pool's cluster.
+ * @param everyEndpointRefusedKey - Whether every endpoint the request tried refused its key.
+ * @param cause - The last refusal.
+ * @returns `not_configured` when every key was refused, else `upstream_unavailable`.
+ */
+function keyRefusalUnavailable(
+  cluster: SolanaCluster,
+  everyEndpointRefusedKey: boolean,
+  cause: unknown
+): RpcUnavailableError {
+  return everyEndpointRefusedKey
+    ? new RpcUnavailableError(
+        "not_configured",
+        `Every Solana RPC provider for ${cluster} refused SDP's key`,
+        { cluster },
+        { cause }
+      )
+    : new RpcUnavailableError(
+        "upstream_unavailable",
+        "Solana RPC could not be reached",
+        { cluster },
+        { cause }
+      );
+}
+
 function isClusterMismatch(error: unknown): boolean {
   return error instanceof RpcUnavailableError && error.reason === "cluster_mismatch";
 }
@@ -267,6 +296,11 @@ class UnsentRequestError extends Error {
   constructor(public readonly cause: unknown) {
     super("The request was not sent: its endpoint could not be proven", { cause });
   }
+}
+
+/** What an endpoint really threw: the wrapped failure for an unsent request, else `error` itself. */
+function unwrapUnsent(error: unknown): unknown {
+  return error instanceof UnsentRequestError ? error.cause : error;
 }
 
 /** One endpoint attempt: what it answered, or what it threw. */
@@ -325,16 +359,16 @@ function servedJsonRpcError(response: unknown) {
  * | Answered "node unhealthy"                  | yes      | reads    |
  * | `sendTransaction` answered anything else   | no       | no       |
  * | `requestAirdrop` answered another error    | no       | yes      |
- * | Read answered another `failover` code      | no       | yes      |
+ * | Read answered another transient code       | no       | yes      |
  * | Read answered anything else                | no       | no       |
  *
  * A send stops once it left SDP: the failure may arrive after the leader got the transaction, and
  * resubmitting is the send primitive's decision. A 401 or 403 is the provider's gateway refusing
  * SDP's key before any node saw the request, so even a send moves on, and the endpoint cools down
  * because the key fails every request until it is replaced. Only "node unhealthy" cools a node down; the other
- * `failover` codes in `TRANSIENT_JSON_RPC_ERROR_VERDICTS` (behind the caller's `minContextSlot`,
- * missing history or block status) are about this request, not the node, and a cooldown applies to
- * every request on the cluster. An airdrop the node answered with an error did not happen, so the next provider's
+ * codes in `TRANSIENT_JSON_RPC_ERROR_CODES` (behind the caller's `minContextSlot`, missing history
+ * or block status, `-32603` for an upstream timeout) are about this request, not the node, and a
+ * cooldown applies to every request on the cluster. An airdrop the node answered with an error did not happen, so the next provider's
  * faucet may try; the refusal is about that faucet (dry, rate-limited), not the node's health.
  * A faucet that rate-limits with HTTP 429 instead of a served error is the same refusal.
  *
@@ -369,7 +403,7 @@ function judgeAttempt<TResponse>(
   if (isSend) return { cooldown: false, tryNext: false };
   if (method === "requestAirdrop" && servedError !== null)
     return { cooldown: false, tryNext: true };
-  return { cooldown: false, tryNext: transientJsonRpcVerdict(servedError) === "failover" };
+  return { cooldown: false, tryNext: isTransientJsonRpcError(servedError) };
 }
 
 /**
@@ -441,7 +475,8 @@ function emitAttemptTelemetry<TResponse>(
 /**
  * Per-request failover across a cluster's endpoints: try each endpoint in `endpointAttemptOrder`
  * and let `judgeAttempt` decide whether to cool it down and whether to ask the next one. The last
- * endpoint's answer or error is returned as-is, so kit raises its typed error.
+ * endpoint's answer or error is returned as-is, so kit raises its typed error, except a key refusal:
+ * that becomes `not_configured` when every endpoint refused its key, else `upstream_unavailable`.
  *
  * @param endpoints - Guarded transports with provider names, in failover order.
  * @returns The pool transport.
@@ -455,6 +490,7 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
     // last one's -32016 is returned, so a caller issuing parallel reads (wallet balances: 3) pays
     // reads × endpoints requests. Accepted for now: the floor comes from a slot SDP already saw
     // confirmed, so the full walk is rare. If it shows up, stop after two -32016 answers.
+    let everyEndpointRefusedKey = true;
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
       const endpoint = endpoints[endpointIndex];
@@ -474,9 +510,13 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
         genesisProbeRequired
       );
       if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
+      const cause = outcome.ok ? undefined : unwrapUnsent(outcome.cause);
+      everyEndpointRefusedKey &&= isKeyRefusal(cause);
       if (verdict.tryNext && !isLastEndpoint) continue;
       if (outcome.ok) return outcome.response;
-      throw outcome.cause instanceof UnsentRequestError ? outcome.cause.cause : outcome.cause;
+      if (isKeyRefusal(cause))
+        throw keyRefusalUnavailable(endpoint.cluster, everyEndpointRefusedKey, cause);
+      throw cause;
     }
   };
 }

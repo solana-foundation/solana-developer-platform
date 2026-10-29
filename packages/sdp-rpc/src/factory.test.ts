@@ -473,11 +473,13 @@ describe("createClusterRpc", () => {
     const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
     for (let request = 0; request < 3; request += 1) {
-      await assert.rejects(rpc.getSlot().send(), (error: unknown) =>
-        isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
-          ? error.context.statusCode === 401
-          : false
-      );
+      await assert.rejects(rpc.getSlot().send(), (error: unknown) => {
+        assert.ok(error instanceof RpcUnavailableError);
+        assert.deepEqual(error.details, { reason: "not_configured", cluster: "devnet" });
+        assert.ok(isSolanaError(error.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR));
+        assert.equal(error.cause.context.statusCode, 401);
+        return true;
+      });
     }
     assert.deepEqual(calls, [genesisProbe(unauthorized), slotRead(unauthorized)]);
 
@@ -488,6 +490,50 @@ describe("createClusterRpc", () => {
       slotRead(unauthorized),
       genesisProbe(unauthorized),
       slotRead(unauthorized),
+    ]);
+  });
+
+  it("answers upstream_unavailable when the last endpoint refused its key after an outage", async () => {
+    const down = "https://devnet-refusal-after-outage-down.example.test";
+    const unauthorized = "https://devnet-refusal-after-outage-401.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: down,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: unauthorized,
+    });
+    stubEndpoints({ [down]: devnetHttpStatus(503), [unauthorized]: devnetHttpStatus(401) });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    await assert.rejects(rpc.getSlot().send(), {
+      name: "RpcUnavailableError",
+      details: { reason: "upstream_unavailable", cluster: "devnet" },
+    });
+  });
+
+  it("fails a read over on -32603 without cooling the endpoint down, and returns a send's as-is", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 4_000_000 });
+    const failing = "https://devnet-internal-error-preferred.example.test";
+    const healthy = "https://devnet-internal-error-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: failing,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({
+      [failing]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR),
+      [healthy]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    await assert.rejects(
+      rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send(),
+      (error) => isSolanaError(error, SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(failing),
+      slotRead(failing),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      { url: failing, method: "sendTransaction" },
     ]);
   });
 

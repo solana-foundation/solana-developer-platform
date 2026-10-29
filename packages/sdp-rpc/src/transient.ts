@@ -19,27 +19,22 @@ import { RpcHttpStatusError, RpcTimeoutError, SdpRpcError } from "./errors";
 const TRANSIENT_HTTP_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
 
 /**
- * What a transient JSON-RPC error means for the request that got it:
+ * JSON-RPC codes for a node that could not serve this request: unhealthy, behind the requested
+ * slot, missing history or block status, or failing the attempt (`-32603`, which providers answer
+ * for an upstream timeout). Nodes answer these with HTTP 200, so the managed pool reads them from
+ * the body and sends a read to the next endpoint; a caller may also retry later.
  *
- * - `failover`: this node can't serve the request yet (unhealthy, behind the requested slot,
- *   missing history or block status). Nodes answer these with HTTP 200, so the managed pool reads
- *   them from the body and asks the next endpoint; a caller may also retry later.
- * - `retry`: the node failed this attempt (`-32603`, which providers answer for an upstream
- *   timeout). The pool returns it as-is; a caller may retry.
- *
- * Every code here is transient. One table, so the pool's failover and the caller's retry never
- * disagree about which codes are worth another attempt.
+ * One table, so the pool's failover and the caller's retry never disagree about which codes are
+ * worth another attempt.
  */
-export const TRANSIENT_JSON_RPC_ERROR_VERDICTS: ReadonlyMap<number, "failover" | "retry"> = new Map(
-  [
-    [SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY, "failover"],
-    [SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED, "failover"],
-    [SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET, "failover"],
-    [SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE, "failover"],
-    [SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE, "failover"],
-    [SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, "retry"],
-  ]
-);
+export const TRANSIENT_JSON_RPC_ERROR_CODES: ReadonlySet<number> = new Set([
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
+  SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
+]);
 
 /**
  * Node and undici `code`s for a connection that failed, reset or timed out. `fetch` rejects with
@@ -84,15 +79,14 @@ function isTransientNetworkError(error: unknown): boolean {
 }
 
 /**
- * The verdict for a JSON-RPC error kit decoded into a `SolanaError`, or `undefined` when the code
- * is not transient (or `error` is not one).
+ * Whether `error` is a JSON-RPC error kit decoded into a `SolanaError` with a code in
+ * `TRANSIENT_JSON_RPC_ERROR_CODES`.
  *
  * @param error - The thrown or served error.
- * @returns `failover`, `retry`, or `undefined`.
+ * @returns `true` for a transient JSON-RPC code.
  */
-export function transientJsonRpcVerdict(error: unknown): "failover" | "retry" | undefined {
-  if (!isSolanaError(error)) return undefined;
-  return TRANSIENT_JSON_RPC_ERROR_VERDICTS.get(error.context.__code);
+export function isTransientJsonRpcError(error: unknown): boolean {
+  return isSolanaError(error) && TRANSIENT_JSON_RPC_ERROR_CODES.has(error.context.__code);
 }
 
 /**
@@ -111,7 +105,7 @@ export function isTransientRpcError(error: unknown): boolean {
     return TRANSIENT_HTTP_STATUS_CODES.has(error.context.statusCode);
   }
   if (error instanceof RpcHttpStatusError) return TRANSIENT_HTTP_STATUS_CODES.has(error.httpStatus);
-  if (transientJsonRpcVerdict(error) !== undefined) return true;
+  if (isTransientJsonRpcError(error)) return true;
   return isTransientNetworkError(error);
 }
 

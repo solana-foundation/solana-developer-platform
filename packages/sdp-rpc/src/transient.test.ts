@@ -12,9 +12,9 @@ import { fetchFailedError } from "./test-fixtures";
 import {
   isForbiddenRpcError,
   isRpcUpstreamUnavailable,
+  isTransientJsonRpcError,
   isTransientRpcError,
   isUnauthorizedRpcError,
-  transientJsonRpcVerdict,
   withTransientRpcRetry,
 } from "./transient";
 
@@ -152,12 +152,11 @@ test("classifies a kit HTTP error by status with production-stripped messages", 
   }
 });
 
-test("gives the pool's failover codes a failover verdict and -32603 a retry verdict", () => {
-  const verdicts = decodedUnder("production", TRANSIENT_JSON_RPC_ERRORS).map((error) =>
-    transientJsonRpcVerdict(error)
-  );
-  assert.deepEqual(verdicts, ["retry", "failover", "failover", "failover", "failover", "failover"]);
-  assert.equal(transientJsonRpcVerdict(new Error("Node is unhealthy")), undefined);
+test("classifies every transient JSON-RPC code by code, never by message", () => {
+  for (const error of decodedUnder("production", TRANSIENT_JSON_RPC_ERRORS)) {
+    assert.equal(isTransientJsonRpcError(error), true);
+  }
+  assert.equal(isTransientJsonRpcError(new Error("Node is unhealthy")), false);
 });
 
 test("retries a transient error and returns the eventual success", async () => {
