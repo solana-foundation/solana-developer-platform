@@ -258,6 +258,42 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.ok(!twoCookies.includes("second"));
   });
 
+  it("keeps the fields that follow a cookie header inside a serialized message", () => {
+    // Whole-line matching is only correct for a raw header. An embedded header
+    // ends where its containing string ends: stopping at the line end erased
+    // `status` and the closing quotes, hiding the error details the message
+    // carried.
+    const scrubbed = scrubTelemetryString(
+      '{"message":"Cookie: session=supersecret-value","status":502}'
+    );
+
+    assert.equal(scrubbed, '{"message":"Cookie: [REDACTED]","status":502}');
+  });
+
+  it("does not end an embedded cookie value at an escaped quote", () => {
+    // Quotes inside a serialized string are escaped; only the string's own
+    // closing quote ends the value. Ending early would leak the tail of the
+    // header, and the escaped quotes themselves stay inside the redaction.
+    const scrubbed = scrubTelemetryString(
+      '{"message":"Cookie: session=abc; note=\\"hello\\"","status":502}'
+    );
+
+    assert.ok(!scrubbed.includes("hello"));
+    assert.ok(!scrubbed.includes("session=abc"));
+    assert.ok(scrubbed.includes('"status":502}'));
+  });
+
+  it("consumes quoted cookie values in a raw header instead of stopping at a quote", () => {
+    // The boundary that preserves serialized structure must not fire on a raw
+    // header: a quoted value followed by another pair would otherwise leak the
+    // second credential.
+    const scrubbed = scrubTelemetryString('Cookie: session="abc"; refresh="def"');
+
+    assert.ok(!scrubbed.includes("abc"));
+    assert.ok(!scrubbed.includes("def"));
+    assert.ok(scrubbed.includes("Cookie:"));
+  });
+
   it("redacts a seed and a passphrase in a serialized body while public seeds survive", () => {
     // The object-key rules catch a scrubbed object, but a log argument that
     // is already a string — a serialized body, an error message carrying one
