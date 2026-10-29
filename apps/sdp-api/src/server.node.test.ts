@@ -43,4 +43,36 @@ describe("server boot checks", () => {
       /DATABASE_PREPARED_STATEMENTS/
     );
   });
+
+  describe("Kora Cloud Run audience", () => {
+    const mainnetKora = {
+      KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
+      KORA_MAINNET_RPC_URL: "https://kora-mainnet-upstream.mock.invalid",
+    };
+
+    it("refuses managed stage and prod with a Kora URL but no audience", () => {
+      expect(() => assertRequiredEnv(makeEnv(mainnetKora))).toThrow(
+        /set KORA_MAINNET_CLOUD_RUN_AUDIENCE/
+      );
+      expect(() =>
+        assertRequiredEnv(
+          makeEnv({
+            ...mainnetKora,
+            KORA_MAINNET_CLOUD_RUN_AUDIENCE: "https://kora-mainnet.mock.invalid",
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("boots dev and self-hosted without an audience", () => {
+      expect(() =>
+        assertRequiredEnv(makeEnv({ ...mainnetKora, ENVIRONMENT: "development" }))
+      ).not.toThrow();
+      expect(() =>
+        assertRequiredEnv(
+          makeEnv({ ...mainnetKora, SDP_DEPLOYMENT_MODE: "self_hosted", SIGNING_PROVIDER: "local" })
+        )
+      ).not.toThrow();
+    });
+  });
 });
