@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
+import type { PaymentTransferBatchRequest, PaymentTransferBatchStatus } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
@@ -327,7 +327,7 @@ describe("sendTransferBatchUnderKey", () => {
 });
 
 describe("partially failed batches (APE-462)", () => {
-  const answer = (status: string, replayed = false) =>
+  const answer = (status: PaymentTransferBatchStatus, replayed = false) =>
     Response.json(
       { data: { batch: { id: "batch_1", status }, recipients: [], transfers: [] } },
       replayed ? { headers: { "Idempotent-Replayed": "true" } } : undefined

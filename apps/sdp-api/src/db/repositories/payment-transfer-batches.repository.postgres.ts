@@ -943,8 +943,8 @@ export function createPostgresPaymentTransferBatchesRepository(
 
     async claimFailedTransferRecipients(input: ClaimFailedTransferRecipientsInput) {
       if (input.recipientIds.length === 0) return null;
-      return db
-        .transaction(async (tx) => {
+      try {
+        return await db.transaction(async (tx) => {
           // The batch lock first, as every batch status writer takes it.
           const batch = await tx
             .prepare(
@@ -1021,11 +1021,11 @@ export function createPostgresPaymentTransferBatchesRepository(
             recipients: claimed.results.map(mapPaymentTransferRecipientRow),
             retry: mapPaymentTransferBatchRetryRow(retry),
           };
-        })
-        .catch((error: unknown) => {
-          if (error instanceof ClaimLostError) return null;
-          throw error;
         });
+      } catch (error) {
+        if (error instanceof ClaimLostError) return null;
+        throw error;
+      }
     },
   };
 }

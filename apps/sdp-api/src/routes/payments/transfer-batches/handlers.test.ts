@@ -4,6 +4,8 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import {
   PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
   PAYMENT_TRANSFER_BATCH_STATUSES,
+  PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferBatchRecipientStatus,
 } from "@sdp/types/payments";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
@@ -2356,7 +2358,7 @@ describe("payment transfer batches", () => {
           "SELECT status FROM payment_transfer_recipients WHERE batch_id = ? ORDER BY created_at"
         )
         .bind(batchId)
-        .all<{ status: string }>();
+        .all<{ status: PaymentTransferBatchRecipientStatus }>();
       return result.results;
     }
 
@@ -2620,7 +2622,7 @@ describe("payment transfer batches", () => {
             transferId: z.string().nullable(),
           })
         ),
-        transfers: z.array(z.object({ id: z.string(), status: z.string() })),
+        transfers: z.array(z.object({ id: z.string(), status: z.enum(PAYMENT_TRANSFER_STATUSES) })),
       }),
     });
     const readBatch = async (response: Response) => batchBodySchema.parse(await response.json());
@@ -2742,7 +2744,7 @@ describe("payment transfer batches", () => {
       const unclaimed = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_recipients WHERE id = ?")
         .bind(failed.id)
-        .first<{ status: string }>();
+        .first<{ status: PaymentTransferBatchRecipientStatus }>();
       expect(unclaimed).toEqual({ status: "failed" });
 
       await setDisabled([]);
@@ -3048,7 +3050,7 @@ describe("payment transfer batches", () => {
       const row = await getDb(env)
         .prepare("SELECT status FROM payment_transfer_recipients WHERE id = ?")
         .bind(failed.id)
-        .first<{ status: string }>();
+        .first<{ status: PaymentTransferBatchRecipientStatus }>();
       expect(row).toEqual({ status: "failed" });
     });
 
