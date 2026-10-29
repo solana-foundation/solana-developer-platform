@@ -89,10 +89,12 @@ test("skips a candidate that serves mainnet and selects the next one that serves
     const result =
       method === "getGenesisHash"
         ? genesisHashByUrl[url]
-        : {
-            context: { slot: 7 },
-            value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
-          };
+        : method === "getLatestBlockhash"
+          ? {
+              context: { slot: 7 },
+              value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
+            }
+          : { context: { slot: 7 }, value: true };
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
   };
 
@@ -113,5 +115,36 @@ test("skips a candidate that serves mainnet and selects the next one that serves
     { url: mainnetUrl, method: "getGenesisHash", params: [] },
     { url: devnetUrl, method: "getGenesisHash", params: [] },
     { url: devnetUrl, method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] },
+    {
+      url: devnetUrl,
+      method: "isBlockhashValid",
+      params: ["rpc-health-blockhash", { commitment: "confirmed", minContextSlot: 7 }],
+    },
   ]);
+});
+
+test("skips a devnet RPC whose latest blockhash has already expired", async (t) => {
+  const staleUrl = "https://rpc-health-stale.test/devnet";
+  const liveUrl = "https://rpc-health-live.test/devnet";
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    const { id, method } = JSON.parse(init.body);
+    const result =
+      method === "getGenesisHash"
+        ? DEVNET_GENESIS_HASH
+        : method === "getLatestBlockhash"
+          ? { context: { slot: 7 }, value: { blockhash: "rpc-health-blockhash" } }
+          : { context: { slot: 7 }, value: url === liveUrl };
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
+  };
+
+  const selected = await selectHealthySolanaRpcUrl({
+    SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: staleUrl,
+    SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL: liveUrl,
+  });
+
+  assert.equal(selected?.id, "quicknode");
 });

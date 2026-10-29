@@ -27,6 +27,7 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
+import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import { EARN_DEPOSIT_TOKEN_SYMBOLS } from "@sdp/types/earn";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
@@ -151,20 +152,22 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
    */
   it("signs an ATA create funded by its own fee payer", async () => {
     const feePayer = await adapter.getFeePayer();
+    const rpcUrl = env.SOLANA_RPC_URL;
+    if (!rpcUrl) {
+      throw new Error("SOLANA_RPC_URL is required for the live Kora signing test");
+    }
     const owner = address("11111111111111111111111111111112");
     const [ata] = await findAssociatedTokenPda({
       owner,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
       mint: USDC_DEVNET,
     });
-    const { blockhash, lastValidBlockHeight } = await client
-      .getBlockhash()
-      .then((result: { blockhash: string }) => ({
-        blockhash: result.blockhash as Parameters<
-          typeof setTransactionMessageLifetimeUsingBlockhash
-        >[0]["blockhash"],
-        lastValidBlockHeight: 2n ** 63n - 1n,
-      }));
+    // CI selects an RPC whose confirmed blockhash is valid; use that same
+    // commitment so the signing check tests Kora's fee-payer policy.
+    const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(
+      createRpc(env, { rpcUrl }),
+      "confirmed"
+    );
 
     const message = pipe(
       createTransactionMessage({ version: 0 }),
