@@ -109,6 +109,8 @@ async function markClosedPaymentRequestPaid(
              ),
              last_checked_at = sdp_iso_now(),
              last_verified_at = sdp_iso_now(),
+             signature_scan_stuck_signature = NULL,
+             signature_scan_stuck_since = NULL,
              updated_at = sdp_iso_now()
        WHERE id = ?
          AND organization_id = ?
@@ -213,6 +215,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                  ),
                  last_checked_at = sdp_iso_now(),
                  last_verified_at = CASE WHEN ?::boolean THEN sdp_iso_now() ELSE last_verified_at END,
+                 signature_scan_stuck_signature = CASE WHEN ?::text = 'paid' THEN NULL ELSE signature_scan_stuck_signature END,
+                 signature_scan_stuck_since = CASE WHEN ?::text = 'paid' THEN NULL ELSE signature_scan_stuck_since END,
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -226,6 +230,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.paidLate,
           input.status,
           input.chainRead,
+          input.status,
+          input.status,
           input.requestId,
           input.organizationId,
           input.projectId

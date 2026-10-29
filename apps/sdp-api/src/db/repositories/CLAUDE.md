@@ -135,7 +135,9 @@ another chance. An expired request can close after one hour, but it retains
 such closed requests past its normal seven-day window so a recovered chain read
 can still settle them. Migration 0190 indexes that exception; migration 0191
 adds scan progress. Do not move the safe cursor past an unreadable candidate or
-drop the late-watch exception without another recovery path.
+drop the late-watch exception without another recovery path. A found payment
+does not advance the scan before settlement; the paid transition clears the
+stuck marker in the same transaction that records the inbound transfer.
 
 ## Ramps: one transition table
 

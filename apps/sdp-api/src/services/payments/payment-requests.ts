@@ -350,6 +350,10 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
     return { kind: "pending" };
   }
   const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), from);
+  if (scan.found !== null) {
+    // Leave the scan position retryable until the transfer and paid transition commit.
+    return { kind: "paid", found: scan.found };
+  }
   const cycleFinished = scan.scannedAll && from.before === null;
   const cycleHadRetry = from.cycleHadRetry || scan.hadRetry;
   const hasUnresolved = cycleHadRetry || scan.stuck.signature !== null;
@@ -364,9 +368,6 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
     stuckSince: cleanSegment ? null : scan.stuck.since,
   };
   await advanceSignatureScan(env, row, from, to);
-  if (scan.found !== null) {
-    return { kind: "paid", found: scan.found };
-  }
   // A complete pass can close an expired request after an hour. The safe cursor
   // stays behind every unreadable candidate, so the late watch can retry them.
   const stuckSince = to.stuckSince === null ? Number.NaN : Date.parse(to.stuckSince);

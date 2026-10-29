@@ -57,6 +57,7 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
+  createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
 import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -1404,6 +1405,62 @@ describe("settlement atomicity", () => {
 
     expect(await listInboundTransfers()).toHaveLength(0);
     expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
+  });
+
+  it("keeps an old closed request in the late watch until settlement commits", async () => {
+    const request = await storeScanPosition(
+      await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+      { stuckSignature: SIGNATURE, stuckSince: PAST }
+    );
+    await storeExpired(request.id);
+    mockSettlementSucceeds(PAST_SECONDS);
+    const real = repositoryFactory.createTransactionalPaymentRequestsRepository;
+    let failOnce = true;
+    vi.spyOn(repositoryFactory, "createTransactionalPaymentRequestsRepository").mockImplementation(
+      (db, scope) => {
+        const repository = real(db, scope);
+        if (failOnce) {
+          failOnce = false;
+          vi.spyOn(repository, "markExpiredPaymentRequestPaid").mockRejectedValueOnce(
+            new Error("settlement temporarily unavailable")
+          );
+        }
+        return repository;
+      }
+    );
+    const lateWatch = () =>
+      createSystemPaymentRequestsRepository(env).listClosedPaymentRequestsForLateCheck({
+        environment: "sandbox",
+        closedSince: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        checkedBefore: new Date(Date.now() + 60_000).toISOString(),
+        limit: 10,
+      });
+
+    await expect(
+      onSandbox(async () =>
+        checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+      )
+    ).rejects.toThrow("settlement temporarily unavailable");
+
+    expect(await readStored(request.id)).toMatchObject({
+      status: "expired",
+      signature_scan_stuck_signature: SIGNATURE,
+      signature_scan_stuck_since: PAST,
+    });
+    expect(await listInboundTransfers()).toHaveLength(0);
+    expect((await lateWatch()).map((row) => row.id)).toContain(request.id);
+
+    const paid = await onSandbox(async () =>
+      checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+    );
+
+    expect(paid).toMatchObject({
+      status: "paid",
+      signature_scan_stuck_signature: null,
+      signature_scan_stuck_since: null,
+    });
+    expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
+    expect((await lateWatch()).map((row) => row.id)).not.toContain(request.id);
   });
 });
 
