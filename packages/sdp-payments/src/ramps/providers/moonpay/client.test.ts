@@ -447,10 +447,8 @@ describe("MoonpayRampClient on-ramp limits", () => {
     refuseProviderCalls();
 
     await assert.rejects(quoteAud("12abc"), isBadRequest(/^Invalid amount format$/));
-    await assert.rejects(
-      quoteAud(`1${"0".repeat(40)}`),
-      isBadRequest(/^fiatAmount is out of range$/)
-    );
+    // Compared exactly at any size, so a huge amount meets the currency's maximum.
+    await assert.rejects(quoteAud(`1${"0".repeat(40)}`), isBadRequest(/at most \d+ AUD$/));
   });
 });
 
