@@ -1,21 +1,30 @@
 # @sdp/api-catalog
 
-What the API, the dashboard's API playground and the docs need to know about the public SDP
-API, kept in one place so they never describe or write a call differently. It ships TypeScript
-source with no React, so either app, a script or server code can import it.
+The public OpenAPI document produces one reference model for each release channel.
+The docs render that model; the dashboard uses a smaller generated projection for
+its existing playground sections. All three apps share the same operation IDs,
+parameters and examples.
 
-| Subpath                      | What it holds                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@sdp/api-catalog/reference` | The API reference model: every operation of one release channel's public OpenAPI document, with its parameters, request body schema, each response's body schema and example, module, action and the sample call. `apps/sdp-api/src/openapi/reference.ts` builds it (`openapi:generate` writes it beside `openapi.json`) and the docs render their reference from it, parsing it with `apiReferenceSchema`. |
-| `@sdp/api-catalog/snippets`  | `buildSnippets`: one call written as cURL, TypeScript and Python. The key is read from `SDP_API_KEY`, never inlined (`auth: "none"` leaves it out for a public route), and a call carries an `Idempotency-Key` only where its route declares the header (`takesIdempotencyKey`), whatever its method.                                                                                                       |
+- `@sdp/api-catalog/reference` defines every public operation, including Health
+  and Projects, with request schemas and per-status response examples.
+- `@sdp/api-catalog/catalog` lists those operations in document order and
+  projects the existing dashboard playground forms from them.
+- `@sdp/api-catalog/playground-catalog` is generated at `experimental` by
+  `pnpm generate:api-playground`. It carries the dashboard's four existing
+  sections and proxy allowlist. The dashboard filters them by release channel.
+- `@sdp/api-catalog/snippets` writes cURL, TypeScript and Python samples. It
+  reads the key from `SDP_API_KEY` and sends `Idempotency-Key` only when the
+  route declares it.
 
-The dashboard playground still reads its own generated catalog; it moves onto this model next
-(PRO-2298).
+The docs build gets its channel-specific reference from
+`apps/sdp-api/generated/api-reference.json`. The committed playground projection
+stays at `experimental` so CI can check drift across all sections.
 
-## Scripts
+## Checks
 
 ```sh
 pnpm --filter @sdp/api-catalog typecheck
 pnpm --filter @sdp/api-catalog test
 pnpm --filter @sdp/api-catalog lint
+pnpm check:api-playground
 ```

@@ -1,3 +1,5 @@
+import type { PlaygroundModule } from "@sdp/api-catalog/catalog";
+import generatedCatalog from "@sdp/api-catalog/playground-catalog";
 import type { RampProviderId } from "@sdp/types/provider-access";
 // biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
@@ -14,9 +16,6 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundMethod,
 } from "@/components/api-playground-shell";
-import generatedCatalog from "./api-playground-catalog.generated.json";
-
-type PlaygroundModule = "wallets" | "payments" | "counterparties" | "issuance";
 
 type RouteOwner = SdpModule | "core";
 type ValueGate = { module: SdpModule } | { rampProvider: RampProviderId };
@@ -33,8 +32,8 @@ interface GeneratedPlaygroundCatalog {
   valueGates: Record<string, { module?: string; rampProvider?: string }>;
 }
 
-// SAFETY: scripts/generate-playground-catalog.ts writes this file from the same
-// shapes; JSON imports widen literal unions such as the HTTP method to string.
+// SAFETY: scripts/generate-playground-catalog.ts writes this package artifact from
+// the shared reference; JSON imports widen literal unions such as the method to string.
 // Module and provider names are parsed below rather than trusted.
 const catalog = generatedCatalog as GeneratedPlaygroundCatalog;
 
@@ -125,9 +124,9 @@ const VALUE_GATES = new Map(
  * The published playground operation `method pathname` is on `releaseChannel`,
  * or undefined. This is the playground's allowlist: the proxy route refuses
  * anything it does not return and the forms offer nothing it does not return,
- * so the two cannot disagree. The catalog holds the public OpenAPI document's
- * API-key operations (Earn held out), so an internal, admin or undocumented
- * route is never reachable through the playground.
+ * so the two cannot disagree. The catalog holds only the dashboard's existing
+ * playground sections from the public document (Earn held out), so an internal,
+ * admin or undocumented route is never reachable through the playground.
  *
  * @param method - The HTTP method.
  * @param pathname - A concrete pathname (`/v1/x/abc`) or a form's template (`/v1/x/{id}`), no query.
