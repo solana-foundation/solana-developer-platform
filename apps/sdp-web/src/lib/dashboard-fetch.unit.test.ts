@@ -498,7 +498,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
 
     await expect(
       dashboardRequest(PATH, { method: "POST", body: "{}", signal: controller.signal })
-    ).rejects.toBeDefined();
+    ).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -598,7 +598,7 @@ describe("dashboardRequest Idempotency-Key per user action (HOO-1918)", () => {
     controller.abort();
     respond(jsonResponse(201));
 
-    await expect(aborted).rejects.toBeDefined();
+    await expect(aborted).rejects.toThrow();
     expect((await joined).status).toBe(201);
     expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
   });
