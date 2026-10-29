@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { OrganizationRole } from "@sdp/types/roles";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as membersActions from "@/app/members/actions";
@@ -88,5 +88,45 @@ describe("MemberActions role choices", () => {
     await user.click(screen.getByRole("menuitem", { name: "Make read-only" }));
     await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
     expect(change.mock.calls[0]?.slice(0, 2)).toEqual(["mem_test_viewer", "viewer"]);
+  });
+});
+
+describe("MemberActions removal", () => {
+  const openRemoval = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "Actions for Teammate" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove member" }));
+    return within(await screen.findByRole("dialog", { name: "Remove member" }));
+  };
+
+  it("holds the removal until the member's keys load", async () => {
+    vi.spyOn(membersActions, "listMemberApiKeys").mockReturnValue(
+      new Promise<membersActions.MemberApiKey[]>(() => {})
+    );
+    const user = userEvent.setup();
+    render(row("mem_test_keys_pending", "member"));
+
+    const dialog = await openRemoval(user);
+    expect(dialog.getByText("Checking the API keys this member created…")).toBeTruthy();
+    expect(dialog.getByRole("button", { name: "Remove member" }).hasAttribute("disabled")).toBe(
+      true
+    );
+  });
+
+  it("removes anyway after the keys fail to load", async () => {
+    vi.spyOn(membersActions, "listMemberApiKeys").mockRejectedValue(new Error("unavailable"));
+    const remove = vi.spyOn(membersActions, "removeMember").mockResolvedValue(REFUSED);
+    const user = userEvent.setup();
+    render(row("mem_test_keys_failed", "member"));
+
+    const dialog = await openRemoval(user);
+    await user.click(await dialog.findByRole("button", { name: "Remove anyway" }));
+    expect(
+      dialog.getByText(
+        "Could not load the API keys this member created. Removing them does not revoke their keys."
+      )
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(remove).toHaveBeenCalledWith("mem_test_keys_failed", expect.any(String))
+    );
   });
 });

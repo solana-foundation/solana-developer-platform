@@ -67,6 +67,11 @@ import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import {
+  cancelSeededPaymentRequest,
+  seedPaymentRequest,
+  setPaymentRequestColumns,
+} from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as paymentRequestTransfer from "./payment-request-transfer";
@@ -96,10 +101,10 @@ async function closeLapsedPaymentRequest(
   return (await paymentRequests.closeLapsedPaymentRequest(...args)).row;
 }
 
-async function checkExpiredPaymentRequestForLatePayment(
-  ...args: Parameters<typeof paymentRequests.checkExpiredPaymentRequestForLatePayment>
+async function checkClosedPaymentRequestForLatePayment(
+  ...args: Parameters<typeof paymentRequests.checkClosedPaymentRequestForLatePayment>
 ) {
-  return (await paymentRequests.checkExpiredPaymentRequestForLatePayment(...args)).row;
+  return (await paymentRequests.checkClosedPaymentRequestForLatePayment(...args)).row;
 }
 
 let signaturesSpy: MockInstance<typeof solanaRpc.getSignaturesForAddress>;
@@ -205,10 +210,7 @@ async function createRequestFor(params: {
   amount: string;
   expiresAt: string | null;
 }) {
-  return createPaymentRequestsRepository(
-    env,
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
-  ).createPaymentRequest({
+  return seedPaymentRequest(env, {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -698,7 +700,7 @@ describe("closeLapsedPaymentRequest", () => {
   });
 });
 
-describe("checkExpiredPaymentRequestForLatePayment", () => {
+describe("checkClosedPaymentRequestForLatePayment", () => {
   installSettlementHooks();
 
   it("moves an expired request to paid late when a payment shows up", async () => {
@@ -707,7 +709,7 @@ describe("checkExpiredPaymentRequestForLatePayment", () => {
     const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
     mockSettlementSucceeds(PAST_SECONDS + 60n);
-    const late = await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+    const late = await onSandbox(() => checkClosedPaymentRequestForLatePayment(env, expired));
 
     expect(late).toMatchObject({ status: "paid", paid_late: true });
     expect(late.fulfilled_by_transfer_id).not.toBeNull();
@@ -719,7 +721,7 @@ describe("checkExpiredPaymentRequestForLatePayment", () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
-    const checked = await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+    const checked = await onSandbox(() => checkClosedPaymentRequestForLatePayment(env, expired));
 
     expect(checked).toMatchObject({ status: "expired", paid_late: false });
     expect(await listInboundTransfers()).toHaveLength(0);
@@ -808,7 +810,7 @@ describe("settlement audit", () => {
     const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
     mockSettlementSucceeds(PAST_SECONDS + 60n);
-    await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+    await onSandbox(() => checkClosedPaymentRequestForLatePayment(env, expired));
 
     expect(await listPaymentRequestAudits(request.id, "settle")).toEqual([
       {
@@ -1268,10 +1270,36 @@ describe("payment lateness", () => {
     const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
     mockSettlementSucceeds(PAST_SECONDS - 60n);
-    const settled = await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+    const settled = await onSandbox(() => checkClosedPaymentRequestForLatePayment(env, expired));
 
     expect(settled).toMatchObject({ status: "paid", paid_late: false });
   });
+
+  it.each([
+    [-60n, false],
+    [60n, true],
+  ])(
+    "settles a canceled request a payment landed %ss after the cancel, paid late: %s",
+    async (secondsAfterCancel, paidLate) => {
+      const canceled = await cancelSeededPaymentRequest(
+        env,
+        await createRequest({ token: SOL_MINT, expiresAt: null }),
+        { apiKeyId: null, userId: TEST_USER.id }
+      );
+      await setPaymentRequestColumns(env, canceled.id, { canceled_at: PAST });
+
+      mockSettlementSucceeds(PAST_SECONDS + secondsAfterCancel);
+      const settled = await onSandbox(() => checkClosedPaymentRequestForLatePayment(env, canceled));
+
+      expect(settled).toMatchObject({
+        status: "paid",
+        paid_late: paidLate,
+        canceled_by_api_key_id: null,
+        canceled_by_user_id: TEST_USER.id,
+        canceled_at: PAST,
+      });
+    }
+  );
 });
 
 describe("lost race to expiry", () => {

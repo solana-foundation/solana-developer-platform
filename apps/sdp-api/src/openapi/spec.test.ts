@@ -3,10 +3,16 @@ import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
 } from "@sdp/types/idempotency-required-routes";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
+import {
+  ANONYMOUS_MAX_REQUESTS,
+  RATE_LIMIT_TIERS,
+  RATE_LIMIT_WINDOW_MS,
+} from "@/middleware/rate-limit";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 import {
@@ -592,10 +598,12 @@ describe("OpenAPI spec", () => {
     );
     const ownerConstraint = [
       {
+        description: "Owned by a Managed config.",
         required: ["custodyConfigId"],
         not: { required: ["custodyConnectionId"] },
       },
       {
+        description: "Owned by a Custody Connection.",
         required: ["custodyConnectionId"],
         not: { required: ["custodyConfigId"] },
       },
@@ -750,6 +758,26 @@ describe("OpenAPI spec", () => {
     });
   }
 
+  // Provider availability lists every family in one response, so a channel
+  // without Compliance must name neither the family nor its providers there,
+  // in values or prose; the runtime response omits those entries to match.
+  for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+    it(`${releaseChannel}: names Compliance in provider availability only when the channel runs it`, () => {
+      const operation = createPublicOpenApiDocument({ releaseChannel }).paths?.[
+        "/v1/projects/{projectId}/provider-availability"
+      ]?.get;
+      expect(operation).toBeDefined();
+      const published = JSON.stringify(operation);
+      const runsCompliance = SDP_RELEASE_CHANNELS[releaseChannel].includes("compliance");
+      const complianceValues = ["compliance", ...COMPLIANCE_PROVIDERS];
+
+      expect(complianceValues.filter((value) => published.includes(`"${value}"`))).toEqual(
+        runsCompliance ? complianceValues : []
+      );
+      expect(/compliance/i.test(published)).toBe(runsCompliance);
+    });
+  }
+
   // A deployment stores values a narrower channel no longer documents (a key
   // saved with `tokens:read` before a downgrade, or created on another
   // channel's dashboard). Response enums therefore open up rather than narrow,
@@ -777,6 +805,16 @@ describe("OpenAPI spec", () => {
         expect(published).not.toContain(`"${value}"`);
       }
       expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
+    }
+  });
+
+  it("gives the docs the rate limits the API enforces, the same on every channel", () => {
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(createPublicSurfaceManifest(releaseChannel).rateLimits).toEqual({
+        windowSeconds: RATE_LIMIT_WINDOW_MS / 1000,
+        apiKeyTiers: RATE_LIMIT_TIERS,
+        unauthenticatedPerIp: ANONYMOUS_MAX_REQUESTS,
+      });
     }
   });
 

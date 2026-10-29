@@ -19,9 +19,9 @@ export type CustodyOutcomeKind =
  * `info` marks a transport problem that is safe to retry; only a conclusive
  * rejection earns `danger`.
  */
-export type CustodyOutcomeTone = "danger" | "info" | "warning" | "neutral";
+type CustodyOutcomeTone = "danger" | "info" | "warning" | "neutral";
 
-export type CustodyOutcomeAction =
+type CustodyOutcomeAction =
   | "enter_credentials_again"
   | "cancel_setup"
   | "add_new_connection"

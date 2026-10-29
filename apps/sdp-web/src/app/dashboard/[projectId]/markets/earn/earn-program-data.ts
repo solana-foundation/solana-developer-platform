@@ -267,7 +267,7 @@ export function earnProgramsRefreshInterval(state: EarnProgramsState | undefined
  * 10s, which is the busy cadence itself, and a poll landing inside its own
  * dedupe window is dropped — freezing the status exactly while it moves.
  */
-export const EARN_PROGRAM_DEDUPING_MS = 2_000;
+const EARN_PROGRAM_DEDUPING_MS = 2_000;
 
 export function useEarnPrograms() {
   const { data, error, isLoading, mutate } = useCadencedSWR(
@@ -832,7 +832,7 @@ const earnVaultDepositResponseSchema = z.object({
  * that failed says nothing about whether the deposit landed, and treating it
  * as an outcome would announce a settlement the API never reported.
  */
-export async function fetchEarnVaultDeposit(
+async function fetchEarnVaultDeposit(
   movementId: string
 ): Promise<EarnVaultDepositRecord | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -897,7 +897,7 @@ async function fetchAllVaultMovementPages<T>(input: {
  * workspace busy enough to push an in-flight deposit past the first page is
  * exactly the case a single request got wrong.
  */
-export async function fetchEarnVaultDeposits(
+async function fetchEarnVaultDeposits(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultDepositRecord[]> {
   return fetchAllVaultMovementPages({
@@ -1254,7 +1254,7 @@ const earnVaultWithdrawalResponseSchema = z.object({
  * deliberately NOT terminal — the caller keeps polling, because a read that
  * failed says nothing about whether the exit landed.
  */
-export async function fetchEarnVaultWithdrawal(
+async function fetchEarnVaultWithdrawal(
   movementId: string
 ): Promise<EarnVaultWithdrawal | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -1278,7 +1278,7 @@ const earnVaultWithdrawalsPageSchema = z.object({
  * and fails loudly rather than truncating, exactly like the deposits reader —
  * a silently short page here is an exit that stops being tracked.
  */
-export async function fetchEarnVaultWithdrawals(
+async function fetchEarnVaultWithdrawals(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawal[]> {
   return fetchAllVaultMovementPages({
@@ -1617,7 +1617,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
 }
 
-export async function fetchEarnVaultWithdrawalRequest(
+async function fetchEarnVaultWithdrawalRequest(
   withdrawalRequestId: string
 ): Promise<EarnVaultWithdrawalRequestRecord | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -1667,9 +1667,7 @@ export async function fetchEarnVaultWithdrawalRequests(
   });
 }
 
-export function isEarnVaultWithdrawalRequestInFlight(
-  request: EarnVaultWithdrawalRequestRecord
-): boolean {
+function isEarnVaultWithdrawalRequestInFlight(request: EarnVaultWithdrawalRequestRecord): boolean {
   return !isEarnVaultQueuedWithdrawalTerminal(request.status);
 }
 
@@ -1764,7 +1762,7 @@ export function createEarnWithdrawal(
   return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
 }
 
-export function fetchEarnWithdrawal(
+function fetchEarnWithdrawal(
   programId: string,
   withdrawalRef: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {

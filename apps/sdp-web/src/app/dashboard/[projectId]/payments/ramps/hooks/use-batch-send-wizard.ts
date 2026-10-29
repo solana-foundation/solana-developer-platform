@@ -1,7 +1,11 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CounterpartyAccountSummary,
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
   type SolanaCluster,
@@ -48,7 +52,7 @@ import type { RampWizardStep } from "./use-ramp-wizard";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
-export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
     // The rows form speaks for itself; the step header already says "Details".
     { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
@@ -88,7 +92,7 @@ export interface BatchRecipientDraft {
   amount: string;
 }
 
-export interface BatchRecipientEntry {
+interface BatchRecipientEntry {
   recipient: BatchEligibleRecipient;
   amount: string;
 }
@@ -237,6 +241,43 @@ function batchCanProceed({
     (selectedWallet?.isRuntimeExecutionAllowed === true &&
       (currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true))
   );
+}
+
+/** How often an estimate with warnings is re-read while the review is open. */
+const ESTIMATE_WARNING_RECHECK_MS = 10_000;
+
+/**
+ * The minimum SOL amount of each recipient the estimate says create would
+ * refuse (HOO-2375), by counterparty account. Warnings name recipients by
+ * index into the canonical request, which may be reordered.
+ */
+export function belowRentMinimumByAccount(
+  warnings: readonly PaymentTransferBatchEstimateWarning[],
+  requestRecipients: readonly { counterpartyAccountId: string }[]
+): Map<string, string> {
+  const byAccount = new Map<string, string>();
+  for (const warning of warnings) {
+    if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
+    // The estimate is keyed by this exact request, so every index is in it.
+    const recipient = requestRecipients[warning.recipientIndex];
+    if (recipient === undefined) {
+      throw new Error(
+        `Estimate warning names recipient ${warning.recipientIndex}, not in the request`
+      );
+    }
+    byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+  }
+  return byAccount;
+}
+
+/** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
+export function sourceBelowRentMinimum(
+  warnings: readonly PaymentTransferBatchEstimateWarning[]
+): { sourceRemainder: string; minimumAmount: string } | null {
+  const warning = warnings.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
+    ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
+    : null;
 }
 
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
@@ -440,8 +481,39 @@ export function useBatchSendWizard({
       ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // Each estimate belongs to its own request: its warnings index that
+      // request's recipients, and Send waits for it. The dashboard default
+      // keeps the previous request's estimate while the next one loads.
+      keepPreviousData: false,
+      // A flagged address may be funded elsewhere: recheck until it clears,
+      // so Send re-enables without the request changing (HOO-2375).
+      refreshInterval: (latest) =>
+        latest !== undefined && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+    }
   );
+  // No estimate yet (loading or failed): nothing to flag.
+  const belowRentMinimum = useMemo(
+    () =>
+      estimate === undefined
+        ? new Map<string, string>()
+        : belowRentMinimumByAccount(estimate.warnings, request.recipients),
+    [estimate, request]
+  );
+  const sourceRentShortfall = useMemo(
+    () => (estimate === undefined ? null : sourceBelowRentMinimum(estimate.warnings)),
+    [estimate]
+  );
+  // Create would refuse the batch (409): nothing to send until it is fixed.
+  // Review sends only once the estimate has answered (or failed, as before)
+  // and named no recipient create would refuse.
+  const estimateSettled = estimate !== undefined || estimateError !== undefined;
+  const canSend =
+    canProceed &&
+    (currentStepId !== "REVIEW" ||
+      batchResult !== null ||
+      (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null));
 
   const submitBatch = async () => {
     setSubmitting(true);
@@ -494,7 +566,7 @@ export function useBatchSendWizard({
   };
 
   const handlePrimary = async () => {
-    if (!canProceed) {
+    if (!canSend) {
       return;
     }
     if (isLastStep) {
@@ -527,7 +599,7 @@ export function useBatchSendWizard({
     stepIndex,
     currentStepId,
     isLastStep,
-    canProceed,
+    canProceed: canSend,
     liveWallets,
     walletsLoading,
     liveWalletsError,
@@ -563,6 +635,8 @@ export function useBatchSendWizard({
     setRecipientAmount,
     bulkImport,
     estimate: estimate ?? null,
+    belowRentMinimum,
+    sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,

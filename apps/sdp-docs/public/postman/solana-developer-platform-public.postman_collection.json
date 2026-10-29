@@ -317,7 +317,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/projects/{{projectId}}/provider-availability",
-            "description": "Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
+            "description": "Lists every provider this deployment's release channel publishes, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
           }
         }
       ]
@@ -998,7 +998,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
@@ -1031,7 +1031,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
-            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1069,7 +1069,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1194,6 +1194,15 @@
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
             "description": "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles before the approval is revoked: the revoke waits for it, and the background sweep revokes the approval once it has settled."
+          }
+        },
+        {
+          "name": "Cancel payment request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/requests/{{paymentRequestId}}/cancel",
+            "description": "Cancels an open payment request, so its payment link stops building and sponsoring transactions. Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel."
           }
         },
         {

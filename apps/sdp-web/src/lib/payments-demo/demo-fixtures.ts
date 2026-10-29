@@ -651,17 +651,22 @@ const SCHEDULE_SPECS: readonly ScheduleSpec[] = [
   },
 ];
 
-interface RequestSpec {
+interface RequestSpecBase {
   key: string;
   wallet: WalletKey;
   amount: string;
-  status: PaymentRequestStatus;
   createdAgo: number;
   /** Signed offset from `now`, or null for a request that never expires. */
   expiresAt: number | null;
-  paidByTransferId?: string;
-  canceledAgo?: number;
 }
+
+/** A canceled request says when it was canceled; a paid one may name the transfer that paid it. */
+type RequestSpec = RequestSpecBase &
+  (
+    | { status: Exclude<PaymentRequestStatus, "paid" | "canceled"> }
+    | { status: "paid"; paidByTransferId?: string }
+    | { status: "canceled"; canceledAgo: number }
+  );
 
 const REQUEST_SPECS: readonly RequestSpec[] = [
   {
@@ -1122,14 +1127,17 @@ function buildRequest(
 ): CreatedPaymentRequest {
   const wallet = world.wallets[spec.wallet];
   const createdAt = clock.ago(spec.createdAgo);
-  const paidAt = transfers.find((row) => row.transfer.id === spec.paidByTransferId)?.transfer
-    .createdAt;
+  const paidAt =
+    spec.status === "paid"
+      ? transfers.find((row) => row.transfer.id === spec.paidByTransferId)?.transfer.createdAt
+      : undefined;
   const expiresAt = spec.expiresAt === null ? null : clock.at(spec.expiresAt);
+  const canceledAt = spec.status === "canceled" ? clock.ago(spec.canceledAgo) : null;
   const closedAt =
     spec.status === "paid"
       ? paidAt
-      : spec.status === "canceled" && spec.canceledAgo !== undefined
-        ? clock.ago(spec.canceledAgo)
+      : canceledAt !== null
+        ? canceledAt
         : spec.status === "expired"
           ? (expiresAt ?? undefined)
           : undefined;
@@ -1146,7 +1154,10 @@ function buildRequest(
     status: spec.status,
     expiresAt,
     fulfilledByTransferId: spec.status === "paid" ? (spec.paidByTransferId ?? null) : null,
-    canceledBy: spec.status === "canceled" ? CREATED_BY : null,
+    paidLate: false,
+    canceledByApiKeyId: null,
+    canceledByUserId: spec.status === "canceled" ? CREATED_BY : null,
+    canceledAt,
     lifecycle: [
       { status: "awaiting_payment", at: createdAt },
       ...(closedAt === undefined ? [] : [{ status: spec.status, at: closedAt }]),

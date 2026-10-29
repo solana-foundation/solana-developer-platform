@@ -18,6 +18,8 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+# A devDependency (the API reference model the OpenAPI generator writes); the bundle never imports it.
+COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-helius-rings/package.json ./packages/sdp-helius-rings/
 COPY packages/sdp-helius-rings-sdk/package.json ./packages/sdp-helius-rings-sdk/

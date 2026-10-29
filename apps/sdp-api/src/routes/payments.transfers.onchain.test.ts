@@ -178,6 +178,54 @@ describe("Payments routes — on-chain transfers", () => {
     expect(await countTransferRows()).toBe(0);
   });
 
+  describe("native SOL below the rent-exempt minimum (HOO-2375)", () => {
+    const account = (lamports: number) => ({
+      data: ["", "base64"],
+      executable: false,
+      lamports,
+      owner: "11111111111111111111111111111111",
+      rentEpoch: 0,
+      space: 0,
+    });
+
+    it.each([
+      {
+        case: "pays less than the minimum to an address with no account",
+        amount: "0.0001",
+        // The small destination, then the source.
+        accounts: [null, account(5_000_000_000)],
+        details: { recipientIndexes: [0], sourceRemainder: null },
+      },
+      {
+        case: "would leave the source wallet below the minimum",
+        amount: "0.5",
+        accounts: [account(500_300_000)],
+        details: { recipientIndexes: [], sourceRemainder: "0.0003" },
+      },
+    ])(
+      "refuses a transfer that $case with an unstored 409 before writing a row",
+      async ({ amount, accounts, details }) => {
+        rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: accounts });
+        const res = await postTransfer(
+          {
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount,
+          },
+          {}
+        );
+
+        expect(res.status).toBe(409);
+        const body = await readErrorResponse(res);
+        expect(body.error.code).toBe("AMOUNT_BELOW_RENT_MINIMUM");
+        expect(body.error.details).toMatchObject({ ...details, minimumAmount: "0.00089088" });
+        expect(sendTransactionMock).not.toHaveBeenCalled();
+        expect(await countTransferRows()).toBe(0);
+      }
+    );
+  });
+
   it("executes a SOL transfer, waits for finalization, and returns a finalized transfer record", async () => {
     const res = await postTransfer(
       {

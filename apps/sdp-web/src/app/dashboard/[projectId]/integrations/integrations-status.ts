@@ -45,12 +45,12 @@ const COMPLIANCE_DESCRIPTION_KEYS: Record<ComplianceProviderId, MessageKey> = {
   chainalysis: "Shared.integrations.complianceChainalysisDescription",
 };
 
-export const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
+const RAMP_PROVIDER_LABELS: Record<RampProviderId, string> = {
   moonpay: "MoonPay",
   stripe: "Stripe",
 };
 
-export const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {
+const COMPLIANCE_PROVIDER_LABELS: Record<ComplianceProviderId, string> = {
   range: "Range",
   elliptic: "Elliptic",
   trm: "TRM Labs",
