@@ -11,7 +11,12 @@ import {
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent, projectScopeWithDeclaredIdempotencyHeaders } from "./helpers";
-import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
+import {
+  inviteMemberResponse,
+  listMembersResponse,
+  memberApiKeysResponse,
+  memberRoleResponse,
+} from "./responses";
 
 // Matches each route's `idempotent()` step (ADR 0009); spec.test.ts checks.
 const keyAcceptedStoredHeaders = projectScopeWithDeclaredIdempotencyHeaders({
@@ -153,6 +158,29 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
         content: jsonContent(memberRoleResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/members/{memberId}/api-keys",
+    tags: ["Members"],
+    summary: "List a member's API keys",
+    operationId: "listMemberApiKeys",
+    description:
+      "Lists the active API keys the member created, across every project of the organization, newest first. Keys belong to the organization: removing the member leaves them working, so an admin reads this before or after a removal to decide which to revoke. A rotated key keeps the creator of the key it replaced.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      params: z.object({
+        memberId: memberIdParamSchema,
+      }),
+    },
+    responses: {
+      200: {
+        description: "The member's active API keys",
+        content: jsonContent(memberApiKeysResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 

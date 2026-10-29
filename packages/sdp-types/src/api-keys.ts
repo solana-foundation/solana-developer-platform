@@ -10,7 +10,14 @@ export type SdpEnvironment = (typeof SDP_ENVIRONMENTS)[number];
 
 export type ApiKeyEnvironment = SdpEnvironment;
 
-export type ApiKeyStatus = "active" | "revoked" | "expired" | "deactivated";
+export const API_KEY_STATUSES = ["active", "revoked", "expired", "deactivated"] as const;
+export type ApiKeyStatus = (typeof API_KEY_STATUSES)[number];
+
+/** Statuses a key never leaves: key lists leave them out. Expired keys stay listed. */
+export const API_KEY_ENDED_STATUSES = [
+  "revoked",
+  "deactivated",
+] as const satisfies readonly ApiKeyStatus[];
 
 /** A row of a key's signing-wallet list: listed, or taken off it (soft deleted). */
 export const API_KEY_SIGNING_WALLET_STATUSES = ["active", "archived"] as const;

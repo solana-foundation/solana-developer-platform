@@ -9,7 +9,7 @@ import { requireHumanSession } from "@/middleware/human-session";
 import { idempotent } from "@/middleware/idempotency";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { publicRoute, requireAction } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
+import { validateBody, validateParams } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   authorizeOrganizationInvitation,
@@ -17,12 +17,13 @@ import {
   getCurrentMember,
   inviteMember,
   leaveOrganization,
+  listMemberApiKeys,
   listMembers,
   removeMember,
   revokeInvitation,
   updateMemberRole,
 } from "./handlers";
-import { inviteSchema, updateMemberRoleSchema } from "./schemas";
+import { inviteSchema, memberParamsSchema, updateMemberRoleSchema } from "./schemas";
 
 export const members = new Hono<{ Bindings: Env }>();
 
@@ -61,6 +62,12 @@ members.delete(
     "signed-in members only: leaving acts on the caller's own membership, which any member may end"
   ),
   leaveOrganization
+);
+members.get(
+  "/:memberId/api-keys",
+  requireAction("members.manage"),
+  validateParams(memberParamsSchema),
+  listMemberApiKeys
 );
 members.patch(
   "/:memberId",

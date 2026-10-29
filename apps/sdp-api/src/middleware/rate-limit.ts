@@ -20,7 +20,8 @@ export const RATE_LIMIT_TIERS = {
   unlimited: 10_000,
 } as const satisfies Record<RateLimitTier, number>;
 
-const ANONYMOUS_MAX_REQUESTS = 20;
+/** Maximum admitted requests per window, per client IP, for a request without a credential. */
+export const ANONYMOUS_MAX_REQUESTS = 20;
 
 /**
  * Per-user-per-org ceiling for dashboard traffic (Clerk JWT). Dashboard

@@ -5,7 +5,7 @@
 ## Canonical URLs
 - Docs: https://platform.solana.com/docs
 - API: https://api.solana.com
-- Interactive API docs: https://api.solana.com/docs
+- API reference: https://platform.solana.com/docs/reference/api
 - OpenAPI: https://api.solana.com/openapi.json
 - AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
@@ -33,8 +33,9 @@
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
 - [Documentation for AI](https://platform.solana.com/docs/reference/docs-for-ai): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+- [API conventions](https://platform.solana.com/docs/reference/conventions): What every SDP API call has in common, from how it authenticates to how it fails.
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
-- [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
+- [API Reference](https://platform.solana.com/docs/reference/api): Every public API endpoint, grouped by family and generated from OpenAPI.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
 - [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
 - [Projects](https://platform.solana.com/docs/reference/api/projects): Projects and their provider availability. Project members and keys are managed in the dashboard.
@@ -53,7 +54,6 @@
 - [SKILL.md](https://platform.solana.com/SKILL.md): Agent skill with the rules for building on SDP.
 - Any docs page as Markdown: add `.md` to its URL.
 - [OpenAPI](https://api.solana.com/openapi.json)
-- [Swagger UI](https://api.solana.com/docs)
 
 ## Scope
 - Public AI artifacts intentionally exclude hidden or internal-only API families.
