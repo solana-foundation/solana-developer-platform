@@ -2620,7 +2620,7 @@ describe("payment transfer batches", () => {
     const readBatch = async (response: Response) => batchBodySchema.parse(await response.json());
 
     /** Two recipients in two chunks; the first chunk sent is rejected, so it never lands. */
-    async function seedPartiallyFailedBatch() {
+    async function seedPartiallyFailedBatch(run = "") {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
@@ -2632,7 +2632,7 @@ describe("payment transfer batches", () => {
         })
       );
       sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
-      const counterpartyId = await seedCounterparty("batch_retry_counterparty");
+      const counterpartyId = await seedCounterparty(`batch_retry_counterparty${run}`);
       const accountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
         TEST_SOLANA_ADDRESSES.wallet2,
         TEST_SOLANA_ADDRESSES.wallet3,
@@ -2647,7 +2647,7 @@ describe("payment transfer batches", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
           body: JSON.stringify({
-            externalId: testRunId(),
+            externalId: `${testRunId()}${run}`,
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: accountIds.map((counterpartyAccountId) => ({
@@ -2774,6 +2774,33 @@ describe("payment transfer batches", () => {
       expect(rerun.headers.get("Idempotent-Replayed")).toBe("true");
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("answers a key reused on another batch's retry by that batch, never the first", async () => {
+      const first = await seedPartiallyFailedBatch();
+      const second = await seedPartiallyFailedBatch("-second");
+      vi.clearAllMocks();
+      const key = crypto.randomUUID();
+      expect((await retry(first.batch.id, key)).status).toBe(200);
+
+      // While the key's record lives, the key layer refuses it on another batch.
+      const reused = await retry(second.batch.id, key);
+      expect(reused.status).toBe(422);
+      expect(await reused.json()).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED" } });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+
+      // Once it is gone, the first batch's retry row is not the second's answer:
+      // the key is a new retry of the second batch.
+      await getDb(env).execute("DELETE FROM idempotency_keys");
+      const resent = await retry(second.batch.id, key);
+      expect(resent.status).toBe(200);
+      expect(resent.headers.get("Idempotent-Replayed")).toBeNull();
+      expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+      const body = await readBatch(resent);
+      expect(body.data.batch.id).toBe(second.batch.id);
+      expect(body.data.recipients.find((r) => r.id === second.failed.id)?.status).toBe(
+        "processing"
+      );
     });
 
     it("fails a crashed retry's unsent recipients on a same-key rerun, so they can be retried", async () => {

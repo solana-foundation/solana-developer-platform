@@ -435,8 +435,9 @@ export interface PaymentTransferBatchesRepository {
    * from: still the batch's transactions, so its responses keep showing them.
    */
   listSupersededTransferIds(input: RecomputeTransferBatchStatusInput): Promise<string[]>;
-  /** The retry recorded under a credential-bound record key, if any. */
+  /** The batch's retry recorded under a credential-bound record key, if any. */
   findTransferBatchRetryByIdempotency(input: {
+    batchId: string;
     organizationId: string;
     projectId: string;
     idempotencyKey: string;

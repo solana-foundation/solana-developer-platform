@@ -106,16 +106,14 @@ export async function findTransferBatchRetryReplay(
   const { batch, projectId } = input.authorized;
   const organizationId = input.authorized.scope.auth.organizationId;
   const retry = await getPaymentTransferBatchesRepository(c).findTransferBatchRetryByIdempotency({
+    batchId: batch.id,
     organizationId,
     projectId,
     idempotencyKey: recordKey,
   });
   if (retry === null) return null;
-  if (
-    retry.batch_id !== batch.id ||
-    !idempotencyFingerprintMatches(c, retry.idempotency_fingerprint)
-  ) {
-    // Another request's retry under this key: the step refuses it (422).
+  if (!idempotencyFingerprintMatches(c, retry.idempotency_fingerprint)) {
+    // Another request's retry of this batch under this key: the step refuses it (422).
     return { fingerprint: retry.idempotency_fingerprint, respond: () => success(c, {}) };
   }
   const settled =

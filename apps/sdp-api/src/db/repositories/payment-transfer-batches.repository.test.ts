@@ -302,14 +302,34 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     expect(
       await repo.findTransferBatchRetryByIdempotency({
         ...scope,
+        batchId: batch.id,
         idempotencyKey: "retry-record-key-2",
       })
     ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
     for (const lost of ["retry-record-key-1", "retry-record-key-3"]) {
       expect(
-        await repo.findTransferBatchRetryByIdempotency({ ...scope, idempotencyKey: lost })
+        await repo.findTransferBatchRetryByIdempotency({
+          ...scope,
+          batchId: batch.id,
+          idempotencyKey: lost,
+        })
       ).toBeNull();
     }
+    // Scoped by its batch: another batch's id finds nothing and leaves the row as it was.
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        batchId: "tbatch_other",
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toBeNull();
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        batchId: batch.id,
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
   });
 });
 

@@ -18,8 +18,10 @@ CREATE TABLE payment_transfer_batch_retries (
     created_at TEXT NOT NULL DEFAULT sdp_iso_now()
 );
 
-CREATE UNIQUE INDEX payment_transfer_batch_retries_org_project_key
-    ON payment_transfer_batch_retries (organization_id, project_id, idempotency_key)
+-- A retry's key is its batch's: a key reused on another batch once its shared
+-- record has expired is a new request (the record refused it until then).
+CREATE UNIQUE INDEX payment_transfer_batch_retries_batch_key
+    ON payment_transfer_batch_retries (organization_id, project_id, batch_id, idempotency_key)
     WHERE status = 'active';
 
 CREATE INDEX payment_transfer_batch_retries_batch

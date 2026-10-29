@@ -887,14 +887,19 @@ export function createPostgresPaymentTransferBatchesRepository(
       );
     },
 
-    async findTransferBatchRetryByIdempotency({ organizationId, projectId, idempotencyKey }) {
+    async findTransferBatchRetryByIdempotency({
+      batchId,
+      organizationId,
+      projectId,
+      idempotencyKey,
+    }) {
       const row = await db
         .prepare(
           `SELECT * FROM payment_transfer_batch_retries
-            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?
-              AND status = 'active'`
+            WHERE organization_id = ? AND project_id = ? AND batch_id = ?
+              AND idempotency_key = ? AND status = 'active'`
         )
-        .bind(organizationId, projectId, idempotencyKey)
+        .bind(organizationId, projectId, batchId, idempotencyKey)
         .first<Record<string, unknown>>();
       return row ? mapPaymentTransferBatchRetryRow(row) : null;
     },
