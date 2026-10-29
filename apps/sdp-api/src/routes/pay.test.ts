@@ -645,6 +645,44 @@ describe("Public payment request routes", () => {
       expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR + 1);
     });
 
+    it("holds each clock hour to the cap across an hour boundary", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000 + 3_600_000;
+      const now = vi.spyOn(Date, "now");
+      onTestFinished(() => now.mockRestore());
+      const postAt = async (ms: number) => {
+        now.mockReturnValue(ms);
+        return (await postTransaction(request.public_token)).status;
+      };
+      rpc.answer("getBlockHeight", 2_000);
+
+      // Six in the last minute of one hour fill it.
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect(await postAt(hour - 30_000)).toBe(200);
+      }
+      // Just past the boundary the previous hour still counts nearly in full: one more fits.
+      expect(await postAt(hour + 30_000)).toBe(200);
+      expect(await postAt(hour + 30_000)).toBe(429);
+      // Near the next hour's end its weight has decayed, but the hour holds to six.
+      const lateStatuses: number[] = [];
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        lateStatuses.push(await postAt(hour + 3_540_000));
+      }
+      expect(lateStatuses.filter((status) => status === 200)).toHaveLength(
+        PAY_SPONSOR_SIGNATURES_PER_HOUR - 1
+      );
+      expect(lateStatuses.at(-1)).toBe(429);
+      expect(sign).toHaveBeenCalledTimes(2 * PAY_SPONSOR_SIGNATURES_PER_HOUR);
+    });
+
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
       const sponsorship = stubSponsorship();
       sponsorship.mockImplementationOnce(() => ({

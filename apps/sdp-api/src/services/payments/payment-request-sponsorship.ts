@@ -52,6 +52,10 @@ import type { Env } from "@/types/env";
  * payer needs one or two; a claim lasts one blockhash lifetime, and every signature counts against
  * Kora's quota and reserves budget whether or not it lands. Six leaves a payer room to retry a
  * failed or expired transaction.
+ *
+ * Counted in the shared sliding window, which holds each UTC clock hour to six exactly (at most
+ * 144 a day, against Kora's fixed UTC-day quota). Its estimate of the previous hour decays across
+ * the next, so a run of signatures straddling an hour boundary can reach twelve within 60 minutes.
  */
 export const PAY_SPONSOR_SIGNATURES_PER_HOUR = 6;
 const PAY_SPONSOR_SIGNATURE_WINDOW_MS = 3_600_000;
@@ -102,7 +106,7 @@ function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): v
  * @returns The partially signed transaction, or the hold another payer's live claim places.
  * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, a
  *   concurrent claim superseded this one, or the request has asked for
- *   `PAY_SPONSOR_SIGNATURES_PER_HOUR` sponsor signatures in the last hour.
+ *   its `PAY_SPONSOR_SIGNATURES_PER_HOUR` sponsor signatures for the sliding window.
  * @throws AppError `SERVICE_UNAVAILABLE` when the signature counter store is unavailable.
  * @throws AppError `BAD_REQUEST` when the payer is the sponsor, a SOL amount is not positive, or
  *   the request stopped being payable before its claim (canceled, paid or expired).
