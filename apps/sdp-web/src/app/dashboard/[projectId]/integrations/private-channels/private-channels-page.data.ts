@@ -3,7 +3,6 @@ import type {
   PrivateChannelDto,
   PrivateChannelEventListEnvelope,
   PrivateChannelInstance,
-  PrivateChannelInstanceOverview,
   PrivateChannelPrincipalDto,
   PrivateChannelTokenEligibility,
   PrivateChannelVerifiedWalletDto,
@@ -14,7 +13,6 @@ import {
   fetchPrivateChannelEventReferences,
   fetchPrivateChannelEvents,
   fetchPrivateChannelInstance,
-  fetchPrivateChannelOverview,
   fetchPrivateChannelPrincipals,
   fetchPrivateChannels,
   fetchPrivateChannelTokenEligibility,
@@ -58,24 +56,6 @@ export function loadInstance(
   client: SdpApiClient
 ): Promise<PrivateChannelsResult<PrivateChannelInstance | null>> {
   return toResult(async () => (await fetchPrivateChannelInstance(client)).instance ?? null, null);
-}
-
-/**
- * The active instance plus its live overview. Resolves `{ok: true, data: null}`
- * for the expected "no active instance" 404, which callers redirect on — that is
- * a routing signal, not a load failure, so it must not read as an error state.
- */
-export async function loadOverview(client: SdpApiClient): Promise<
-  PrivateChannelsResult<{
-    instance: PrivateChannelInstance;
-    overview: PrivateChannelInstanceOverview;
-  } | null>
-> {
-  const result = await toResult(() => fetchPrivateChannelOverview(client), null);
-  if (!result.ok && result.status === 404) {
-    return { ok: true, data: null };
-  }
-  return result;
 }
 
 export function loadChannels(

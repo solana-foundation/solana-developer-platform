@@ -557,6 +557,11 @@ export interface PaymentTransferSummary {
   counterpartyId?: string;
   counterpartyDisplayName?: string;
   providerReference?: string;
+  fireblocks?: {
+    transactionId: string | null;
+    status: string;
+    subStatus: string | null;
+  };
   deliveryMode?: PaymentRampQuoteDeliveryMode;
   fiatCurrency?: string;
   fiatAmount?: string;
@@ -697,6 +702,43 @@ export interface ListProjectCounterpartyAccountsEnvelope {
   };
 }
 
+/** What a batch estimate says create would refuse for rent (HOO-2375). */
+export const paymentTransferBatchEstimateWarningSchema = z.discriminatedUnion("code", [
+  z
+    .object({
+      code: z
+        .literal("AMOUNT_BELOW_RENT_MINIMUM")
+        .describe(
+          "A native SOL recipient's address holds no account and its amount is below the rent-exempt minimum."
+        ),
+      recipientIndex: z
+        .number()
+        .int()
+        .describe("Zero-based index of the recipient in the request."),
+      minimumAmount: z
+        .string()
+        .describe("The smallest SOL amount the address can receive while it has no account."),
+      message: z.string().describe("Human-readable warning."),
+    })
+    .describe("A recipient the batch could not pay as requested."),
+  z
+    .object({
+      code: z
+        .literal("SOURCE_BELOW_RENT_MINIMUM")
+        .describe(
+          "The source wallet would be left holding more than nothing but less than the rent-exempt minimum, at the end or after some order of the batch's concurrent transactions."
+        ),
+      sourceRemainder: z.string().describe("The SOL the source wallet would be left with."),
+      minimumAmount: z.string().describe("The rent-exempt minimum for a SOL wallet."),
+      message: z.string().describe("Human-readable warning."),
+    })
+    .describe("The source wallet would fall below the rent minimum."),
+]);
+
+export type PaymentTransferBatchEstimateWarning = z.infer<
+  typeof paymentTransferBatchEstimateWarningSchema
+>;
+
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
@@ -706,6 +748,7 @@ export interface PaymentTransferBatchEstimate {
     tokenAccountRentLamports: string;
     sponsored: boolean;
   };
+  warnings: PaymentTransferBatchEstimateWarning[];
 }
 
 export interface PaymentTransferBatchEnvelope {
@@ -1204,6 +1247,68 @@ export const PAYMENT_REQUEST_STATUSES = [
 ] as const;
 export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
+/**
+ * Whether a payment request in each status can still be paid through its `/pay` link. A payable
+ * status is not enough on its own: an `awaiting_payment` request past its `expiresAt` is not
+ * payable either.
+ */
+export const PAYMENT_REQUEST_STATUS_PAYABLE = {
+  awaiting_payment: true,
+  paid: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** Reports whether a payment request's status still admits a payment through its link. */
+export function isPayablePaymentRequestStatus(status: PaymentRequestStatus): boolean {
+  return PAYMENT_REQUEST_STATUS_PAYABLE[status];
+}
+
+/**
+ * Whether a payment request can still be paid at `now`: a payable status, and not past its
+ * expiry. `/pay` and the dashboard both decide with it.
+ *
+ * @param request - The request's status and expiry.
+ * @param request.status - Its stored status.
+ * @param request.expiresAt - Its expiry, or null for one that never expires.
+ * @param now - The time to judge at, in epoch milliseconds.
+ * @returns True while the request's link can still be paid.
+ */
+export function isPaymentRequestPayableAt(
+  request: { status: PaymentRequestStatus; expiresAt: string | null },
+  now: number
+): boolean {
+  return (
+    isPayablePaymentRequestStatus(request.status) &&
+    (request.expiresAt === null || Date.parse(request.expiresAt) > now)
+  );
+}
+
+/**
+ * Whether each status closes a payment request without a payment: a payer who signed before it
+ * closed can still land the transfer, and the reconciler records that money as a late payment.
+ */
+export const PAYMENT_REQUEST_STATUS_CLOSED_UNPAID = {
+  awaiting_payment: false,
+  paid: false,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** The statuses that close a payment request without a payment. */
+export type ClosedUnpaidPaymentRequestStatus = {
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_CLOSED_UNPAID)[Status] extends true
+    ? Status
+    : never;
+}[PaymentRequestStatus];
+
+/** Reports whether a payment request closed without a payment, so a late one can still settle it. */
+export function isClosedUnpaidPaymentRequestStatus(
+  status: PaymentRequestStatus
+): status is ClosedUnpaidPaymentRequestStatus {
+  return PAYMENT_REQUEST_STATUS_CLOSED_UNPAID[status];
+}
+
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
@@ -1226,7 +1331,13 @@ export interface PaymentRequest {
   status: PaymentRequestStatus;
   expiresAt: string | null;
   fulfilledByTransferId: string | null;
-  canceledBy: string | null;
+  paidLate: boolean;
+  lastCheckedAt?: string | null;
+  /** The API key that canceled it; null when a member did or it is not canceled. */
+  canceledByApiKeyId: string | null;
+  /** The member who canceled it; null when an API key did or it is not canceled. */
+  canceledByUserId: string | null;
+  canceledAt: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   createdBy: string | null;
   createdAt: string;

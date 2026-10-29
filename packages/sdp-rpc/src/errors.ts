@@ -49,6 +49,27 @@ export class RpcTimeoutError extends SdpRpcError {
   }
 }
 
+/**
+ * A read answered from a bank below the slot the caller demanded (`minContextSlot`), found by
+ * SDP's own `context.slot` check because an upstream may ignore the option. The node was behind,
+ * so its answer is withheld rather than trusted. Callers classify it by type, never by message.
+ */
+export class MinContextSlotNotReachedError extends SdpRpcError {
+  /**
+   * @param contextSlot - The slot of the bank that answered.
+   * @param minContextSlot - The slot the caller demanded.
+   */
+  constructor(
+    public readonly contextSlot: bigint,
+    public readonly minContextSlot: bigint
+  ) {
+    super("SOLANA_RPC_ERROR", "Solana RPC answered from a slot below minContextSlot", {
+      contextSlot: contextSlot.toString(),
+      minContextSlot: minContextSlot.toString(),
+    });
+  }
+}
+
 export function solanaRpcError(message: string, details?: Record<string, unknown>): SdpRpcError {
   return new SdpRpcError("SOLANA_RPC_ERROR", message, details);
 }

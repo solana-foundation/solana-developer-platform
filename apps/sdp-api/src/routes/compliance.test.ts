@@ -7,14 +7,14 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
-  return mockReleaseChannelStages(
+  return mockReleaseChannelMaturity(
     await importOriginal<typeof import("@sdp/types/release-channels")>(),
     RAMP_PROVIDERS
   );
@@ -177,8 +177,8 @@ describe("Compliance routes", () => {
     env.CHAINALYSIS_API_KEY = undefined;
     env.CHAINALYSIS_API_BASE_URL = undefined;
     env.SDP_DEPLOYMENT_MODE = undefined;
-    providerStages.rampStageOverride = null;
-    providerStages.moduleStageOverride = null;
+    providerMaturity.rampMaturityOverride = null;
+    providerMaturity.moduleMaturityOverride = null;
 
     await seedTestDatabase(env);
     await seedAuth();
@@ -760,7 +760,7 @@ describe("Compliance routes", () => {
   });
 
   it("screens a Production project with a compliance provider below stable the release channel offers", async () => {
-    providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
+    providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "beta" };
     env.RANGE_API_KEY = "range_test_api_key";
     await seedProductionApiKey();
     const loadProjectProviderVerdict = vi.spyOn(providerAvailability, "loadProjectProviderVerdict");

@@ -148,10 +148,7 @@ export function rampTransferTokenMint(assetRail: CryptoRailId): string {
   return mint;
 }
 
-export function resolvePaymentWallet(
-  wallets: CustodyWallet[],
-  custodyWalletId: string
-): CustodyWallet {
+function resolvePaymentWallet(wallets: CustodyWallet[], custodyWalletId: string): CustodyWallet {
   const wallet = wallets.find((entry) => entry.id === custodyWalletId);
   if (!wallet) {
     throw walletNotFound();

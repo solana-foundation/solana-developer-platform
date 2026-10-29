@@ -23,6 +23,13 @@ import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import {
+  emitRpcTelemetry,
+  markRpcAttemptDeadline,
+  type RpcTelemetryEvent,
+  rpcFailureOutcome,
+  rpcProviderForEndpoint,
+} from "./telemetry";
 import { isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -56,8 +63,22 @@ const genesisProbes = new Map<string, Promise<void>>();
  */
 const ENDPOINT_COOLDOWN_MS = 30_000;
 
-/** Pool key (cluster plus its endpoint URLs) to the memoized client. */
-const clusterRpcs = new Map<string, SolanaRpc>();
+/** One family of pooled clients: they share failover and cooldown state only with each other. */
+interface PoolMemo {
+  /** Pool key (cluster plus its endpoint URLs in order) to the memoized pool transport. */
+  readonly transports: Map<string, RpcTransport>;
+  /** Pool key to the memoized client over that transport. */
+  readonly rpcs: Map<string, SolanaRpc>;
+}
+
+/** The managed pools behind `createClusterRpc()` and the history client. */
+const managedPools: PoolMemo = { transports: new Map(), rpcs: new Map() };
+
+/**
+ * `<timeoutMs> <poolKey>` to the memoized bounded client. Each wraps the managed pool's own
+ * transport, so a deadline never forks the pool's failover or cooldown state.
+ */
+const boundedRpcs = new Map<string, SolanaRpc>();
 
 /** Each cluster's Kora upstream: the Solana RPC that cluster's Kora simulates against. */
 export const KORA_UPSTREAM_RPC_ENV_KEYS = {
@@ -66,27 +87,34 @@ export const KORA_UPSTREAM_RPC_ENV_KEYS = {
 } as const satisfies Record<SolanaCluster, string>;
 
 /**
- * Kora upstream key (cluster plus URL) to the memoized client. Kept apart from `clusterRpcs` so a
- * Kora URL that is also a pool endpoint never shares the pool's client or cooldown state.
+ * Kora upstream clients, keyed by cluster plus URL. Kept apart from `managedPools` so a Kora URL
+ * that is also a pool endpoint never shares the pool's client or cooldown state.
  */
-const koraUpstreamRpcs = new Map<string, SolanaRpc>();
+const koraUpstreamPools: PoolMemo = { transports: new Map(), rpcs: new Map() };
 
 /**
  * Bound every request through `transport` by `timeoutMs`, combined with the caller's own signal
  * when it has one, so a caller signal never removes the deadline. Whichever fires first aborts.
  *
  * @param transport - The transport to bound.
- * @param timeoutMs - The per-attempt deadline.
+ * @param timeoutMs - The deadline duration.
+ * @param owner - Whether this bounds a provider attempt or the caller's whole request.
  * @returns A transport whose deadline expiry rejects with a transient-classified timeout.
  */
-function withAttemptDeadline(transport: RpcTransport, timeoutMs: number): RpcTransport {
+function withTransportDeadline(
+  transport: RpcTransport,
+  timeoutMs: number,
+  owner: "attempt" | "caller"
+): RpcTransport {
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const deadline = new AbortController();
+    const deadlineSignal =
+      owner === "attempt" ? markRpcAttemptDeadline(deadline.signal) : deadline.signal;
     const deadlineReason = new Error("RPC attempt deadline elapsed");
     const timer = setTimeout(() => deadline.abort(deadlineReason), timeoutMs);
     const signal = rpcRequest.signal
-      ? AbortSignal.any([rpcRequest.signal, deadline.signal])
-      : deadline.signal;
+      ? AbortSignal.any([rpcRequest.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await transport<TResponse>({ ...rpcRequest, signal });
     } catch (cause) {
@@ -118,7 +146,7 @@ function proveGenesis(
   if (probeInFlight) return probeInFlight;
   const probe = (async () => {
     const servedGenesisHash = await createSolanaRpcFromTransport(
-      withAttemptDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
+      withTransportDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS, "attempt")
     )
       .getGenesisHash()
       .send();
@@ -300,16 +328,65 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
   ];
 }
 
+interface RpcEndpoint {
+  transport: RpcTransport;
+  provider: string;
+  cluster: SolanaCluster;
+  genesisProofKey: string;
+}
+
+function emitAttemptTelemetry<TResponse>(
+  endpoint: RpcEndpoint,
+  rpcRequest: Parameters<RpcTransport>[0],
+  outcome: AttemptOutcome<TResponse>,
+  verdict: AttemptVerdict,
+  hasNext: boolean,
+  startedAt: number,
+  genesisProbeRequired: boolean
+): void {
+  let telemetryOutcome: RpcTelemetryEvent["outcome"];
+  if (outcome.ok) {
+    telemetryOutcome = servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed";
+  } else {
+    telemetryOutcome = rpcFailureOutcome(rpcRequest.signal);
+  }
+  const statusCode =
+    !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+      ? outcome.cause.context.statusCode
+      : undefined;
+  const common = {
+    provider: endpoint.provider,
+    cluster: endpoint.cluster,
+    method: isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch",
+  };
+  emitRpcTelemetry({
+    event: "sdp_rpc_attempt",
+    surface: "managed_pool",
+    ...common,
+    outcome: telemetryOutcome,
+    status_code: statusCode,
+    duration_ms: performance.now() - startedAt,
+    genesis_probe_required: genesisProbeRequired,
+  });
+  if (verdict.cooldown) {
+    emitRpcTelemetry({ event: "sdp_rpc_cooldown", surface: "managed_pool", ...common });
+  }
+  if (verdict.tryNext && hasNext) {
+    emitRpcTelemetry({ event: "sdp_rpc_failover", surface: "managed_pool", ...common });
+  }
+}
+
 /**
  * Per-request failover across a cluster's endpoints: try each endpoint in `endpointAttemptOrder`
  * and let `judgeAttempt` decide whether to cool it down and whether to ask the next one. The last
  * endpoint's answer or error is returned as-is, so kit raises its typed error.
  *
- * @param endpointTransports - The guarded endpoint transports, in failover order.
+ * @param endpoints - Guarded transports with provider names, in failover order.
  * @returns The pool transport.
  */
-function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
-  const lastFailedAt = endpointTransports.map(() => Number.NEGATIVE_INFINITY);
+
+function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
+  const lastFailedAt = endpoints.map(() => Number.NEGATIVE_INFINITY);
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
     const attemptOrder = endpointAttemptOrder(lastFailedAt, Date.now());
     // NOTE: perf. A `minContextSlot` no endpoint has reached yet walks every endpoint before the
@@ -318,18 +395,42 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
     // confirmed, so the full walk is rare. If it shows up, stop after two -32016 answers.
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
-      const outcome = await attemptEndpoint<TResponse>(
-        endpointTransports[endpointIndex],
-        rpcRequest
-      );
+      const endpoint = endpoints[endpointIndex];
+      const genesisProbeRequired =
+        (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
+      const startedAt = performance.now();
+      const outcome = await attemptEndpoint<TResponse>(endpoint.transport, rpcRequest);
       const verdict = judgeAttempt(outcome, rpcRequest);
-      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       const isLastEndpoint = attempt === attemptOrder.length - 1;
+      emitAttemptTelemetry(
+        endpoint,
+        rpcRequest,
+        outcome,
+        verdict,
+        !isLastEndpoint,
+        startedAt,
+        genesisProbeRequired
+      );
+      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       if (verdict.tryNext && !isLastEndpoint) continue;
       if (outcome.ok) return outcome.response;
       throw outcome.cause instanceof UnsentRequestError ? outcome.cause.cause : outcome.cause;
     }
   };
+}
+
+/**
+ * The configured endpoint URLs for `cluster`, in failover order: its own managed pool or nothing,
+ * never another cluster's.
+ *
+ * @param cluster - The cluster whose pool to read.
+ * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value, possibly none.
+ */
+function configuredEndpointUrls(cluster: SolanaCluster): string[] {
+  return Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
+    const endpointUrl = process.env[envKey];
+    return endpointUrl ? [endpointUrl] : [];
+  });
 }
 
 /**
@@ -340,10 +441,7 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
 function managedEndpointUrls(cluster: SolanaCluster): string[] {
-  const endpointUrls = Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
-    const endpointUrl = process.env[envKey];
-    return endpointUrl ? [endpointUrl] : [];
-  });
+  const endpointUrls = configuredEndpointUrls(cluster);
   if (endpointUrls.length === 0) {
     throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
       cluster,
@@ -364,20 +462,44 @@ export function assertManagedRpcConfigured(): void {
   }
 }
 
+/** Behaviour options for a cluster client: never a cluster or URL, which come from the scope. */
+export type ClusterRpcOptions = Readonly<{
+  /** End-to-end deadline for each request, failover hops and genesis probes included. */
+  timeoutMs: number;
+}>;
+
 /**
  * The Solana RPC client for the open cluster scope, over that cluster's managed provider pool
  * with per-request failover, a per-attempt deadline, and a genesis guard on every endpoint.
  * Memoized per process by cluster and pool, so every caller on a cluster shares one client;
- * nothing below the client may read the cluster scope. Callers needing a tighter deadline pass
- * `abortSignal` to `.send()`.
+ * nothing below the client may read the cluster scope. A caller that hands the client to a helper
+ * which sends without a signal passes `timeoutMs`: that client wraps the same pool transport, so
+ * failover, cooldowns and genesis proofs stay shared. Otherwise a tighter deadline is an
+ * `abortSignal` on `.send()`.
  *
+ * @param options - The client's behaviour; omitted, each attempt keeps the pool's own deadline.
+ * @param options.timeoutMs - The end-to-end deadline for each request.
  * @returns The RPC client for the scope's cluster.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
  */
-export function createClusterRpc(): SolanaRpc {
+export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const { cluster } = currentClusterScope();
-  return pooledClusterRpc(cluster, managedEndpointUrls(cluster), clusterRpcs);
+  const endpointUrls = managedEndpointUrls(cluster);
+  if (options === undefined) return pooledClusterRpc(cluster, endpointUrls, managedPools);
+  const { poolKey, poolTransport } = pooledClusterTransport(
+    cluster,
+    endpointUrls,
+    managedPools.transports
+  );
+  const clientKey = `${options.timeoutMs} ${poolKey}`;
+  const memoizedRpc = boundedRpcs.get(clientKey);
+  if (memoizedRpc) return memoizedRpc;
+  const rpc = createSolanaRpcFromTransport(
+    withTransportDeadline(poolTransport, options.timeoutMs, "caller")
+  );
+  boundedRpcs.set(clientKey, rpc);
+  return rpc;
 }
 
 /**
@@ -399,7 +521,7 @@ export function createClusterHistoryRpc(): SolanaRpc {
     heliusUrl
       ? [heliusUrl, ...endpointUrls.filter((endpointUrl) => endpointUrl !== heliusUrl)]
       : endpointUrls,
-    clusterRpcs
+    managedPools
   );
 }
 
@@ -425,37 +547,142 @@ export function createKoraUpstreamRpc(): SolanaRpc {
       { cluster }
     );
   }
-  return pooledClusterRpc(cluster, [endpointUrl], koraUpstreamRpcs);
+  return pooledClusterRpc(cluster, [endpointUrl], koraUpstreamPools);
 }
 
 /**
- * One memoized pooled client per cluster and ordered endpoint list. A single endpoint is a pool
- * that never fails over; the pool transport still unwraps a failed genesis probe's error.
+ * Refuse a provider operation that asks for a cluster other than the open scope's. Earn's provider
+ * packages still name the cluster their plan targets (HOO-1881), so the URL helpers check it
+ * against the scope instead of trusting it.
+ *
+ * @param cluster - The cluster the provider asked for.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `CLUSTER_SCOPE_CONFLICT` when the scope serves the other cluster.
+ */
+function assertScopeServes(cluster: SolanaCluster): void {
+  const openScope = currentClusterScope();
+  if (openScope.cluster === cluster) return;
+  throw new SdpRpcError(
+    "CLUSTER_SCOPE_CONFLICT",
+    `Earn work named ${cluster} inside a ${openScope.cluster} cluster scope`,
+    { openCluster: openScope.cluster, requestedCluster: cluster }
+  );
+}
+
+/**
+ * The open scope's managed endpoints, in failover order, for an Earn provider that asked for
+ * `cluster`; none when the cluster has no pool. Earn's provider packages still build their own
+ * transports from a URL and pin one endpoint per operation (ADR 0007 rejects per-request failover
+ * inside one plan), so this is the one function that hands a pool URL out of `@sdp/rpc` until
+ * those packages take clients (HOO-1881) and the pinning moves to `withConsistentRpcReads`
+ * (HOO-2025). Prove each URL with `proveEarnClusterEndpoint` before use.
+ *
+ * @param cluster - The cluster the provider asked for; it must be the scope's.
+ * @returns The configured endpoint URLs, possibly none.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `CLUSTER_SCOPE_CONFLICT` when the scope serves the other cluster.
+ */
+export function earnClusterEndpointUrls(cluster: SolanaCluster): string[] {
+  assertScopeServes(cluster);
+  return configuredEndpointUrls(cluster);
+}
+
+/**
+ * Prove `endpointUrl`, one of the open scope's managed endpoints, serves `cluster`, with the probe,
+ * proof cache and TTL the pool's genesis guard uses: an endpoint the pool proved is proved here,
+ * and the other way round, so the two never probe one endpoint twice.
+ *
+ * @param cluster - The cluster the provider asked for; it must be the scope's.
+ * @param endpointUrl - One of `earnClusterEndpointUrls(cluster)`.
+ * @returns Resolves once the endpoint holds an unexpired proof.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws SdpRpcError `CLUSTER_SCOPE_CONFLICT` when the scope serves the other cluster.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when `endpointUrl` is not in `cluster`'s pool.
+ * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ */
+export async function proveEarnClusterEndpoint(
+  cluster: SolanaCluster,
+  endpointUrl: string
+): Promise<void> {
+  assertScopeServes(cluster);
+  if (!configuredEndpointUrls(cluster).includes(endpointUrl)) {
+    throw new SdpRpcError(
+      "RPC_NOT_CONFIGURED",
+      `The endpoint is not in the ${cluster} managed pool`,
+      { cluster }
+    );
+  }
+  const genesisProofKey = `${cluster} ${endpointUrl}`;
+  const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
+  if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
+  await proveGenesis(
+    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl }), endpointUrl),
+    cluster,
+    genesisProofKey
+  );
+}
+
+/**
+ * One memoized pool transport per cluster and ordered endpoint list, within one family: every
+ * endpoint behind the per-attempt deadline, read socket retry and genesis guard.
  *
  * @param cluster - The cluster every endpoint must serve.
  * @param endpointUrls - The endpoints in failover order.
- * @param memoizedRpcs - The memo the client is kept in.
+ * @param memoizedTransports - The family's transport memo.
+ * @returns The pool key and its transport.
+ */
+function pooledClusterTransport(
+  cluster: SolanaCluster,
+  endpointUrls: string[],
+  memoizedTransports: PoolMemo["transports"]
+): { poolKey: string; poolTransport: RpcTransport } {
+  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
+  const memoizedTransport = memoizedTransports.get(poolKey);
+  if (memoizedTransport) return { poolKey, poolTransport: memoizedTransport };
+  const endpoints = endpointUrls.map((endpointUrl): RpcEndpoint => {
+    const provider =
+      memoizedTransports === koraUpstreamPools.transports
+        ? "kora-upstream"
+        : rpcProviderForEndpoint(cluster, endpointUrl);
+    return {
+      provider,
+      cluster,
+      genesisProofKey: `${cluster} ${endpointUrl}`,
+      transport: withTransportDeadline(
+        withGenesisGuard(
+          withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+          cluster,
+          endpointUrl
+        ),
+        DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+        "attempt"
+      ),
+    };
+  });
+  const poolTransport = createPoolTransport(endpoints);
+  memoizedTransports.set(poolKey, poolTransport);
+  return { poolKey, poolTransport };
+}
+
+/**
+ * One memoized pooled client per cluster and ordered endpoint list, within one family. A single
+ * endpoint is a pool that never fails over; the pool transport still unwraps a failed genesis
+ * probe's error.
+ *
+ * @param cluster - The cluster every endpoint must serve.
+ * @param endpointUrls - The endpoints in failover order.
+ * @param memo - The family the transport and client are kept in.
  * @returns The pooled RPC client.
  */
 function pooledClusterRpc(
   cluster: SolanaCluster,
   endpointUrls: string[],
-  memoizedRpcs: Map<string, SolanaRpc>
+  memo: PoolMemo
 ): SolanaRpc {
-  const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
-  const memoizedRpc = memoizedRpcs.get(poolKey);
+  const { poolKey, poolTransport } = pooledClusterTransport(cluster, endpointUrls, memo.transports);
+  const memoizedRpc = memo.rpcs.get(poolKey);
   if (memoizedRpc) return memoizedRpc;
-  const endpointTransports = endpointUrls.map((endpointUrl) =>
-    withAttemptDeadline(
-      withGenesisGuard(
-        withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
-        cluster,
-        endpointUrl
-      ),
-      DEFAULT_RPC_REQUEST_TIMEOUT_MS
-    )
-  );
-  const rpc = createSolanaRpcFromTransport(createPoolTransport(endpointTransports));
-  memoizedRpcs.set(poolKey, rpc);
+  const rpc = createSolanaRpcFromTransport(poolTransport);
+  memo.rpcs.set(poolKey, rpc);
   return rpc;
 }

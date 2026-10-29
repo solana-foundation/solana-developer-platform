@@ -111,11 +111,17 @@ describe("KoraAdapter fee-payer address cache", () => {
     const first = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_a", client });
     const second = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_b", client });
 
-    assert.deepEqual(await Promise.all([first.getFeePayer(), second.getFeePayer()]), [
+    assert.equal(first.feePayerReadSource(), "network");
+    const firstRead = first.getFeePayer();
+    assert.equal(second.feePayerReadSource(), "shared");
+
+    assert.deepEqual(await Promise.all([firstRead, second.getFeePayer()]), [
       syntheticSigner(1),
       syntheticSigner(1),
     ]);
+    assert.equal(first.feePayerReadSource(), "pinned");
     const later = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_c", client });
+    assert.equal(later.feePayerReadSource(), "cache");
     assert.equal(await later.getFeePayer(), syntheticSigner(1));
     const otherKora = new KoraAdapter({
       rpcUrl: "https://kora-other.mock.invalid",
@@ -213,6 +219,12 @@ describe("KoraAdapter sign refusals", () => {
   it("maps each Kora refusal of a sign to its FeePaymentError code", async () => {
     const refusals: Array<[Error, FeePaymentErrorCode]> = [
       [new Error("RPC Error -32090: server exploded"), "NETWORK_ERROR"],
+      [new Error("Kora Error -32091: Config error: fee payer policy"), "PROVIDER_NOT_AVAILABLE"],
+      [
+        new Error("Kora Error -32092: Serialization error: Missing field 'authority'"),
+        "PROVIDER_REJECTED",
+      ],
+      [new Error("Kora Error -32093: RPC error: connection reset"), "NETWORK_ERROR"],
       [new Error("RPC Error -32000: Invalid transaction: simulation failed"), "PROVIDER_REJECTED"],
       [
         new Error("Kora Error -32001: Validation error: mutable mint authority"),

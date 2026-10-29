@@ -5,7 +5,7 @@ import type {
   EarnVaultQueuedWithdrawalQuote,
   EarnVaultWithdrawalOptions,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -16,7 +16,7 @@ import {
   type EarnVaultWithdrawalRequestStatus,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalFingerprint,
@@ -24,7 +24,6 @@ import {
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -54,6 +53,7 @@ import {
   resolveVaultQueuedWithdrawClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { earnRuntime } from "@/services/earn/runtime";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
   type AsyncWithdrawalTermsInput,
@@ -89,7 +89,6 @@ type ExternalSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
 interface ResolvedCustodyQueueTarget {
   auth: ApiKeyContext;
   projectId: string;
-  environment: SdpEnvironment;
   actor: CustodyQueuedWithdrawalActor;
   position: QueuedWithdrawalPosition;
 }
@@ -280,7 +279,7 @@ async function resolveCustodyQueueTarget(
   positionId: string,
   access: "read" | "write"
 ): Promise<ResolvedCustodyQueueTarget> {
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
@@ -313,11 +312,9 @@ async function resolveCustodyQueueTarget(
   return {
     auth,
     projectId,
-    environment,
     actor: {
       organizationId: auth.organizationId,
       projectId,
-      environment,
       custodyWalletId: wallet.id,
       custodyWalletPublicKey: wallet.publicKey,
       userId: auth.userId ?? null,
@@ -337,7 +334,6 @@ async function resolveCustodyQueueTarget(
 
 export async function readOptions(
   c: AppContext,
-  environment: SdpEnvironment,
   position: QueuedWithdrawalPosition
 ): Promise<
   Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & { withdrawAuthority: string | null }
@@ -362,7 +358,7 @@ export async function readOptions(
     };
   }
   try {
-    const runtime = { env: c.env, environment };
+    const runtime = earnRuntime(c.env);
     const reference = { providerReference: position.vaultAddress };
     const [queueOptions, parRedemption] = await Promise.all([
       client ? client.getWithdrawalOptions(runtime, reference) : Promise.resolve(null),
@@ -384,7 +380,6 @@ export async function readOptions(
 
 async function readPreview(
   c: AppContext,
-  environment: SdpEnvironment,
   position: QueuedWithdrawalPosition,
   terms: AsyncWithdrawalTermsInput
 ): Promise<
@@ -396,7 +391,7 @@ async function readPreview(
     if (!client) throw notImplemented(position.provider, "par redemptions");
     try {
       const quote = await client.quoteParRedemption(
-        { env: c.env, environment },
+        earnRuntime(c.env),
         terms.intermediateAmount === undefined
           ? { providerReference: position.vaultAddress, shares: terms.shares }
           : {
@@ -412,10 +407,10 @@ async function readPreview(
   const client = resolveVaultQueuedWithdrawClient(c.env, position.provider, createVaultDeadline());
   if (!client) throw notImplemented(position.provider, "queued vault withdrawals");
   try {
-    return await client.quoteQueuedWithdrawal(
-      { env: c.env, environment },
-      { providerReference: position.vaultAddress, ...terms }
-    );
+    return await client.quoteQueuedWithdrawal(earnRuntime(c.env), {
+      providerReference: position.vaultAddress,
+      ...terms,
+    });
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
@@ -426,7 +421,7 @@ export async function getEarnVaultWithdrawalOptions(
 ) {
   const body = c.req.valid("json");
   const target = await resolveCustodyQueueTarget(c, body.positionId, "read");
-  const options = await readOptions(c, target.environment, target.position);
+  const options = await readOptions(c, target.position);
   return success(c, { positionId: target.position.id, ...options });
 }
 
@@ -435,7 +430,7 @@ export async function createEarnVaultQueuedWithdrawalPreview(
 ) {
   const body = c.req.valid("json");
   const target = await resolveCustodyQueueTarget(c, body.positionId, "read");
-  const quote = await readPreview(c, target.environment, target.position, queuedTerms(body));
+  const quote = await readPreview(c, target.position, queuedTerms(body));
   return success(c, { positionId: target.position.id, ...quote });
 }
 
@@ -449,10 +444,11 @@ export async function extractEarnVaultWithdrawalRequest(
   }
   const target = await resolveCustodyQueueTarget(c, body.positionId, "write");
   const terms = queuedTerms(body);
+  const { environment } = currentClusterScope();
   const idempotencyFingerprint =
     terms.mechanism === "operator_redemption"
       ? buildEarnVaultParRedemptionFingerprint({
-          environment: target.environment,
+          environment,
           provider: target.position.provider,
           positionId: target.position.id,
           ...(terms.intermediateAmount === undefined
@@ -460,7 +456,7 @@ export async function extractEarnVaultWithdrawalRequest(
             : { intermediateAmount: terms.intermediateAmount }),
         })
       : buildEarnVaultQueuedWithdrawalFingerprint({
-          environment: target.environment,
+          environment,
           provider: target.position.provider,
           positionId: target.position.id,
           shares: terms.shares,
@@ -539,7 +535,7 @@ function decodeRequestCursor(cursor: string | undefined) {
 
 export async function listEarnVaultWithdrawalRequests(c: AppContext) {
   const query = parseQuery(c, earnVaultWithdrawalRequestsQuerySchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const wallets = await listReadableEarnVaultWallets(c, auth, projectId);
@@ -562,7 +558,7 @@ export async function listEarnVaultWithdrawalRequests(c: AppContext) {
 }
 
 async function requireReadableCustodyRequest(c: AppContext, withdrawalRequestId: string) {
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
@@ -590,7 +586,7 @@ async function requireReadableCustodyRequest(c: AppContext, withdrawalRequestId:
 async function requireRecoverableCustodyRequest(c: AppContext, withdrawalRequestId: string) {
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
     organizationId: getAuth(c).organizationId,
-    environment: resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     withdrawalRequestId,
   });
   if (!request?.custody_wallet_id) throw notFound("Earn vault withdrawal request");
@@ -628,12 +624,11 @@ export async function cancelEarnVaultWithdrawalRequest(
   });
 }
 
-function externalActor(c: AppContext, environment: SdpEnvironment): QueuedWithdrawalActor {
+function externalActor(c: AppContext): QueuedWithdrawalActor {
   const auth = getAuth(c);
   return {
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
-    environment,
     userId: auth.userId ?? null,
     apiKeyId: auth.apiKeyId ?? null,
   };
@@ -641,7 +636,7 @@ function externalActor(c: AppContext, environment: SdpEnvironment): QueuedWithdr
 
 function externalPosition(target: Awaited<ReturnType<typeof resolveExternalWalletExit>>) {
   return {
-    id: target.positionId ?? "",
+    id: target.positionId,
     provider: target.provider,
     vaultAddress: target.vaultAddress,
     tokenMint: target.tokenMint,
@@ -655,11 +650,8 @@ export async function getEarnExternalWalletWithdrawalOptions(
 ) {
   const body = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const options = await readOptions(c, target.environment, externalPosition(target));
-  return success(c, {
-    ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
-    ...options,
-  });
+  const options = await readOptions(c, externalPosition(target));
+  return success(c, { positionId: target.positionId, ...options });
 }
 
 export async function createEarnExternalWalletQueuedWithdrawalPreview(
@@ -667,16 +659,8 @@ export async function createEarnExternalWalletQueuedWithdrawalPreview(
 ) {
   const body = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const quote = await readPreview(
-    c,
-    target.environment,
-    externalPosition(target),
-    queuedTerms(body)
-  );
-  return success(c, {
-    ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
-    ...quote,
-  });
+  const quote = await readPreview(c, externalPosition(target), queuedTerms(body));
+  return success(c, { positionId: target.positionId, ...quote });
 }
 
 export async function createEarnExternalWalletWithdrawalRequestTransaction(
@@ -684,11 +668,8 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
 ) {
   const body: ExternalRequestBuildBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  if (!target.positionId) {
-    throw internalError("Authenticated queued-withdrawal build resolved without a position");
-  }
   const built = await buildExternalQueuedWithdrawalRequest(c.env, {
-    actor: externalActor(c, target.environment),
+    actor: externalActor(c),
     position: externalPosition(target),
     terms: queuedTerms(body),
     ...(body.feePayer ? { feePayer: body.feePayer } : {}),
@@ -706,7 +687,7 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
 ) {
   const body: ExternalCancelBuildBody = c.req.valid("json");
   const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const projectId = requireProjectId(c);
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
     organizationId: auth.organizationId,
@@ -717,14 +698,11 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
     throw notFound("Earn external-wallet withdrawal request");
   }
   const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
-  if (!target.positionId) {
-    throw internalError("Authenticated queued-withdrawal cancellation resolved without a position");
-  }
   if (target.ownerAddress !== request.owner_address) {
     throw notFound("Earn external-wallet withdrawal request");
   }
   const built = await buildExternalQueuedWithdrawalCancel(c.env, {
-    actor: externalActor(c, environment),
+    actor: externalActor(c),
     position: externalPosition(target),
     request,
     requestAddress: request.request_address,
@@ -749,7 +727,6 @@ async function submitExternalQueueAction(
   const actor: QueuedWithdrawalActor = {
     organizationId: getAuth(c).organizationId,
     projectId: requireProjectId(c),
-    environment: resolveSdpEnvironment(c),
     userId: getAuth(c).userId ?? null,
     apiKeyId: getAuth(c).apiKeyId ?? null,
   };
@@ -785,7 +762,7 @@ export async function listEarnExternalWalletWithdrawalRequests(c: AppContext) {
   const page = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).list({
     organizationId: auth.organizationId,
     projectId,
-    environment: resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     ownerAddress: query.ownerAddress,
     externalWalletOnly: true,
     ...(query.status ? { status: STATUS_FROM_WIRE[query.status] } : {}),
@@ -806,7 +783,7 @@ export async function getEarnExternalWalletWithdrawalRequest(c: AppContext) {
   const auth = getAuth(c);
   const request = await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(c.env)).getById({
     organizationId: auth.organizationId,
-    environment: resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     withdrawalRequestId,
   });
   if (

@@ -5,7 +5,6 @@ import {
 import type { Context } from "hono";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { forbidden } from "@/lib/errors";
-import { readActiveOrganizationSettings } from "@/lib/organization-access";
 import type { Env } from "@/types/env";
 
 /**
@@ -29,20 +28,6 @@ export function recordOrganizationEntitlements(
   rawSettings: string | null
 ): void {
   c.set("organizationEntitlements", parseOrganizationEntitlements(rawSettings));
-}
-
-/**
- * Loads and records the entitlements for an authentication door that does not
- * already read the organization row (a Clerk organization first provisioned by
- * this request). Uncached, so revoking an entitlement takes effect on the next
- * request; like every door's organization read, it refuses an organization
- * that is no longer `active`.
- */
-export async function loadOrganizationEntitlements(
-  c: Context<{ Bindings: Env }>,
-  organizationId: string
-): Promise<void> {
-  recordOrganizationEntitlements(c, await readActiveOrganizationSettings(c.env, organizationId));
 }
 
 /** Whether this request's organization may act on production (APE-351). */

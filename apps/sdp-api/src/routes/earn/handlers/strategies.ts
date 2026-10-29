@@ -1,4 +1,5 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnStrategy,
@@ -12,7 +13,6 @@ import {
   isEarnProviderSurfaced,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types/provider-access";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
@@ -21,7 +21,6 @@ import {
   type AppContext,
   getEarnRepository,
   requireEarnStrategyForCaller,
-  resolveEarnCatalogueEnvironment,
 } from "@/routes/earn/context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "@/routes/earn/schemas";
 import type { Env } from "@/types/env";
@@ -43,7 +42,7 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
  * still accepts it from the stored catalogue precisely because hiding a
  * customer's own position would hide their money.
  */
-export function isHiddenStrategy(row: EarnStrategyRow): boolean {
+function isHiddenStrategy(row: EarnStrategyRow): boolean {
   if (!isEarnProviderSurfaced(row.provider)) {
     return true;
   }
@@ -128,10 +127,9 @@ export function mapToEarnStrategy(
 
 /**
  * Loads a strategy and applies the same environment and visibility policy as
- * the list route. The catalogue is platform-global: a tenant caller sees its
- * project's environment, an anonymous caller sees the shelf the id names.
+ * the list route: the caller sees its project's environment.
  */
-export async function requireEarnStrategy(
+async function requireEarnStrategy(
   c: AppContext,
   strategyId: string
 ): Promise<{ strategy: EarnStrategyRow; environment: SdpEnvironment }> {
@@ -146,16 +144,14 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  // A tenant reads its project's shelf; an anonymous caller picks one with
-  // `?environment=` (production when omitted). See resolveEarnCatalogueEnvironment.
-  const environment = resolveEarnCatalogueEnvironment(c, query.environment);
+  const { environment, cluster: projectCluster } = currentClusterScope();
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
   // changes what is LISTED, never what can take a deposit: a foreign-cluster
   // row still arrives `fundable: false` and every provider mutation re-asserts
   // the same predicate.
-  const cluster = query.cluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  const cluster = query.cluster ?? projectCluster;
   const { rows, total } = await repo.listStrategies({
     environment,
     hostCluster: cluster,

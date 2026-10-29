@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
 import { RETIRED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
+import {
+  SDP_RAMP_PROVIDER_MATURITY,
+  type SdpRampProviderMaturity,
+} from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -455,7 +458,7 @@ describe("Ramp webhook event inbox", () => {
       )
       .run();
 
-    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 
     expect(applied).toBe(0);
     const rows = await readInboxRows();
@@ -477,7 +480,7 @@ describe("Ramp webhook event inbox", () => {
       .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
       .run();
 
-    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 
     expect(applied).toBe(1);
     expect(await readTransferStatus()).toBe("settling");
@@ -504,7 +507,7 @@ describe("Ramp webhook event inbox", () => {
       payload: completedPayload,
     });
 
-    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+    const applied = await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 
     expect(applied).toBe(0);
     expect(await readTransferStatus()).toBe("awaiting_payment");
@@ -545,7 +548,7 @@ describe("Ramp webhook event inbox", () => {
       )
       .run();
 
-    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 
     const rows = await getDb(env)
       .prepare("SELECT id, status, attempts FROM ramp_webhook_events ORDER BY created_at ASC")
@@ -578,7 +581,7 @@ describe("Ramp webhook event inbox", () => {
       .bind(stored.id)
       .run();
 
-    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES);
+    await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY);
 
     const row = await getDb(env)
       .prepare("SELECT status, attempts FROM ramp_webhook_events WHERE id = ?")
@@ -745,7 +748,7 @@ describe("Ramp webhook event inbox", () => {
     async (provider) => {
       const id = await seedStoredEvent(provider);
 
-      expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(0);
+      expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY)).toBe(0);
 
       const row = await getDb(env)
         .prepare("SELECT status, terminal, last_error FROM ramp_webhook_events WHERE id = ?")
@@ -771,7 +774,7 @@ describe("Ramp webhook event inbox", () => {
       .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
       .run();
 
-    expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_STAGES)).toBe(1);
+    expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY)).toBe(1);
 
     expect(await readTransferStatus()).toBe("settling");
     expect(await readInboxRows()).toEqual(
@@ -785,10 +788,13 @@ describe("Ramp webhook event inbox", () => {
   describe("with one ramp provider in the release channel and another out", () => {
     // Today every provider is `experimental`, so `beta` would leave them all out:
     // these stages put MoonPay in `beta` and keep Stripe out of it.
-    const MOONPAY_ONLY: SdpRampProviderStages = { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" };
+    const MOONPAY_ONLY: SdpRampProviderMaturity = {
+      ...SDP_RAMP_PROVIDER_MATURITY,
+      moonpay: "beta",
+    };
     const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
-      rampProviderStages: MOONPAY_ONLY,
+      rampProviderMaturity: MOONPAY_ONLY,
     });
 
     it("accepts the included provider's webhook and refuses the excluded one's", async () => {
@@ -894,7 +900,7 @@ describe("Ramp webhook event inbox", () => {
       expect(
         await replayRampWebhookEvents(
           { ...env, SDP_RELEASE_CHANNEL: "stable" },
-          SDP_RAMP_PROVIDER_STAGES
+          SDP_RAMP_PROVIDER_MATURITY
         )
       ).toBe(0);
 

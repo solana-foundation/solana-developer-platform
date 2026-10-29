@@ -1,6 +1,6 @@
 import {
   SDP_MODULES,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
@@ -62,7 +62,7 @@ function nextClientHeaders() {
 
 async function probe(releaseChannel: SdpReleaseChannel, module: SdpModule) {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const env = {
     ...baseEnv,
@@ -91,7 +91,7 @@ describe("release channels at the API", () => {
 
   it("stable: serves wallet balances", async () => {
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
     });
     const response = await app.request(
       "/v1/payments/wallets/wallet_1/balances",

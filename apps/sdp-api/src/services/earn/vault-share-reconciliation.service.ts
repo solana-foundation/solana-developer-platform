@@ -55,7 +55,7 @@ export interface ReconcilableVaultClaim {
  * Retained amounts follow lifecycle order, never go negative, and never count
  * repeated held-intermediate cancellations as additional backing.
  */
-export interface ReconcilableRedemptionIntermediate {
+interface ReconcilableRedemptionIntermediate {
   mint: string;
   retained: string;
   in_flight: string;
@@ -72,7 +72,7 @@ export interface ReconcilableShareMintedStrategy {
   created_at: string;
 }
 
-export interface UnrecordedVaultHolding {
+interface UnrecordedVaultHolding {
   custodyWalletId: string;
   walletAddress: string;
   provider: string;
@@ -93,7 +93,7 @@ export interface UnrecordedVaultHolding {
   ambiguousAttribution: boolean;
 }
 
-export interface UnbackedVaultPosition {
+interface UnbackedVaultPosition {
   positionId: string;
   custodyWalletId: string;
   walletAddress: string;
@@ -116,11 +116,11 @@ export interface UnbackedVaultPosition {
  * cover, and the ledger holds no per-claim share total to check that
  * against, so the claim is listed beside its requests rather than judged.
  */
-export interface QueuedWithdrawalVaultPosition extends UnbackedVaultPosition {
+interface QueuedWithdrawalVaultPosition extends UnbackedVaultPosition {
   withdrawalRequestIds: string[];
 }
 
-export interface UnreadableVaultWallet {
+interface UnreadableVaultWallet {
   custodyWalletId: string;
   walletAddress: string;
 }

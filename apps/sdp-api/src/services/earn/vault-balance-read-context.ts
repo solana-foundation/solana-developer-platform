@@ -1,11 +1,10 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { notFound, providerUnavailable } from "@/lib/errors";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 /** How long a finalized signature's status is reused before it is read again. */
@@ -53,7 +52,6 @@ export async function resolveVaultBalanceReadContext(
     movementIds: readonly string[];
     organizationId: string;
     projectId: string;
-    environment: SdpEnvironment;
     custodyWalletIds: readonly string[];
   }
 ): Promise<
@@ -65,6 +63,7 @@ export async function resolveVaultBalanceReadContext(
   | undefined
 > {
   if (input.movementIds.length === 0) return undefined;
+  const { environment, cluster } = currentClusterScope();
   const repo = createPostgresEarnMovementsRepository(getDb(env));
   const afterMovementIds = [...new Set(input.movementIds)];
   const movements = [];
@@ -77,7 +76,7 @@ export async function resolveVaultBalanceReadContext(
     });
     if (
       movement?.execution_model !== "vault_direct" ||
-      movement.environment !== input.environment ||
+      movement.environment !== environment ||
       movement.project_id !== input.projectId ||
       !movement.custody_wallet_id ||
       !input.custodyWalletIds.includes(movement.custody_wallet_id)
@@ -88,16 +87,13 @@ export async function resolveVaultBalanceReadContext(
       throw providerUnavailable("Earn balance confirmation is unavailable");
     movements.push(movement);
   }
-  const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
   const keys = movements.map((movement) => `${cluster}\n${movement.signature}`);
   const statuses: Array<SignatureStatusInfo | null | undefined> = keys.map(finalizedStatus);
   const unread = movements.flatMap((movement, index) =>
     statuses[index] ? [] : [{ index, signature: movement.signature as Signature }]
   );
   if (unread.length > 0) {
-    const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: 3_000 });
+    const rpc = createClusterRpc({ timeoutMs: 3_000 });
     const read = await getSignatureStatuses(
       rpc,
       unread.map(({ signature }) => signature),

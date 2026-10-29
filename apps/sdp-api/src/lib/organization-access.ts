@@ -4,6 +4,7 @@ import {
   type ApiKeyEnvironment,
   type RateLimitTier,
 } from "@sdp/types/api-keys";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import { organizationStatusMayAuthenticate } from "@sdp/types/organizations";
 import { projectStatusMayAuthenticate } from "@sdp/types/projects";
 import type { Context } from "hono";
@@ -121,6 +122,27 @@ type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
 };
 
 /** Everything an API key may do on this request, all from one read. */
+/** How a request names its API key row. */
+export type ApiKeyLookup =
+  /** A presented key: its hash, and an `sf_` key's key ID (null for `sk_`). */
+  | { kind: "secret"; keyHash: string; publicId: string | null }
+  /** A key the gateway authenticated and named by key ID (HOO-2256). */
+  | { kind: "gateway"; publicId: string };
+
+/**
+ * What the instance's refusal and throttle caches remember a lookup by: the
+ * hash of a presented key, or the key ID the gateway named. An `sf_` key's
+ * hash covers its secret alone, so its key ID is part of the entry: a secret
+ * refused under a wrong key ID must not refuse the real key. Prefixed so no
+ * two kinds of entry can collide.
+ */
+export function apiKeyRefusalKey(lookup: ApiKeyLookup): string {
+  if (lookup.kind === "gateway") {
+    return `gateway:${lookup.publicId}`;
+  }
+  return lookup.publicId === null ? lookup.keyHash : `sf:${lookup.publicId}:${lookup.keyHash}`;
+}
+
 export interface ApiKeyAuthorization {
   id: string;
   organizationId: string;
@@ -152,8 +174,9 @@ export interface ApiKeyAuthorization {
  */
 export async function authorizeApiKey(
   c: Context<{ Bindings: Env }>,
-  keyHash: string
+  lookup: ApiKeyLookup
 ): Promise<ApiKeyAuthorization> {
+  const refusalKey = apiKeyRefusalKey(lookup);
   const row = await getDb(c.env)
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants, ak.grants_assigned,
@@ -170,13 +193,20 @@ export async function authorizeApiKey(
          FROM api_keys ak
          JOIN organizations o ON o.id = ak.organization_id
          JOIN projects p ON p.id = ak.project_id AND p.organization_id = ak.organization_id
-        WHERE ak.key_hash = ?`
+        WHERE ${
+          lookup.kind === "secret"
+            ? "ak.key_hash = ? AND ak.public_id IS NOT DISTINCT FROM ?"
+            : "ak.public_id = ?"
+        }`
     )
-    .bind(keyHash)
+    // A presented key: the key ID must match the row the secret belongs to,
+    // since an `sf_` secret under another key's ID is no key at all. A
+    // gateway identity: the gateway verified the secret; the ID names the row.
+    .bind(...(lookup.kind === "secret" ? [lookup.keyHash, lookup.publicId] : [lookup.publicId]))
     .first<ApiKeyAuthorizationRow>();
 
   if (!row) {
-    throw refuseTerminally(keyHash, "INVALID_API_KEY");
+    throw refuseTerminally(refusalKey, "INVALID_API_KEY");
   }
   // Organization and project status before the key's own: a key created or
   // rotated after an organization deletion enumerated its keys is covered by
@@ -191,10 +221,10 @@ export async function authorizeApiKey(
   // A dead key never comes back, so its refusal is remembered; the
   // organization and project refusals above can lift and are not.
   if (refusal === "revoked") {
-    throw refuseTerminally(keyHash, "REVOKED_API_KEY");
+    throw refuseTerminally(refusalKey, "REVOKED_API_KEY");
   }
   if (refusal === "expired") {
-    throw refuseTerminally(keyHash, "EXPIRED_API_KEY");
+    throw refuseTerminally(refusalKey, "EXPIRED_API_KEY");
   }
   // A key from before grants holds none until a person gives it some; it is
   // refused by name rather than failing every route. Not remembered: setting
@@ -225,5 +255,24 @@ export async function authorizeApiKey(
       walletScopeSchema.parse(row.wallet_scope) === "all"
         ? { scope: "all" }
         : { scope: "selected", custodyWalletIds },
+  };
+}
+
+/**
+ * The settings fields SDP defines, without any other key a stored row still
+ * carries (a retired `webhookSecret` above all), so a response never echoes
+ * one.
+ *
+ * @param settings - Settings as stored.
+ * @returns Only the defined fields.
+ */
+export function projectOrganizationSettings(settings: OrganizationSettings): OrganizationSettings {
+  return {
+    defaultEnvironment: settings.defaultEnvironment,
+    allowedIpAddresses: settings.allowedIpAddresses,
+    legacyAllowedIpAddresses: settings.legacyAllowedIpAddresses,
+    providerOverrides: settings.providerOverrides,
+    enableProductionProject: settings.enableProductionProject,
+    customRateLimits: settings.customRateLimits,
   };
 }

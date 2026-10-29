@@ -400,7 +400,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "shared-gcp-parent",
-      body: { fields: { appId: APP_ID, appSecret: "new-gcp-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-gcp-secret" } },
     });
     expect(response.status).toBe(200);
     const rows = await getDb(env).queryMany<{ secret_ref: string; secret_version_ref: string }>(
@@ -423,7 +423,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "first-gcp-owner",
-      body: { fields: { appId: APP_ID, appSecret: "first-owner-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "first-owner-secret" } },
     });
     expect(response.status).toBe(200);
     expect(gcp.versions.size).toBe(1);
@@ -439,7 +439,10 @@ describe("provider credential lifecycle", () => {
       const response = await lifecycleRequest(`/provider-credentials/${current}/rotate`, {
         method: "POST",
         key: `backend-change-${index}`,
-        body: { fields: { appId: APP_ID, appSecret: `backend-change-secret-${index}` } },
+        body: {
+          provider: "privy",
+          fields: { appId: APP_ID, appSecret: `backend-change-secret-${index}` },
+        },
       });
       expect(response.status).toBe(200);
       current = credentialResponseSchema.parse(await response.json()).data.providerCredential.id;
@@ -472,7 +475,10 @@ describe("provider credential lifecycle", () => {
       const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: `rollback-backend-${previousBackend}`,
-        body: { fields: { appId: APP_ID, appSecret: "backend-rollback-secret" } },
+        body: {
+          provider: "privy",
+          fields: { appId: APP_ID, appSecret: "backend-rollback-secret" },
+        },
       });
       expect(rotated.status).toBe(200);
       const current = credentialResponseSchema.parse(await rotated.json()).data.providerCredential
@@ -507,7 +513,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "prototype-shared-commit",
-      body: { fields: { appId: APP_ID, appSecret: "prototype-new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "prototype-new-secret" } },
     });
     expect(response.status).toBe(200);
     const { data } = credentialResponseSchema.parse(await response.json());
@@ -539,7 +545,7 @@ describe("provider credential lifecycle", () => {
     const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "prototype-shared-cancel",
-      body: { fields: { appId: APP_ID, appSecret: "prototype-late-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "prototype-late-secret" } },
     });
     try {
       await started.promise;
@@ -739,7 +745,7 @@ describe("provider credential lifecycle", () => {
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-parent-deactivation",
-      body: { fields: { appId: APP_ID, appSecret: "pending-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "pending-secret" } },
     });
     expect(pending.status).toBe(200);
     const { data } = credentialResponseSchema.parse(await pending.json());
@@ -1121,7 +1127,7 @@ describe("provider credential lifecycle", () => {
     const rotation = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-gcp-root-deactivation",
-      body: { fields: { appId: APP_ID, appSecret: "live-child-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "live-child-secret" } },
     });
     expect(rotation.status).toBe(200);
     const childId = credentialResponseSchema.parse(await rotation.json()).data.providerCredential
@@ -1210,7 +1216,7 @@ describe("provider credential lifecycle", () => {
       const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: "rotate-quota-exhausted",
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
 
       expect(response.status).toBe(429);
@@ -1235,7 +1241,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-quota-unavailable",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
 
     expect(response.status).toBe(503);
@@ -1265,7 +1271,7 @@ describe("provider credential lifecycle", () => {
       const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: "rotate-before-quota-test",
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
       expect(rotated.status).toBe(200);
       const { data } = await rotated.json();
@@ -1346,7 +1352,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-shared-credential",
-      body: { fields: { appId: `  ${APP_ID}  `, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: `  ${APP_ID}  `, appSecret: "new-secret" } },
     });
 
     expect(response.status).toBe(200);
@@ -1439,7 +1445,7 @@ describe("provider credential lifecycle", () => {
       const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: "rotate-retirement-write-failure",
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
 
       expect(response.status).toBe(409);
@@ -1546,7 +1552,7 @@ describe("provider credential lifecycle", () => {
         lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
           method: "POST",
           key: "rotate-gcp-insert-rollback",
-          body: { fields: { appId: APP_ID, appSecret: "new-gcp-secret" } },
+          body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-gcp-secret" } },
         })
       ).rejects.toMatchObject({ code: "23514" });
       expect(versionRef).toBeUndefined();
@@ -1589,7 +1595,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "rotate-gcp-in-flight",
-      body: { fields: { appId: APP_ID, appSecret: "in-flight-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "in-flight-secret" } },
     };
     const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
     try {
@@ -1640,7 +1646,10 @@ describe("provider credential lifecycle", () => {
       const request = {
         method: "POST" as const,
         key: `rotate-gcp-${writeFailure}`,
-        body: { fields: { appId: APP_ID, appSecret: "failed-gcp-write-secret" } },
+        body: {
+          provider: "privy",
+          fields: { appId: APP_ID, appSecret: "failed-gcp-write-secret" },
+        },
       };
       const response = await lifecycleRequest(
         `/provider-credentials/${CREDENTIAL_ID}/rotate`,
@@ -1712,7 +1721,10 @@ describe("provider credential lifecycle", () => {
         lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
           method: "POST",
           key: "rotate-gcp-finalization-sql-failure",
-          body: { fields: { appId: APP_ID, appSecret: "sql-rejected-gcp-secret" } },
+          body: {
+            provider: "privy",
+            fields: { appId: APP_ID, appSecret: "sql-rejected-gcp-secret" },
+          },
         })
       ).rejects.toMatchObject({ code: "23514" });
       expect(gcp.versions.size).toBe(1);
@@ -1760,7 +1772,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "rotate-gcp-cancel-creating",
-      body: { fields: { appId: APP_ID, appSecret: "late-gcp-write-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "late-gcp-write-secret" } },
     };
     const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
     let candidateId: string | undefined;
@@ -1828,7 +1840,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "legacy-absence-ack",
-      body: { fields: { appId: APP_ID, appSecret: "late-known-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "late-known-secret" } },
     });
     expect(response.status).toBe(409);
     expect(
@@ -1873,7 +1885,7 @@ describe("provider credential lifecycle", () => {
       const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: `rotate-gcp-adopted-${status}`,
-        body: { fields: { appId: APP_ID, appSecret: "adopted-gcp-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "adopted-gcp-secret" } },
       });
       expect(response.status).toBe(200);
       const { data } = credentialResponseSchema.parse(await response.json());
@@ -1949,7 +1961,7 @@ describe("provider credential lifecycle", () => {
       const request = {
         method: "POST" as const,
         key: `rotate-gcp-unknown-${committed}`,
-        body: { fields: { appId: APP_ID, appSecret: "uncertain-gcp-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "uncertain-gcp-secret" } },
       };
       expect(
         (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
@@ -2003,7 +2015,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "rotate-gcp-unknown-reservation",
-      body: { fields: { appId: APP_ID, appSecret: "unwritten-gcp-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "unwritten-gcp-secret" } },
     };
     expect(
       (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
@@ -2049,7 +2061,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-invalid-credential",
-      body: { fields: { appId: APP_ID, appSecret: "invalid-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "invalid-secret" } },
     });
 
     expect(response.status).toBe(200);
@@ -2080,7 +2092,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "rotate-rejected-audit",
-      body: { fields: { appId: APP_ID, appSecret: "invalid-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "invalid-secret" } },
     };
     const response = await lifecycleRequest(
       `/provider-credentials/${CREDENTIAL_ID}/rotate`,
@@ -2109,7 +2121,10 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-different-privy-account",
-      body: { fields: { appId: "different-privy-app", appSecret: "valid-other-secret" } },
+      body: {
+        provider: "privy",
+        fields: { appId: "different-privy-app", appSecret: "valid-other-secret" },
+      },
     });
 
     expect(response.status).toBe(200);
@@ -2165,7 +2180,7 @@ describe("provider credential lifecycle", () => {
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-concurrent-rejection",
-      body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rejected-secret" } },
     });
     const { data } = credentialResponseSchema.parse(await pending.json());
     const candidateId = data.providerCredential.id;
@@ -2214,7 +2229,7 @@ describe("provider credential lifecycle", () => {
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-rejection-commit-unknown",
-      body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rejected-secret" } },
     });
     const { data } = credentialResponseSchema.parse(await pending.json());
     const candidateId = data.providerCredential.id;
@@ -2305,7 +2320,7 @@ describe("provider credential lifecycle", () => {
         const initial = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
           method: "POST",
           key: "rotate-before-commit-recovery",
-          body: { fields: { appId: APP_ID, appSecret: secret } },
+          body: { provider: "privy", fields: { appId: APP_ID, appSecret: secret } },
         });
         expect(initial.status).toBe(200);
         const { data } = credentialResponseSchema.parse(await initial.json());
@@ -2397,7 +2412,7 @@ describe("provider credential lifecycle", () => {
         lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
           method: "POST",
           key: "rotate-audit-unavailable",
-          body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+          body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rejected-secret" } },
         })
       ).rejects.toThrow("Required audit record could not be persisted");
       expect(
@@ -2427,7 +2442,7 @@ describe("provider credential lifecycle", () => {
       const created = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: `before-${operation}-audit-outage`,
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
       const candidateId = credentialResponseSchema.parse(await created.json()).data
         .providerCredential.id;
@@ -2464,7 +2479,7 @@ describe("provider credential lifecycle", () => {
       const request = {
         method: "POST" as const,
         key: `outcome-outage-${action}`,
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       };
       let currentId = CREDENTIAL_ID;
       if (action === "rollback") {
@@ -2513,7 +2528,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "audit-outage-terminal-replay",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     };
     const response = await lifecycleRequest(
       `/provider-credentials/${CREDENTIAL_ID}/rotate`,
@@ -2552,7 +2567,7 @@ describe("provider credential lifecycle", () => {
     const pending = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-unreadable-secret",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const { data } = credentialResponseSchema.parse(await pending.json());
     const candidateId = data.providerCredential.id;
@@ -2610,7 +2625,7 @@ describe("provider credential lifecycle", () => {
     const first = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-retry-unknown",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as {
@@ -2641,7 +2656,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-secret-access-cancel",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -2689,7 +2704,7 @@ describe("provider credential lifecycle", () => {
     const request = {
       method: "POST" as const,
       key: "rotate-replay",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     };
 
     const first = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
@@ -2716,7 +2731,7 @@ describe("provider credential lifecycle", () => {
     const firstRequest = {
       method: "POST" as const,
       key: "rotate-historical-replay",
-      body: { fields: { appId: APP_ID, appSecret: "first-new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "first-new-secret" } },
     };
     const first = await lifecycleRequest(
       `/provider-credentials/${CREDENTIAL_ID}/rotate`,
@@ -2730,7 +2745,7 @@ describe("provider credential lifecycle", () => {
     const second = await lifecycleRequest(`/provider-credentials/${firstCandidateId}/rotate`, {
       method: "POST",
       key: "rotate-after-historical-replay",
-      body: { fields: { appId: APP_ID, appSecret: "second-new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "second-new-secret" } },
     });
     expect(second.status).toBe(200);
     expect(await second.json()).toMatchObject({
@@ -2766,7 +2781,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-rollback",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -2812,7 +2827,7 @@ describe("provider credential lifecycle", () => {
     const rejected = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "lineage-version-rejected",
-      body: { fields: { appId: APP_ID, appSecret: "rejected-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rejected-secret" } },
     });
     expect(rejected.status).toBe(200);
     expect(await rejected.json()).toMatchObject({
@@ -2823,7 +2838,7 @@ describe("provider credential lifecycle", () => {
       await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: "lineage-version-after-rejection",
-        body: { fields: { appId: APP_ID, appSecret: "replacement-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "replacement-secret" } },
       })
     ).toMatchObject({ status: 200 });
     expect(
@@ -2843,7 +2858,7 @@ describe("provider credential lifecycle", () => {
     const secondResponse = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "lineage-version-two",
-      body: { fields: { appId: APP_ID, appSecret: "second-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "second-secret" } },
     });
     expect(secondResponse.status).toBe(200);
     const second = credentialResponseSchema.parse(await secondResponse.json()).data
@@ -2851,7 +2866,7 @@ describe("provider credential lifecycle", () => {
     const thirdResponse = await lifecycleRequest(`/provider-credentials/${second.id}/rotate`, {
       method: "POST",
       key: "lineage-version-three",
-      body: { fields: { appId: APP_ID, appSecret: "third-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "third-secret" } },
     });
     expect(thirdResponse.status).toBe(200);
     const third = credentialResponseSchema.parse(await thirdResponse.json()).data
@@ -2863,7 +2878,7 @@ describe("provider credential lifecycle", () => {
       await lifecycleRequest(`/provider-credentials/${second.id}/rotate`, {
         method: "POST",
         key: "lineage-version-four",
-        body: { fields: { appId: APP_ID, appSecret: "fourth-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "fourth-secret" } },
       })
     ).toMatchObject({ status: 200 });
     expect(
@@ -2886,7 +2901,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-rollback-cleanup",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -2938,7 +2953,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-cancel",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -2994,7 +3009,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-gcp-cancel",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -3033,7 +3048,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-invariant-breach",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     const rotatedBody = (await rotated.json()) as {
       data: { providerCredential: { id: string } };
@@ -3099,7 +3114,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-unpersisted-outcome",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
 
     expect(response.status).toBe(503);
@@ -3114,7 +3129,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-max-length-fields",
-      body: { fields: { appId: ` ${appId} `, appSecret } },
+      body: { provider: "privy", fields: { appId: ` ${appId} `, appSecret } },
     });
 
     expect(response.status).toBe(200);
@@ -3139,7 +3154,10 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-oversized-field",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret", [field]: "x".repeat(4097) } },
+      body: {
+        provider: "privy",
+        fields: { appId: APP_ID, appSecret: "new-secret", [field]: "x".repeat(4097) },
+      },
     });
 
     expect(response.status).toBe(400);
@@ -3151,6 +3169,7 @@ describe("provider credential lifecycle", () => {
       method: "POST",
       key: "rotate-unknown-field",
       body: {
+        provider: "privy",
         fields: { appId: APP_ID, appSecret: "new-secret" },
         connectionIds: [CONNECTION_A_ID],
       },
@@ -3179,7 +3198,7 @@ describe("provider credential lifecycle", () => {
     const response = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-orphan",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
 
     expect(response.status).toBe(409);
@@ -3195,7 +3214,7 @@ describe("provider credential lifecycle", () => {
     const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
       method: "POST",
       key: "rotate-before-pending-child",
-      body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
     });
     expect(rotated.status).toBe(200);
     const rotatedBody = (await rotated.json()) as {
@@ -3210,7 +3229,7 @@ describe("provider credential lifecycle", () => {
     const pending = await lifecycleRequest(`/provider-credentials/${currentId}/rotate`, {
       method: "POST",
       key: "rotate-pending-before-rollback",
-      body: { fields: { appId: APP_ID, appSecret: "pending-secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "pending-secret" } },
     });
     expect(pending.status).toBe(200);
     const pendingBody = (await pending.json()) as {
@@ -3288,7 +3307,7 @@ describe("provider credential lifecycle", () => {
       const rotated = await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, {
         method: "POST",
         key: `rotate-before-rollback-${failureCode}`,
-        body: { fields: { appId: APP_ID, appSecret: "new-secret" } },
+        body: { provider: "privy", fields: { appId: APP_ID, appSecret: "new-secret" } },
       });
       expect(rotated.status).toBe(200);
       const currentId = credentialResponseSchema.parse(await rotated.json()).data.providerCredential

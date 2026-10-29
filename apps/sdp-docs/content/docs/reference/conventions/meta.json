@@ -1,0 +1,4 @@
+{
+  "title": "Conventions",
+  "pages": ["errors", "pagination", "rate-limits", "versioning"]
+}

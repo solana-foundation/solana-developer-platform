@@ -68,7 +68,7 @@
     },
     {
       "key": "sdpApiKey",
-      "value": "sk_test_your_api_key",
+      "value": "sf_your_api_key",
       "type": "string"
     }
   ],
@@ -317,7 +317,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/projects/{{projectId}}/provider-availability",
-            "description": "Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
+            "description": "Lists every provider this deployment's release channel publishes, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404."
           }
         }
       ]
@@ -998,7 +998,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+            "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"destination\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"100.00\"\n}",
@@ -1031,7 +1031,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
-            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1069,7 +1069,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1194,6 +1194,15 @@
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
             "description": "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently."
+          }
+        },
+        {
+          "name": "Cancel payment request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/requests/{{paymentRequestId}}/cancel",
+            "description": "Cancels an open payment request, so its payment link stops building and sponsoring transactions. Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel."
           }
         },
         {
@@ -1565,6 +1574,188 @@
                 }
               }
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Counterparties",
+      "item": [
+        {
+          "name": "Get counterparty field options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/metadata",
+            "description": "Returns the enum option sets and country list needed to build a counterparty form."
+          }
+        },
+        {
+          "name": "List counterparties",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties",
+            "description": "Lists counterparties for the authenticated organization."
+          }
+        },
+        {
+          "name": "Create counterparty",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties",
+            "description": "Creates a counterparty. If externalId is provided, it must be unique within the organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"individual\",\n  \"displayName\": \"Jane Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get counterparty",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Gets counterparty details by id."
+          }
+        },
+        {
+          "name": "Update counterparty",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Updates counterparty attributes. At least one field must be provided. Use null on externalId to clear it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"customer_42\",\n  \"entityType\": \"business\",\n  \"displayName\": \"Jane Q. Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive counterparty",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}",
+            "description": "Archives a counterparty. Archived counterparties are hidden from default lists."
+          }
+        },
+        {
+          "name": "Get counterparty ramp requirements",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/requirements",
+            "description": "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required."
+          }
+        },
+        {
+          "name": "List counterparty accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts",
+            "description": "Lists payment accounts for a counterparty. Crypto-wallet accounts can be used by payment flows that send funds to a counterparty wallet."
+          }
+        },
+        {
+          "name": "Create counterparty account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts",
+            "description": "Creates a payment account for a counterparty. For accountKind \"crypto_wallet\", details.network must be \"solana\" and details.address must be a Solana wallet address.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountKind\": \"crypto_wallet\",\n  \"label\": \"USDC wallet\",\n  \"details\": {\n    \"network\": \"solana\",\n    \"address\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  },\n  \"providerAccountData\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "List counterparty provider accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/provider-accounts",
+            "description": "Lists provider-owned fiat payout accounts for a counterparty. Provider details are fetched just in time and account numbers are returned only as last-four digits."
+          }
+        },
+        {
+          "name": "Get counterparty account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Gets a counterparty payment account by id."
+          }
+        },
+        {
+          "name": "Update counterparty account",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Updates a counterparty payment account. At least one field must be provided.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Primary USDC wallet\",\n  \"details\": {\n    \"network\": \"solana\",\n    \"address\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n  },\n  \"providerAccountData\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Archive counterparty account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/accounts/{{counterpartyAccountId}}",
+            "description": "Archives a counterparty payment account. Archived accounts are hidden from default lists."
           }
         }
       ]

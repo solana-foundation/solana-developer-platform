@@ -2,13 +2,14 @@ import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "
 import type { CustodyWalletPurpose } from "@sdp/types/custody";
 import { RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
+  ORGANIZATION_PROVIDER_FAMILIES,
   RAMP_PROVIDERS,
   type RampProviderId,
   RETIRED_RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import {
   isRampProviderInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
@@ -63,8 +64,10 @@ function buildOwners(): ReadonlyMap<string, Owner> {
     own(value, { module });
   }
   for (const value of TOKEN_TRANSACTION_TYPES) own(value, { module: "issuance" });
+  // A provider availability entry's family is the module of the same name.
+  for (const family of ORGANIZATION_PROVIDER_FAMILIES) own(family, { module: family });
   // "ramp" is the transfer-list category that selects RAMP_TRANSFER_TYPES.
-  for (const value of [...RAMP_TRANSFER_TYPES, "offramp_channel", "ramps", "ramp"]) {
+  for (const value of [...RAMP_TRANSFER_TYPES, "offramp_channel", "ramp"]) {
     own(value, { module: "ramps" });
   }
   for (const provider of RAMP_PROVIDERS) own(provider, { rampProvider: provider });
@@ -108,7 +111,7 @@ export function isValuePublished(
   if ("module" in owner) return modules.has(owner.module);
   return (
     modules.has("ramps") &&
-    isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_STAGES)
+    isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
   );
 }
 

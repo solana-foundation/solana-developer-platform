@@ -1,3 +1,4 @@
+import type { OrganizationRole } from "@sdp/types/roles";
 import { Badge } from "@sdp/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { cn } from "@sdp/ui/cn";
@@ -22,11 +23,22 @@ function formatJoined(value: string): string {
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-function roleLabel(role: string, t: Translate): string {
-  return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
+function roleLabel(role: OrganizationRole, t: Translate): string {
+  switch (role) {
+    case "admin":
+      return t("Shared.members.roleAdmin");
+    case "member":
+      return t("Shared.members.roleMember");
+    case "viewer":
+      return t("Shared.members.roleViewer");
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`Unhandled organization role: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
-export async function MembersSection({ page = 1 }: { page?: number }) {
+export async function MembersSection({ page }: { page: number }) {
   const t = await getTranslations();
 
   let members: Member[] = [];
@@ -117,6 +129,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                       <MemberActions
                         memberId={member.id}
                         label={identity.actionLabel}
+                        role={member.role}
                         isSelf={Boolean(member.isSelf)}
                         isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
                       />
@@ -145,11 +158,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                   </TableCell>
                   <TableCell className="text-muted text-sm">—</TableCell>
                   <TableCell className="text-right">
-                    <InvitationActions
-                      invitationId={invitation.id}
-                      email={invitation.email}
-                      acceptUrl={invitation.acceptUrl}
-                    />
+                    <InvitationActions invitationId={invitation.id} email={invitation.email} />
                   </TableCell>
                 </TableRow>
               ))}

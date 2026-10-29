@@ -1,6 +1,7 @@
 import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { routePath } from "hono/route";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
@@ -19,45 +20,8 @@ export const RATE_LIMIT_TIERS = {
   unlimited: 10_000,
 } as const satisfies Record<RateLimitTier, number>;
 
+/** Maximum admitted requests per window, per client IP, for a request without a credential. */
 export const ANONYMOUS_MAX_REQUESTS = 20;
-export const ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS = 120;
-export const ANONYMOUS_EARN_BUILD_MAX_REQUESTS = 30;
-
-const ANONYMOUS_EARN_BUILD_PATHS = new Set([
-  "/v1/earn/vault-deposit-previews",
-  "/v1/earn/external-wallet/deposit-transactions",
-  "/v1/earn/external-wallet/withdrawal-previews",
-  "/v1/earn/external-wallet/withdrawal-transactions",
-]);
-
-function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
-  identifierPrefix: string | null;
-  maxRequests: number;
-  metricTier: string;
-} {
-  if (
-    c.req.method === "GET" &&
-    (c.req.path === "/v1/earn/strategies" || c.req.path.startsWith("/v1/earn/strategies/"))
-  ) {
-    return {
-      identifierPrefix: "anonymous:earn:catalogue",
-      maxRequests: ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
-      metricTier: "anonymous_earn_catalogue",
-    };
-  }
-  if (c.req.method === "POST" && ANONYMOUS_EARN_BUILD_PATHS.has(c.req.path)) {
-    return {
-      identifierPrefix: "anonymous:earn:build",
-      maxRequests: ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
-      metricTier: "anonymous_earn_build",
-    };
-  }
-  return {
-    identifierPrefix: null,
-    maxRequests: ANONYMOUS_MAX_REQUESTS,
-    metricTier: "anonymous_default",
-  };
-}
 
 /**
  * Per-user-per-org ceiling for dashboard traffic (Clerk JWT). Dashboard
@@ -68,14 +32,29 @@ function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
 export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 
 /**
- * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
- * traffic gets its real limit per key id after auth (enforceRateLimit in the
- * auth middleware), so the anonymous limit must not apply — it would cap
- * every tier at 20/min per IP. The key is unverified at this point, so a high
- * IP ceiling still bounds invalid-key spray (a fresh hash per request) against
- * the DB read in auth.
+ * Per-IP ceiling for requests that present an API key on a path where API-key
+ * authentication runs (AUTHENTICATED_PATHS). Keyed traffic gets its
+ * real limit per key id after auth (enforceRateLimit in the auth middleware),
+ * so the anonymous limit must not apply — it would cap every tier at 20/min
+ * per IP. The key is unverified at this point, so a high IP ceiling still
+ * bounds invalid-key spray (a fresh hash per request) against the DB read in
+ * auth. Anywhere else a presented key is never checked, so it buys nothing.
  */
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
+
+/**
+ * The mounts whose routers authenticate the caller, matched as segment
+ * prefixes by matchesFreePath: API keys and Clerk sessions through
+ * `unifiedAuthMiddleware` and the gates built on it, and Clerk sessions alone
+ * through the onboarding and organization-signup middlewares under `/v1`.
+ * Only here does a credential choose a tier: a verified Clerk session its
+ * per-user limit, an API key the keyed IP backstop with the auth middleware's
+ * per-key limit behind it. On every other path (`/pay` above all, which makes
+ * the fee payer sign for anyone) no credential is ever checked, so none is
+ * read: the anonymous limit applies whatever headers are sent, and no JWKS
+ * verification runs.
+ */
+export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
 
 /**
  * Per-key-hash flood guard the auth middleware applies before it reads the
@@ -251,6 +230,23 @@ export class InProcessRateLimiter {
     maxRequests: number,
     windowMs: number
   ): void {
+    const { windowStart, count } = this.assertNotExhausted(c, identifier, maxRequests, windowMs);
+    this.windows.set(identifier, { windowStart, count: count + 1 });
+  }
+
+  /**
+   * Refuses, as `enforce` would, an identifier that has used `maxRequests` in
+   * the current window, without counting this call: for a limit that counts
+   * only failures, checked before the work that might fail.
+   *
+   * @throws AppError RATE_LIMITED (429) with a Retry-After header.
+   */
+  assertNotExhausted(
+    c: Context<{ Bindings: Env }>,
+    identifier: string,
+    maxRequests: number,
+    windowMs: number
+  ): { windowStart: number; count: number } {
     const now = Date.now();
     const windowStart = Math.floor(now / windowMs) * windowMs;
     const current = this.windows.get(identifier);
@@ -263,14 +259,14 @@ export class InProcessRateLimiter {
           event: "sdp_api_rate_limit_rejected",
           tier: `${this.name}_in_process_fallback`,
           method: c.req.method,
-          route: c.req.path,
+          route: routePath(c, -1) || "unmatched",
           limit: maxRequests,
         },
         "In-process fallback rate limit rejected request"
       );
       throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }
-    this.windows.set(identifier, { windowStart, count: count + 1 });
+    return { windowStart, count };
   }
 
   /** Forget every count, so a test starts from an empty instance. */
@@ -279,8 +275,8 @@ export class InProcessRateLimiter {
   }
 }
 
-/** Distinct client IPs the keyed backstop's fallback remembers. */
-const KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED = 10_000;
+/** Distinct client IPs each per-IP fallback remembers. */
+const PER_IP_FALLBACK_MAX_TRACKED = 10_000;
 
 /**
  * The keyed per-IP backstop's in-process stand-in while the shared counter
@@ -290,7 +286,19 @@ const KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED = 10_000;
  */
 export const keyedIpBackstopFallback = new InProcessRateLimiter(
   "keyed_ip_backstop",
-  KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED
+  PER_IP_FALLBACK_MAX_TRACKED
+);
+
+/**
+ * The anonymous per-IP limit's in-process stand-in while the shared counter
+ * store is down, so no unauthenticated path runs unmetered during an outage.
+ * It counts per instance rather than refusing: `/pay` reads stay up, and the
+ * sponsored signature `/pay` produces is still refused by sponsorship budget
+ * admission, which fails closed on the same store.
+ */
+export const anonymousFallback = new InProcessRateLimiter(
+  "anonymous_default",
+  PER_IP_FALLBACK_MAX_TRACKED
 );
 
 /**
@@ -439,7 +447,7 @@ export async function enforceRateLimit(
         event: "sdp_api_rate_limit_rejected",
         tier: options.metricTier ?? "default",
         method: c.req.method,
-        route: c.req.path,
+        route: routePath(c, -1) || "unmatched",
         limit: maxRequests,
       },
       "Rate limit rejected request"
@@ -452,11 +460,16 @@ export async function enforceRateLimit(
  * Pre-auth rate limiting middleware. Paths matching an exempt pattern pass
  * straight through (exact, segment-prefix, or single-segment `*` wildcard —
  * see matchesFreePath; bare `startsWith` would mis-skip the whole API when
- * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
- * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
- * sk_-shaped requests get the high per-IP backstop (their real limit is
- * enforced per key after auth via enforceRateLimit), and everything else gets
- * the anonymous per-IP limit.
+ * `/` is listed). For everything else, on an AUTHENTICATED_PATHS mount:
+ * verified Clerk dashboard JWTs get a generous per-user limit (not an
+ * exemption — see CLERK_USER_MAX_REQUESTS), and requests presenting an API key
+ * get the high per-IP backstop (their real limit is enforced per key after
+ * auth via enforceRateLimit). Everything else, any credential on any other
+ * path included, gets the anonymous per-IP limit.
+ *
+ * Both per-IP limits count in this instance's memory while the shared counter
+ * store is down (keyedIpBackstopFallback, anonymousFallback), so neither runs
+ * unmetered during an outage.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt
  * paths, so every path kv-store skips must be listed here too — the
@@ -474,8 +487,14 @@ export function skipRateLimitPaths(...paths: string[]) {
       return;
     }
 
+    const authenticatedPath = matchesFreePath(c.req.path, AUTHENTICATED_PATHS);
     const bearerToken = extractBearerToken(c);
-    if (bearerToken && looksLikeJwt(bearerToken) && looksLikeClerkJwt(bearerToken, c.env)) {
+    if (
+      authenticatedPath &&
+      bearerToken &&
+      looksLikeJwt(bearerToken) &&
+      looksLikeClerkJwt(bearerToken, c.env)
+    ) {
       const clerkUserId = await verifiedClerkUserId(c, bearerToken);
       if (clerkUserId) {
         // Per user, not per IP: an office behind one NAT address is many people, and
@@ -488,22 +507,16 @@ export function skipRateLimitPaths(...paths: string[]) {
       // limit below, which is what bounds signature-spray against the JWKS check.
     }
 
-    const apiKey = extractApiKey(c);
-    const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
-
     const clientIp = getClientIp(c) ?? "unknown";
-    if (presentsApiKey) {
+    if (authenticatedPath && presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
       });
     } else {
-      const limit = anonymousRequestLimit(c);
-      await enforceRateLimit(
-        c,
-        limit.identifierPrefix ? `${limit.identifierPrefix}:ip:${clientIp}` : clientIp,
-        limit.maxRequests,
-        { metricTier: limit.metricTier }
-      );
+      await enforceRateLimit(c, clientIp, ANONYMOUS_MAX_REQUESTS, {
+        metricTier: "anonymous_default",
+        fallback: anonymousFallback,
+      });
     }
     await next();
   };

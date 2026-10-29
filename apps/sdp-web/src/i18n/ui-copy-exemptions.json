@@ -168,7 +168,7 @@
     "reason": "Decorative typographic separator"
   },
   {
-    "candidate": "src/flags/index.ts:279:3:Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Requires the new-design flag, and serves only Payments pages on the new design.",
+    "candidate": "src/flags/definitions.ts:205:5:Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Serves only Payments pages.",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
   },
   {
@@ -178,29 +178,5 @@
   {
     "candidate": "src/flags/index.ts:283:20:Enabled",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
-  },
-  {
-    "candidate": "src/flags/index.ts:240:3:NEW DESIGN: show the 2026 refresh's shell (palette, type and sidebar, the language switch in the account menu) and the Privacy connect form. Each redesigned area also has a new-design-* flag of its own, which counts only while this one is on. Off serves the previous design everywhere.",
-    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
-  },
-  {
-    "candidate": "src/flags/index.ts:243:21:Previous design",
-    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
-  },
-  {
-    "candidate": "src/flags/index.ts:244:20:New design",
-    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
-  },
-  {
-    "candidate": "src/components/dashboard-nav.ts:119:7:contacts",
-    "reason": "Design-module id passed to isDesignModuleOn, never rendered; the label comes from the catalog"
-  },
-  {
-    "candidate": "src/flags/index.ts:95:5:`NEW DESIGN for ${area}. Requires the new-design flag; off serves that area's previous design.`",
-    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
-  },
-  {
-    "candidate": "src/components/dashboard-nav.ts:284:11:overview",
-    "reason": "Design-module id passed to isDesignModuleOn, never rendered; the label comes from the catalog"
   }
 ]

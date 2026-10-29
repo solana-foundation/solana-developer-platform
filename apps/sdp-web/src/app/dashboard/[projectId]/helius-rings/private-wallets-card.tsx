@@ -10,7 +10,7 @@ import { Select, SelectItem } from "@sdp/ui/select";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { Check, Copy } from "lucide-react";
-import { type MouseEvent, useCallback, useMemo, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useMemo, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
 import { createRingsWallet, type RingsWallet } from "./helius-rings.data";
@@ -35,6 +35,19 @@ export interface CustodyWalletOption {
  * Owns its own create-form state; the parent only supplies the wallet list and
  * an `onWalletsChanged` callback to refresh.
  */
+type PrivateWalletCreateState = "hidden" | "noCustodyWallets" | "allBound" | "form";
+
+function privateWalletCreateState(
+  canWrite: boolean,
+  custodyWalletCount: number,
+  availableCustodyWalletCount: number
+): PrivateWalletCreateState {
+  if (!canWrite) return "hidden";
+  if (custodyWalletCount === 0) return "noCustodyWallets";
+  if (availableCustodyWalletCount === 0) return "allBound";
+  return "form";
+}
+
 export function PrivateWalletsCard({
   wallets,
   custodyWallets,
@@ -42,6 +55,7 @@ export function PrivateWalletsCard({
   selectedWalletId,
   onSelect,
   balancesTick,
+  canWrite,
   onWalletsChanged,
 }: {
   wallets: readonly RingsWallet[];
@@ -50,6 +64,8 @@ export function PrivateWalletsCard({
   selectedWalletId: string | null;
   onSelect: (walletId: string) => void;
   balancesTick: number;
+  /** False for a read-only member: create, retry and re-key are hidden. */
+  canWrite: boolean;
   onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
@@ -87,6 +103,80 @@ export function PrivateWalletsCard({
     await onWalletsChanged();
   }, [selectedCustodyWallet, walletName, onWalletsChanged, t]);
 
+  // What the card offers for adding a wallet: nothing to a read-only member, the reason when no
+  // custody wallet is free to bind, else the form.
+  const createState = privateWalletCreateState(
+    canWrite,
+    custodyWallets.length,
+    availableCustodyWallets.length
+  );
+  let createControls: ReactNode;
+  switch (createState) {
+    case "hidden":
+      createControls = null;
+      break;
+    case "noCustodyWallets":
+      createControls = (
+        <p className="text-sm text-secondary">
+          {t("DashboardHeliusRings.wallets.noCustodyWallets")}
+        </p>
+      );
+      break;
+    case "allBound":
+      createControls = (
+        <p className="text-sm text-secondary">
+          {t("DashboardHeliusRings.wallets.allCustodyWalletsBound")}
+        </p>
+      );
+      break;
+    case "form":
+      createControls = (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-56 flex-col gap-1.5">
+            <span className="text-sm font-medium text-primary">
+              {t("DashboardHeliusRings.wallets.createWalletLabel")}
+            </span>
+            <Select
+              ariaLabel={t("DashboardHeliusRings.wallets.createWalletLabel")}
+              value={selectedCustodyWallet}
+              onValueChange={setSelectedCustodyWallet}
+              placeholder={t("DashboardHeliusRings.wallets.createWalletPlaceholder")}
+            >
+              {availableCustodyWallets.map((wallet) => (
+                <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                  {wallet.label ?? wallet.walletId}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+          <div className="flex min-w-48 flex-col gap-1.5">
+            <Label htmlFor="rings-wallet-name">
+              {t("DashboardHeliusRings.wallets.createNameLabel")}
+            </Label>
+            <Input
+              id="rings-wallet-name"
+              value={walletName}
+              placeholder={t("DashboardHeliusRings.wallets.createNamePlaceholder")}
+              onChange={(event) => setWalletName(event.target.value)}
+            />
+          </div>
+          <Button
+            disabled={creating || !selectedCustodyWallet || !walletName.trim()}
+            onClick={() => void handleCreate()}
+          >
+            {creating
+              ? t("DashboardHeliusRings.wallets.creating")
+              : t("DashboardHeliusRings.wallets.create")}
+          </Button>
+        </div>
+      );
+      break;
+    default: {
+      const exhaustive: never = createState;
+      throw new Error(`Unhandled create state: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+
   return (
     <Card className="min-w-0">
       <CardHeader>
@@ -100,56 +190,9 @@ export function PrivateWalletsCard({
           </Callout>
         ) : null}
 
-        {custodyWallets.length === 0 ? (
-          <p className="text-sm text-secondary">
-            {t("DashboardHeliusRings.wallets.noCustodyWallets")}
-          </p>
-        ) : availableCustodyWallets.length === 0 ? (
-          <p className="text-sm text-secondary">
-            {t("DashboardHeliusRings.wallets.allCustodyWalletsBound")}
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-56 flex-col gap-1.5">
-              <span className="text-sm font-medium text-primary">
-                {t("DashboardHeliusRings.wallets.createWalletLabel")}
-              </span>
-              <Select
-                ariaLabel={t("DashboardHeliusRings.wallets.createWalletLabel")}
-                value={selectedCustodyWallet}
-                onValueChange={setSelectedCustodyWallet}
-                placeholder={t("DashboardHeliusRings.wallets.createWalletPlaceholder")}
-              >
-                {availableCustodyWallets.map((wallet) => (
-                  <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                    {wallet.label ?? wallet.walletId}
-                  </SelectItem>
-                ))}
-              </Select>
-            </div>
-            <div className="flex min-w-48 flex-col gap-1.5">
-              <Label htmlFor="rings-wallet-name">
-                {t("DashboardHeliusRings.wallets.createNameLabel")}
-              </Label>
-              <Input
-                id="rings-wallet-name"
-                value={walletName}
-                placeholder={t("DashboardHeliusRings.wallets.createNamePlaceholder")}
-                onChange={(event) => setWalletName(event.target.value)}
-              />
-            </div>
-            <Button
-              disabled={creating || !selectedCustodyWallet || !walletName.trim()}
-              onClick={() => void handleCreate()}
-            >
-              {creating
-                ? t("DashboardHeliusRings.wallets.creating")
-                : t("DashboardHeliusRings.wallets.create")}
-            </Button>
-          </div>
-        )}
+        {createControls}
 
-        <hr className="border-border-default" role="presentation" />
+        {canWrite ? <hr className="border-border-default" role="presentation" /> : null}
 
         {wallets.length === 0 ? (
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.wallets.empty")}</p>
@@ -184,7 +227,8 @@ export function PrivateWalletsCard({
                     custodyName={custodyLabel(wallet.sdpWalletId)}
                     onSelect={() => onSelect(wallet.id)}
                     balancesTick={balancesTick}
-                    onWalletsChanged={onWalletsChanged}
+                    // Re-key and retry are writes; without one the row only reads.
+                    onWalletsChanged={canWrite ? onWalletsChanged : undefined}
                   />
                 ))}
               </TableBody>
@@ -270,7 +314,8 @@ function PrivateWalletRow({
   custodyName: string;
   onSelect: () => void;
   balancesTick: number;
-  onWalletsChanged: () => Promise<void>;
+  /** Absent for a read-only member, which hides retry and re-key. */
+  onWalletsChanged?: () => Promise<void>;
 }) {
   const t = useTranslations();
   return (
@@ -294,7 +339,7 @@ function PrivateWalletRow({
             {/* Paused counts as well as pending: a re-key claims the row before
                 it rotates, so a failed rotation leaves a wallet paused with no
                 address, and this check is where an operator sees why. */}
-            {wallet.status === "pending" ? (
+            {wallet.status === "pending" && onWalletsChanged ? (
               <RetryProvisionButton wallet={wallet} onRetried={onWalletsChanged} />
             ) : null}
             {wallet.status === "pending" || wallet.status === "paused" ? (

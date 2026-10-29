@@ -19,6 +19,7 @@ import {
   paymentOfframpCurrenciesQuerySchema,
   paymentOnrampCurrenciesQuerySchema,
   paymentRecurringPaymentIdParamsSchema,
+  paymentRequestIdParamsSchema,
   paymentSubscriptionIdParamsSchema,
   paymentSubscriptionPlanIdParamsSchema,
   paymentTransferBatchIdParamsSchema,
@@ -34,6 +35,7 @@ import {
 } from "@/openapi/schemas/payments";
 import { walletBalancesQuerySchema } from "@/routes/payments/wallet-balances/schemas";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -46,6 +48,7 @@ import {
   paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
+  paymentRequestResponse,
   paymentSubscriptionCollectionAttemptListResponse,
   paymentSubscriptionListResponse,
   paymentSubscriptionPlanListResponse,
@@ -62,6 +65,18 @@ import {
   transferResponse,
   walletBalancesResponse,
 } from "./responses";
+
+/** Where each Payments operation sits in the API reference (`DOCS_GROUP`). */
+export const PAYMENT_GROUPS = {
+  balances: "Balances and transactions",
+  transfers: "Transfers",
+  transferBatches: "Transfer batches",
+  recurringPayments: "Recurring payments",
+  paymentRequests: "Payment requests",
+  subscriptionPlans: "Subscription plans",
+  subscriptions: "Subscriptions",
+  ramps: "Ramps",
+} as const;
 
 // Each matches the route's `idempotent()` step (ADR 0009); spec.test.ts checks.
 // Transfers and batches store any answer once their row is written.
@@ -80,6 +95,10 @@ const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
 });
+const keyAcceptedRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "rerun",
+});
 
 export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -90,6 +109,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/wallets/{walletId}/balances",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.balances,
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
@@ -127,10 +147,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfers",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -152,6 +173,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfers",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "List transfers",
     operationId: "listPaymentTransfers",
     description:
@@ -174,6 +196,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfers/{transferId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Get transfer",
     operationId: "getPaymentTransfer",
     description: "Retrieves details for a specific transfer.",
@@ -195,10 +218,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfer-batches/estimate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -220,10 +244,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfer-batches",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`).",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -245,6 +270,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfer-batches",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "List transfer batches",
     operationId: "listPaymentTransferBatches",
     description: "Lists transfer batches for the authenticated organization or project scope.",
@@ -266,6 +292,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfer-batches/{batchId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Get transfer batch",
     operationId: "getPaymentTransferBatch",
     description: "Retrieves a transfer batch with recipient rows and chunk transfer summaries.",
@@ -287,6 +314,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
     description:
@@ -312,6 +340,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/recurring-payments",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "List recurring payments",
     operationId: "listPaymentRecurringPayments",
     description:
@@ -334,6 +363,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/payments/recurring-payments/{id}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Update recurring payment",
     operationId: "updatePaymentRecurringPayment",
     description:
@@ -360,6 +390,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/activate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Activate recurring payment",
     operationId: "activatePaymentRecurringPayment",
     description:
@@ -382,6 +413,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/cancel",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
@@ -402,8 +434,32 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
+    path: "/v1/payments/requests/{paymentRequestId}/cancel",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Cancel payment request",
+    operationId: "cancelPaymentRequest",
+    description:
+      "Cancels an open payment request, so its payment link stops building and sponsoring transactions. Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: keyAcceptedRerunHeaders,
+      params: paymentRequestIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request canceled",
+        content: jsonContent(paymentRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
     path: "/v1/payments/recurring-payments/{id}/collect",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
@@ -426,6 +482,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/resume",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
     description:
@@ -448,6 +505,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/recurring-payments/{id}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Get recurring payment",
     operationId: "getPaymentRecurringPayment",
     description: "Retrieves an SDP-custody outbound recurring payment record.",
@@ -469,6 +527,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
@@ -494,6 +553,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "List subscription plans",
     operationId: "listPaymentSubscriptionPlans",
     description: "Lists recurring-payment subscription plans.",
@@ -515,6 +575,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscription-plans/{planId}/prepare-create",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Prepare subscription plan creation",
     operationId: "preparePaymentSubscriptionPlanCreate",
     description:
@@ -541,6 +602,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscription-plans/{planId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Get subscription plan",
     operationId: "getPaymentSubscriptionPlan",
     description: "Retrieves a recurring-payment subscription plan record.",
@@ -562,6 +624,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/payments/subscription-plans/{planId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
     description:
@@ -588,6 +651,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
@@ -613,6 +677,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "List subscriptions",
     operationId: "listPaymentSubscriptions",
     description: "Lists recurring-payment subscriptions.",
@@ -634,6 +699,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription authorization",
     operationId: "preparePaymentSubscriptionAuthorization",
     description:
@@ -660,6 +726,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription cancellation",
     operationId: "preparePaymentSubscriptionCancel",
     description:
@@ -686,6 +753,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription resume",
     operationId: "preparePaymentSubscriptionResume",
     description:
@@ -712,6 +780,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
@@ -738,6 +807,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions/{subscriptionId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Get subscription",
     operationId: "getPaymentSubscription",
     description: "Retrieves a recurring-payment subscription record.",
@@ -759,6 +829,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "List subscription collection attempts",
     operationId: "listPaymentSubscriptionCollectionAttempts",
     description: "Lists collection attempts for a recurring-payment subscription.",
@@ -781,6 +852,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/ramps/onramp/currency",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List on-ramp currency support",
     operationId: "listPaymentOnrampCurrencies",
     description:
@@ -803,6 +875,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/ramps/offramp/currency",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List off-ramp currency support",
     operationId: "listPaymentOfframpCurrencies",
     description:
@@ -825,6 +898,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/ramps/onramp/quote",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "Create on-ramp quote",
     operationId: "createPaymentOnrampQuote",
     description:
@@ -849,6 +923,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/ramps/sandbox/simulate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:

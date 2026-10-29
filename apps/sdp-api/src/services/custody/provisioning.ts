@@ -26,6 +26,10 @@ import {
   type ProvisionAnchorageResult,
   provisionAnchorageWallet as provisionAnchorageWalletInCustody,
 } from "@sdp/custody/provisioning/anchorage";
+import {
+  getFireblocksVault as getFireblocksVaultInCustody,
+  listFireblocksVaults as listFireblocksVaultsInCustody,
+} from "@sdp/custody/provisioning/fireblocks-vaults";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
@@ -215,4 +219,27 @@ function createRuntime(): CustodyProvisioningRuntime {
     getRandomValues: (values) => crypto.getRandomValues(new Uint8Array(values)),
     sha256: (data) => crypto.subtle.digest("SHA-256", new Uint8Array(data)),
   };
+}
+
+export function listFireblocksVaults(
+  env: Env,
+  credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
+  options: { after?: string; namePrefix?: string }
+) {
+  return listFireblocksVaultsInCustody(
+    createRuntime(),
+    { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
+    options
+  );
+}
+export function getFireblocksVault(
+  env: Env,
+  credential: { apiKey: string; apiSecretPem: string; assetId: "SOL" | "SOL_TEST" },
+  id: string
+) {
+  return getFireblocksVaultInCustody(
+    createRuntime(),
+    { ...credential, apiBaseUrl: env.FIREBLOCKS_API_BASE_URL },
+    id
+  );
 }

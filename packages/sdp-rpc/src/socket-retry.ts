@@ -1,5 +1,6 @@
 // biome-ignore-all lint/security/noSecrets: Solana JSON-RPC method names, not credentials.
 import { isJsonRpcPayload, type RpcTransport } from "@solana/kit";
+import { fetchWithPinnedRpcTelemetry, withPinnedRpcTelemetry } from "./telemetry";
 
 /**
  * Solana JSON-RPC methods that only read, so sending one twice is harmless.
@@ -85,10 +86,11 @@ function isSocketDeathBeforeResponse(error: unknown): boolean {
  * as it was reused. Every other failure, and every non-read method, surfaces
  * unchanged.
  */
-export function withReadSocketRetry(transport: RpcTransport): RpcTransport {
+export function withReadSocketRetry(transport: RpcTransport, endpointUrl?: string): RpcTransport {
+  const send = endpointUrl ? withPinnedRpcTelemetry(transport, endpointUrl) : transport;
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     try {
-      return await transport<TResponse>(config);
+      return await send<TResponse>(config);
     } catch (error) {
       if (
         config.signal?.aborted ||
@@ -97,7 +99,7 @@ export function withReadSocketRetry(transport: RpcTransport): RpcTransport {
       ) {
         throw error;
       }
-      return await transport<TResponse>(config);
+      return await send<TResponse>(config);
     }
   };
 }
@@ -108,7 +110,7 @@ export async function fetchWithReadSocketRetry(
   init?: RequestInit
 ): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return await fetchWithPinnedRpcTelemetry(input, init);
   } catch (error) {
     if (
       init?.signal?.aborted ||
@@ -119,7 +121,7 @@ export async function fetchWithReadSocketRetry(
     ) {
       throw error;
     }
-    return await fetch(input, init);
+    return await fetchWithPinnedRpcTelemetry(input, init);
   }
 }
 

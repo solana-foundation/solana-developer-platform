@@ -18,7 +18,7 @@ export type IssuanceDateFilter = "all" | "7d" | "30d" | "12m";
 export type IssuanceSortOption = "newest" | "oldest" | "name-asc" | "name-desc";
 
 /** The narrowing filters plus sort — everything the filter popover owns. */
-export interface IssuanceFilterState {
+interface IssuanceFilterState {
   status: IssuanceStatusFilter;
   template: string;
   date: IssuanceDateFilter;
@@ -38,12 +38,12 @@ export const ISSUANCE_DEFAULT_PAGE_SIZE = 24;
 // Bounds what a hand-edited URL can ask the API for. The API caps at 100 too;
 // clamping here keeps the client's own page math honest either way.
 export const ISSUANCE_MAX_PAGE_SIZE = 100;
-export const ISSUANCE_MAX_SEARCH_LENGTH = 100;
+const ISSUANCE_MAX_SEARCH_LENGTH = 100;
 // Matches the API's page bound, so a hand-edited page number is clamped here
 // rather than round-tripping into a 400.
 export const ISSUANCE_MAX_PAGE = 1_000_000;
 
-export const DEFAULT_ISSUANCE_FILTERS: IssuanceFilterState = {
+const DEFAULT_ISSUANCE_FILTERS: IssuanceFilterState = {
   status: "all",
   template: "all",
   date: "all",
@@ -256,7 +256,7 @@ export function toIssuanceTokensApiParams(
  * value, so it doesn't count toward "active filters". Search is shown in its own
  * input, so it isn't counted on the filter badge either.
  */
-export function countActiveIssuanceFilters(filters: IssuanceFilterState): number {
+function countActiveIssuanceFilters(filters: IssuanceFilterState): number {
   let count = 0;
   if (filters.status !== "all") count += 1;
   if (filters.template !== "all") count += 1;

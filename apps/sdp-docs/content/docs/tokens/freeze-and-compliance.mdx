@@ -37,7 +37,7 @@ Enter the wallet address and select the intent (e.g., transfer destination or To
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/compliance/address-screenings \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "address": "8dHEsGLp...hQWRGZ",
@@ -99,7 +99,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "accountAddress": "3xYZa...2aBc",
@@ -114,7 +114,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 ```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
-  headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
+  headers: { Authorization: "Bearer sf_...", "Content-Type": "application/json" },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
 });
 ```
@@ -123,7 +123,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -164,13 +164,13 @@ To resume, click **Unpause token** and confirm.
 ```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
@@ -200,7 +200,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \
   -d '{

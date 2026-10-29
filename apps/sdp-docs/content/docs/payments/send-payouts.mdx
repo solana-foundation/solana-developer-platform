@@ -11,7 +11,7 @@ One request creates a durable batch, chunks its recipients into Solana transacti
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payroll-2026-05-14" \
   -d '{
@@ -30,6 +30,15 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 ```
 
 `Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+
+### The SOL rent-exempt minimum
+
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL), and the network refuses a native SOL transfer that would break that, along with every recipient in the same transaction. SDP checks before it sends:
+
+- A recipient whose address has no account must receive at least the minimum.
+- The source wallet must end with nothing or at least the minimum. Chunks land in any order, so a batch that sends the wallet's whole balance also needs every chunk to move at least the minimum.
+
+`POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
@@ -60,7 +69,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
   -d '{
@@ -82,7 +91,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
     {
       method: "POST",
       headers: {
-        "Authorization": "Bearer sk_test_...",
+        "Authorization": "Bearer sf_...",
         "Content-Type": "application/json",
         "Idempotency-Key": row.idempotencyKey,
       },
@@ -107,7 +116,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -131,7 +140,7 @@ After the loop finishes, list all outbound transfers in the run's time window an
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -147,7 +156,7 @@ async function* listOutboundTransfers(from: string, to: string) {
     url.searchParams.set("pageSize", "100");
 
     const res = await fetch(url, {
-      headers: { Authorization: "Bearer sk_test_..." },
+      headers: { Authorization: "Bearer sf_..." },
     });
     const { data, meta } = await res.json();
     yield* data;

@@ -1,10 +1,9 @@
-import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
   PAYMENT_TRANSFER_STATUS_TONE,
   type PaymentTransferStatus,
   type PaymentTransferStatusTone,
   type PaymentTransferSummary as TransferRecord,
-  type PaymentsDashboardWallet as WalletRecord,
 } from "@sdp/types/payments";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
@@ -14,18 +13,6 @@ import type { TranslationValues } from "@/i18n/translate";
 import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-function parseIntegerAmount(value: string): bigint | null {
-  if (!/^\d+$/.test(value)) {
-    return null;
-  }
-
-  try {
-    return BigInt(value);
-  } catch {
-    return null;
-  }
-}
 
 function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
   if (decimals <= 0) {
@@ -141,16 +128,6 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
   return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
-}
-
-/**
- * Builds an amount-input placeholder that communicates an asset's precision.
- *
- * @param decimals - The asset's fractional digit count.
- * @returns A zero amount padded to the asset's decimals, e.g. `0.000000` for 6.
- */
-export function amountInputPlaceholder(decimals: number): string {
-  return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
 }
 
 /**
@@ -318,13 +295,6 @@ export function statusVariant(status: PaymentTransferStatus): BadgeVariant {
   return BADGE_VARIANT_BY_TONE[PAYMENT_TRANSFER_STATUS_TONE[status]];
 }
 
-export function formatDirection(direction: string | undefined, t: Translate): string {
-  if (!direction) {
-    return t("DashboardPayments.unknown");
-  }
-  return direction[0]?.toUpperCase() + direction.slice(1);
-}
-
 type TransactionCounterpartyFields = Pick<
   TransferRecord,
   "counterpartyId" | "type" | "direction" | "source" | "destination"
@@ -348,11 +318,6 @@ export function resolveTransactionCounterpartyReference(
     return source === undefined ? destination : source;
   }
   return destination === undefined ? source : destination;
-}
-
-export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
-  const reference = resolveTransactionCounterpartyReference(transfer);
-  return reference === undefined ? t("DashboardPayments.unavailable") : reference;
 }
 
 export function formatPaymentTransferType(type: string | undefined, t: Translate): string {
@@ -406,50 +371,6 @@ export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): numb
   }, 0);
 
   return hasNumericBalance ? total : null;
-}
-
-export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
-  const aggregate = new Map<
-    string,
-    { token: string; mint: string; amount: bigint; decimals: number; usdValue: number | null }
-  >();
-
-  for (const wallet of wallets) {
-    for (const balance of wallet.balances ?? []) {
-      const current = aggregate.get(balance.mint);
-      const numericValue = Number(balance.uiAmount);
-      const rawAmount = parseIntegerAmount(balance.amount);
-      const usdValue = resolveUsdBalanceValue(balance);
-      if (!Number.isFinite(numericValue) || rawAmount === null) {
-        continue;
-      }
-
-      if (!current) {
-        aggregate.set(balance.mint, {
-          token: balance.token,
-          mint: balance.mint,
-          amount: rawAmount,
-          decimals: balance.decimals,
-          usdValue,
-        });
-        continue;
-      }
-
-      current.amount += rawAmount;
-      if (usdValue !== null) {
-        current.usdValue = (current.usdValue ?? 0) + usdValue;
-      }
-    }
-  }
-
-  return [...aggregate.values()].map((entry) => ({
-    token: entry.token,
-    mint: entry.mint,
-    amount: entry.amount.toString(),
-    uiAmount: formatUiAmountFromRaw(entry.amount, entry.decimals),
-    decimals: entry.decimals,
-    ...(entry.usdValue !== null ? { usdValue: Number(entry.usdValue.toFixed(6)) } : {}),
-  }));
 }
 
 /**
@@ -540,15 +461,4 @@ export function selectTopAggregateBalanceRows(
   });
 
   return sorted.slice(0, limit);
-}
-
-export function resolveAggregateBalanceRows(
-  aggregate: CustodyWalletAggregate | null,
-  wallets: WalletRecord[]
-): CustodyWalletTokenBalance[] {
-  if (aggregate?.balances) {
-    return normalizeAggregateBalances(aggregate.balances);
-  }
-
-  return normalizeAggregateBalances(aggregateBalancesFromWallets(wallets));
 }

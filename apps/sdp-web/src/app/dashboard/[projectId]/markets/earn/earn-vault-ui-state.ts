@@ -1,6 +1,13 @@
-import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types/earn";
+import {
+  type EarnVaultDirectMovementStatus,
+  type EarnVaultMovementStatus,
+  type EarnVaultWithdrawal,
+  isLandedEarnVaultDirectMovementStatus,
+} from "@sdp/types/earn";
 import type { BadgeVariant } from "@sdp/ui/badge";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { useTranslations } from "@/i18n/provider";
+import { compareUnsignedDecimals } from "./earn-decimal";
 
 export type EarnVaultPositionUiStatus = "pending" | "active";
 
@@ -39,7 +46,7 @@ export function earnVaultWithdrawalUiState(
   return WITHDRAWAL_UI_STATE[status];
 }
 
-export function earnVaultPositionStatusDisplay(
+function earnVaultPositionStatusDisplay(
   status: EarnVaultPositionUiStatus,
   pendingLabel: string,
   activeLabel: string
@@ -68,6 +75,33 @@ export function earnVaultPositionStatusLabels(
 }
 
 /**
+ * The position badge a direct withdrawal's receipt carries. A settled exit that
+ * redeemed every share the position held at its last read closed the position,
+ * so the badge reads Closed instead of the shared Active.
+ *
+ * @param withdrawal - The withdrawal the receipt describes.
+ * @param positionShares - The position's share balance at its last read, when known.
+ * @param t - The translator.
+ * @returns The badge, or undefined when that read could not count the shares,
+ *   so the receipt keeps the withdrawal's own status instead of claiming what remains.
+ */
+export function earnVaultWithdrawalPositionStatusLabels(
+  withdrawal: Pick<EarnVaultWithdrawal, "shares" | "status">,
+  positionShares: string | undefined,
+  t: ReturnType<typeof useTranslations>
+): EarnVaultPositionStatusDisplay | undefined {
+  const { positionStatus } = earnVaultWithdrawalUiState(withdrawal.status);
+  if (!isLandedEarnVaultDirectMovementStatus(withdrawal.status)) {
+    return earnVaultPositionStatusLabels(positionStatus, t);
+  }
+  if (positionShares === undefined) return undefined;
+  const ordering = compareUnsignedDecimals(withdrawal.shares, positionShares);
+  if (ordering === undefined) return undefined;
+  if (ordering < 0) return earnVaultPositionStatusLabels(positionStatus, t);
+  return { label: t("DashboardMarkets.treasury.positionStatusClosed"), variant: "success" };
+}
+
+/**
  * The status badge's variant as an outcome mark's tone. Both vault modals close
  * on the same three marks, so one mapping — a fourth spelling of it is how two
  * receipts end up disagreeing about what "info" looks like.
@@ -76,4 +110,26 @@ export function vaultOutcomeTone(statusVariant: BadgeVariant): "info" | "success
   if (statusVariant === "success") return "success";
   if (statusVariant === "warning") return "warning";
   return "info";
+}
+
+const STATUS_TEXT_TONE = {
+  default: "progress",
+  primary: "progress",
+  info: "progress",
+  success: "positive",
+  warning: "attention",
+  danger: "critical",
+  outline: "neutral",
+} as const satisfies Record<BadgeVariant, StatusTone>;
+
+/**
+ * A status badge's variant as the refresh design's status text tone, so a list that sets
+ * statuses as words reads the same meaning the badge did: a plain badge is a state still
+ * moving, an outline one a state that lapsed without harm.
+ *
+ * @param statusVariant - The variant a status presentation assigns.
+ * @returns The tone to set the status's words in.
+ */
+export function earnStatusTextTone(statusVariant: BadgeVariant): StatusTone {
+  return STATUS_TEXT_TONE[statusVariant];
 }

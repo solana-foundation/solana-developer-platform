@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import type { DashboardFlags } from "@/flags/dashboard";
+import { dashboardFlagsAt } from "@/test/release-channel-flags";
 import IntegrationDetailLoading from "./[provider]/loading";
 import { integrationsSkeletonLayout } from "./integration-feature-gates";
 import { INTEGRATION_FAMILIES } from "./integrations-filter";
@@ -22,14 +23,8 @@ const EVERY_FAMILY = integrationsSkeletonLayout({
   privateChannels: true,
 });
 
-// What `stable` serves today: Custody, no ramp provider, Compliance or Private Channels.
-const STABLE = integrationsSkeletonLayout({
-  releaseChannel: "stable",
-  custody: true,
-  ramps: false,
-  compliance: false,
-  privateChannels: false,
-});
+// What `stable` serves, from the module and ramp provider maturity tables.
+const STABLE = integrationsSkeletonLayout(dashboardFlagsAt("stable"));
 
 const SECTION = /space-y-4/g;
 const CARD = /h-\[120px\]/g;
@@ -77,13 +72,19 @@ describe("integration detail skeleton", () => {
   });
 
   it("draws no section for a family the release channel hides", () => {
-    // Drawing every family on `stable` showed Ramps and Privacy placeholders that
-    // vanished once the page loaded (HOO-1978).
-    expect(STABLE.families).toEqual(["custody"]);
+    // Drawing every family on `stable` showed placeholders that vanished once the page
+    // loaded (HOO-1978).
+    const cardsPerFamily = {
+      custody: CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length,
+      ramps: STABLE.rampCards,
+      compliance: COMPLIANCE_PROVIDERS.length,
+      privacy: 1,
+    } as const;
+    expect(STABLE.families.length).toBeLessThan(INTEGRATION_FAMILIES.length);
     const markup = renderToStaticMarkup(<IntegrationsSkeleton layout={STABLE} />);
-    expect(markup.match(SECTION)).toHaveLength(1);
+    expect(markup.match(SECTION)).toHaveLength(STABLE.families.length);
     expect(markup.match(CARD)).toHaveLength(
-      CUSTODY_PROVIDER_CATALOG.filter((entry) => entry.visible).length
+      STABLE.families.reduce((cards, family) => cards + cardsPerFamily[family], 0)
     );
   });
 
@@ -120,20 +121,7 @@ describe("integration detail skeleton", () => {
 
   describe("client loading path", () => {
     // The shell's flag snapshot on `stable`: every non-stable module capped off.
-    const STABLE_FLAGS: DashboardFlags = {
-      assetProfiles: false,
-      compliance: false,
-      custody: true,
-      dvp: false,
-      earn: false,
-      heliusRings: false,
-      issuance: false,
-      markets: false,
-      payments: true,
-      privateChannels: false,
-      ramps: false,
-      releaseChannel: "stable",
-    };
+    const STABLE_FLAGS = dashboardFlagsAt("stable");
 
     function renderClientPath(flags: DashboardFlags): string {
       const PageLoading = resolvePageLoadingComponent("integrations");
@@ -147,8 +135,12 @@ describe("integration detail skeleton", () => {
     });
 
     it("drops a family its flag hides inside the release channel", () => {
-      const markup = renderClientPath({ ...STABLE_FLAGS, compliance: false });
-      expect(markup.match(SECTION)).toHaveLength(1);
+      // Private Channels' flag can turn it off on a channel that runs it.
+      const markup = renderClientPath({
+        ...dashboardFlagsAt("experimental"),
+        privateChannels: false,
+      });
+      expect(markup.match(SECTION)).toHaveLength(INTEGRATION_FAMILIES.length - 1);
     });
   });
 });

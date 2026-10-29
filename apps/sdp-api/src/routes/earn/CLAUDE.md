@@ -107,9 +107,9 @@ balance with a live one.
 
 - **Public OpenAPI promotion is a security review gate** (PRO-1872, threat
   model EARN-027). `registerPublicEarnPaths` decides what partners see, and
-  the public/preview split is a PUBLICATION boundary. The runtime has a narrow
-  keyless subset and a keyed control plane, all under the same `/v1/*` tracing
-  and rate-limit middleware. Moving a route into the public document or
+  the public/preview split is a PUBLICATION boundary. Every runtime route
+  requires a credential, under the same `/v1/*` tracing and rate-limit
+  middleware. Moving a route into the public document or
   changing its published `security` declaration changes partner-facing scope,
   which is why it needs a human gate. The
   pinned operation list in `../../openapi/spec.test.ts` ("publishes the
@@ -131,13 +131,8 @@ balance with a live one.
   constant is the sign-off PR. The flag reaches one runtime response:
   `GET /v1/projects/{projectId}/provider-availability` omits Earn entries
   while it is false, so the response matches the public document.
-  The current contract pins eight optional-auth operations: strategy list/detail,
-  vault deposit preview, external-wallet deposit build, withdrawal preview,
-  withdrawal build, withdrawal-options discovery, and queued-withdrawal preview.
-  Public OpenAPI represents each as API-key auth or an empty security requirement;
-  the internal document additionally accepts Clerk and session auth. Every tenant
-  read, queued request/cancellation build, and signed-transaction submit remains
-  authenticated.
+  Public OpenAPI declares API-key auth on every operation; the internal
+  document additionally accepts Clerk and session auth.
 
   Internal route parity is checked by `../../openapi/earn-contracts.test.ts`
   against the mounted router. Treasury registrations live in
@@ -178,16 +173,15 @@ signature. Initiated movements keep their signature uniqueness. Caller keys
 still share the existing ledger constraint, so use distinct keys for direct
 and queued intents; ADR 0003 records the unresolved collision and rollout gate.
 
-The custody options/preview/create/list/detail/cancel routes are keyed. External
-wallet options and previews use the optional-auth contract: anonymous calls are
-per-IP RPC-metered and persist nothing. External request/cancellation builds,
-submits, and request history are keyed so every share escrow has the durable
-status and recovery surface the public contract promises. A presented invalid
-credential always returns 401 rather than falling back to anonymous.
-Cancellation is an exit-recovery path: no gate strands it, and a
-caller with write access to the exact org-owned custody wallet may recover a
-request whose initiating project was deleted; list/detail history remains
-exact-project scoped.
+Every queue route, custody and external-wallet alike, requires a credential,
+so every share escrow has the durable status and recovery surface the public
+contract promises. The custody cancel takes `earn.manage`, the action its
+movement (`earn.queued_withdraw_cancel`) needs at the custody signer, so a key
+without it is refused before sponsorship, a build and a simulation.
+Cancellation is an exit-recovery path: no gate strands it, and a caller with
+write access to the exact org-owned custody wallet may recover a request whose
+initiating project was deleted; list/detail history remains exact-project
+scoped.
 
 The scheduled reconciler independently advances both signed-action finality and
 provider PDA state. Landed request terms and terminal quantities come from the
@@ -205,6 +199,13 @@ Provider observations cannot reopen eligibility while a cancel action remains
 active. Atomic failed-action recovery owns that transition. A rejected create
 may leave `closed_or_unknown` as failed only before provider existence is
 established by a nonce or creation timestamp.
+
+Each tick first deletes abandoned external request/cancel builds whose
+blockhash expired, against the block height of the build's OWN environment's
+cluster pool, and reads that height only when the environment holds an
+unconsumed build (`hasUnconsumedExternalBuilds`, the DELETE's own predicate), so
+an idle tick asks no cluster anything. A cluster without a pool defers its
+cleanup; it never borrows the other cluster's height.
 
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
@@ -569,10 +570,15 @@ transaction signed by the organization custody wallet or external owner.
   `requireAction("earn.execute")` → `requestGate` → handler.
   The caller names a CATALOGUE row, never a raw vault address, so the sync's
   admission gates still bound this path.
-  - **`requestGate`.** `requestGate({ extract: extractEarnVaultDeposit })`
-    resolves everything (strategy, wallet, amount) BEFORE
-    `createOrgSignerForCustodyWallet` is reached. The extractor owns all the
-    gates below; the handler only ledgers.
+  - **`requestGate`.** `extractEarnVaultDeposit` resolves identity only
+    (strategy, deposit style, swap, wallet and the key's scope over it, the
+    fingerprint), `findEarnVaultDepositIdempotentKeyReplay` answers a recorded
+    key next, and only then does `admitEarnVaultDeposit` run the money-in
+    state gates below (ADR 0009). A same-key retry of a recorded deposit is
+    therefore never refused by state that changed since (a paused strategy, a
+    flipped floor policy, lost entitlement, its own amount counted against
+    the cap). All of it runs BEFORE `createOrgSignerForCustodyWallet` is
+    reached; the handler only ledgers.
     Registered as the `earn` family in
     `src/security/value-moving-conformance.node.test.ts`, whose
     `valueMovingSourceRoots` now includes `src/services/earn` — it did not, which
@@ -618,9 +624,11 @@ transaction signed by the organization custody wallet or external owner.
     `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
     position is claimed — reusing a key with a different intent is a **409**, not
     a silent replay, and writes nothing.
-  - Gate order: schema → strategy resolution → provider/environment capability
-    → provider-specific production floor → deposit-style check → surfacing → entitlement →
-    **catalogue admission** → **vault exposure cap** → wallet.
+  - Gate order: schema → strategy resolution → provider registration →
+    deposit-style check → swap normalization → wallet → wallet scope →
+    **replay** → provider-specific production floor → environment capability →
+    surfacing → entitlement → **catalogue admission** → **vault exposure cap**
+    → custody runtime execution.
     `assertStrategyDepositable` (`handlers/admission.ts`) is shared with the
     custodial path and asserts `status = 'active'` plus
     `isClusterFundableInEnvironment`; without it a `paused` row (an
@@ -637,12 +645,11 @@ transaction signed by the organization custody wallet or external owner.
     default) it only emits `sdp_api_earn_volume_cap_evaluated` with
     `would_block`. The 409's `details` carry only `vaultAddress` and its
     message is a fixed sentence: `exposure`, `projected` and `limit` are the
-    cross-tenant aggregate and go to the evaluated event ONLY, because the
-    preview and external-wallet build routes are keyless and a body that
-    named them told any anonymous caller SDP's total position in the vault
-    (SOLA9-9; `earn.vault-exposure-cap.test.ts` pins the redaction on an
-    anonymous build and preview). An unreadable exposure is a 503 in BOTH
-    modes. A readable
+    cross-tenant aggregate and go to the evaluated event ONLY, because a body
+    that named them told one tenant SDP's total position in the vault across
+    every tenant (SOLA9-9; `earn.vault-exposure-cap.test.ts` pins the
+    redaction on a build and a preview). An unreadable exposure is a 503 in
+    BOTH modes. A readable
     TVL of 0 is NOT unreadable: it drives the share bound to 0, so at flag
     flip (PRO-1937) expect `would_block` storms on explicitly zero-TVL rows —
     expected strictness, not a bug. A vault whose metrics have not landed at
@@ -676,8 +683,6 @@ transaction signed by the organization custody wallet or external owner.
     carry `stage: "preview" | "admission" | "ledger_write"`. Pinned by
     `services/earn/vault-exposure.ledger-gate.test.ts` (a real two-transaction
     race on Postgres).
-    An anonymous build has no SDP submit or durable movement row, so it receives
-    only the admission decision and is outside the ledgered exposure figure.
   - The route takes `earn.execute`; whether the key may sign with the wallet
     is the custody signer's decision against its wallet scope (HOO-2099),
     refused early by `assertCallerWalletInScope` before any work.
@@ -773,13 +778,13 @@ transaction signed by the organization custody wallet or external owner.
   because `denomination` is the deposit mint. The fingerprint gains
   `swapSourceTokenMint`/`swapSlippageBps` ONLY when swapping (legacy
   fingerprints stay byte-identical), and it forces `wallet-pays` — Jupiter's
-  programs are not paymaster-allowlisted. Keyed external-wallet builds pass a
+  programs are not paymaster-allowlisted. External-wallet builds pass a
   distinct `feePayer` to Jupiter as its `payer`; validation admits that signer
   only on the exact idempotent ATA-create setup instruction while the swap
   itself remains owner-only. Any other signer is a provider failure. Size is
   checked locally before simulation so an oversized base64 transaction does
-  not collapse into an opaque RPC `-32602`. A keyed external build retries once
-  with a compact 132-bit SHA-256 request memo. If a non-swap plan still only
+  not collapse into an opaque RPC `-32602`. An external-wallet build retries
+  once with a compact 132-bit SHA-256 request memo. If a non-swap plan still only
   overflows because it has a distinct fee payer, the API returns a clean 400
   telling the caller to rebuild owner-paid. Swap oversize handling after
   lookup-table compression (`VaultTransactionTooLargeError`): one re-quote at
@@ -787,8 +792,8 @@ transaction signed by the organization custody wallet or external owner.
   path refuses (400) while the external-wallet build answers the SPLIT contract:
   `{ requiresSeparateSwap: true, swap: { transaction, … }, followUp }`, an
   unsigned swap-only transaction the owner signs and broadcasts itself
-  (persisting no consumable build; only a keyed request writes the
-  orphan-detection ADVISORY described in the external-wallet section),
+  (persisting no consumable build; it writes only the orphan-detection
+  ADVISORY described in the external-wallet section),
   followed by an ordinary unswapped build for `followUp.amount`. Jupiter
   routes MAINNET only: on devnet the mints are pinned per cluster but Jupiter
   answers "not tradable", surfaced as a 400.
@@ -797,17 +802,14 @@ transaction signed by the organization custody wallet or external owner.
   dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
   no wallet, no request gate, no idempotency key — it moves nothing — but it
   exists only to open a NEW position, so it takes the deposit's own gate order
-  deliberately. The optional-auth router validates a presented credential and
-  its `earn.read` action, then the handler applies the environment fail-close
-  (`isVaultDirectDepositEnabled`, 403), catalogue row (404), deposit style
-  (400), authenticated provider availability (surfacing alone, via
-  `assertAnonymousEarnProviderOffered`, for an anonymous caller),
-  admission (`assertStrategyDepositable`), the vault exposure cap evaluated
-  WITHOUT throwing (`checkVaultExposure`; an unreadable exposure still 503s),
-  then capability (`supportsVaultDepositQuote`, 501 for a provider that cannot
-  quote). An anonymous preview has no entitlement or tenant lookup, but still
-  evaluates the platform-wide cap. A vault that will not take the deposit
-  answers 200 with
+  deliberately. The route takes `earn.read`, then the handler applies the
+  environment fail-close (`isVaultDirectDepositEnabled`, 403), catalogue row
+  (404), deposit style (400), provider availability (surfacing and
+  entitlement), admission (`assertStrategyDepositable`), the vault exposure
+  cap evaluated WITHOUT throwing (`checkVaultExposure`; an unreadable exposure
+  still 503s), then capability (`supportsVaultDepositQuote`, 501 for a
+  provider that cannot quote). A vault that will not take the deposit answers
+  200 with
   `blockingIssues` in the provider's own words; an unusable amount maps through
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
   An ENFORCED cap block is appended to `blockingIssues` as
@@ -968,10 +970,11 @@ transaction signed by the organization custody wallet or external owner.
   (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
   recorded while `/vault-positions` still hides it), and wallet-binding scope is
   the same `listReadableEarnVaultWallets`. No provider gate (ADR 0002: money the
-  org already holds). The endpoint is genesis-proven before any balance read — a
-  wrong-cluster RPC would report every position unbacked — and a per-wallet
-  read failure degrades to a named `unreadableWallets` entry whose claims go
-  unjudged, never a zero-share finding. The whole pass runs under one
+  org already holds). Every balance read goes to the environment's own cluster
+  pool, whose genesis guard refuses a wrong-cluster endpoint before it answers
+  (a wrong chain would report every position unbacked), and a per-wallet read
+  failure, that refusal included, degrades to a named `unreadableWallets` entry
+  whose claims go unjudged, never a zero-share finding. The whole pass runs under one
   `VaultDeadline`, so a data-driven wallet count bounds what gets READ, never
   how long the request runs: an over-budget wallet is unreadable, not a hung
   request and not a silent skip. Registered in the INTERNAL OpenAPI document
@@ -1011,6 +1014,23 @@ The every-minute vault reconciliation worker consumes
 interactive detail reads. The sweep additionally rebroadcasts the recorded signed bytes while
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
+
+**The Earn sweeps run once per environment** (HOO-2148, ADR 0011). The vault
+movement sweep (with its queued-withdrawal sibling), split-swap detection and
+the metrics refresh are `cluster` Cron Definitions: each registration runs
+inside its environment's cluster scope, selects only that environment's rows
+(`currentClusterScope().environment` into every claim, repair, backlog and
+cleanup query) and takes its cluster from the scope, never from a row. Each
+tick event carries `environment`, and the sdp-infra rules group by it. The
+chain reads the sweeps make themselves go through `createClusterRpc()`:
+statuses, heights and history, the payout and receipt repairs, the
+queued-withdrawal build cleanup (its height read only when
+`hasUnconsumedExternalBuilds` says something could expire), the split-swap
+height and the deposit-mint guard, and so do the shared services they call
+(rebroadcast, provider position and queue reads). The catalogue sync stays
+`global`, because its sandbox mirror lane writes production's snapshot, and
+runs each lane's provider fetch in that lane's environment's scope
+(`runInEnvironmentClusterScope`); its writes are DB-only.
 
 **The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
 threat model EARN-006). A chain read failure used to `return` cleanly, so the
@@ -1062,6 +1082,16 @@ history after a null signature status, and recovers a historical receipt through
 the normal settlement path only when its execution result is known. Missing
 execution metadata or an unavailable history read leaves the row recoverable and
 fails the tick visibly; neither establishes success, failure, or signature absence.
+
+A null status counts as absence only from a node at least as current as the
+finalized height that proved expiry: the sweep reads height and slot together
+(`getChainHeight`) and re-reads every expired row's status with
+`minContextSlot` at that slot, as sponsorship budget reconciliation does. Per-
+request pool failover can answer the batch statuses from an endpoint behind the
+one that answered the height; a failed re-read leaves those rows unjudged and
+fails the tick. The queued-withdrawal sweep applies the same rule at its
+confirmed height before any expired request or cancel recovery; both share
+`reReadExpiredStatuses` (`@sdp/rpc/solana`) with the payments settlement tracker.
 
 When neither status nor history observes the transaction past its window, a
 `requested` row moves conservatively to `submitted` through the guarded writer.
@@ -1135,56 +1165,31 @@ signer distinction is a column pair — exactly one of `custody_wallet_id` and
 scopes by custody wallet, so external-wallet rows are structurally invisible
 to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
 
-#### Access tiers (PRO-1943)
+#### Access
 
-The router exposes one handler per endpoint through two access tiers. Do not
-fork a keyed and anonymous route with duplicate behavior.
+Every external-wallet route, like every other Earn route, requires a
+credential: an API key, or a dashboard session with a project. The request runs
+in that project's environment and cluster scope (`projectContextMiddleware`)
+and takes its declared action (`earn.read`, `earn.execute` or `earn.manage`).
+A strategy row from another environment is 404 (`requireEarnStrategyForCaller`,
+context.ts); the deployment's `ENVIRONMENT` never selects a cluster.
 
-- **Keyless catalogue, discovery, and instant builds:** `GET /strategies`,
-  `GET /strategies/:id`, `POST /vault-deposit-previews`, the external-wallet
-  deposit build, direct-withdrawal preview/build, withdrawal-options discovery,
-  and queued-withdrawal preview. A valid credential enriches the same request
-  with its existing tenant context. With no credential, the request has no
-  organization, project, entitlement, custody, or persistence context.
-  When a credential is present, the route still enforces its previous
-  `earn.read` or `earn.execute` action.
-- **No credential downgrade:** a presented credential must resolve completely
-  or return 401. That includes an unknown, revoked, or expired API key, a Clerk
-  token without organization context.
-  Only a request that presents no supported credential may continue anonymously.
-- **Keyed control plane:** submits, queued request/cancellation builds,
-  movements, positions, earnings, custody vault routes, programs, and the
-  aggregate feed. These retain the existing permission and project boundaries.
-- **Environment:** an authenticated project is authoritative. A keyless call
-  has no project, so the caller picks the shelf: `?environment=` on the list
-  (production when omitted) and the named strategy's own `environment` on
-  quotes and builds (`requireEarnStrategyForCaller`, context.ts). The
-  deployment's `ENVIRONMENT` never selects a cluster (PRO-1998).
-- **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
-  and builds use a tighter per-IP tier plus an independently configurable RPC
-  budget. Structured logs carry the tier, normalized route, and decision.
-
-An authenticated instant direction is BUILD then SUBMIT. An anonymous instant
-direction stops after BUILD and the caller broadcasts directly. Queued request
-and cancellation directions are always keyed BUILD then SUBMIT so SDP can
-guarantee durable status and recovery (`handlers/external-wallet.ts`,
-`handlers/queued-withdrawals.ts`,
+Every direction is BUILD then SUBMIT, so SDP records each movement or queued
+request before broadcast and can guarantee durable status and recovery
+(`handlers/external-wallet.ts`, `handlers/queued-withdrawals.ts`,
 `services/earn/vault-external-wallet.service.ts`):
 
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
-  minSharesOut?}`. Both tiers enforce environment capability, the share floor
-  (`assertDepositFloorPresent`), surfacing, catalogue admission, and the vault
-  exposure cap through the same admission helpers as the custody path.
-  Entitlement runs only when a credential supplied a tenant. The provider plan
-  is built for the OWNER and returned with
-  `{transactionId, transaction, sponsored}`. Authenticated builds persist
+  minSharesOut?}`. It enforces environment capability, the share floor
+  (`assertDepositFloorPresent`), surfacing, entitlement, catalogue admission,
+  and the vault exposure cap through the same admission helpers as the custody
+  path. The provider plan is built for the OWNER and returned with
+  `{transactionId, transaction, sponsored}`. The build persists
   `earn_external_wallet_transactions` so a later submit can prove byte
-  equality and repeat the cap decision under the ledger lock. Anonymous builds
-  write nothing and set `sponsored: false`; the caller broadcasts and tracks
-  the transaction itself, so only the build-time cap check is possible. No
-  idempotency key is accepted because a build moves no money and expires.
-- **`feePayer`: the partner pays (keyed builds only).** Optional; committed at
+  equality and repeat the cap decision under the ledger lock. No idempotency
+  key is accepted because a build moves no money and expires.
+- **`feePayer`: the partner pays.** Optional; committed at
   BUILD time (it lives in the message bytes, so the submit's message equality
   makes a swapped fee payer a refused submit, never a substitution). One
   `caller-provided` fee mode then drives all three places that must agree
@@ -1204,21 +1209,19 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   and refuses a fee-payer build whose plan never names the owner as a signer
   (money must not move on the partner's signature alone). The split-swap
   answer carries `feePayer` through `followUp` and compiles the standalone
-  swap with the same payer. Anonymous builds reject a different `feePayer` and
-  always use the owner. This is the CALLER's wallet co-signing, not Kora; SDP
-  sponsorship for caller-signed movements stays PRO-1744.
-- **A keyed split answer records an ADVISORY, never a movement** (PRO-1864,
-  threat model EARN-026). The standalone swap is the one transaction this flow
-  hands out that SDP never sees again, so an authenticated split branch writes
+  swap with the same payer. This is the CALLER's wallet co-signing, not Kora;
+  SDP sponsorship for caller-signed movements stays PRO-1744.
+- **A split answer records an ADVISORY, never a movement** (PRO-1864, threat
+  model EARN-026). The standalone swap is the one transaction this flow hands
+  out that SDP never sees again, so the split branch writes
   an `earn_split_swap_advisories` row (owner, strategy, the swap floor in ATOMS
   with the mint's decimals, the swap's last valid block height, and the owner's
   deposit-token balance read at build time as a baseline) before answering.
-  Anonymous split builds write neither an advisory nor a movement. For keyed
-  builds, the insert and baseline read are FAIL-CLOSED: money in may
+  The insert and baseline read are FAIL-CLOSED: money in may
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory every minute (a Cron Definition run by the
-  Worker): an in-flight deposit or
+  judges each open advisory every minute, once per environment (a `cluster`
+  Cron Definition run by the Worker): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
   intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
@@ -1238,7 +1241,11 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   signal stays reserved for what the detector can prove. Once the rise
   is gone a covering deposit resolves it (one movement discharges at most one
   advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
-  is `unfunded`, and a partial rise stays open. It ALERTS and never acts: the funds are
+  is `unfunded`, and a partial rise stays open. The balance is read with
+  `minContextSlot` at the confirmed height's slot (`getChainHeight`): a pool
+  endpoint behind that height could predate a landed swap and make an orphan a
+  permanent `unfunded`, so a node behind the floor fails the read and the
+  advisory waits for the next sweep. It ALERTS and never acts: the funds are
   the owner's, and only the partner can move them. Detection writes nothing
   but back to the advisory table. Every amount it compares is atoms to atoms;
   the decimal `swap_min_out_amount` exists for display only.
@@ -1275,45 +1282,39 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
   would pay from the vault's live accounting, from which the partner derives
   a truthful `minAmountOut`. Read-only, no idempotency key, and it takes the
-  exit's own gates only. An authenticated caller supplies `positionId`, which
-  is 404-scoped to its organization and exact project. An anonymous caller
-  supplies `{strategyId, ownerAddress, shares}`, which resolves only global
-  catalogue metadata and never looks up a tenant position. The sync retains a
-  deprecated metadata tombstone when a provider delists a strategy, so that
-  stable id continues to resolve the vault and mints needed for an exit while
-  remaining absent from catalogue lists and deposit admission.
+  exit's own gates only. The caller supplies `positionId`, which is
+  404-scoped to its organization and exact project; the position carries the
+  vault and mints, so a delisted strategy stays exitable.
 - `POST /external-wallet/withdrawal-transactions`: the exit build, with the
-  same locator split and ADR 0002 exit safety. It works while a provider is
-  disabled for new deposits. Keyed builds may name `feePayer` and persist the
-  build; anonymous builds require the owner as payer and persist nothing.
+  same `positionId` locator and ADR 0002 exit safety. It works while a provider
+  is disabled for new deposits. It may name `feePayer` and persists the build.
   `minAmountOut` is optional only when the provider has no withdrawal slippage
-  policy. A keyed floor is stored in the build table's shared
+  policy. The floor is stored in the build table's shared
   `min_shares_out` column; direction disambiguates its unit. A floor the
   provider's plan does not encode (Kamino's kvault withdraw takes only a share
   amount, so `plan.accepted.minAmountOut` is absent) is a **400**, never
   stored: recording it would claim a protection nothing on chain enforces.
-- `POST /external-wallet/withdrawals`: the keyed submit, mirrored, including
-  the `409 TRANSACTION_EXPIRED` pre-record refusal. An anonymous build cannot
-  be submitted because no tenant build row exists.
+- `POST /external-wallet/withdrawals`: the submit, mirrored, including the
+  `409 TRANSACTION_EXPIRED` pre-record refusal.
 - **NO requestGate and no wallet scope, deliberately** — this is not the
   vault-deposit cautionary tale repeating. A key's wallet scope governs the org's own
   custody at `createOrgSignerForCustodyWallet`; these routes never resolve a signer and
   never touch custody. The owner's own signature
   IS the authorization, and there is no signing sink here for
   `value-moving-conformance.node.test.ts` to inventory.
-- **Keyed scoping is org AND project**, stricter than custody vault claims:
+- **Scoping is org AND project**, stricter than custody vault claims:
   the external wallet belongs to the partner's project
   (`idx_earn_positions_external_wallet_claim` includes `project_id`), so a
   sibling project can neither see nor exit its positions. Position reads for
   partners are PRO-1724, not here.
-- Who pays: an anonymous build always uses the owner. A keyed build uses the
-  owner by default or the partner's `feePayer` when named. The rent funder is
+- Who pays: the owner by default, or the partner's `feePayer` when named. The
+  rent funder is
   recorded as a creation claim, not execution evidence. Kamino retains share-ATA
   rent for an explicit owner-authorized close.
   Kora sponsorship for this surface, meaning SDP pays,
   stays PRO-1744. The response's `sponsored` field is therefore false today.
 
-The keyed per-owner READS (PRO-1772) close the loop the money routes open. All
+The per-owner READS (PRO-1772) close the loop the money routes open. All
 three take `earn.read` only. No wallet scope applies (end-user wallets are not custody
 wallets, same as the position reads) and NO provider gate (ADR 0002: they
 report on money that already moved). **None of them 404 an owner**: a wallet
@@ -1344,6 +1345,13 @@ their owners) and replaces the dashboard's old N-per-owner read fanout. The
 dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
 that opts in, pinned by its unit test. Partner docs steer analytics keys to the
 default shape and detailed surfaces to the explicit opt-in.
+
+Every count and total in the summary skips a holding whose live read is
+exactly empty (`isEarnVaultHoldingEmpty`): a deposit that has not landed, or an
+exit whose close-out waits on an unsettled movement, holds nothing and must
+not read as a live $0 position. An unreadable holding still counts, as
+unavailable, never as zero. The per-owner positions read still returns such a
+holding, so a partner's customer view can show it pending.
 
 Simultaneous summary calls for the same organization, project and environment
 share only their in-flight DB scan and live hydration. This is not a cache: the
@@ -1450,10 +1458,25 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** Explicit `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`
-pins remain isolated. Otherwise, executing provider read/build operations use
-the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
-must prove its genesis hash before SDK work. Transient nested transport errors
+**Per-cluster RPC.** Every Earn read and send runs in a cluster scope and
+goes to that scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`):
+a request in its project's scope (every Earn route takes an API key), a cron
+in its registration's, the catalogue sync in each lane's. Nothing in Earn takes a cluster to pick an RPC,
+and nothing reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or
+`SOLANA_NETWORK`: a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
+the pooled client, `PROVIDER_NOT_CONFIGURED` on a provider operation) and never
+reads the other cluster. One-shot reads, simulation and broadcast use
+`createClusterRpc()`, or `createClusterRpc({ timeoutMs })` for a client handed
+to a helper that sends without a signal: per-request failover and the pool's
+genesis guard, a send never failing over once it left SDP. Provider packages
+still build transports from a URL (HOO-1881), so `services/earn/cluster-rpc.ts`,
+the one module allowed to import the URL helpers from `@sdp/rpc/factory`, hands
+them the scope's pool URLs and refuses a provider that asks for the other
+cluster (`CLUSTER_SCOPE_CONFLICT`). Executing provider
+read/build operations instead pin one pool endpoint per attempt
+(`vault-rpc-failover.ts`, until `withConsistentRpcReads` replaces it under
+HOO-2025), so a plan never mixes endpoints; each candidate must prove its
+genesis hash before SDK work, sharing the pool's proof cache. Transient nested transport errors
 may retry the unsigned read/build within the same workflow deadline; deterministic
 refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
 `readVaultPositions` throw an `AggregateError` cause) retries only when every
@@ -1486,7 +1509,7 @@ The Earn reads that fan out to a PAID upstream carry `meteredQuota`: the
 provider's API on a program read (`GET /programs` is 2N round trips per page
 against the shared provider account), Solana RPC on a live-hydrated one. Two
 counters, `earn-provider-read` (programs list/detail/deposits, the deposit
-quote, the keyed external-wallet deposit build) and `earn-chain-read` (vault
+quote, the external-wallet deposit build) and `earn-chain-read` (vault
 positions, share reconciliation, the per-owner external-wallet reads).
 
 **No money-OUT route and no EXIT quote carries one, and that is load-bearing.**
@@ -1497,21 +1520,16 @@ So withdrawals, vault withdrawals, the external-wallet submits, the
 external-wallet exit build, and every preview an exit derives its floor from
 stay unmetered. A fail-OPEN meter on the two external-wallet exit routes was
 weighed and dropped (PRO-1994): a 429 is still a refusal on the way out, so
-keyed exit traffic is bounded by the general per-key tier alone, recorded as
+exit traffic is bounded by the general per-key tier alone, recorded as
 accepted risk. Money-IN carries no such rule, which is why the deposit quote
-and the keyed external-wallet deposit build are metered
-(`authenticatedMeteredQuota`, so an anonymous build keeps its per-IP `earn-rpc`
-counter) and the exit quote is not. On both money-in routes the body is
+and the external-wallet deposit build are metered and the exit quote is not.
+On both money-in routes the body is
 validated before either meter runs, so a malformed request charges nothing
 against the organization's shared pool. Pinned by the "metered quotas" describe in
 `../earn-program.test.ts`,
 whose second test exhausts both counters and asserts the payout still lands,
 and by the one in `../earn.external-wallet.test.ts`, which also breaks the
 counter store and asserts the deposit build 503s while the exit still builds.
-Anonymous paid-upstream counters use a verified Cloud Run client address. A
-self-hosted deployment ignores forwarded addresses by default and shares the
-fail-closed unidentified bucket; `TRUST_PROXY_HEADERS=true` is safe only when
-its ingress replaces caller-supplied `X-Forwarded-For` values.
 
 ## Audit-ledger parity (PRO-1866)
 
@@ -1552,8 +1570,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - **Money-in** (`POST /programs`, `PUT /programs/:programId`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
 - **New positions only** (`POST /programs`, vault deposits): surfacing, the
-  `provider_not_offered` check inside `assertProviderAvailable`
-  (`assertAnonymousEarnProviderOffered` for an anonymous vault deposit). `PUT`
+  `provider_not_offered` check inside `assertProviderAvailable`. `PUT`
   passes `program: "existing"`, which skips it.
   Surfacing gates the way IN and nothing else — every read, every money-out
   route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
@@ -1596,7 +1613,9 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `isEarnExitOrRead` (exits.ts) allows: every GET plus an explicit list of
   withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
   `production-exits.test.ts` forces every state-changing route to be filed as
-  an exit or an entry.
+  an exit or an entry. `exits.ts` also files the starts (deposits,
+  cancellations), and `movement-actions.test.ts` fails any route filed with a
+  start whose declared action that start's `actions` do not admit (HOO-2099).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
   or credentials are missing) and the money-out half (the "withdrawals (ADR 0002
@@ -1610,14 +1629,20 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Conventions
 
-- Environment resolution is the shared `@/lib/sdp-environment` helper: API-key
-  callers use the key's (project-derived) environment; dashboard/session
-  callers use the membership-verified `x-project-id` project's environment; a
-  request with neither fails closed (500), never defaults to sandbox. The
-  keyless-capable Earn handlers are the single exception: with no tenant
-  authenticated, the caller's `?environment=` or the named strategy's row
-  decides (PRO-1998), never the deployment's `ENVIRONMENT`. A
-  production-project dashboard session therefore drives provider production.
+- **Environment and cluster come from the open cluster scope**
+  (`currentClusterScope()`, ADR 0007), never from `c`. The project middleware
+  opens it with the API key's (project-derived) environment or the
+  membership-verified `x-project-id` project's; the deployment's `ENVIRONMENT`
+  never decides. Code outside a scope fails closed (`CLUSTER_SCOPE_MISSING`,
+  500), never defaults to sandbox. Services take neither as a parameter and
+  read the scope where they need it; a provider client gets the scope's
+  environment through `earnRuntime(env)` (`services/earn/runtime.ts`). A read
+  about one recorded row (a queued request re-read before its cancel, the
+  post-exit close-out) keeps the row's own environment, which the URL helpers
+  refuse unless it is the scope's. `services/earn/cluster-rpc.boundary.test.ts`
+  fails an Earn route or service that imports `resolveSdpEnvironment` or
+  `CLUSTER_BY_SDP_ENVIRONMENT`. A production-project dashboard session
+  therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
   clearing that one flag darkens every Markets API surface. Both default off.
@@ -1655,11 +1680,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   write; the alert exists so a human looks at the provider.
 - **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
   Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
-  "allow_all"` (both mints keep a mutable Paxos hook authority), so the metrics
-  refresh ends by reading each Token-2022 deposit mint per cluster and emitting
-  `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
-  permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. Report-only. Adding a Token-2022
+  "allow_all"` (both mints keep a mutable Paxos hook authority), so each
+  environment's metrics refresh ends by reading its cluster's Token-2022
+  deposit mints in one `getMultipleAccounts` through `createClusterRpc()` and
+  emitting `sdp_api_earn_deposit_mint_drift` when the hook program, hook
+  authority or permanent delegate differs from the pins in
+  `services/earn/deposit-mint-guard.ts`. A cluster with no pool cannot be
+  watched, so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error
+  wherever Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
   stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
   guard's unit suite; adding any deposit token without its devnet mint in
   `infra/kora/kora.toml` `allowed_tokens` fails
@@ -1690,7 +1718,8 @@ movement ids. Resolve organization, project, environment and readable custody
 wallet scope before looking up their confirmed/finalized signature slots. A
 finalized status that passed those checks is memoised per (cluster, signature),
 bounded and for 10 minutes, so later polls skip `getSignatureStatuses` for it;
-a confirmed-only one is read on every poll, and the endpoint proof always runs.
+a confirmed-only one is read on every poll. A poll answered entirely from that
+memo builds no client and sends nothing, not even a genesis probe.
 The response's `balanceReadContext` acknowledges the ids and maximum slot.
 Only affected positions receive their own maximum confirmation slot. Hydration
 batches separate differing bounds even within the same provider and owner.

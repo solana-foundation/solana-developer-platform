@@ -166,20 +166,6 @@ export function getHighRiskProviders(snapshot: ComplianceSnapshot): CompliancePr
   return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
 }
 
-export function riskToneClassName(result: ComplianceProviderResult): string {
-  const tone = resolveRiskTone(result);
-  if (tone === "green") {
-    return "border-success-border bg-success-bg text-success";
-  }
-  if (tone === "yellow") {
-    return "border-warning-border bg-warning-bg text-warning";
-  }
-  if (tone === "red") {
-    return "border-destructive-border bg-destructive-bg text-destructive-strong";
-  }
-  return "border-border-default bg-fill-subtle text-secondary";
-}
-
 export async function fetchWallets(
   options: { signal?: AbortSignal; includeBalances?: boolean },
   t: Translate

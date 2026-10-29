@@ -11,10 +11,9 @@ import type {
   ProjectMember,
   ProjectSettings,
 } from "@sdp/types/projects";
-import type { ProjectRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { internalError, notFound } from "@/lib/errors";
 
 /**
  * Stored project settings as the API exposes them. Unknown keys are stripped,
@@ -225,144 +224,9 @@ export class ProjectService {
     return updated;
   }
 
-  /**
-   * Ensure a default project exists for the given environment and that the user
-   * is a member. Idempotent — safe to call on every authenticated request.
-   *
-   * @param organizationId - Organization to provision under
-   * @param environment - "sandbox" or "production"
-   * @param createdBy - User ID used as creator and initial member
-   * @returns The project ID (existing or newly created)
-   */
-  async findOrCreateDefault(
-    organizationId: string,
-    environment: ProjectEnvironment,
-    createdBy: string
-  ): Promise<string> {
-    const slug = environment === "sandbox" ? "default-sandbox" : "default-production";
-    const name =
-      environment === "sandbox" ? "Default Sandbox Project" : "Default Production Project";
-    const description =
-      environment === "sandbox" ? "Default sandbox project" : "Default production project";
-
-    await this.db
-      .prepare(
-        `INSERT INTO projects
-           (id, organization_id, name, slug, description, environment, settings, status, created_by, created_at, updated_at)
-         VALUES ('prj_' || gen_random_uuid(), ?, ?, ?, ?, ?, NULL, 'active', ?, sdp_datetime_now(), sdp_datetime_now())
-         ON CONFLICT (organization_id, slug) DO NOTHING`
-      )
-      .bind(organizationId, name, slug, description, environment, createdBy)
-      .run();
-
-    const project = await this.db
-      .prepare(`SELECT id FROM projects WHERE organization_id = ? AND slug = ?`)
-      .bind(organizationId, slug)
-      .first<{ id: string }>();
-
-    if (!project) {
-      throw internalError(`Failed to provision default ${environment} project`);
-    }
-
-    await this.db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-         VALUES ('pm_' || gen_random_uuid(), ?, ?, 'admin', sdp_datetime_now())
-         ON CONFLICT (project_id, user_id) DO NOTHING`
-      )
-      .bind(project.id, createdBy)
-      .run();
-
-    return project.id;
-  }
-
   // ═══════════════════════════════════════════════════════════════════════════
   // Project Members
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Add a member to a project
-   */
-  async addMember(projectId: string, userId: string, role: ProjectRole): Promise<ProjectMember> {
-    // Check if already a member
-    const existing = await this.getMembership(projectId, userId);
-    if (existing) {
-      throw badRequest("User is already a member of this project");
-    }
-
-    const id = `pm_${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
-
-    const member: ProjectMember = {
-      id,
-      projectId,
-      userId,
-      role,
-      createdAt: now,
-    };
-
-    await this.db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role, created_at)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-      .bind(member.id, member.projectId, member.userId, member.role, member.createdAt)
-      .run();
-
-    return member;
-  }
-
-  /**
-   * Update a member's role
-   */
-  async updateMemberRole(projectId: string, userId: string, role: ProjectRole): Promise<void> {
-    await this.db
-      .prepare("UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?")
-      .bind(role, projectId, userId)
-      .run();
-  }
-
-  /**
-   * Remove a member from a project
-   */
-  async removeMember(projectId: string, userId: string): Promise<void> {
-    await this.db
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(projectId, userId)
-      .run();
-  }
-
-  /**
-   * Get a user's membership in a project
-   */
-  async getMembership(projectId: string, userId: string): Promise<ProjectMember | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT id, project_id, user_id, role, created_at
-         FROM project_members
-         WHERE project_id = ? AND user_id = ?`
-      )
-      .bind(projectId, userId)
-      .first<{
-        id: string;
-        project_id: string;
-        user_id: string;
-        role: string;
-        created_at: string;
-      }>();
-
-    if (!row) {
-      return null;
-    }
-
-    return {
-      id: row.id,
-      projectId: row.project_id,
-      userId: row.user_id,
-      role: row.role as ProjectRole,
-      createdAt: row.created_at,
-    };
-  }
 
   /**
    * List all members of a project
@@ -372,7 +236,7 @@ export class ProjectService {
   ): Promise<Array<ProjectMember & { user: { id: string; email: string; name: string | null } }>> {
     const result = await this.db
       .prepare(
-        `SELECT pm.id, pm.project_id, pm.user_id, pm.role, pm.created_at,
+        `SELECT pm.id, pm.project_id, pm.user_id, pm.created_at,
                 u.email, u.name
          FROM project_members pm
          JOIN users u ON u.id = pm.user_id
@@ -384,7 +248,6 @@ export class ProjectService {
         id: string;
         project_id: string;
         user_id: string;
-        role: string;
         created_at: string;
         email: string;
         name: string | null;
@@ -394,7 +257,6 @@ export class ProjectService {
       id: row.id,
       projectId: row.project_id,
       userId: row.user_id,
-      role: row.role as ProjectRole,
       createdAt: row.created_at,
       user: {
         id: row.user_id,

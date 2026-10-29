@@ -5,23 +5,71 @@ type Translate = Parameters<typeof getDashboardPageConfig>[1];
 const t = ((key: string) => key) as Translate;
 
 describe("Markets dashboard headers", () => {
-  it("centers the Markets landing title without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets", t, false, false, []);
+  it("sets the Markets landing title left over the page column, without header tabs", () => {
+    const config = getDashboardPageConfig("/dashboard/markets", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: "max-w-page",
     });
     expect(config.headerTabs).toBeUndefined();
+    expect(config.headerAction).toBeUndefined();
   });
 
+  it("titles Treasury left over the page column, without header tabs", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t);
+
+    expect(config).toMatchObject({
+      title: "Shared.dashboardShell.treasurySolutions",
+      titlePosition: "left",
+      contentWidthClass: "max-w-page",
+    });
+    expect(config.headerTabs).toBeUndefined();
+    expect(config.routeTabs).toBeUndefined();
+  });
+
+  it.each(["/dashboard/markets/embedded-yield", "/dashboard/markets/earn"])(
+    "titles Embedded Yield left over the page column, with the integration as its action at %s",
+    (pathname) => {
+      const config = getDashboardPageConfig(pathname, t);
+
+      expect(config).toMatchObject({
+        title: "Shared.dashboardShell.earnProgram",
+        titlePosition: "left",
+        contentWidthClass: "max-w-page",
+        headerAction: {
+          label: "DashboardMarkets.earnProgram.configureShort",
+          href: "/dashboard/markets/embedded-yield/configure",
+          variant: "primary",
+        },
+      });
+      expect(config.headerTabs).toBeUndefined();
+      expect(config.routeTabs).toBeUndefined();
+    }
+  );
+
   it.each([
-    "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/embedded-yield",
-    "/dashboard/markets/dvp",
-  ])("centers the shared Markets title without redundant route tabs for %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t, false, false, []);
+    "/dashboard/markets/embedded-yield/configure",
+    "/dashboard/markets/embedded-yield/integrate",
+    "/dashboard/markets/earn/configure",
+  ])("sets the way back to Embedded Yield over the integration's title at %s", (pathname) => {
+    const config = getDashboardPageConfig(pathname, t);
+
+    expect(config).toMatchObject({
+      title: "DashboardMarkets.earnProgram.configureShort",
+      contentWidthClass: "max-w-page",
+      backAction: {
+        href: "/dashboard/markets/embedded-yield",
+        label: "Shared.dashboardShell.earnProgram",
+      },
+    });
+    expect(config.headerTabs).toBeUndefined();
+    expect(config.headerAction).toBeUndefined();
+  });
+
+  it("centers the shared Markets title on DvP, which keeps the base design", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/dvp", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -31,68 +79,17 @@ describe("Markets dashboard headers", () => {
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs).toBeUndefined();
   });
-
-  it("centers the Embedded Yield integration title without header tabs", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/markets/embedded-yield/integrate",
-      t,
-      false,
-      false,
-      []
-    );
-
-    expect(config).toMatchObject({
-      title: "Shared.dashboardShell.configureEarnButton",
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
-    });
-    expect(config.headerTabs).toBeUndefined();
-  });
-
-  it("uses the integration title for Embedded Yield configuration", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/markets/embedded-yield/configure",
-      t,
-      false,
-      false,
-      []
-    );
-
-    expect(config).toMatchObject({
-      title: "Shared.dashboardShell.configureEarnButton",
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
-    });
-  });
 });
 
 describe("Integrations dashboard headers", () => {
   it("keeps category navigation in the sidebar submenu", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/integrations",
-      t,
-      false,
-      true,
-      [],
-      true,
-      true,
-      true
-    );
+    const config = getDashboardPageConfig("/dashboard/integrations", t, true);
 
     expect(config.headerTabs).toBeUndefined();
   });
 
   it("does not recreate category tabs when modules are disabled", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/integrations",
-      t,
-      false,
-      false,
-      [],
-      false,
-      false,
-      false
-    );
+    const config = getDashboardPageConfig("/dashboard/integrations", t, false);
 
     expect(config.headerTabs).toBeUndefined();
   });
@@ -113,6 +110,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallet"],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "DashboardIssuance.newDesign.draft.pageTitle"],
+    ["/dashboard/issuance/token_1", "DashboardIssuance.newDesign.token.pageTitle"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
     ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newDesign.newCounterparty"],
     ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.contact"],
@@ -157,39 +155,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
     ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
-    expect(getDashboardPageConfig(pathname, t, false, true, [], true, true, true).title).toBe(
-      title
-    );
-  });
-
-  it("uses the asset-management header only for enabled Asset Profiles", () => {
-    const legacy = (assetProfiles: boolean) =>
-      getDashboardPageConfig(
-        "/dashboard/issuance/token_1",
-        t,
-        assetProfiles,
-        false,
-        [],
-        true,
-        true,
-        false
-      ).title;
-    expect(legacy(true)).toBe("Shared.dashboardShell.assetManagement");
-    expect(legacy(false)).toBe("Shared.dashboardShell.issuance");
-  });
-
-  it("names a token's page Token on the new design, with or without Asset Profiles", () => {
-    for (const assetProfiles of [true, false]) {
-      expect(
-        getDashboardPageConfig("/dashboard/issuance/token_1", t, assetProfiles, false, []).title
-      ).toBe("DashboardIssuance.newDesign.token.pageTitle");
-    }
-  });
-
-  it("keeps the previous design's draft title with NEW DESIGN off", () => {
-    expect(
-      getDashboardPageConfig("/dashboard/issuance/create", t, false, true, [], true, true, false)
-        .title
-    ).toBe("Shared.dashboardShell.newAsset");
+    expect(getDashboardPageConfig(pathname, t, true).title).toBe(title);
   });
 });

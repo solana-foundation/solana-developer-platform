@@ -179,33 +179,6 @@ export function getSolanaConfig(env: RpcEnv): SolanaConfig {
 }
 
 /**
- * The RPC endpoint for `cluster`, on a process that may serve BOTH clusters at
- * once (a sandbox project is devnet, a production project is mainnet-beta).
- *
- * `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL` are explicit overrides and
- * always win. Without one, the canonical default (`resolveDefaultSolanaRpcUrl`,
- * with its managed-provider selection and key expansion) is safe ONLY for the
- * cluster the process names in `SOLANA_NETWORK`; the other cluster answers `""`
- * so callers fail closed instead of building against the wrong chain.
- */
-export function resolveClusterRpcUrl(env: RpcEnv, cluster: "devnet" | "mainnet-beta"): string {
-  const explicit = explicitClusterRpcUrl(env, cluster);
-  if (explicit) return explicit;
-  if (resolveDefaultCluster(env) !== cluster) return "";
-  return resolveDefaultSolanaRpcUrl(env)?.trim() ?? "";
-}
-
-/** Ordered alternatives for a cluster, respecting an operator's explicit pin. */
-export function resolveClusterRpcUrls(env: RpcEnv, cluster: "devnet" | "mainnet-beta"): string[] {
-  const explicit = explicitClusterRpcUrl(env, cluster);
-  if (explicit) return [explicit];
-  if (resolveDefaultCluster(env) !== cluster) return [];
-  return resolveSolanaRpcProviderUrls(env)
-    .map((url) => url.trim())
-    .filter(Boolean);
-}
-
-/**
  * The operator's explicit endpoint for `cluster` (`SOLANA_DEVNET_RPC_URL` /
  * `SOLANA_MAINNET_RPC_URL`), or undefined. It wins for the default cluster too:
  * an operator who pins a private or isolated endpoint for a cluster means every

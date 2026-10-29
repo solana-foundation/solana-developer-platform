@@ -170,14 +170,17 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
       })
     );
     const deposited = await position();
-    const receipt = await readKaminoDepositReceipt(runtime, {
-      signature: depositSignature,
-      vault: VAULT,
-      owner: owner.address,
-      tokenMint: initial.tokenMint,
-      shareMint: initial.sharesMint,
-      requestedAmount: "25",
-    });
+    const receipt = await readKaminoDepositReceipt(
+      { cluster: runtime.cluster, rpc: createSolanaRpc(runtime.rpcUrl) },
+      {
+        signature: depositSignature,
+        vault: VAULT,
+        owner: owner.address,
+        tokenMint: initial.tokenMint,
+        shareMint: initial.sharesMint,
+        requestedAmount: "25",
+      }
+    );
     expect(receipt).toEqual({ amount: "25", sharesOut: deposited.shares });
     const depositedShares = parseDecimalAmount(deposited.shares, quote.shareDecimals);
     expect(depositedShares).toBeGreaterThan(0n);

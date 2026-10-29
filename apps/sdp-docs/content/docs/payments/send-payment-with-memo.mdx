@@ -21,7 +21,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: order-2026-05-14-4837" \
   -H "Content-Type: application/json" \
   -d '{
@@ -40,7 +40,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Idempotency-Key": "order-2026-05-14-4837",
       "Content-Type": "application/json",
     },
@@ -60,7 +60,7 @@ const { data } = await response.json();
 ```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Idempotency-Key", "order-2026-05-14-4837")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""

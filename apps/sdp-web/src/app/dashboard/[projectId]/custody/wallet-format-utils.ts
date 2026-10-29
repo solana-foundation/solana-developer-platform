@@ -37,7 +37,7 @@ export function formatCreatedDate(value: string, locale: string): string {
   });
 }
 
-export function formatPurpose(value: string | null, t: Translate): string | null {
+function formatPurpose(value: string | null, t: Translate): string | null {
   if (!value) {
     return null;
   }

@@ -15,7 +15,7 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 /** Whose move it is, or how a finished ramp ended; each surface picks its icon from it. */
 export type RampPhaseTone = "action" | "progress" | "attention" | "success" | "error";
 
-export type RampPhaseKind =
+type RampPhaseKind =
   | "checkout"
   | "awaiting_funds"
   | "ready_to_send"

@@ -1,6 +1,5 @@
 "use client";
 
-import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import {
@@ -10,7 +9,6 @@ import {
   DownloadIcon,
   Loader2Icon,
   MenuIcon,
-  PanelRightIcon,
   PlusIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -24,12 +22,10 @@ import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integra
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
-import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { type DesignModuleFlags, isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -212,7 +208,6 @@ export function DashboardHeaderAction({
 }
 
 type DashboardTopBarProps = {
-  isMobileSidebarOpen: boolean;
   setMobileSidebarOpen: (value: boolean) => void;
   titleVisibility: "visible" | "desktop-only" | "screen-reader-only";
   title: string;
@@ -228,11 +223,6 @@ type DashboardTopBarProps = {
    * title's row. "base" keeps the bottom bar's layout.
    */
   layout?: "base" | "refresh";
-  /**
-   * Whether the phone's bottom bar is on screen (the previous design). Without it a base layout
-   * still needs the menu button, in its title row's leading slot.
-   */
-  hasBottomNav?: boolean;
   /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
   /** Shown before a refresh page's title, as a wallet's provider mark is. */
@@ -266,33 +256,6 @@ export function HeaderBackAction({
         {label}
       </span>
     </Link>
-  );
-}
-
-function SidebarToggle({
-  isMobileSidebarOpen,
-  setMobileSidebarOpen,
-}: {
-  isMobileSidebarOpen: boolean;
-  setMobileSidebarOpen: (value: boolean) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <button
-      type="button"
-      aria-label={t("Shared.dashboardShell.openNavigation")}
-      onClick={() => setMobileSidebarOpen(true)}
-      // Hidden below xl: the bottom bar and its More sheet own mobile navigation,
-      // and two entry points to the same destinations is worse than one. Kept for
-      // the narrow window between the sidebar collapsing and xl, where neither the
-      // persistent sidebar nor the bottom bar is present.
-      className={[
-        "hidden h-8 w-8 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong",
-        isMobileSidebarOpen ? "invisible" : "",
-      ].join(" ")}
-    >
-      <PanelRightIcon className="h-4 w-4" />
-    </button>
   );
 }
 
@@ -495,7 +458,6 @@ export function StandardDashboardTopBar({
 }
 
 export function DashboardTopBar({
-  isMobileSidebarOpen,
   setMobileSidebarOpen,
   titleVisibility,
   title,
@@ -505,7 +467,6 @@ export function DashboardTopBar({
   action,
   above,
   layout = "base",
-  hasBottomNav = true,
   utilities,
   mark,
 }: DashboardTopBarProps) {
@@ -538,18 +499,8 @@ export function DashboardTopBar({
     );
   }
 
-  // A phone with no bottom bar (any refresh route, and every route on NEW DESIGN) needs the menu
-  // button beside a centred, back-linked or base title; the previous design's toggle stays
-  // hidden behind the bar.
-  const showsMenuButton = isRefresh || !hasBottomNav;
-  const sidebarToggle = showsMenuButton ? (
-    <MobileNavButton onClick={openNavigation} />
-  ) : (
-    <SidebarToggle
-      isMobileSidebarOpen={isMobileSidebarOpen}
-      setMobileSidebarOpen={setMobileSidebarOpen}
-    />
-  );
+  // A phone needs the menu button beside a centred, back-linked or base title.
+  const sidebarToggle = <MobileNavButton onClick={openNavigation} />;
 
   if (centersPageTitle) {
     return (
@@ -601,7 +552,7 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
  */
 function refreshFlowPageConfig(config: {
   title: string;
-  tabs: readonly { id: string; label: string }[];
+  tabs: DashboardHeaderTabsConfig["tabs"];
 }): DashboardPageConfig {
   return {
     title: config.title,
@@ -614,6 +565,9 @@ function refreshFlowPageConfig(config: {
 
 /** Width of the refresh Payments overview and list pages: the design's 900px column. */
 const REFRESH_PAGE_WIDTH = "max-w-page";
+
+/** Embedded Yield's former home, which still renders the same pages. */
+const LEGACY_EARN_PROGRAM_HREF = "/dashboard/markets/earn";
 
 function actionPageConfig(config: {
   title: string;
@@ -781,6 +735,7 @@ function getCounterpartyRoutePageConfig(
       },
       headerAction: {
         label: t("Shared.dashboardShell.pay"),
+        capability: "canWrite",
         href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
         variant: "primary",
       },
@@ -796,8 +751,8 @@ function getMarketsRoutePageConfig(
   if (pathname === "/dashboard/markets") {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   // Create is a detail/action route, so it keeps a centred title and a way back
@@ -827,23 +782,48 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
-  ) {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return {
-      title: t("Shared.dashboardShell.markets"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      title: t("Shared.dashboardShell.treasurySolutions"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
+  // Embedded Yield, also at its legacy `earn` alias, with the integration as its page action.
   if (
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === LEGACY_EARN_PROGRAM_HREF
   ) {
     return {
-      title: t("Shared.dashboardShell.configureEarnButton"),
+      title: t("Shared.dashboardShell.earnProgram"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardMarkets.earnProgram.configureShort"),
+        href: `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`,
+        variant: "primary",
+      },
+    };
+  }
+  // The integration guide, under both its routes and the legacy alias: the way back to the
+  // portfolio over a left title.
+  if (
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate` ||
+    pathname === `${LEGACY_EARN_PROGRAM_HREF}/configure`
+  ) {
+    return {
+      title: t("DashboardMarkets.earnProgram.configureShort"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+        label: t("Shared.dashboardShell.earnProgram"),
+      },
+    };
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) {
+    return {
+      title: t("Shared.dashboardShell.markets"),
       titlePosition: "center",
       contentWidthClass: "max-w-none",
     };
@@ -918,7 +898,7 @@ function getAccessControlPageConfig(
   return null;
 }
 
-/** Issuance on the new design: the list, the draft flow and one token's page. */
+/** Issuance: the list, the draft flow and one token's page. */
 function getIssuanceRoutePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
@@ -970,53 +950,6 @@ function getIssuanceRoutePageConfig(
         { id: "activity", label: t("Shared.tabs.activity") },
       ],
       hideOnMobile: false,
-    },
-  };
-}
-
-function getLegacyIssuanceRoutePageConfig(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  assetProfilesEnabled: boolean
-): DashboardPageConfig | null {
-  if (pathname === "/dashboard/issuance") {
-    return {
-      title: t("Shared.dashboardShell.issuance"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/issuance/create") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.newAsset"),
-      backHref: "/dashboard/issuance",
-      backLabel: t("Shared.dashboardShell.backToOverview"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (!pathname.startsWith("/dashboard/issuance/")) {
-    return null;
-  }
-  // Gate the chrome on the same flag the page uses to pick the workspace. Flag
-  // on → the create flow's centered title + capped column; off → the legacy
-  // left-aligned, full-width layout, untouched.
-  if (assetProfilesEnabled) {
-    return {
-      ...actionPageConfig({
-        title: t("Shared.dashboardShell.assetManagement"),
-        backHref: "/dashboard/issuance",
-        backLabel: t("Shared.dashboardShell.backToOverview"),
-        contentWidthClass: "max-w-7xl",
-      }),
-      hideTitleOnMobile: true,
-    };
-  }
-  return {
-    title: t("Shared.dashboardShell.issuance"),
-    contentWidthClass: "max-w-none",
-    backAction: {
-      href: "/dashboard/issuance",
-      label: t("Shared.dashboardShell.backToOverview"),
     },
   };
 }
@@ -1132,6 +1065,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.counterparty.add"),
+        capability: "canWrite",
         href: "/dashboard/payments/counterparty/create",
         icon: "plus",
         variant: "primary",
@@ -1167,6 +1101,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.requests.new"),
+        capability: "canWrite",
         href: PAYMENT_REQUEST_NEW_HREF,
         icon: "plus",
         variant: "primary",
@@ -1208,6 +1143,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.recurring.new"),
+        capability: "canWrite",
         href: "/dashboard/payments/recurring/create",
         icon: "plus",
         variant: "primary",
@@ -1228,229 +1164,28 @@ function getRefreshPaymentsPageConfig(
       title: t("Shared.dashboardShell.deposit"),
       tabs: [
         { id: "address", label: t("DashboardPayments.depositMethod.address") },
-        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+        {
+          id: "provider",
+          label: t("DashboardPayments.depositMethod.provider"),
+          capability: "canWrite",
+        },
       ],
     });
   }
   return null;
 }
 
-/**
- * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
- * and the Privacy connect form. Returns null for every other route, and for the new design's own
- * routes, which send the previous design back to their list.
- */
-function getLegacyDesignPageConfig(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean,
-  transactionModules: readonly UnifiedTransactionModule[]
-): DashboardPageConfig | null {
-  if (pathname === "/dashboard/integrations/private-channels/setup") {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: "/dashboard/integrations/private-channels",
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  const privateChannelsSetup = pathname.match(
-    /^\/dashboard\/integrations\/private-channels\/([^/]+)\/setup$/
-  );
-  if (privateChannelsSetup) {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: privateChannelsInstancePath(privateChannelsSetup[1]),
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname !== "/dashboard/payments" && !pathname.startsWith("/dashboard/payments/")) {
-    return null;
-  }
-  if (pathname === "/dashboard/payments/counterparty") {
-    return {
-      title: t("Shared.dashboardShell.counterparty"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/counterparty/create") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.newCounterparty"),
-      backHref: "/dashboard/payments/counterparty",
-      backLabel: t("Shared.dashboardShell.backToCounterparty"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
-    return {
-      title: t("Shared.dashboardShell.manageCounterparty"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/payments/counterparty",
-        label: t("Shared.dashboardShell.backToCounterparty"),
-      },
-    };
-  }
-  if (pathname === "/dashboard/payments") {
-    return {
-      title: t("Shared.dashboardShell.payments"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (
-    pathname === PAYMENT_TRANSACTIONS_HREF ||
-    pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)
-  ) {
-    return {
-      title: t("Shared.dashboardShell.transactions"),
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...transactionModules.map((module) => ({
-            id: module,
-            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
-          })),
-        ],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === PAYMENT_REQUESTS_HREF || pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
-    return {
-      title: t("Shared.dashboardShell.requests"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/recurring") {
-    return {
-      title: t("Shared.dashboardShell.recurringPayments"),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/recurring/create") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.recurringPayment"),
-      backHref: "/dashboard/payments/recurring",
-      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/payments/recurring/")) {
-    return {
-      title: t("Shared.dashboardShell.recurringPayment"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
-      },
-    };
-  }
-  const action = getPaymentsActions(t, privateChannelsEnabled, { newDesign: false }).find((item) =>
-    pathname.startsWith(item.href)
-  );
-  const title = action
-    ? action.label
-    : pathname.endsWith("/receive")
-      ? t("Shared.dashboardShell.receive")
-      : t("Shared.dashboardShell.send");
-  return actionPageConfig({
-    title,
-    backHref: "/dashboard/payments",
-    backLabel: t("Shared.dashboardShell.backToPayments"),
-    contentWidthClass: "max-w-none",
-  });
-}
-
-/** The Wallets routes as the previous design (NEW DESIGN off) configures them. */
-function getLegacyWalletRoutePageConfig(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>
-): DashboardPageConfig | null {
-  const isWalletDetail =
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
-  if (!isWalletDetail) return null;
-
-  return {
-    title: t("Shared.dashboardShell.wallets"),
-    contentWidthClass: "max-w-none",
-    backAction: {
-      href: "/dashboard/wallets",
-      label: t("Shared.dashboardShell.backToWallets"),
-    },
-  };
-}
-
-function getLegacyWalletSectionPageConfig(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>
-): DashboardPageConfig | null {
-  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
-    return {
-      title: t("Shared.dashboardShell.wallets"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
-    return {
-      title: t("Shared.dashboardShell.createWallet"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
-  if (
-    pathname === "/dashboard/wallets/connections" ||
-    pathname === "/dashboard/custody/connections"
-  ) {
-    return {
-      title: t("Shared.dashboardShell.connections"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
-  return null;
-}
-
-function getHomeTitle(t: ReturnType<typeof useTranslations>, overviewNewDesign: boolean): string {
-  return overviewNewDesign
-    ? t("Shared.dashboardShell.newDesign.home")
-    : t("Shared.dashboardShell.home");
-}
-
-// The first page and the holdings page reached from it: both follow the Overview module, which
-// names the first page Overview on it and Home off it.
+// The first page and the holdings page reached from it.
 function getHomePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  overviewNewDesign: boolean
+  t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard") {
-    // NEW DESIGN's Overview is built on the refresh design: a left title over the same 900px
-    // column as the Payments pages. The previous design's Home names itself: the sidebar marks
-    // it active and the page opens on a balance, so the workspace renders an sr-only heading.
-    return overviewNewDesign
-      ? {
-          title: getHomeTitle(t, overviewNewDesign),
-          titlePosition: "left",
-          contentWidthClass: REFRESH_PAGE_WIDTH,
-        }
-      : {
-          title: getHomeTitle(t, overviewNewDesign),
-          hideTitle: true,
-          contentWidthClass: "max-w-none",
-        };
+    return {
+      title: t("Shared.dashboardShell.newDesign.home"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+    };
   }
   if (pathname === "/dashboard/tokens") {
     // Reached from the Overview's holdings, so it carries a way back rather than
@@ -1460,9 +1195,7 @@ function getHomePageConfig(
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard",
-        label: overviewNewDesign
-          ? t("Shared.dashboardShell.newDesign.backToHome")
-          : t("Shared.dashboardShell.backToHome"),
+        label: t("Shared.dashboardShell.newDesign.backToHome"),
       },
     };
   }
@@ -1472,45 +1205,18 @@ function getHomePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean,
-  // Transactions tabs, from `enabledTransactionModules`.
-  transactionModules: readonly UnifiedTransactionModule[],
-  _custodyEnabled = true,
-  paymentsEnabled = true,
-  newDesign = true,
-  newDesignModules?: DesignModuleFlags
+  paymentsEnabled = true
 ): DashboardPageConfig {
-  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
-  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
-  // The Overview module also names the first page: Overview on it, Home off it.
-  const overviewNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "overview");
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
-  const homePageConfig = getHomePageConfig(pathname, t, overviewNewDesign);
+  const homePageConfig = getHomePageConfig(pathname, t);
   if (homePageConfig) return homePageConfig;
-  // Every Wallets page's header follows the Wallets module.
-  const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
-  const walletSectionPageConfig = walletsNewDesign
-    ? getWalletSectionPageConfig(pathname, t)
-    : getLegacyWalletSectionPageConfig(pathname, t);
+  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = walletsNewDesign
-    ? getWalletRoutePageConfig(pathname, t, paymentsEnabled)
-    : getLegacyWalletRoutePageConfig(pathname, t);
+  const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t, paymentsEnabled);
   if (walletRoutePageConfig) return walletRoutePageConfig;
-  const issuanceRoutePageConfig = isDesignModuleOn({ newDesign, newDesignModules }, "issuance")
-    ? getIssuanceRoutePageConfig(pathname, t)
-    : getLegacyIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
+  const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  // A Payments page no design module has redesigned keeps the previous design's header under
-  // NEW DESIGN too.
-  const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled, transactionModules)
-    : null;
-  if (legacyDesignConfig) {
-    return legacyDesignConfig;
-  }
   const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
   if (refreshPaymentsConfig) {
     return refreshPaymentsConfig;
@@ -1549,9 +1255,7 @@ export function getDashboardPageConfig(
     return privateChannelsConfig;
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
-      pathname.startsWith(item.href)
-    );
+    const action = getPaymentsActions(t, true).find((item) => pathname.startsWith(item.href));
     const title = action
       ? action.label
       : pathname.endsWith("/receive")
@@ -1589,5 +1293,5 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
   }
-  return { title: getHomeTitle(t, overviewNewDesign) };
+  return { title: t("Shared.dashboardShell.newDesign.home") };
 }

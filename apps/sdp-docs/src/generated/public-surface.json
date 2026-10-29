@@ -92,5 +92,14 @@
     "private_channels",
     "helius_rings"
   ],
-  "allRampProviders": ["moonpay", "stripe"]
+  "allRampProviders": ["moonpay", "stripe"],
+  "rateLimits": {
+    "windowSeconds": 60,
+    "apiKeyTiers": {
+      "standard": 100,
+      "elevated": 500,
+      "unlimited": 10000
+    },
+    "unauthenticatedPerIp": 20
+  }
 }

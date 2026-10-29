@@ -140,6 +140,38 @@ describe("rejectCrossSiteWrite", () => {
       rejectCrossSiteWrite(write("/api/workspace-status", { origin: "https://attacker.example" }))
     ).toBeNull();
   });
+
+  it("refuses a cross-origin Server Action posted to a page and allows a same-origin one", () => {
+    const settingsPath = `/dashboard/${PRODUCTION_PROJECT.id}/settings`;
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", origin: "https://attacker.example" })
+      )?.status
+    ).toBe(403);
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, {
+          "next-action": "action_test",
+          origin: "https://dashboard.example.com",
+        })
+      )
+    ).toBeNull();
+  });
+
+  it("refuses a Server Action with neither Origin nor Sec-Fetch-Site only while it carries the Clerk session cookie", () => {
+    const settingsPath = `/dashboard/${PRODUCTION_PROJECT.id}/settings`;
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", cookie: "__session=session_synthetic" })
+      )?.status
+    ).toBe(403);
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", cookie: "__session_abc123=synthetic" })
+      )?.status
+    ).toBe(403);
+    expect(rejectCrossSiteWrite(write(settingsPath, { "next-action": "action_test" }))).toBeNull();
+  });
 });
 
 describe("proxy request project", () => {

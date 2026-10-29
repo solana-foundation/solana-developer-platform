@@ -2,8 +2,8 @@
 
 Every colour, font, type size, radius and control size SDP UI is built from, as plain CSS
 custom properties, with Tailwind utilities mapped onto them. The
-dashboard (`apps/sdp-web`) consumes the package today. A future Storybook or docs page can
-read the same files without Tailwind.
+dashboard (`apps/sdp-web`) and the docs (`apps/sdp-docs`) consume the package. A future
+Storybook can read the same files without Tailwind.
 
 ## Files
 
@@ -43,9 +43,9 @@ In a Tailwind v4 stylesheet, import the tokens before anything that reads them:
 ```
 
 `apps/sdp-web/src/app/globals.css` imports them this way, so the dashboard reads the base
-palette from the package. While the `new-design` flag is on, `apps/sdp-web/src/app/sdp-theme.css`
-also points the base names at the refresh palette and faces for the whole document (every page
-gets the colours and type; only refresh surfaces get the refresh shapes).
+palette from the package. On every dashboard route, `apps/sdp-web/src/app/sdp-theme.css` also
+points the base names at the refresh palette and faces for the whole document (every dashboard
+page gets the colours and type; only refresh surfaces get the refresh shapes).
 
 Opt a surface into the refresh design with the attribute. On `<html>` it adopts the design
 app-wide, in light and dark:
@@ -60,9 +60,9 @@ Content portaled out of that element (modals, menus, popovers) leaves the scope,
 carry the attribute itself.
 
 In the dashboard the shell sets the attribute on `<main>` from the route
-(`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: the routes a redesigned area
-registers in `lib/design-modules.ts`, and the Privacy connect form), and on the sidebar whenever
-`new-design` is on. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
+(`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: Overview, Wallets, Issuance,
+Payments, the Markets landing, Treasury, Embedded Yield and its integration guide, and the
+Privacy connect form), and always on the sidebar. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
 through `useThemeScopeAttributes` (`packages/sdp-ui/src/theme-scope.ts`); where structure
 differs as well, a client component reads `useThemeScope() === "refresh"`.
 
@@ -86,12 +86,21 @@ files in `src/assets/fonts` and exposes them under those names. In Next.js, load
 `next/font/local`, set `variable` to that name, and put the font's `variable` class on
 `<html>`. Elsewhere, declare `@font-face` rules for the same files and set the two variables
 on `:root`. Without either, the stack falls back to the installed family name, then the system
-stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`.
+stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`, and
+sdp-docs the same way in `apps/sdp-docs/src/app/layout.tsx`.
 
 ### Page column
 
 `max-w-page` is the design's content column (852px, which with 24px gutters is the design's
 900px column). `max-w-flow` is the wizard and settings form column (660px).
+
+### Motion
+
+`--motion-duration-fast` (120ms) is hover and press feedback, `--motion-duration-base` (180ms) a small
+reveal such as a menu, tab or disclosure, and `--motion-duration-slow` (240ms) a panel or drawer; pair
+them with `--motion-ease-out`. All three drop to 0ms under `prefers-reduced-motion`. The docs read
+them today. `--motion-duration-default` (250ms) is the duration Tailwind's `transition` utilities use
+(`theme.css`) and is unchanged.
 
 ### Class merging
 

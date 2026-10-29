@@ -9,7 +9,7 @@ import {
 import { useWalletActivity } from "./use-wallet-activity";
 
 /** How many more rows each "Load older activity" asks the feed for. */
-export const WALLET_ACTIVITY_LOAD_STEP = 100;
+const WALLET_ACTIVITY_LOAD_STEP = 100;
 
 /**
  * A wider read only replaces the loaded window when it is at least as complete: no source

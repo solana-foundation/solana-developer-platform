@@ -9,7 +9,7 @@ export interface KmsClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-export class KmsError extends Error {
+class KmsError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "KmsError";

@@ -30,7 +30,7 @@ function isInterruptedNavigation(error: unknown): boolean {
   return error instanceof Error && error.message.includes("is interrupted by another navigation");
 }
 
-export async function getClerkBearerToken(page: Page): Promise<string> {
+async function getClerkBearerToken(page: Page): Promise<string> {
   // The proxy's workspace-loading bounce (307 + client return) can land while
   // this goto is still in flight; Clerk is readable from either page.
   await page.goto("/dashboard", { waitUntil: "domcontentloaded" }).catch((error) => {
@@ -57,7 +57,7 @@ export async function getClerkBearerToken(page: Page): Promise<string> {
   return token;
 }
 
-export async function openAuthenticatedBootstrapPage(browser: Browser): Promise<Page> {
+async function openAuthenticatedBootstrapPage(browser: Browser): Promise<Page> {
   return browser.newPage({
     storageState: authStatePath,
   });

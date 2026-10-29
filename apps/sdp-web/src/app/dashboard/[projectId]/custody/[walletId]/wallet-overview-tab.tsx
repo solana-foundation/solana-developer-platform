@@ -63,7 +63,7 @@ function PartSkeleton({ rows = 3 }: { rows?: number }) {
 }
 
 /** Whether the wallet can sign, as the design heads every wallet's page. */
-export function WalletStateBand({ wallet }: { wallet: WalletPageView }) {
+function WalletStateBand({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   return wallet.isRuntimeExecutionAllowed ? (
     <StateBand tone="ok" state={t("DashboardCustody.walletStateActive")}>

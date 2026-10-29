@@ -95,7 +95,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
@@ -114,7 +114,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "payment-invoice-1234",
     },
@@ -135,7 +135,7 @@ const { data } = await response.json();
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -183,7 +183,7 @@ Poll status for async confirmations:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -193,6 +193,10 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 </Step>
 
 </HowItWorks>
+
+## SOL and the rent-exempt minimum
+
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL). A native SOL transfer that pays less than that to an address with no account, or that leaves the source wallet holding more than nothing but less than the minimum, is refused with `409 AMOUNT_BELOW_RENT_MINIMUM` before anything is written or sent. `details.recipientIndexes` (`[0]`) or `details.sourceRemainder` says which, and `details.minimumAmount` gives the minimum. Send at least the minimum, fund the address, or send the wallet's whole balance; the 409 is not stored under the `Idempotency-Key`, so the same request runs again once it clears. Token transfers are unaffected: SDP's sponsor funds a missing token account's rent.
 
 ## Deduplication
 

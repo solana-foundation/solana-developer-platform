@@ -41,6 +41,7 @@ import {
   vedaClusterConfig,
   vedaProgramAllowlist,
 } from "./programs";
+import { withVedaOperationReads } from "./rpc";
 import {
   buildVedaDepositPlan,
   buildVedaQueuedWithdrawalCancelPlan,
@@ -283,7 +284,11 @@ export class VedaVaultDirectClient
     return { runtime: { cluster, rpcUrl }, config };
   }
 
-  /** Every chain capability enters through this proof-then-deadline boundary. */
+  /**
+   * Every chain capability enters through this proof-then-deadline boundary,
+   * and each attempt reads each account once (`withVedaOperationReads`): the
+   * runner's re-attempt on another endpoint opens a fresh scope.
+   */
   private async withRuntime<T>(
     ctx: EarnRuntimeContext,
     label: string,
@@ -298,7 +303,7 @@ export class VedaVaultDirectClient
       // consume one deadline rather than receiving independent budgets.
       const { runtime, config } = await this.runtime(ctx);
       assertActive();
-      return operation(runtime, config, assertActive);
+      return withVedaOperationReads(() => operation(runtime, config, assertActive));
     });
   }
 

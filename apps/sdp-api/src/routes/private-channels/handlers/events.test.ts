@@ -111,7 +111,7 @@ describe("Private Channels event handlers", () => {
     await seedDefaultProjects(db, {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,
-      members: [],
+      members: [USER_ID, NON_MEMBER_USER_ID],
       ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
     });
     await db

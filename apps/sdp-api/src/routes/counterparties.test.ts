@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import type { OrganizationProviderOverrides } from "@sdp/types/provider-access";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { getDb } from "@/db/client";
@@ -630,7 +630,7 @@ describe("Counterparties Routes", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       // Today every provider is `experimental`; these stages put only MoonPay in `beta`.
       const betaApp = createApp({
-        rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+        rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
       });
 
       const response = await betaApp.request(

@@ -13,10 +13,11 @@ const CLERK_API_URL = "https://clerk.example.test/v1";
 const CLERK_ORG_ID = "org_clerk_member_directory";
 const ORGANIZATION_ID = TEST_ORG.id;
 const INVITER_USER_ID = "usr_directory_inviter";
+const INVITATION_EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
 interface DirectoryResponse {
   members: { id: string; user: { email: string } }[];
-  invitations: { id: string; email: string; acceptUrl: string | null }[];
+  invitations: { id: string; email: string }[];
   meta: { total: number; page: number; pageSize: number; hasMore: boolean };
 }
 
@@ -42,7 +43,7 @@ function stubClerk(): { listCalls: number } {
         email_address: `invitee${index}@example.com`,
         status: "pending",
         inviter_id: "clerk_user_inviter",
-        url: `https://accept.example.test/orginv_${index}`,
+        url: `https://accept.example.test/orginv_${index}?__clerk_ticket=ticket_${index}`,
       }));
 
       return new Response(JSON.stringify({ data }), {
@@ -60,7 +61,6 @@ function stubClerk(): { listCalls: number } {
 /** Seeds `memberCount` active members and 4 pending invitations. */
 async function seedDirectory(memberCount: number): Promise<void> {
   const db = getDb(env);
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const statements = [
     db
@@ -118,7 +118,7 @@ async function seedDirectory(memberCount: number): Promise<void> {
           `invitee${index}@example.com`,
           INVITER_USER_ID,
           `hash_directory_${index}`,
-          expiresAt,
+          INVITATION_EXPIRES_AT,
           `orginv_${index}`,
           `2025-02-${String(4 - index).padStart(2, "0")}T00:00:00.000Z`
         )
@@ -257,15 +257,27 @@ describe("member directory", () => {
       expect(serialized).not.toContain("accept.example.test");
     });
 
-    it("returns invitations with their accept links to a caller holding org:write", async () => {
+    it("returns pending invitations to a members.manage caller without Clerk accept links", async () => {
       await seedDirectory(2);
       await authenticateAs("admin");
-      stubClerk();
+      const clerk = stubClerk();
 
       const directory = await listMembers();
 
-      expect(directory.invitations).toHaveLength(4);
-      expect(directory.invitations[0]?.acceptUrl).toBe("https://accept.example.test/orginv_0");
+      expect(directory.invitations).toEqual(
+        [0, 1, 2, 3].map((index) => ({
+          id: `inv_directory_${index}`,
+          email: `invitee${index}@example.com`,
+          role: "member",
+          status: "pending",
+          createdAt: `2025-02-${String(4 - index).padStart(2, "0")}T00:00:00.000Z`,
+          expiresAt: INVITATION_EXPIRES_AT,
+        }))
+      );
+      const serialized = JSON.stringify(directory);
+      expect(serialized).not.toContain("__clerk_ticket");
+      expect(serialized).not.toContain("accept.example.test");
+      expect(clerk.listCalls).toBe(0);
     });
 
     it("counts only what the caller can see in meta.total", async () => {
@@ -320,16 +332,6 @@ describe("member directory", () => {
         "inv_directory_2",
         "inv_directory_3",
       ]);
-    });
-
-    it("does not call Clerk for a page that carries no invitations", async () => {
-      await seedDirectory(26);
-      await authenticateAs("admin");
-      const clerk = stubClerk();
-
-      await listMembers(1);
-
-      expect(clerk.listCalls).toBe(0);
     });
   });
 });

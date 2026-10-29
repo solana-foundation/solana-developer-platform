@@ -260,19 +260,12 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   }
 }
 
-/* NEW DESIGN: the 2026 palette, faces and body type on every route, not only inside the refresh
-   scope. The shell marks its <main> with data-sdp-new-design when the flag is on; :has lifts
-   that to the root, so menus, dialogs and toasts portaled to <body> follow, and the previous
-   design keeps the base palette everywhere. Component shapes and page layout stay with the
+/* The 2026 palette, faces and body type on every dashboard route, not only inside the refresh
+   scope. The dashboard shell marks its <main> with data-sdp-dashboard-shell; :has lifts that to
+   the root, so menus, dialogs and toasts portaled to <body> follow, and pages outside the
+   dashboard keep the base palette. Component shapes and page layout stay with the
    refresh scope. Same re-points as the refresh scope in @sdp/design-tokens' tokens.css. */
-/* The shell's page section as a solid colour, for surfaces that must match it exactly (a pinned
-   header over scrolling cards). The previous design's section is surface-raised at 80% over the
-   shell; alpha compositing is a plain sRGB mix, so this reproduces it in both themes. */
-:root {
-  --sdp-page-backdrop: color-mix(in srgb, var(--surface-raised) 80%, var(--surface));
-}
-
-:root:has(main[data-sdp-new-design]) {
+:root:has(main[data-sdp-dashboard-shell]) {
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);
@@ -319,9 +312,6 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --page-title-line-height: var(--line-height-heading);
   --page-title-letter-spacing: var(--letter-spacing-heading);
 
-  /* NEW DESIGN's page section is flat and opaque. */
-  --sdp-page-backdrop: var(--surface-raised);
-
   /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
      which the browser matches to the Medium face, so every plain run came out heavy; body text is
      the Regular face, drawn antialiased. A semibold or bold request takes the Medium face as it
@@ -362,7 +352,7 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
 }
 
-:root.dark:has(main[data-sdp-new-design]) {
+:root.dark:has(main[data-sdp-dashboard-shell]) {
   --clerk-color-primary: #fbfaf9;
   --clerk-color-primary-foreground: #08080a;
   --clerk-color-foreground: #fbfaf9;

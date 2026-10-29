@@ -17,11 +17,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 ## Public API Routes
 
 The API exposes these public REST endpoints. Most require an API key or Clerk session
-token. Earn strategy reads, deposit/direct-withdrawal previews and unsigned
-instant builds, withdrawal-route discovery, and queued-withdrawal previews also
-accept anonymous requests. Submits, queued request/cancellation actions,
-positions, movements, earnings, and the rest of the tenant control plane remain
-authenticated.
+token; every Earn route does.
 
 | Family | Path | Use Case |
 |---|---|---|
@@ -130,6 +126,19 @@ SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>
+
+# API keys are stored as HMAC-SHA-256 under this pepper; the API refuses to
+# start without it. Generate with `openssl rand -hex 32`.
+API_KEY_PEPPER=<64 hex characters>
+```
+
+`pnpm db:seed:local` seeds the documented dev key hashed under the same pepper,
+and it runs `psql` directly, so it does not read `.env.local`. Export the value
+in the shell first, or the seed refuses to run:
+
+```bash
+export API_KEY_PEPPER=<the value in .env.local>
+pnpm -C apps/sdp-api db:seed:local
 ```
 
 Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
@@ -143,16 +152,9 @@ it reads, `KORA_<CLUSTER>_RPC_URL`, instead: both or neither, since the API refu
 start when a cluster sets only one of them. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
-Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
-`ENVIRONMENT=production` to production. Anonymous quote and build traffic has
-a separate paid-upstream budget configured with
-`EARN_ANONYMOUS_RPC_MAX_REQUESTS` and
-`EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
-project environment and authenticated quota. At startup, the API validates and
-logs the resolved anonymous Earn environment from `ENVIRONMENT`; verify that
-event before exposing a non-production deployment. Outside Cloud Run, forwarded
-client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
-behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
+Outside Cloud Run, forwarded client addresses are ignored unless
+`TRUST_PROXY_HEADERS=true`; enable it only behind an ingress that replaces
+caller-supplied `X-Forwarded-For` values.
 
 ### Release Channel (which modules run)
 
@@ -245,14 +247,13 @@ private metadata:
 ```
 
 Set it in the Clerk dashboard (Organizations → your org → Metadata → Private;
-the `organization.updated` webhook syncs it) or with
-`pnpm --filter @sdp/api org:tier:local --clerk-org-id <org_…> --tier individual --overrides '{"custody":{"local":true}}'`.
+the `organization.updated` webhook syncs it).
 Without it, choosing the local signer returns `403 Local requires manual activation`.
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
-The webhook handler is the only path that creates `organizations` rows
-outside `pnpm db:seed:local`.
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only
+syncs the name, slug and entitlements of organizations SDP already knows.
 
 ### Optional: Compliance & Ramp Integrations
 

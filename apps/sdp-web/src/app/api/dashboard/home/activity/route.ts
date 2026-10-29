@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   buildHomeActivityRows,
+  computeTodaysVolume,
   fetchOrgIssuanceActivity,
 } from "@/app/dashboard/[projectId]/home-page.data";
 import {
@@ -13,6 +14,14 @@ import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
+/**
+ * Home's recent activity and today's volume, from one read of the transfers.
+ *
+ * The list gives each wallet a deadline so one slow wallet cannot hold it back,
+ * and a list missing a wallet can say so. A total cannot: a sum over some
+ * wallets is a smaller number, not the volume. So the volume is reported only
+ * when every wallet loaded, and Home shows it as unavailable otherwise.
+ */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
   const [t, issuanceEnabled] = await Promise.all([getTranslations(), issuance()]);
@@ -67,6 +76,8 @@ export async function GET(request: Request) {
     const activityNotice = [transfersError, transfersPartial, issuanceActivityError]
       .filter(Boolean)
       .join(" ");
+    const completeTransfers =
+      transfersResult.ok && transfersResult.walletsNotLoaded === 0 && transfersResult.data;
 
     const response = NextResponse.json(
       {
@@ -74,6 +85,10 @@ export async function GET(request: Request) {
           activityRows,
           activityError,
           activityNotice: activityNotice || null,
+          todaysVolume: completeTransfers ? computeTodaysVolume(completeTransfers) : null,
+          todaysVolumeError: completeTransfers
+            ? null
+            : t("Shared.homeWorkspace.paymentsActivityUnavailable"),
         },
       },
       {
@@ -86,6 +101,7 @@ export async function GET(request: Request) {
 
     logRouteResult(trace, 200, {
       transferCount: transfersResult.data?.length ?? 0,
+      walletsNotLoaded: transfersResult.walletsNotLoaded,
       issuanceTransactionCount: issuanceActivityResult.data?.length ?? 0,
       activityRowCount: activityRows.length,
     });

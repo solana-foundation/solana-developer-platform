@@ -1,4 +1,5 @@
 import type { Project } from "@sdp/types/projects";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,10 +14,11 @@ import {
 
 const sdpApi = vi.hoisted(() => ({
   listSdpProjects: vi.fn<() => Promise<Project[]>>(),
+  requestMemberRole: vi.fn(async (): Promise<OrganizationRole> => "admin"),
 }));
 
 const sdpAuth = vi.hoisted(() => ({
-  getSdpAuth: vi.fn(async () => ({ orgRole: "org:admin", orgId: "org_test", userId: "user_test" })),
+  getSdpAuth: vi.fn(async () => ({ orgId: "org_test", userId: "user_test" })),
 }));
 
 const dashboardShell = vi.hoisted(() => ({
@@ -49,7 +51,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/sdp-api", () => sdpApi);
 vi.mock("@/lib/sdp-auth", () => sdpAuth);
 vi.mock("@/flags/dashboard", () => ({ getDashboardFlags: async () => DASHBOARD_FLAGS }));
-vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStep: async () => null }));
+vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStatus: async () => null }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   DashboardWorkspaceProvider: dashboardShell.DashboardWorkspaceProvider,
 }));
