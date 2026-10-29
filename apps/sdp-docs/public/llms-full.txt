@@ -5383,7 +5383,7 @@ Source: https://platform.solana.com/docs/reference/api
 
 Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
 
-Browse 109 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
+Browse 110 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
 
 ## Health
 
@@ -5469,6 +5469,7 @@ Browse 109 endpoints across 8 API families. Select an operation to see its param
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
+| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/recurring-payments` | [Create recurring payment](/docs/reference/api/payments/create-payment-recurring-payment.md) |
 | `GET` | `/v1/payments/recurring-payments` | [List recurring payments](/docs/reference/api/payments/list-payment-recurring-payments.md) |
@@ -26719,13 +26720,452 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 ## Responses
 
 - **`200`** Failed recipients resent
+
+  - **`data`** · `object` · required
+
+    Transfer batch response payload.
+
+    - **`batch`** · `object` · required
+
+      Transfer batch details.
+
+      - **`id`** · `string` · required · example `xbatch_example`
+
+        Transfer batch identifier.
+
+      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
+
+        Organization identifier.
+
+      - **`projectId`** · `string` · required · min length 1 · example `prj_example`
+
+        Project identifier for the transfer batch.
+
+      - **`externalId`** · `string | null` · required · example `payroll_2026_06_30`
+
+        Caller-provided batch correlation ID.
+
+      - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
+
+        Exact source SDP Wallet ID, or null for unresolved legacy batches.
+
+      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+        Source Provider wallet ID retained as evidence.
+
+      - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Source custody wallet address.
+
+      - **`token`** · `string` · required · example `SOL`
+
+        Token symbol or mint address.
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
+
+        Transfer batch status.
+
+      - **`totalAmount`** · `string | null` · required · example `1000.00`
+
+        Total requested batch amount in UI units, when computed.
+
+      - **`recipientCount`** · `integer` · required · example `20`
+
+        Number of recipient rows in the batch.
+
+      - **`transactionCount`** · `integer` · required · example `1`
+
+        Number of Solana transaction chunks for the batch.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`recipients`** · `object[]`
+
+      Recipient rows for the batch, included on detail responses.
+
+      - **`id`** · `string` · required
+
+        Transfer batch recipient identifier.
+
+      - **`batchId`** · `string` · required
+
+        Parent transfer batch identifier.
+
+      - **`transferId`** · `string | null` · required · min length 1 · example `xfr_example`
+
+        Payment transfer chunk that settled this recipient, once assigned.
+
+      - **`externalId`** · `string | null` · required · example `payroll_row_001`
+
+        Caller-provided recipient correlation ID.
+
+      - **`counterpartyId`** · `string` · required · example `cpty_example`
+
+        Counterparty identifier for the recipient.
+
+      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+
+        Counterparty account identifier for the recipient.
+
+      - **`destination`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Resolved Solana destination address.
+
+      - **`amount`** · `string` · required · example `100.00`
+
+        Token amount in UI units (decimal string).
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `archived` · example `pending`
+
+        Transfer batch recipient status.
+
+      - **`error`** · `string | null` · required
+
+        Recipient-level failure reason, when available.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`transfers`** · `object[]`
+
+      Payment transfer chunk records associated with this batch.
+
+      - **`fireblocks`** · `object`
+
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+
+        - **`transactionId`** · `string | null` · required
+
+        - **`status`** · `string` · required
+
+        - **`subStatus`** · `string | null` · required
+
+      - **`id`** · `string` · required · min length 1 · example `xfr_example`
+
+        Transfer identifier (SDP record ID, not the on-chain signature).
+
+      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
+
+        Organization identifier.
+
+      - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
+
+        Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
+
+      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+        Provider wallet ID retained as evidence; not an execution selector.
+
+      - **`projectId`** · `string` · min length 1 · example `prj_example`
+
+        Project identifier for the transfer.
+
+      - **`type`** · `string` · required · one of `transfer`, `transfer_batch`, `onramp`, `offramp` · example `transfer`
+
+        Transfer type.
+
+      - **`kind`** · `string` · required · one of `pay`, `confidential_pay`, `batch_pay`, `recurring_pay`, `deposit`, `request_deposit`, `onramp`, `offramp`
+
+        Dashboard transaction kind derived from the transfer type and originating Payments resource.
+
+      - **`direction`** · `string` · required · one of `inbound`, `outbound` · example `outbound`
+
+        Transfer direction.
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `finalized`, `failed`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired` · example `confirmed`
+
+        Transfer status.
+
+      - **`signature`** · `string | null` · required · example `sig_example`
+
+        Solana transaction signature (tx id/hash).
+
+      - **`serializedTx`** · `string | null` · required · min length 1 · example `base64_tx_example`
+
+        Base64-encoded transaction payload, if available. Always null for transfer batch chunks, whose signed bytes stay server-side.
+
+      - **`slot`** · `integer | null` · required · example `123456`
+
+        Slot number, if confirmed.
+
+      - **`blockTime`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        Block time, if confirmed.
+
+      - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+
+      - **`fee`** · `integer | null` · required · example `5000`
+
+        Transaction fee in lamports.
+
+      - **`error`** · `string | null` · required · example `Signature failed`
+
+        Error message if the transaction failed.
+
+      - **`initiatedBy`** · `object`
+
+        Initiator that triggered the transfer.
+
+        - **`type`** · `string` · required · one of `api_key`, `user`, `system` · example `api_key`
+
+          Initiator type.
+
+        - **`id`** · `string`
+
+          Initiator identifier if applicable.
+
+        - **`display`** · `string`
+
+          Human-friendly label for the initiator.
+
+      - **`source`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Source wallet address.
+
+      - **`destination`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Destination wallet address.
+
+      - **`memo`** · `string` · max length 256
+
+        Optional memo for the transfer.
+
+      - **`rampsMemo`** · `object` · required
+
+        Free-form key-value memo for offchain reconciliation of ramp transfers. At most 20 entries.
+
+        - **`*`** · `string` · min length 1 · max length 256
+
+      - **`token`** · `string`
+
+        Token symbol or mint address.
+
+      - **`amount`** · `string` · example `100.00`
+
+        Token amount in UI units (decimal string).
+
+      - **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle`, `mural`, `moneygram`, `lightspark`, `coinbase`, `bvnk` · example `moonpay`
+
+        Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.
+
+      - **`counterpartyId`** · `string` · example `cpty_example`
+
+        Counterparty tied to the transfer record, when available.
+
+      - **`counterpartyDisplayName`** · `string` · example `Acme Studio`
+
+        Current display name of the counterparty tied to the transfer.
+
+      - **`providerReference`** · `string` · example `ramp_quote_example`
+
+        Provider quote or transaction reference used for ramp correlation.
+
+      - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
+
+        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+
+      - **`fiatCurrency`** · `string` · example `USD`
+
+        Fiat currency for the ramp leg.
+
+      - **`fiatAmount`** · `string` · example `100.00`
+
+        Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.
+
+      - **`settlement`** · `object`
+
+        Provider-reported ramp settlement economics for live providers.
+
+        - **`provider`** · `string` · required · always `moonpay`
+
+        - **`status`** · `string` · required · one of `completed`, `failed`
+
+        - **`transactionId`** · `string` · required
+
+          MoonPay transaction id.
+
+        - **`baseCurrencyCode`** · `string` · required
+
+          Fiat currency paid.
+
+        - **`baseCurrencyAmount`** · `number` · required
+
+          Fiat amount paid.
+
+        - **`quoteCurrencyCode`** · `string` · required
+
+          Crypto currency purchased.
+
+        - **`quoteCurrencyAmount`** · `number` · required
+
+          Crypto amount purchased.
+
+        - **`feeAmount`** · `number` · required
+
+          Provider fee.
+
+        - **`extraFeeAmount`** · `number` · required
+
+          Extra provider fee.
+
+        - **`networkFeeAmount`** · `number` · required
+
+          Network fee.
+
+        - **`areFeesIncluded`** · `boolean` · required
+
+          Whether the fees are included in the paid amount.
+
+        - **`usdRate`** · `number` · required
+
+          USD exchange rate.
+
+        - **`cryptoTransactionId`** · `string`
+
+          On-chain transaction id.
+
+        - **`failureReason`** · `string`
+
+          Provider failure reason.
+
+      - **`fiatPayout`** · `object`
+
+        What the provider reports paying out once it settles an off-ramp sale. Provider-reported: SDP cannot verify a bank payout.
+
+        - **`amount`** · `string` · required · example `20.82`
+
+          Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices the sale at receipt.
+
+        - **`currency`** · `string` · required · example `USD`
+
+          ISO currency of the payout, as the provider reports it.
+
+        - **`reportedAt`** · `string` · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+          When the provider reported the payout.
+
+      - **`deliveryMismatch`** · `object`
+
+        Present while SDP holds a provider-settled ramp in `settling` because the chain contradicts the provider's delivery. A new provider report clears it.
+
+        - **`reason`** · `string` · required · one of `provider_report_mismatch`, `transaction_failed`, `predates_transfer`, `not_delivered`, `amount_mismatch`, `transaction_not_found` · example `amount_mismatch`
+
+          Why the chain contradicts the provider: `provider_report_mismatch` (its report contradicts SDP's record), `transaction_failed`, `predates_transfer` (the transaction landed before the transfer), `not_delivered` (nothing of the quoted asset reached the quoted wallet), `amount_mismatch`, or `transaction_not_found` (no finalized transaction an hour after the report; SDP keeps checking, and a later delivery completes the transfer).
+
+        - **`checkedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+          When SDP's delivery check reached this verdict.
+
+        - **`reportedAmount`** · `string` · example `20`
+
+          What the provider reported delivering, in display units.
+
+        - **`observedAmount`** · `string` · example `0.5`
+
+          What the chain shows the quoted wallet received, in display units.
+
+      - **`risk`** · `object`
+
+        Optional risk evaluation for the transfer.
+
+        - **`provider`** · `string` · required · example `trm`
+
+          Risk scoring provider.
+
+        - **`score`** · `string` · required · example `0.12`
+
+          Provider-specific risk score.
+
+        - **`level`** · `string` · required · one of `low`, `medium`, `high`, `unknown` · example `low`
+
+          Risk level classification.
+
+        - **`evaluatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          Timestamp when risk was evaluated.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        Creation timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+        Last update timestamp.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
 - **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
 - **`401`** Unauthorized
+
+  Same fields as `400`.
+
 - **`403`** Forbidden. Requires the `transfer_batches.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
 - **`404`** Not Found
+
+  Same fields as `400`.
+
 - **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`422`** Unprocessable Entity
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
+
+  Same fields as `400`.
 
 ## Example request
 
