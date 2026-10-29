@@ -2717,6 +2717,34 @@ describe("payment transfer batches", () => {
       );
     });
 
+    it("refuses a stopped project's retry before claiming, then sends under the same key", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+      const setDisabled = (movements: string[]) =>
+        getDb(env)
+          .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+          .bind(movements, TEST_PROJECT.id)
+          .run();
+      await setDisabled(["payments.transfer_batch"]);
+
+      const stopped = await retry(batch.id, "stopped-project-retry");
+      expect(stopped.status).toBe(403);
+      expect(await stopped.json()).toMatchObject({
+        error: { code: "FORBIDDEN", details: { reason: "movement_disabled" } },
+      });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      const unclaimed = await getDb(env)
+        .prepare("SELECT status FROM payment_transfer_recipients WHERE id = ?")
+        .bind(failed.id)
+        .first<{ status: string }>();
+      expect(unclaimed).toEqual({ status: "failed" });
+
+      await setDisabled([]);
+      const resumed = await retry(batch.id, "stopped-project-retry");
+      expect(resumed.status).toBe(200);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    });
+
     it("replays a same-key retry without sending again", async () => {
       const { batch } = await seedPartiallyFailedBatch();
       vi.clearAllMocks();

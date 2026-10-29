@@ -14,7 +14,7 @@ import {
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
-import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { admitPaymentStart } from "@/routes/payments/wallets";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import {
   type AuthorizedBatchRequest,
@@ -165,7 +165,7 @@ export async function admitTransferBatchRetryExecution(
   c: AppContext,
   input: MovementStepInput<AuthorizedBatchRetry>
 ): Promise<void> {
-  await admitPaymentWalletRuntimeExecution(c, input.authorized.sourceWallet);
+  await admitPaymentStart(c, input.authorized.sourceWallet, "payments.transfer_batch");
 }
 
 /**
