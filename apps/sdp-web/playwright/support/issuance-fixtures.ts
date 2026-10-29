@@ -3,7 +3,6 @@ import path from "node:path";
 
 interface IssuanceFixtureWallet {
   id: string;
-  walletId: string;
   publicKey: string;
   label: string | null;
 }

@@ -12,7 +12,7 @@ describe("loadWalletActivity", () => {
 
     await loadWalletActivity(
       request,
-      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      { custodyWalletId: "cwlt_1" },
       ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
     );
 
@@ -25,7 +25,7 @@ describe("loadWalletActivity", () => {
 
 describe("loadWalletActivity windows", () => {
   const t = ((key: string) => key) as Parameters<typeof loadWalletActivity>[2];
-  const wallet = { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" };
+  const wallet = { custodyWalletId: "cwlt_1" };
 
   function transfer(index: number) {
     return {

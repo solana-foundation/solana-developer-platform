@@ -11,6 +11,7 @@ import {
   installPaymentsRouteTestHooks,
   seedProductionPrivyWallet,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
@@ -57,21 +58,30 @@ describe("Payments routes — payment request access before the key", () => {
 
   it("still creates a request for the project's own wallet", async () => {
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      { walletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-own-wallet"
     );
 
     expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      data: { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID },
+    });
+    expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
+    const retired = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      "payreq-own-wallet"
+    );
+    expect(retired.status).toBe(404);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
   });
 
   it("replays a retry that only re-spells the amount (APE SOLA9-734)", async () => {
     const first = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      { walletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-respelled"
     );
     const retry = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
+      { walletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
       "payreq-respelled"
     );
 
@@ -94,13 +104,13 @@ describe("Payments routes — payment request token cluster", () => {
     });
     const productionWallet = required(
       await getDb(env)
-        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
+        .prepare("SELECT id FROM custody_wallets WHERE id = ?")
         .bind("cwlt_payment_request_production")
-        .first<{ wallet_id: string }>()
+        .first<{ id: string }>()
     );
 
     const response = await postPaymentRequest(
-      { walletId: productionWallet.wallet_id, token: DEVNET_USDC_MINT, amount: "1" },
+      { walletId: productionWallet.id, token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-devnet-mint-on-production"
     );
 
@@ -122,7 +132,7 @@ describe("Payments routes — payment request token cluster", () => {
     "refuses invalid USDC amount %s and stores no request",
     async (amount) => {
       const response = await postPaymentRequest(
-        { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount },
+        { walletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount },
         "payreq-too-precise-amount"
       );
 
@@ -194,7 +204,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
   it("refuses a SOL request below the minimum to a wallet with no account, storing nothing", async () => {
     rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: [null] });
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: SOL_MINT, amount: "0.0001" },
+      { walletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.0001" },
       "payreq-sol-below-rent"
     );
 
@@ -207,7 +217,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
 
   it("creates a SOL request at or above the minimum without reading the wallet", async () => {
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: SOL_MINT, amount: "0.001" },
+      { walletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.001" },
       "payreq-sol-above-rent"
     );
 

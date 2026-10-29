@@ -371,7 +371,7 @@ function ReviewStep({ form }: StepProps) {
   const firstRunDetail = firstRunDate
     ? t("DashboardPayments.recurring.firstRun", { date: firstRunDate })
     : t("DashboardPayments.recurring.firstRunAfterActivation");
-  const walletName = selectedWallet?.label ?? selectedWallet?.walletId ?? "";
+  const walletName = selectedWallet?.label ?? selectedWallet?.id ?? "";
   const destinationDetail = selectedAccount
     ? (selectedAccount.label ?? shortenAddress(accountAddress(selectedAccount)))
     : "";

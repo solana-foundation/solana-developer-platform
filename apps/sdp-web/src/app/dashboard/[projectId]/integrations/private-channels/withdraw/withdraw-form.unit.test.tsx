@@ -65,6 +65,7 @@ vi.mock("./withdraw-progress", () => ({
 
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { WithdrawForm } from "./withdraw-form";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -91,7 +92,6 @@ const wallets: CustodyWalletSummary[] = [
     id: "custody_treasury",
     custodyConfigId: "custody-config-1",
     isRuntimeExecutionAllowed: true,
-    walletId: "wallet_treasury",
     publicKey: "Treasury11111111111111111111111111111111",
     label: "Treasury",
     purpose: null,
@@ -106,9 +106,48 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
+  resetIdempotencyKeyStoresForTests();
 });
 
 describe("WithdrawForm", () => {
+  it("keeps the selected internal source and retry key after a lost response and remount", async () => {
+    const user = userEvent.setup();
+    mocks.fetchWalletBalancesAction.mockReturnValue(new Promise(() => undefined));
+    mocks.createWithdrawalAction.mockResolvedValue({
+      ok: false,
+      kind: "server",
+      message: "Response lost",
+      answer: { status: null, replayed: false, code: null },
+    });
+    const treasury = wallets[0];
+    if (!treasury) throw new Error("Missing treasury fixture");
+    const sibling = { ...treasury, id: "custody_sibling", label: "Sibling" };
+    const submit = async () => {
+      render(<WithdrawForm tokens={eligibleTokens} wallets={[...wallets, sibling]} />, {
+        wrapper: I18nWrapper,
+      });
+      const walletSelect = screen.getAllByRole("combobox")[0];
+      if (!walletSelect) throw new Error("Missing wallet picker");
+      await user.selectOptions(walletSelect, "custody_sibling");
+      await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
+      await user.click(screen.getByRole("button", { name: "Withdraw" }));
+      await screen.findByText("Response lost");
+    };
+    await submit();
+    const first = mocks.createWithdrawalAction.mock.lastCall?.[0];
+    expect(first).toMatchObject({
+      custodyWalletId: "custody_sibling",
+      amount: "1.25",
+      idempotencyKey: expect.any(String),
+    });
+    expect(first).not.toHaveProperty("walletId");
+    cleanup();
+    resetIdempotencyKeyStoresForTests();
+    await submit();
+    expect(mocks.createWithdrawalAction).toHaveBeenLastCalledWith(first);
+  });
+
   it("refuses to submit until the user picks the wallet", async () => {
     const user = userEvent.setup();
     render(<WithdrawForm tokens={eligibleTokens} wallets={wallets} />, { wrapper: I18nWrapper });

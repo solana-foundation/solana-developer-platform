@@ -81,7 +81,6 @@ const connectionWallet: CustodyWalletSummary = {
   custodyConnectionId: "conn-active",
   provider: "privy",
   isRuntimeExecutionAllowed: true,
-  walletId: "wallet-byok-1",
   publicKey: "ByokPublicKey11111111111111111111111111111",
   label: "BYOK Treasury",
   purpose: "transfer",

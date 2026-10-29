@@ -40,9 +40,15 @@
           }
         ],
         "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
+          "data": {
+            "configId": "cfg_example",
+            "publicKey": "So11111111111111111111111111111111111111112",
+            "custodyWalletId": "cwlt_example"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         },
         "releaseModule": "custody",
         "shadowedBy": []
@@ -72,7 +78,6 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
-              "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
@@ -102,13 +107,13 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+            "defaultValue": "{\n  \"provider\": \"anchorage\",\n  \"custodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "walletId": "anchorage_wallet_123",
+            "custodyWalletId": "cwlt_example",
             "deleted": true
           },
           "meta": {
@@ -215,7 +220,6 @@
                 "custodyConfigId": "cfg_example",
                 "provider": "privy",
                 "isRuntimeExecutionAllowed": true,
-                "walletId": "privy_wallet_123",
                 "publicKey": "So11111111111111111111111111111111111111112",
                 "label": "Root Signing Wallet",
                 "purpose": "root",
@@ -350,13 +354,13 @@
         "operationId": "getWalletPublicKey",
         "title": "Get wallet public key",
         "method": "GET",
-        "path": "/v1/wallets/public-key?walletId={walletId}",
+        "path": "/v1/wallets/public-key?custodyWalletId={custodyWalletId}",
         "pathFields": [
           {
-            "key": "walletId",
-            "label": "walletId",
-            "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
-            "defaultValue": "privy_wallet_123",
+            "key": "custodyWalletId",
+            "label": "custodyWalletId",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+            "defaultValue": "cwlt_example",
             "required": true
           }
         ],
@@ -381,13 +385,13 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"custodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "walletId": "privy_wallet_123",
+            "custodyWalletId": "cwlt_example",
             "walletAddress": "So11111111111111111111111111111111111111112",
             "feePayer": "So11111111111111111111111111111111111111112",
             "memo": "SDP signer check 123e4567-e89b-42d3-a456-426614174000",
@@ -413,8 +417,8 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
-            "defaultValue": "privy_wallet_123",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+            "defaultValue": "cwlt_example",
             "required": true
           },
           {
@@ -444,7 +448,6 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
-              "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
@@ -470,8 +473,8 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
-            "defaultValue": "privy_wallet_123",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+            "defaultValue": "cwlt_example",
             "required": true
           }
         ],
@@ -493,7 +496,6 @@
               "custodyConfigId": "cfg_example",
               "provider": "privy",
               "isRuntimeExecutionAllowed": true,
-              "walletId": "privy_wallet_123",
               "publicKey": "So11111111111111111111111111111111111111112",
               "label": "Root Signing Wallet",
               "purpose": "root",
@@ -521,8 +523,8 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.",
-            "defaultValue": "privy_wallet_123",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+            "defaultValue": "cwlt_example",
             "required": true
           },
           {
@@ -535,7 +537,7 @@
         "expectedResponse": {
           "data": {
             "walletBalances": {
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
               "address": "So11111111111111111111111111111111111111112",
               "balances": [
                 {
@@ -2056,6 +2058,7 @@
             "id": "preq_example",
             "organizationId": "organization_example",
             "projectId": "project_example",
+            "custodyWalletId": "cwlt_example",
             "walletId": "wallet_example",
             "destinationAddress": "So11111111111111111111111111111111111111112",
             "token": "example",

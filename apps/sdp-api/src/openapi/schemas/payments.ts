@@ -62,12 +62,12 @@ import {
 import { walletIdParamsSchema as walletIdParamsSchemaBase } from "@/routes/payments/wallet-balances/schemas";
 import {
   base64Schema,
+  custodyWalletIdParamSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
-  WALLET_ID_INPUT_NOTE,
   walletIdParamSchema,
   withOpenApi,
 } from "./base";
@@ -81,8 +81,8 @@ const tokenAmountSchema = z.string().openapi({
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
-      description: `Provider wallet ID — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+      description: "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Payment wallet path parameters." });
@@ -135,7 +135,7 @@ const tokenBalanceSchema = z
 
 const walletBalancesSchema = z
   .object({
-    walletId: walletIdParamSchema,
+    custodyWalletId: custodyWalletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })
@@ -705,6 +705,9 @@ export const paymentRequestSchema = z
     id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
     organizationId: z.string().openapi({ description: "Organization ID." }),
     projectId: z.string().nullable().openapi({ description: "Project ID." }),
+    custodyWalletId: custodyWalletIdParamSchema.nullable().openapi({
+      description: "Exact SDP wallet ID, or null for an unresolved historical wallet link.",
+    }),
     walletId: z.string().openapi({ description: "Receiving custody wallet's provider ID." }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Address the payment is sent to.",

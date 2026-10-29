@@ -31,11 +31,12 @@ import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getIdempotencyClaim, markIdempotencyRecordMismatch } from "@/middleware/idempotency";
 import type { RecordAnswer } from "@/middleware/movement-steps";
-import type { ValidatedBodyContext } from "@/middleware/validate";
+import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
 import { type AppContext, parseBooleanQueryParam, resolveActor } from "@/routes/custody/context";
 import type {
   createWalletSchema,
   deleteWalletSchema,
+  publicKeyQuerySchema,
   updateWalletSchema,
 } from "@/routes/custody/schemas";
 import {
@@ -66,6 +67,24 @@ export function clearWalletCaches() {
   clearWalletBalanceCache();
 }
 
+function toPublicWallet(wallet: CustodyWalletSummary): CustodyWalletSummary {
+  const owner =
+    wallet.custodyConfigId === undefined
+      ? { custodyConnectionId: wallet.custodyConnectionId }
+      : { custodyConfigId: wallet.custodyConfigId };
+  return {
+    ...owner,
+    id: wallet.id,
+    provider: wallet.provider,
+    isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
+    publicKey: wallet.publicKey,
+    label: wallet.label,
+    purpose: wallet.purpose,
+    status: wallet.status,
+    createdAt: wallet.createdAt,
+  };
+}
+
 function buildWalletBalanceCacheScope(c: AppContext): string {
   const auth = getAuth(c);
   return `${auth.organizationId}:${requireProjectId(c)}`;
@@ -89,7 +108,7 @@ function logWalletStep(
 async function queryWalletSummaries(
   c: AppContext,
   filters: ReturnType<typeof resolveWalletFilters>
-): Promise<CustodyWalletSummary[]> {
+): Promise<CustodyRuntimeWalletProjection[]> {
   const { walletAccess } = getAuth(c);
   if (walletAccess.scope === "selected" && walletAccess.custodyWalletIds.length === 0) {
     return [];
@@ -105,22 +124,13 @@ async function queryWalletSummaries(
   return wallets.filter((wallet) => walletAccessAllows(walletAccess, wallet.id));
 }
 
-/**
- * The project's operational wallet a path parameter names (provider wallet id,
- * or, with `allowRecordIdAlias`, the custody wallet id). Project-scoped:
- * whether a key may sign with it is the custody signer's decision (HOO-2099).
- */
-export async function findProjectOperationalWallet(
-  c: AppContext,
-  walletId: string,
-  allowRecordIdAlias = false
-) {
+/** The exact active wallet owned by the caller's organization and project. */
+export async function findProjectOperationalWallet(c: AppContext, custodyWalletId: string) {
   const actor = resolveActor(c);
-  return new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).findOperationalWallet({
+  return new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).findOperationalWalletById({
     organizationId: actor.organizationId,
     projectId: requireProjectId(c),
-    walletId,
-    allowRecordIdAlias,
+    custodyWalletId,
   });
 }
 
@@ -128,7 +138,7 @@ async function getWalletSummaries(
   c: AppContext,
   filters: ReturnType<typeof resolveWalletFilters>,
   route: "list_wallets" | "aggregate_wallets"
-): Promise<CustodyWalletSummary[]> {
+): Promise<CustodyRuntimeWalletProjection[]> {
   const startedAt = performance.now();
   const wallets = await queryWalletSummaries(c, filters);
   logWalletStep(route, "query_wallet_summaries", startedAt, {
@@ -277,7 +287,6 @@ export async function findCustodyWalletCreateReplay(c: AppContext): Promise<Reco
       ...owner,
       id: row.id,
       isRuntimeExecutionAllowed: true,
-      walletId: row.wallet_id,
       publicKey: row.public_key,
       label: row.label,
       purpose: row.purpose,
@@ -314,7 +323,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         idempotency,
       });
       clearWalletCaches();
-      return created(c, { wallet } satisfies CustodyWalletResponse);
+      return created(c, { wallet: toPublicWallet(wallet) } satisfies CustodyWalletResponse);
     }
 
     const wallet = await signingService.createWallet(actor.organizationId, projectId, {
@@ -329,7 +338,6 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
         id: wallet.id,
         custodyConfigId: wallet.custodyConfigId,
         isRuntimeExecutionAllowed: true,
-        walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         label: wallet.label,
         purpose: wallet.purpose,
@@ -383,7 +391,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
     const ownedWallet = await targets.findOwnedWalletForMutation({
       organizationId: actor.organizationId,
       projectId,
-      walletId: body.walletId,
+      custodyWalletId: body.custodyWalletId,
     });
     if (!ownedWallet) {
       throw new AppError("NOT_FOUND", "Custody wallet not found");
@@ -398,7 +406,7 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
 
     await signingService.deleteWallet(actor.organizationId, projectId, {
       provider: body.provider,
-      walletId: body.walletId,
+      walletId: ownedWallet.walletId,
       configId: ownedWallet.custodyConfigId,
     });
 
@@ -406,17 +414,17 @@ export const deleteWallet = async (c: ValidatedBodyContext<typeof deleteWalletSc
     await auditService.log(c, {
       action: "delete",
       resourceType: "custody_wallet",
-      resourceId: body.walletId,
+      resourceId: body.custodyWalletId,
       metadata: {
         event: "wallet_deleted",
-        walletId: body.walletId,
+        custodyWalletId: body.custodyWalletId,
         provider: body.provider ?? null,
         projectId,
       },
     });
 
     const response: DeleteWalletResponse = {
-      walletId: body.walletId,
+      custodyWalletId: body.custodyWalletId,
       deleted: true,
     };
 
@@ -444,7 +452,7 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
 
   const body = c.req.valid("json");
 
-  const wallet = await findProjectOperationalWallet(c, walletId, true);
+  const wallet = await findProjectOperationalWallet(c, walletId);
   if (!wallet) {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }
@@ -477,7 +485,7 @@ export const updateWallet = async (c: ValidatedBodyContext<typeof updateWalletSc
 
   const response: CustodyWalletResponse = {
     wallet: {
-      ...wallet,
+      ...toPublicWallet(wallet),
       label: nextLabel,
     },
   };
@@ -512,7 +520,7 @@ export const listWallets = async (c: AppContext) => {
     wallets: wallets.map((wallet) => {
       const balances = balancesByWalletId.get(wallet.id);
       return {
-        ...wallet,
+        ...toPublicWallet(wallet),
         ...(filters.includeBalances && balances !== undefined ? { balances } : {}),
       };
     }),
@@ -573,14 +581,15 @@ export const getWalletById = async (c: AppContext) => {
     throw badRequest("Invalid wallet ID");
   }
 
-  const wallet = await findProjectOperationalWallet(c, walletId, true);
+  const wallet = await findProjectOperationalWallet(c, walletId);
   // A wallet detail read: a selected key opens only the wallets it lists.
   if (!wallet || !walletAccessAllows(getAuth(c).walletAccess, wallet.id)) {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }
 
   const walletMetadata: CustodyWalletMetadataResponse["wallet"] = {
-    ...wallet,
+    ...toPublicWallet(wallet),
+    provider: wallet.provider,
   };
   const includeBalanceQuery = c.req.query("includeBalance");
   const includeBalance = includeBalanceQuery?.trim().toLowerCase() !== "false";
@@ -601,7 +610,6 @@ export const getWalletById = async (c: AppContext) => {
     getLogger().error(
       {
         requestId: c.get("requestId"),
-        walletId: wallet.walletId,
         publicKey: wallet.publicKey,
         error: error instanceof Error ? error.message : String(error),
       },
@@ -658,24 +666,20 @@ function assertWalletInReleaseChannel(c: AppContext, wallet: CustodyRuntimeWalle
   );
 }
 
-export const getPublicKey = async (c: AppContext) => {
+export const getPublicKey = async (c: ValidatedContext<{ query: typeof publicKeyQuerySchema }>) => {
   const actor = resolveActor(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const requestedWalletId = c.req.query("walletId");
+  const { custodyWalletId } = c.req.valid("query");
 
   const signingService = signingServiceModule.createSigningService(c.env, getRequestTenantScope(c));
   const runtimeTargets = new CustodyRuntimeTargets(getDb(c.env), c.env, new Map());
 
   try {
-    const walletId = requestedWalletId?.trim();
-    if (!walletId) {
-      throw badRequest("walletId is required");
-    }
-    const wallet = await runtimeTargets.findOperationalWallet({
+    const wallet = await runtimeTargets.findOperationalWalletById({
       organizationId: actor.organizationId,
       projectId,
-      walletId,
+      custodyWalletId,
     });
     // A wallet detail read: a selected key sees only the wallets it lists.
     if (!wallet || !walletAccessAllows(auth.walletAccess, wallet.id)) {
@@ -685,11 +689,7 @@ export const getPublicKey = async (c: AppContext) => {
       assertWalletInReleaseChannel(c, wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
-    const publicKey = await signingService.getPublicKey(
-      actor.organizationId,
-      projectId,
-      wallet.walletId
-    );
+    const publicKey = await signingService.getPublicKey(actor.organizationId, projectId, wallet.id);
     return success(c, { publicKey });
   } catch (error) {
     if (error instanceof SigningError) {

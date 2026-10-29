@@ -17,7 +17,6 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const labeledWallet: PaymentsDashboardWallet = {
   id: "cwlt_treasury",
-  walletId: "provider_treasury",
   isRuntimeExecutionAllowed: true,
   custodyConfigId: "cc_test",
   publicKey: "TreasuryPublicKey111111111111111111111111111",
@@ -26,7 +25,6 @@ const labeledWallet: PaymentsDashboardWallet = {
 
 const unlabeledWallet: PaymentsDashboardWallet = {
   id: "cwlt_unlabeled",
-  walletId: "provider_unlabeled",
   isRuntimeExecutionAllowed: true,
   custodyConfigId: "cc_test",
   publicKey: "UnlabeledPublicKey1111111111111111111111111",
@@ -178,7 +176,7 @@ describe("OnchainSendStepContent", () => {
 
   it.each([
     { name: "label", wallet: labeledWallet, expected: "Treasury" },
-    { name: "provider wallet id", wallet: unlabeledWallet, expected: "provider_unlabeled" },
+    { name: "internal wallet id", wallet: unlabeledWallet, expected: "cwlt_unlabeled" },
   ])("shows the source wallet $name and a non-empty memo", ({ wallet, expected }) => {
     renderStep({
       ...baseWizard,
@@ -222,7 +220,7 @@ describe("OnchainSendStepContent", () => {
         transferResult: {
           id: "xfr_test",
           custodyWalletId: labeledWallet.id,
-          providerWalletId: labeledWallet.walletId,
+          providerWalletId: "provider_treasury",
           status: "processing",
           signature,
           rampsMemo: {},

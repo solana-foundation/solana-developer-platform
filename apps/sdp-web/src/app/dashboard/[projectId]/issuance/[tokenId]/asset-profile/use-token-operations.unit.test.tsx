@@ -30,10 +30,9 @@ vi.mock("@/app/dashboard/[projectId]/issuance/[tokenId]/use-token-action-runner"
 vi.mock("./use-token-operation-data", () => ({
   useTokenOperationData: () => ({
     authorityWallets: [
-      { id: "cwlt_test", walletId: "wal_test", isRuntimeExecutionAllowed: true, publicKey: source },
+      { id: "cwlt_test", isRuntimeExecutionAllowed: true, publicKey: source },
       {
         id: "cwlt_new_mint",
-        walletId: "wal_new_mint",
         isRuntimeExecutionAllowed: true,
         publicKey: destination,
       },

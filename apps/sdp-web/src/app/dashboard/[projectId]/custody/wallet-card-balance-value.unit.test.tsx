@@ -54,7 +54,7 @@ describe("WalletCardBalanceValue", () => {
       "fetch",
       vi.fn(async () =>
         Response.json({
-          data: { wallets: [{ walletId: WALLET_ID }, { walletId: "empty-wallet", balances: [] }] },
+          data: { wallets: [{ id: WALLET_ID }, { id: "empty-wallet", balances: [] }] },
         })
       )
     );

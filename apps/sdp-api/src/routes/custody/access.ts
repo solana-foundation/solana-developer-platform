@@ -3,8 +3,6 @@ import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
-import { findProjectOperationalWallet } from "@/routes/custody/handlers/wallets";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { AppContext } from "./context";
 
 /**
@@ -27,12 +25,11 @@ const walletNotFound = () => new AppError("NOT_FOUND", "Custody wallet not found
 /**
  * The named wallet belongs to the caller's project, whatever its status or its
  * owner's: checked before the key is claimed, so a wrong id is never stored as
- * a 404. Ambiguity, and whether the wallet is usable, stay in the handler.
+ * a 404. Whether the wallet is usable stays in the handler.
  */
 async function assertCustodyWalletInProject(
   c: AppContext,
   walletId: string,
-  allowRecordIdAlias: boolean,
   notFound: () => AppError
 ): Promise<void> {
   const auth = getAuth(c);
@@ -43,20 +40,12 @@ async function assertCustodyWalletInProject(
          FROM custody_wallets w
          LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
          LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
-        WHERE (w.wallet_id = ? OR (?::boolean AND w.id = ?))
+        WHERE w.id = ?
           AND ((cfg.organization_id = ? AND cfg.project_id = ?)
             OR (conn.organization_id = ? AND conn.project_id = ?))
         LIMIT 1`
     )
-    .bind(
-      walletId,
-      allowRecordIdAlias,
-      walletId,
-      auth.organizationId,
-      projectId,
-      auth.organizationId,
-      projectId
-    )
+    .bind(walletId, auth.organizationId, projectId, auth.organizationId, projectId)
     .first<{ id: string }>();
   if (!row) {
     throw notFound();
@@ -87,13 +76,11 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
   if (!walletId) {
     throw badRequest("Invalid wallet ID");
   }
-  // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
   const notFound = () => new AppError("NOT_FOUND", "Wallet not found");
-  await assertCustodyWalletInProject(c, walletId, true, notFound);
+  await assertCustodyWalletInProject(c, walletId, notFound);
   // A selected key reaches only the wallets it lists (HOO-2099), as on the
   // wallet detail read: the record the handler updates is checked here.
-  const wallet = await findProjectOperationalWallet(c, walletId, true);
-  if (wallet && !walletAccessAllows(getAuth(c).walletAccess, wallet.id)) {
+  if (!walletAccessAllows(getAuth(c).walletAccess, walletId)) {
     throw notFound();
   }
 }
@@ -102,32 +89,18 @@ export async function authorizeUpdateWallet(c: AppContext, input: AuthorizeInput
 export async function authorizeWalletFaucet(c: AppContext, input: AuthorizeInput): Promise<void> {
   // SAFETY: mounted after validateParams(walletIdParamsSchema), which requires it.
   const { walletId } = input.params as { walletId: string };
-  // The handler resolves the path's id with its record-id alias and answers "Wallet not found".
   await assertCustodyWalletInProject(
     c,
     walletId,
-    true,
     () => new AppError("NOT_FOUND", "Wallet not found")
   );
 }
 
 /** Wallet delete: the wallet the body names. */
 export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput): Promise<void> {
-  const walletId = body<{ walletId: string }>(input).walletId;
-  await assertCustodyWalletInProject(c, walletId, false, walletNotFound);
-  // A selected key reaches only the wallets it lists (HOO-2099): the record
-  // the handler would deactivate is checked here, before the key is claimed.
-  const auth = getAuth(c);
-  const owned = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOwnedWalletForMutation({
-    organizationId: auth.organizationId,
-    projectId: requireProjectId(c),
-    walletId,
-  });
-  if (owned && !walletAccessAllows(auth.walletAccess, owned.id)) {
+  const { custodyWalletId } = body<{ custodyWalletId: string }>(input);
+  await assertCustodyWalletInProject(c, custodyWalletId, walletNotFound);
+  if (!walletAccessAllows(getAuth(c).walletAccess, custodyWalletId)) {
     throw walletNotFound();
   }
 }
@@ -138,17 +111,9 @@ export async function authorizeDeleteWallet(c: AppContext, input: AuthorizeInput
  * caller may sign with it is the custody signer's decision (HOO-2099).
  */
 export async function authorizeSignerCheck(c: AppContext, input: AuthorizeInput): Promise<void> {
-  const walletId = body<{ walletId: string }>(input).walletId;
-  await assertCustodyWalletInProject(c, walletId, false, () =>
+  const { custodyWalletId } = body<{ custodyWalletId: string }>(input);
+  await assertCustodyWalletInProject(c, custodyWalletId, () =>
     badRequest("Custody wallet not found")
   );
-  // The scope is checked against the exact record the handler signs with: a
-  // provider wallet id can be on several records. The custody signer refuses
-  // it too; refusing here keeps the refused check out of the Idempotency-Key
-  // store, so a retry after a scope fix runs. No operational record: the
-  // handler answers that.
-  const wallet = await findProjectOperationalWallet(c, walletId);
-  if (wallet) {
-    assertCallerWalletInScope(getAuth(c), wallet.id);
-  }
+  assertCallerWalletInScope(getAuth(c), custodyWalletId);
 }

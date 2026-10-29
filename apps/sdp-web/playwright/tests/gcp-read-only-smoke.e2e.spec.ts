@@ -36,12 +36,12 @@ interface PageFailureCapture {
  */
 function resolveRequiredTotalBalance(wallet: PaymentsDashboardWallet): number {
   if (!wallet.balances) {
-    throw new Error(`Wallet ${wallet.walletId} did not return balances`);
+    throw new Error(`Wallet ${wallet.id} did not return balances`);
   }
 
   const totalBalance = resolveTotalBalance(wallet.balances);
   if (totalBalance === null) {
-    throw new Error(`Wallet ${wallet.walletId} did not return a resolvable balance`);
+    throw new Error(`Wallet ${wallet.id} did not return a resolvable balance`);
   }
 
   return totalBalance;
@@ -290,7 +290,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await expect(page).toHaveURL(
       projectHref(
         fixture.project.id,
-        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.walletId)}`
+        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.id)}`
       ),
       { timeout: 20_000 }
     );

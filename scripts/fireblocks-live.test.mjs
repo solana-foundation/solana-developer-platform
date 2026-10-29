@@ -19,7 +19,6 @@ const config = {
 };
 const wallet = {
   id: config.custodyWalletId,
-  walletId: "fb_0",
   provider: "fireblocks",
   custodyConnectionId: "cconn_live",
   status: "active",
@@ -145,7 +144,7 @@ test("signer test invokes only the no-broadcast SDP signer check", async () => {
   const writes = t.calls.filter((call) => call.method === "POST" && call.url !== config.rpcUrl);
   assert.equal(writes.length, 1);
   assert(writes[0].url.endsWith("/v1/wallets/signer-check"));
-  assert.deepEqual(JSON.parse(writes[0].body), { walletId: "fb_0" });
+  assert.deepEqual(JSON.parse(writes[0].body), { custodyWalletId: "cwlt_live" });
 });
 
 test("payment and signer modes still refuse disabled wallets before starting work", async () => {

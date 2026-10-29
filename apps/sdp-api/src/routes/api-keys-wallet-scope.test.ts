@@ -382,8 +382,8 @@ describe("API key wallet scope routes", () => {
       walletIds: ["cwlt_scope_a"],
     });
     expect(await listed()).toEqual(["cwlt_scope_a"]);
-    expect((await asKey("/v1/wallets/wal_scope_b?includeBalance=false")).status).toBe(404);
-    expect((await asKey("/v1/wallets/wal_scope_a?includeBalance=false")).status).toBe(200);
+    expect((await asKey("/v1/wallets/cwlt_scope_b?includeBalance=false")).status).toBe(404);
+    expect((await asKey("/v1/wallets/cwlt_scope_a?includeBalance=false")).status).toBe(200);
 
     await seedApiKeyRow(env, keyHash, {
       ...TEST_SEEDED_API_KEY,

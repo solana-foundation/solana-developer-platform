@@ -291,7 +291,7 @@ export async function updateWalletLabelAction(
 }
 
 interface WalletSignerCheckResponse {
-  walletId: string;
+  custodyWalletId: string;
   signature: string;
 }
 
@@ -337,12 +337,12 @@ export async function checkWalletSignerMemoAction(
     const client = await createSdpApiClient();
     const check = await client.fetch<WalletSignerCheckResponse>("/v1/wallets/signer-check", {
       method: "POST",
-      body: JSON.stringify({ walletId: resolvedWalletId }),
+      body: JSON.stringify({ custodyWalletId: resolvedWalletId }),
     });
 
     return {
       status: "success",
-      walletId: check.walletId,
+      walletId: check.custodyWalletId,
       signature: check.signature,
     };
   } catch (error) {

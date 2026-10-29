@@ -203,6 +203,7 @@ export interface InitUtilaSigningOptions {
  */
 export interface InitSigningResult {
   configId: string;
+  custodyWalletId: string;
   publicKey: Address;
   walletId: string;
 }
@@ -354,7 +355,7 @@ export class SigningService {
   }): Promise<InitSigningResult> {
     const provider = params.configJson.provider;
 
-    const { configId } = await this.configStore.saveProviderConfig({
+    const { configId, custodyWalletId } = await this.configStore.saveProviderConfig({
       orgId: params.orgId,
       projectId: params.projectId,
       provider,
@@ -371,6 +372,7 @@ export class SigningService {
 
     return {
       configId,
+      custodyWalletId,
       publicKey: params.publicKey,
       walletId: params.walletId,
     };
@@ -397,6 +399,7 @@ export class SigningService {
 
     return {
       configId: reusable.configId,
+      custodyWalletId: reusable.wallet.id,
       publicKey: reusable.wallet.publicKey as Address,
       walletId: reusable.wallet.walletId,
     };
@@ -1202,10 +1205,10 @@ export class SigningService {
    *
    * @param orgId - The organization that owns the project.
    * @param projectId - The project the wallet belongs to.
-   * @param walletId - The provider wallet ID.
+   * @param custodyWalletId - The exact internal SDP wallet ID.
    * @returns The wallet's Solana address.
    */
-  async getPublicKey(orgId: string, projectId: string, walletId: string): Promise<Address> {
+  async getPublicKey(orgId: string, projectId: string, custodyWalletId: string): Promise<Address> {
     const walletRow = await getDb(this.env)
       .prepare(
         `SELECT c.id as custody_config_id, w.public_key as wallet_public_key
@@ -1213,13 +1216,13 @@ export class SigningService {
          JOIN custody_configs c ON c.id = w.custody_config_id
          WHERE c.organization_id = ?
            AND c.project_id = ?
-           AND w.wallet_id = ?
+           AND w.id = ?
            AND c.status = 'active'
            AND w.status = 'active'
          ORDER BY c.updated_at DESC, c.id DESC
          LIMIT 1`
       )
-      .bind(orgId, projectId, walletId)
+      .bind(orgId, projectId, custodyWalletId)
       .first<{ custody_config_id: string; wallet_public_key: string }>();
 
     if (!walletRow) {

@@ -10,7 +10,7 @@ export const requestWalletFaucet = async (
   c: ValidatedContext<{ param: typeof walletIdParamsSchema; json: typeof walletFaucetSchema }>
 ) => {
   const { walletId } = c.req.valid("param");
-  const wallet = await findProjectOperationalWallet(c, walletId, true);
+  const wallet = await findProjectOperationalWallet(c, walletId);
   if (!wallet) {
     throw new AppError("NOT_FOUND", "Wallet not found");
   }

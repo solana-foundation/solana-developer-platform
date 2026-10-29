@@ -141,7 +141,6 @@ describe("off-ramp final step", () => {
 describe("exceedsWalletBalance", () => {
   const wallet: PaymentsDashboardWallet = {
     id: "cwlt_treasury",
-    walletId: "wallet_treasury",
     publicKey: "treasury",
     label: "Treasury",
     isRuntimeExecutionAllowed: true,

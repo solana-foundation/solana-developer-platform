@@ -136,17 +136,17 @@ export const updateWalletSchema = z.object({
 // Delete Wallet
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const deleteWalletSchema = z.object({
+export const deleteWalletSchema = z.strictObject({
   provider: custodyProviderSchema.optional(),
-  walletId: z.string().min(1),
+  custodyWalletId: z.string().trim().min(1),
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Signer Check
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const signerCheckSchema = z.object({
-  walletId: z.string().trim().min(1),
+export const signerCheckSchema = z.strictObject({
+  custodyWalletId: z.string().trim().min(1),
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -159,3 +159,7 @@ export const walletIdParamsSchema = z.object({
 
 // The amount is the server's: a body naming one is refused.
 export const walletFaucetSchema = z.object({}).strict();
+
+export const publicKeyQuerySchema = z.strictObject({
+  custodyWalletId: z.string().trim().min(1),
+});

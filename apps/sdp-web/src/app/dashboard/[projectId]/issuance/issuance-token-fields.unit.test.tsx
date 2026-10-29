@@ -45,7 +45,6 @@ function baseToken(overrides: Partial<IssuanceTokenView> = {}): IssuanceTokenVie
 function wallet(publicKey: string): PaymentsDashboardWallet {
   return {
     id: `id_${publicKey}`,
-    walletId: `wid_${publicKey}`,
     isRuntimeExecutionAllowed: true,
     publicKey,
     label: "Treasury",
@@ -145,7 +144,7 @@ describe("buildOverviewHeroData", () => {
       name: "Treasury",
       provider: null,
       publicKey: MANAGED,
-      walletId: `wid_${MANAGED}`,
+      walletId: `id_${MANAGED}`,
       restricted: false,
     });
   });
@@ -204,7 +203,7 @@ describe("buildOverviewHeroData", () => {
       name: "Treasury",
       provider: null,
       publicKey: MANAGED,
-      walletId: `wid_${MANAGED}`,
+      walletId: `id_${MANAGED}`,
       restricted: false,
     });
   });
@@ -323,7 +322,7 @@ describe("toWalletIdentity", () => {
       name: "Treasury",
       provider: null,
       publicKey: signer.publicKey,
-      walletId: signer.walletId,
+      walletId: signer.id,
       restricted: false,
     });
   });

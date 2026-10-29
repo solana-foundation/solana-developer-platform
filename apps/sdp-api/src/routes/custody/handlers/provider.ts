@@ -24,7 +24,7 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 type SigningInitializationResult = {
   configId: string;
   publicKey: string;
-  walletId: string;
+  custodyWalletId: string;
 };
 
 export const initializeSigning = async (
@@ -200,7 +200,7 @@ function toInitializeSigningResponse(
   return {
     configId: result.configId,
     publicKey: result.publicKey,
-    walletId: result.walletId,
+    custodyWalletId: result.custodyWalletId,
   };
 }
 

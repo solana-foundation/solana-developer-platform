@@ -4,7 +4,6 @@ import { fetchApiKeyAuthoringWallets, fetchApiKeyForAuthoring } from "./api-key-
 
 const WALLET = {
   id: "wallet_a",
-  walletId: "wallet_a",
   publicKey: "So11111111111111111111111111111111111111112",
   label: "Treasury",
   custodyConfigId: "cfg_1",

@@ -51,6 +51,7 @@ describe("signing.service provider reuse", () => {
     const result = await service.initializePrivySigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
+    expect(result.custodyWalletId).toBe(wallet.id);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
     expect(mockedProvisionPrivyWallet).not.toHaveBeenCalled();
@@ -90,6 +91,7 @@ describe("signing.service provider reuse", () => {
     const result = await service.initializeCoinbaseCdpSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
+    expect(result.custodyWalletId).toBe(wallet.id);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
     expect(mockedProvisionCoinbaseCdpAccount).not.toHaveBeenCalled();
@@ -125,6 +127,7 @@ describe("signing.service provider reuse", () => {
     const result = await service.initializeUtilaSigning(orgId, PROJECT_ID, {});
 
     expect(result.walletId).toBe(wallet.walletId);
+    expect(result.custodyWalletId).toBe(wallet.id);
     expect(result.publicKey).toBe(wallet.publicKey);
     expect(result.configId).toBe(configId);
     expect(mockedProvisionUtilaWallet).not.toHaveBeenCalled();

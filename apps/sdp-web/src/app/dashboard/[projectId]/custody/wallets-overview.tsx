@@ -91,13 +91,13 @@ function toWalletItem(
     provider,
     name: wallet.label?.trim() || truncateMiddle(wallet.publicKey, 6, 6),
     kind: [formatWalletPurposeLabel(wallet.purpose, t), providerName].filter(Boolean).join(" · "),
-    href: projectHref(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`),
+    href: projectHref(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`),
   };
 }
 
 function toFavorite(item: WalletItem): WalletFavorite {
   return {
-    walletId: item.wallet.walletId,
+    walletId: item.wallet.id,
     name: item.name,
     provider: item.wallet.provider ?? null,
   };
@@ -132,7 +132,7 @@ function WalletRowActions({
       ) : null}
       <WalletActionsMenu
         walletAddress={item.wallet.publicKey}
-        walletId={item.wallet.walletId}
+        walletId={item.wallet.id}
         walletLabel={item.wallet.label}
         supportsSignerCheck={walletSupportsSignerCheck(item)}
         triggerMode="kebab"
@@ -200,7 +200,7 @@ function WalletCard({
   return (
     <article
       className="relative flex min-w-0 flex-col rounded-card bg-surface-tile"
-      data-wallet-card={wallet.walletId}
+      data-wallet-card={wallet.id}
     >
       {/* The whole card opens the wallet; its buttons and copy targets sit above this link. */}
       <Link
@@ -232,10 +232,7 @@ function WalletCard({
         </div>
       </div>
       <p className="px-4 pt-5 pb-6 text-quote">
-        <WalletCardBalanceValue
-          walletId={wallet.walletId}
-          initialBalances={wallet.balances ?? []}
-        />
+        <WalletCardBalanceValue walletId={wallet.id} initialBalances={wallet.balances ?? []} />
       </p>
       <dl className="grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
         <WalletIdentifier
@@ -246,8 +243,8 @@ function WalletCard({
         />
         <WalletIdentifier
           label={t("DashboardCustody.walletId")}
-          value={wallet.walletId}
-          displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
+          value={wallet.id}
+          displayValue={formatWalletMeta(wallet.id, 10, 6)}
         />
       </dl>
     </article>
@@ -284,7 +281,7 @@ function WalletsList({
       </TableHeader>
       <TableBody>
         {items.map((item) => (
-          <TableRow key={item.wallet.walletId} data-wallet-row={item.wallet.walletId}>
+          <TableRow key={item.wallet.id} data-wallet-row={item.wallet.id}>
             <TableCell>
               <Link
                 href={item.href}
@@ -297,7 +294,7 @@ function WalletsList({
             <TableCell className="truncate text-secondary">{item.kind}</TableCell>
             <TableCell className="text-right">
               <WalletCardBalanceValue
-                walletId={item.wallet.walletId}
+                walletId={item.wallet.id}
                 initialBalances={item.wallet.balances ?? []}
               />
             </TableCell>
@@ -318,7 +315,7 @@ function WalletsList({
               <div className="flex justify-end">
                 <WalletRowActions
                   item={item}
-                  pinned={favoriteIds.has(item.wallet.walletId)}
+                  pinned={favoriteIds.has(item.wallet.id)}
                   canPin={canPin}
                   onToggleFavorite={onToggleFavorite}
                 />
@@ -549,9 +546,9 @@ export function WalletsOverview({
     <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid>
       {visibleItems.map((item) => (
         <WalletCard
-          key={item.wallet.walletId}
+          key={item.wallet.id}
           item={item}
-          pinned={favoriteIds.has(item.wallet.walletId)}
+          pinned={favoriteIds.has(item.wallet.id)}
           canPin={canPin}
           onToggleFavorite={toggle}
         />

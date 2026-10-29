@@ -92,7 +92,6 @@ const wallets: CustodyWalletSummary[] = [
     id: "custody_treasury",
     custodyConfigId: "custody-config-1",
     isRuntimeExecutionAllowed: true,
-    walletId: "wallet_treasury",
     publicKey: "Treasury11111111111111111111111111111111",
     label: "Treasury",
     purpose: null,

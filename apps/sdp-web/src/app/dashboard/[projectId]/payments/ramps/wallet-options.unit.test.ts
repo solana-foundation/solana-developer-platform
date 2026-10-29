@@ -8,14 +8,12 @@ describe("walletComboboxOptions", () => {
     const wallets: PaymentsDashboardWallet[] = [
       {
         id: "cwlt_1",
-        walletId: "privy_shared",
         publicKey: "address_1",
         label: "Primary",
         isRuntimeExecutionAllowed: true,
       },
       {
         id: "cwlt_2",
-        walletId: "privy_shared",
         publicKey: "address_2",
         label: null,
         isRuntimeExecutionAllowed: true,
@@ -32,7 +30,6 @@ describe("walletComboboxOptions", () => {
     const wallets: PaymentsDashboardWallet[] = [
       {
         id: "cwlt_connection",
-        walletId: "privy_shared",
         custodyConnectionId: "cconn_other",
         publicKey: "address_1",
         label: "Treasury",
@@ -52,14 +49,12 @@ describe("walletComboboxOptions", () => {
     const wallets: PaymentsDashboardWallet[] = [
       {
         id: "cwlt_ok",
-        walletId: "privy_ok",
         publicKey: "address_ok",
         label: "Treasury",
         isRuntimeExecutionAllowed: true,
       },
       {
         id: "cwlt_off",
-        walletId: "privy_off",
         publicKey: "address_off",
         label: "BYOK Test",
         isRuntimeExecutionAllowed: false,
@@ -89,7 +84,6 @@ describe("onchainPaymentAssetOptions", () => {
       WELL_KNOWN_TOKENS.USDC.mints[cluster === "devnet" ? "mainnet-beta" : "devnet"].address;
     const wallet: PaymentsDashboardWallet = {
       id: "cwlt_fireblocks",
-      walletId: "fb_0",
       publicKey: "address",
       label: "Treasury",
       provider: "fireblocks",

@@ -22,7 +22,6 @@ import { updateAssetProfileAction } from "./actions";
 import {
   areDraftsEquivalent,
   type DraftAuthorityWallet,
-  normalizeDraftWalletAssignments,
   profileToDraftState,
 } from "./asset-profile-mapping";
 
@@ -54,19 +53,13 @@ export function useAssetProfileForm({
     }
   }, [initialAssetProfile, assetProfile.updatedAt]);
 
-  const storedBaseline = useMemo(() => {
+  const baseline = useMemo(() => {
     const next = profileToDraftState(assetProfile, token);
     return !token.mintAddress && token.template === "stablecoin"
       ? { ...next, decimals: "6" }
       : next;
   }, [assetProfile, token]);
-  const [storedDraft, setDraft] = useState<DraftState>(storedBaseline);
-  const baseline = token.mintAddress
-    ? storedBaseline
-    : normalizeDraftWalletAssignments(storedBaseline, draftWallets);
-  const draft = token.mintAddress
-    ? storedDraft
-    : normalizeDraftWalletAssignments(storedDraft, draftWallets);
+  const [draft, setDraft] = useState<DraftState>(baseline);
   const [baselineKey, setBaselineKey] = useState(assetProfile.updatedAt);
   // Re-hydrate the form when the underlying profile changes (post-save or after
   // a router.refresh picked up someone else's update) — but never mid-edit.

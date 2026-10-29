@@ -24,7 +24,6 @@ vi.mock("qrcode", () => ({
 
 const signingDisabledWallet: PaymentsDashboardWallet = {
   id: "cwlt_receiving",
-  walletId: "privy_receiving",
   publicKey: "4Nd1mYw5Uu7Tq2K8c3JfYb5sXz9Pq3L6vR2hG8aF1eDk",
   label: "Receiving",
   isRuntimeExecutionAllowed: false,

@@ -732,7 +732,10 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
 
 // ─── The demo world ──────────────────────────────────────────────────────────
 
-export type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
+export type DemoWallet = PaymentsDashboardWallet & {
+  walletId: string;
+  balances: CustodyWalletTokenBalance[];
+};
 
 export type DemoTransfer = PaymentTransferSummary & {
   organizationId: string;
@@ -1146,6 +1149,7 @@ function buildRequest(
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     destinationAddress: wallet.publicKey,
     token: DEMO_TOKENS.USDC.mint,
     amount: spec.amount,
@@ -1272,14 +1276,14 @@ export function findWallet(
   world: DemoWorld,
   id: string | null | undefined
 ): DemoWallet | undefined {
-  return walletList(world).find((wallet) => wallet.id === id || wallet.walletId === id);
+  return walletList(world).find((wallet) => wallet.id === id);
 }
 
 function walletsBody(world: DemoWorld, params: URLSearchParams) {
   const includeBalances = params.get("includeBalances") === "true";
   return {
     data: {
-      wallets: walletList(world).map(({ balances, ...wallet }) =>
+      wallets: walletList(world).map(({ balances, walletId: _providerWalletId, ...wallet }) =>
         includeBalances ? { ...wallet, balances } : wallet
       ),
     },
@@ -1323,7 +1327,11 @@ function walletBalancesBody(world: DemoWorld, walletId: string) {
   if (!wallet) return undefined;
   return {
     data: {
-      walletBalances: { walletId, address: wallet.publicKey, balances: wallet.balances },
+      walletBalances: {
+        custodyWalletId: wallet.id,
+        address: wallet.publicKey,
+        balances: wallet.balances,
+      },
     },
   };
 }

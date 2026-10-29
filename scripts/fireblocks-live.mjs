@@ -275,7 +275,7 @@ export async function runLive(rawConfig, mode, options = {}) {
     log(
       "Approve the memo signer check in Fireblocks now. This test never broadcasts or transfers funds."
     );
-    const result = await api("/v1/wallets/signer-check", { walletId: wallet.walletId });
+    const result = await api("/v1/wallets/signer-check", { custodyWalletId: wallet.id });
     assert.equal(result.walletAddress, wallet.publicKey);
     assert.equal(result.feePayer, config.feePayer);
     assert.equal(result.simulated, true);

@@ -200,18 +200,18 @@ describe("Connection-owned wallet control plane", () => {
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as {
-      data: { wallet: Record<string, unknown> & { id: string; walletId: string } };
+      data: { wallet: Record<string, unknown> & { id: string } };
     };
     expect(body.data.wallet).toMatchObject({
       custodyConnectionId: CONNECTION_ID,
       isRuntimeExecutionAllowed: true,
-      walletId: "privy_created_wallet",
       publicKey: "Vote111111111111111111111111111111111111111",
       label: "Treasury",
       purpose: "transfer",
     });
     expect(body.data.wallet).not.toHaveProperty("custodyConfigId");
     expect(body.data.wallet).not.toHaveProperty("provider");
+    expect(body.data.wallet).not.toHaveProperty("walletId");
     const audit = await getDb(env).queryOne<{
       api_key_id: string;
       request_id: string;
@@ -394,7 +394,7 @@ describe("Connection-owned wallet control plane", () => {
       data: {
         wallet: {
           custodyConnectionId: CONNECTION_ID,
-          walletId: "privy_rotated_credential",
+          id: expect.stringMatching(/^cwlt_/),
         },
       },
     });
@@ -558,7 +558,7 @@ describe("Connection-owned wallet control plane", () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
     const response = await request("", "DELETE", {
-      walletId: FIRST_WALLET_ID,
+      custodyWalletId: FIRST_WALLET_RECORD_ID,
       provider: "privy",
     });
 

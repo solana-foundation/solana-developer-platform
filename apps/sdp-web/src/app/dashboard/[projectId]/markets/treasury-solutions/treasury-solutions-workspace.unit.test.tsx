@@ -213,7 +213,6 @@ vi.mock("@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets",
             id: "cwlt_live",
             custodyConfigId: "custody_live",
             isRuntimeExecutionAllowed: true,
-            walletId: "privy_live",
             publicKey: "LiveWallet111111111111111111111111111111111",
             label: "Operating treasury",
             purpose: null,
@@ -228,7 +227,6 @@ vi.mock("@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets",
                   id: "cwlt_second",
                   custodyConfigId: "custody_live",
                   isRuntimeExecutionAllowed: true,
-                  walletId: "privy_second",
                   publicKey: "SecondWallet1111111111111111111111111111111",
                   label: "Reserve treasury",
                   purpose: null,
@@ -908,6 +906,9 @@ describe("TreasurySolutionsWorkspace", () => {
     renderWorkspace();
 
     expect(screen.getAllByText("Operating treasury").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "Open Operating treasury" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/wallets/cwlt_live"
+    );
     expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Custody wallets" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Active positions" })).toBeTruthy();

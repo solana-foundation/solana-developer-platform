@@ -62,10 +62,8 @@ export const memberIdParamSchema = idSchema("Member identifier.", "mem_example")
 export const projectIdParamSchema = idSchema("Project identifier.", "prj_example");
 export const tokenIdParamSchema = idSchema("Token identifier.", "tok_example");
 export const allowlistEntryIdParamSchema = idSchema("Allowlist entry identifier.", "al_example");
-export const WALLET_ID_INPUT_NOTE =
-  "the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.";
 export const walletIdParamSchema = idSchema(
-  "Provider wallet ID — the `walletId` field returned by GET /v1/wallets.",
+  "Provider wallet reference, distinct from the SDP wallet record `id`.",
   "privy_wallet_123"
 );
 export const custodyWalletIdParamSchema = idSchema(

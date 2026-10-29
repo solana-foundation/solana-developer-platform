@@ -29,7 +29,6 @@ export function assertNever(value: never): never {
 
 export interface PaymentsDashboardWallet {
   id: string;
-  walletId: string;
   publicKey: string;
   label: string | null;
   provider?: CustodyProvider;
@@ -1336,6 +1335,7 @@ export interface PaymentRequest {
   id: string;
   organizationId: string;
   projectId: string | null;
+  custodyWalletId: string | null;
   walletId: string;
   destinationAddress: string;
   token: string;

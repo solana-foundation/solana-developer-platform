@@ -35,7 +35,6 @@ vi.mock("sonner", () => ({
 
 const WALLET_A: PaymentsDashboardWallet = {
   id: "wallet_a",
-  walletId: "wallet_a",
   publicKey: "So11111111111111111111111111111111111111112",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
@@ -43,7 +42,6 @@ const WALLET_A: PaymentsDashboardWallet = {
 const WALLET_B: PaymentsDashboardWallet = {
   ...WALLET_A,
   id: "wallet_b",
-  walletId: "wallet_b",
   label: "Ops",
 };
 const WALLETS = [WALLET_A, WALLET_B];

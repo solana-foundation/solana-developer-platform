@@ -79,21 +79,18 @@ describe("Managed custody out of the release channel", () => {
             id: "cwlt_managed_channel_anchorage",
             custodyConfigId: ANCHORAGE_CONFIG_ID,
             provider: "anchorage",
-            walletId: "anchorage_managed_channel",
             publicKey: PUBLIC_KEYS.anchorage,
           }),
           configWallet({
             id: "cwlt_managed_channel_privy_a",
             custodyConfigId: PRIVY_CONFIG_ID,
             provider: "privy",
-            walletId: "privy_managed_channel_a",
             publicKey: PUBLIC_KEYS.privyA,
           }),
           configWallet({
             id: "cwlt_managed_channel_privy_b",
             custodyConfigId: PRIVY_CONFIG_ID,
             provider: "privy",
-            walletId: "privy_managed_channel_b",
             publicKey: PUBLIC_KEYS.privyB,
           }),
         ],
@@ -104,7 +101,7 @@ describe("Managed custody out of the release channel", () => {
 
   it("refuses Config wallet deletion before any Provider call", async () => {
     const response = await send("/v1/wallets", "DELETE", {
-      walletId: "anchorage_managed_channel",
+      custodyWalletId: "cwlt_managed_channel_anchorage",
       provider: "anchorage",
     });
 
@@ -120,7 +117,9 @@ describe("Managed custody out of the release channel", () => {
   });
 
   it("returns the release-channel 403 for a Config wallet's public key", async () => {
-    const response = await get("/v1/wallets/public-key?walletId=privy_managed_channel_a");
+    const response = await get(
+      "/v1/wallets/public-key?custodyWalletId=cwlt_managed_channel_privy_a"
+    );
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual(channelRefusalBody("privy"));
@@ -175,7 +174,6 @@ function configWallet(wallet: {
   id: string;
   custodyConfigId: string;
   provider: CustodyProvider;
-  walletId: string;
   publicKey: string;
 }) {
   return {

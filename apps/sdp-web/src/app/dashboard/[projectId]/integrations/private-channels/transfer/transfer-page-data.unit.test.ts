@@ -16,7 +16,6 @@ function custodyWallet(walletId: string, publicKey: string, label: string): Cust
     id: `custody_${walletId}`,
     custodyConfigId: "custody-config-1",
     isRuntimeExecutionAllowed: true,
-    walletId,
     publicKey,
     label,
     purpose: null,

@@ -117,7 +117,7 @@ export function toWalletIdentity(
       name: wallet.label?.trim() || unlabeled,
       provider: wallet.provider ?? null,
       publicKey: wallet.publicKey,
-      walletId: wallet.walletId,
+      walletId: wallet.id,
       restricted: wallet.isRuntimeExecutionAllowed !== true,
     };
   }

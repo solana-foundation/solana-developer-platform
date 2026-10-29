@@ -13,7 +13,6 @@ import { parsePaymentApiErrorText } from "./payment-api-errors";
 const paymentsWalletSchema = z
   .object({
     id: z.string().min(1),
-    walletId: z.string().min(1),
     publicKey: z.string().min(1),
     label: z.string().nullable().default(null),
     provider: z.enum(CUSTODY_PROVIDERS).optional(),

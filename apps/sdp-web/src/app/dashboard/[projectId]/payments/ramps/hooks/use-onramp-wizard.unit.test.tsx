@@ -43,7 +43,6 @@ const TRANSFER_ID = "xfr_moonpay_wizard";
 
 const WALLET: PaymentsDashboardWallet = {
   id: "wallet-moonpay",
-  walletId: "provider-moonpay",
   isRuntimeExecutionAllowed: true,
   custodyConfigId: "cc_test",
   publicKey: "wallet-pubkey",
@@ -70,7 +69,7 @@ function transferFixture(
   return {
     id: TRANSFER_ID,
     custodyWalletId: WALLET.id,
-    providerWalletId: WALLET.walletId,
+    providerWalletId: "provider-moonpay",
     status,
     signature: null,
     rampsMemo: {},
@@ -296,7 +295,6 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
   const WALLET_B: PaymentsDashboardWallet = {
     ...WALLET,
     id: "wallet-b",
-    walletId: "provider-b",
     publicKey: "wallet-b-pubkey",
     label: "Wallet B",
   };

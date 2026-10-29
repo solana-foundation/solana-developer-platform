@@ -63,7 +63,6 @@ function makeWallet(overrides: Partial<CustodyWalletSummary>): CustodyWalletSumm
     custodyConfigId: "config",
     provider: "fireblocks",
     isRuntimeExecutionAllowed: true,
-    walletId: "fb_wallet",
     publicKey: "gZeTc7Hq9mXw2JDUBSD",
     label: "Settlement Fireblocks",
     purpose: "transfer",
@@ -78,7 +77,6 @@ const wallets = [
   makeWallet({
     id: "row-2",
     provider: "dfns",
-    walletId: "wa-offramp",
     publicKey: "EGyaAv4Lr8nTqfQ723i",
     label: "Off ramp demo wallet",
     purpose: "root",
@@ -121,7 +119,7 @@ describe("wallet cards", () => {
     expect(within(offRamp as HTMLElement).getByText("Wallet ID")).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Open Off ramp demo wallet" }).getAttribute("href")
-    ).toBe("/dashboard/prj_test_sandbox/wallets/wa-offramp");
+    ).toBe("/dashboard/prj_test_sandbox/wallets/row-2");
   });
 
   it("marks only a wallet whose signing is restricted", () => {
@@ -145,7 +143,7 @@ describe("wallet cards", () => {
     renderOverview();
     expect(document.querySelector("[data-wallets-refreshed-at]")).toBeNull();
     cleanup();
-    mocks.balances = { fb_wallet: [] };
+    mocks.balances = { row: [] };
     renderOverview();
     const time = document.querySelector("[data-wallets-refreshed-at]");
     expect(time?.getAttribute("dateTime")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -175,11 +173,10 @@ describe("search", () => {
   });
 
   it("filters a long list by the search in the URL", () => {
-    mocks.query = "query=vault-7";
+    mocks.query = "query=row-7";
     const many = Array.from({ length: 8 }, (_, index) =>
       makeWallet({
         id: `row-${index}`,
-        walletId: `vault-${index}`,
         label: `Vault ${index}`,
       })
     );
@@ -215,7 +212,7 @@ describe("favorites", () => {
     fireEvent.click(star);
 
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
     expect(
       screen
@@ -241,30 +238,27 @@ describe("favorites", () => {
       screen.getByRole("button", { name: "Remove Settlement Fireblocks from favorites" })
     );
 
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["wa-offramp"]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row-2"]);
     const [title, options] = mocks.toast.mock.calls[2] as [
       string,
       { action: { onClick: () => void } },
     ];
     expect(title).toBe("Removed from favorites");
     options.action.onClick();
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
-      "fb_wallet",
-      "wa-offramp",
-    ]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row", "row-2"]);
   });
 
   it("renames pins and drops wallets that are gone when the list loads", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify([
-        { walletId: "wa-offramp", name: "Old name", provider: "dfns" },
+        { walletId: "row-2", name: "Old name", provider: "dfns" },
         { walletId: "deleted", name: "Gone", provider: "para" },
       ])
     );
     renderOverview();
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
   });
 

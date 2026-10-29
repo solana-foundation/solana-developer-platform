@@ -19,7 +19,6 @@ const FREEZE_AUTHORITY = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
 function freezeSigner(id: string, label: string): PaymentsDashboardWallet {
   return {
     id,
-    walletId: `wal_${id}`,
     label,
     publicKey: FREEZE_AUTHORITY,
     isRuntimeExecutionAllowed: true,

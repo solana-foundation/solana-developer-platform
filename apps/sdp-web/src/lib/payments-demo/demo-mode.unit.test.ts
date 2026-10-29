@@ -541,7 +541,7 @@ describe("every ramp provider", () => {
 describe("requests and schedules", () => {
   it("creates a payment request the list and its page can find", async () => {
     const created = await call("POST", "/v1/payments/requests", {
-      walletId: "demo_privy_treasury",
+      walletId: "demo_cwlt_treasury",
       token: USDC,
       amount: "75.00",
       counterpartyId: null,

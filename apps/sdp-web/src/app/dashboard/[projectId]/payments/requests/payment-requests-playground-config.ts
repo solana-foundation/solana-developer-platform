@@ -25,7 +25,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const walletOptions = wallets.map((wallet) => ({
-    value: wallet.walletId,
+    value: wallet.id,
     label: wallet.label ? wallet.label : wallet.publicKey,
   }));
   const tokenOptions = tokens.map((token) => ({ value: token.mintAddress, label: token.symbol }));

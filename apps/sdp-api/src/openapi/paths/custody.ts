@@ -1,12 +1,11 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { errorResponseSchema, walletIdParamSchema } from "@/openapi/schemas/base";
+import { custodyWalletIdParamSchema, errorResponseSchema } from "@/openapi/schemas/base";
 import {
   createCustodyWalletRequestSchema,
   custodyPublicKeyResponseSchema,
   deleteWalletRequestSchema,
   initializeSigningRequestSchema,
-  initializeSigningResponseSchema,
   orgCustodyProviderSchema,
   signerCheckRequestSchema,
   updateCustodyWalletRequestSchema,
@@ -20,6 +19,7 @@ import {
 import {
   custodyConfigsResponse,
   custodyDeleteWalletResponse,
+  custodyInitializeSigningResponse,
   custodySignerCheckResponse,
   custodyWalletAggregateResponse,
   custodyWalletByIdResponse,
@@ -60,7 +60,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing initialized",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(custodyInitializeSigningResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500]),
       403: {
@@ -209,12 +209,12 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet public key",
     operationId: "getWalletPublicKey",
     description:
-      "Returns the persisted public key for an exact active walletId. walletId is required (400 without it); an API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only.",
+      "Returns the persisted public key for an exact active custodyWalletId. The internal SDP Wallet ID is required (400 without it); provider references and addresses are not accepted. An API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      query: z.object({
-        walletId: walletIdParamSchema,
+      query: z.strictObject({
+        custodyWalletId: custodyWalletIdParamSchema,
       }),
     },
     responses: {
@@ -262,7 +262,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
-        walletId: walletIdParamSchema,
+        walletId: custodyWalletIdParamSchema,
       }),
       headers: projectScopeHeaders,
       query: z.object({
@@ -293,7 +293,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
-        walletId: walletIdParamSchema,
+        walletId: custodyWalletIdParamSchema,
       }),
       headers: keyAcceptedHeaders,
       body: {

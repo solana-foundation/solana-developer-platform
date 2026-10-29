@@ -11,7 +11,6 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 function makeWallet(index: number): PaymentsDashboardWallet {
   return {
     id: `cw_${index}`,
-    walletId: `wal_${index}`,
     isRuntimeExecutionAllowed: true,
     publicKey: `PubKey${index}`,
     label: `Wallet ${index}`,
@@ -54,9 +53,9 @@ describe("TokenSignerSelect", () => {
 
   it("shows the only wallet as a compact identity row without a select", () => {
     const markup = render([makeWallet(1)]);
-    expect(markup).toContain('href="/dashboard/prj_test_sandbox/wallets/wal_1"');
+    expect(markup).toContain('href="/dashboard/prj_test_sandbox/wallets/cw_1"');
     expect(markup).toContain("Wallet 1");
-    expect(markup).toContain("wal_1");
+    expect(markup).toContain("cw_1");
     expect(markup).toContain("PubKey1");
     expect(markup).not.toContain("DashboardIssuance.signer.select");
   });
@@ -89,7 +88,7 @@ describe("TokenSignerSelect", () => {
         onSignerWalletIdChange={() => {}}
       />
     );
-    expect(markup).toContain('href="/dashboard/prj_test_sandbox/wallets/wal_1"');
+    expect(markup).toContain('href="/dashboard/prj_test_sandbox/wallets/cw_1"');
     expect(markup).not.toContain("DashboardIssuance.signer.select");
     // Status once, inside the row; the runtime sentence is not repeated under it.
     expect(markup.split("DashboardCustody.signingDisabledTitle")).toHaveLength(2);

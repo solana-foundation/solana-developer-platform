@@ -35,7 +35,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 const MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const source: PaymentsDashboardWallet = {
   id: "cwlt_source",
-  walletId: "privy_shared",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
@@ -46,7 +45,7 @@ const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   organizationId: "org_test",
   projectId: "proj_test",
   sourceCustodyWalletId: source.id,
-  sourceProviderWalletId: source.walletId,
+  sourceProviderWalletId: "privy_shared",
   sourceAddress: source.publicKey,
   counterpartyId: "cpty_receiver",
   counterpartyAccountId: "cpa_receiver",

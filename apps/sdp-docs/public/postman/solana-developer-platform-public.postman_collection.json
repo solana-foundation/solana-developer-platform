@@ -171,7 +171,7 @@
             "description": "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"anchorage\",\n  \"custodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -204,7 +204,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/wallets/public-key",
-            "description": "Returns the persisted public key for an exact active walletId. walletId is required (400 without it); an API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only."
+            "description": "Returns the persisted public key for an exact active custodyWalletId. The internal SDP Wallet ID is required (400 without it); provider references and addresses are not accepted. An API key with selected wallets gets 404 for a wallet it does not list. Resolution is DB-backed only."
           }
         },
         {
@@ -222,7 +222,7 @@
             "description": "Signs a server-authored memo message with the named wallet, verifies the signature, and simulates the transaction. Nothing is broadcast and no sponsorship is spent. The wallet is the only readonly signer and the request cannot supply memo text.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"walletId\": \"privy_wallet_123\"\n}",
+              "raw": "{\n  \"custodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -969,7 +969,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/wallets/{{walletId}}/balances",
-            "description": "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets."
+            "description": "Retrieves balances for the exact SDP Wallet ID (`id` from GET /v1/wallets) in the path. Provider references are not accepted. The response identifies the wallet with custodyWalletId. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets."
           }
         },
         {

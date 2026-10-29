@@ -85,7 +85,6 @@ const metadataSignerSelection = {
   wallets: [
     {
       id: "cwlt_metadata",
-      walletId: "provider_metadata",
       isRuntimeExecutionAllowed: true,
       publicKey: token.metadataAuthority ?? "",
       label: "Metadata signer",
@@ -132,7 +131,7 @@ describe("useAssetProfileForm", () => {
           token: pendingToken,
           assetProfile,
           metadataSignerSelection,
-          draftWallets: [{ id: "cwlt_metadata", walletId: "provider_metadata" }],
+          draftWallets: [{ id: "cwlt_metadata" }],
         }),
       { wrapper }
     );
@@ -179,7 +178,7 @@ describe("useAssetProfileForm", () => {
     );
   });
 
-  it("normalizes a legacy draft after wallets load and persists exact assignments only on Save", async () => {
+  it("requires explicit reselection for a legacy draft even after its wallet loads", async () => {
     const pendingToken = {
       ...token,
       mintAddress: null,
@@ -200,7 +199,7 @@ describe("useAssetProfileForm", () => {
         },
       },
     };
-    const wallets = [{ id: "cwlt_a", walletId: "provider_a" }];
+    const wallets = [{ id: "cwlt_a" }];
     const initialWallets: typeof wallets = [];
     const rendered = renderHook(
       ({ draftWallets }) =>
@@ -214,13 +213,24 @@ describe("useAssetProfileForm", () => {
     );
     rendered.rerender({ draftWallets: wallets });
     expect(rendered.result.current.draft.authorityWalletIds).toEqual({
-      "mint-authority": "cwlt_a",
-      "metadata-authority": "cwlt_a",
+      "mint-authority": "provider_a",
+      "metadata-authority": "provider_a",
     });
     expect(rendered.result.current.dirty).toBe(false);
-    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
-
+    expect(rendered.result.current.errors.authorityWalletIds).toBeDefined();
     act(() => rendered.result.current.updateDraft({ description: "Keep my edit" }));
+    await act(() => rendered.result.current.save());
+    expect(mocks.updateAssetProfile).not.toHaveBeenCalled();
+    expect(legacyProfile.issuanceMetadata.custom.customer.authorityWalletIds).toEqual({
+      "mint-authority": "provider_a",
+      "metadata-authority": "provider_a",
+    });
+
+    act(() =>
+      rendered.result.current.updateDraft({
+        authorityWalletIds: { "mint-authority": "cwlt_a", "metadata-authority": "cwlt_a" },
+      })
+    );
     await act(() => rendered.result.current.save());
     expect(mocks.updateAssetProfile).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -258,7 +268,7 @@ describe("useAssetProfileForm", () => {
           custom: { customer: { authorityWalletIds: { "mint-authority": "provider_a" } } },
         },
       };
-      const wallet = { id: "cwlt_a", walletId: "provider_a" };
+      const wallet = { id: "cwlt_a" };
       const candidates = state === "missing" ? [] : [wallet, { ...wallet, id: "cwlt_b" }];
       const rendered = renderHook(
         ({ draftWallets }) =>
@@ -285,7 +295,7 @@ describe("useAssetProfileForm", () => {
     }
   );
 
-  it("keeps an exact assignment when another row has the same Provider ID", () => {
+  it("keeps an exact internal assignment with multiple inventory candidates", () => {
     const pendingToken = {
       ...token,
       mintAddress: null,
@@ -305,10 +315,7 @@ describe("useAssetProfileForm", () => {
           token: pendingToken,
           assetProfile: profile,
           metadataSignerSelection,
-          draftWallets: [
-            { id: "cwlt_a", walletId: "shared" },
-            { id: "cwlt_b", walletId: "shared" },
-          ],
+          draftWallets: [{ id: "cwlt_a" }, { id: "cwlt_b" }],
         }),
       { wrapper }
     );
@@ -322,7 +329,6 @@ describe("useAssetProfileForm", () => {
     const historicalToken = { ...token, signingCustodyWalletId: "cwlt_deployment_a" };
     const liveWallet = {
       id: "cwlt_live_b",
-      walletId: "provider_b",
       isRuntimeExecutionAllowed: true,
       publicKey: "live_authority_b",
       label: "B",

@@ -8,7 +8,6 @@ const wallets: CustodyWalletSummary[] = [
     custodyConfigId: "custody-config-1",
     provider: "privy",
     isRuntimeExecutionAllowed: true,
-    walletId: "privy_treasury_01",
     publicKey: "TreasuryPublicKey1111111111111111111111111",
     label: "Operations Treasury",
     purpose: "transfer",
@@ -20,7 +19,6 @@ const wallets: CustodyWalletSummary[] = [
     custodyConfigId: "custody-config-2",
     provider: "coinbase_cdp",
     isRuntimeExecutionAllowed: true,
-    walletId: "coinbase_authority_02",
     publicKey: "MintAuthorityPublicKey222222222222222222222",
     label: "Primary Issuer",
     purpose: "mint_authority",
@@ -34,7 +32,7 @@ describe("wallet search", () => {
     expect(filterWallets(wallets, "OPERATIONS").map((wallet) => wallet.id)).toEqual([
       "wallet-row-1",
     ]);
-    expect(filterWallets(wallets, "authority_02").map((wallet) => wallet.id)).toEqual([
+    expect(filterWallets(wallets, "WALLET-ROW-2").map((wallet) => wallet.id)).toEqual([
       "wallet-row-2",
     ]);
     expect(filterWallets(wallets, "publickey111").map((wallet) => wallet.id)).toEqual([

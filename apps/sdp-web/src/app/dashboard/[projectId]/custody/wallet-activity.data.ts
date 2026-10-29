@@ -42,7 +42,6 @@ export interface WalletActivityPayload {
 
 export interface WalletActivityIdentity {
   custodyWalletId: string;
-  providerWalletId: string;
 }
 
 interface DashboardWalletActivityEnvelope {

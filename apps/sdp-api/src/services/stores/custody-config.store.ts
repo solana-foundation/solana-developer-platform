@@ -61,6 +61,14 @@ export interface CreateWalletParams {
   idempotency?: CustodyWalletIdempotency | null;
 }
 
+interface SaveProviderConfigParams {
+  orgId: string;
+  projectId: string;
+  provider: SigningProviderType;
+  configJson: object;
+  wallet?: CreateWalletParams;
+}
+
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
 
 // Database row types (snake_case)
@@ -187,13 +195,13 @@ export class CustodyConfigStore implements SigningConfigStore {
    * single transaction: the config row never becomes readable with a partial
    * payload, and the wallet lands together with the config that owns it.
    */
-  async saveProviderConfig(params: {
-    orgId: string;
-    projectId: string;
-    provider: SigningProviderType;
-    configJson: object;
-    wallet?: CreateWalletParams;
-  }): Promise<{ configId: string }> {
+  async saveProviderConfig(
+    params: SaveProviderConfigParams & { wallet: CreateWalletParams }
+  ): Promise<{ configId: string; custodyWalletId: string }>;
+  async saveProviderConfig(params: SaveProviderConfigParams): Promise<{ configId: string }>;
+  async saveProviderConfig(
+    params: SaveProviderConfigParams
+  ): Promise<{ configId: string; custodyWalletId?: string }> {
     const { encryptedConfig, encryptionVersion } = await this.encryptConfigJson(
       params.orgId,
       JSON.stringify(params.configJson)
@@ -217,13 +225,14 @@ export class CustodyConfigStore implements SigningConfigStore {
       }
 
       if (params.wallet) {
+        const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
         await tx
           .prepare(
             `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
           )
           .bind(
-            `cwlt_${crypto.randomUUID()}`,
+            custodyWalletId,
             row.id,
             params.wallet.walletId,
             params.wallet.publicKey,
@@ -231,6 +240,7 @@ export class CustodyConfigStore implements SigningConfigStore {
             params.wallet.purpose
           )
           .run();
+        return { configId: row.id, custodyWalletId };
       }
 
       return { configId: row.id };

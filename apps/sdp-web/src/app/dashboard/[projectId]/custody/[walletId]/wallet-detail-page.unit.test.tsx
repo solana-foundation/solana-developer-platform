@@ -74,13 +74,12 @@ function walletMetadataResponse(): Response {
   return Response.json({
     data: {
       wallet: {
-        id: "wallet_record",
+        id: "wallet/one",
         custodyConfigId: "config_test",
         provider: "privy",
         isDefaultProvider: true,
         isRuntimeExecutionAllowed: true,
         ...walletOverrides,
-        walletId: "wallet/one",
         publicKey: "11111111111111111111111111111111",
         label: "Fast wallet",
         purpose: null,
@@ -177,7 +176,7 @@ describe("WalletDetailPage", () => {
     const { wallet } = await renderPage();
     expect(wallet).toMatchObject({
       walletId: "wallet/one",
-      custodyWalletId: "wallet_record",
+      custodyWalletId: "wallet/one",
       name: "Fast wallet",
       label: "Fast wallet",
       provider: "privy",
@@ -194,11 +193,10 @@ describe("WalletDetailPage", () => {
       Response.json({
         data: {
           wallet: {
-            id: "wallet_record",
+            id: "wallet/one",
             custodyConfigId: "config_test",
             provider: "privy",
             isRuntimeExecutionAllowed: true,
-            walletId: "wallet/one",
             publicKey: "11111111111111111111111111111111",
             label: null,
             purpose: null,

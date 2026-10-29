@@ -27,15 +27,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
   it.each([
     ["invalid JSON", "not JSON"],
     ["a missing custody wallet ID", JSON.stringify({ data: { wallet: { walletId: "privy_1" } } })],
-    [
-      "an empty custody wallet ID",
-      JSON.stringify({ data: { wallet: { id: "  ", walletId: "privy_1" } } }),
-    ],
-    ["a missing provider wallet ID", JSON.stringify({ data: { wallet: { id: "cwlt_1" } } })],
-    [
-      "an empty provider wallet ID",
-      JSON.stringify({ data: { wallet: { id: "cwlt_1", walletId: "  " } } }),
-    ],
+    ["an empty custody wallet ID", JSON.stringify({ data: { wallet: { id: "  " } } })],
   ])("returns 502 without loading activity for %s", async (_case, body) => {
     const apiRequest = vi.fn().mockResolvedValue(
       new Response(body, {
@@ -63,7 +55,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
     ["a non-numeric limit", "?limit=all", 20],
   ])("reads %s as a window of %s rows", async (_case, search, pageSize) => {
     const apiRequest = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: { wallet: { id: "cwlt_1", walletId: "privy_1" } } }), {
+      new Response(JSON.stringify({ data: { wallet: { id: "cwlt_1" } } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -82,7 +74,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
     expect(response.status).toBe(200);
     expect(mocks.loadWalletActivity).toHaveBeenCalledWith(
       apiRequest,
-      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      { custodyWalletId: "cwlt_1" },
       expect.any(Function),
       { pageSize }
     );

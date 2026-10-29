@@ -7,14 +7,16 @@ import type {
 } from "@/components/api-playground-shell";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
-import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
+import {
+  getOpenApiPlaygroundEndpoints,
+  mergeOpenApiPlaygroundEndpoints,
+} from "@/lib/api-playground-openapi-catalog";
 import { getRampProviderLabel } from "@/lib/ramps";
 
 interface PaymentsPlaygroundWalletView {
   id: string;
   label: string | null;
   publicKey: string;
-  walletId: string;
 }
 
 export interface PaymentsPlaygroundTransferView {
@@ -30,17 +32,6 @@ interface BuildPaymentsPlaygroundConfigOptions {
 }
 
 const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
-const exampleWalletAddressFallback = "1".repeat(32);
-const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
-
-function buildProviderWalletOptions(
-  wallets: PaymentsPlaygroundWalletView[]
-): ApiPlaygroundFieldOption[] {
-  return wallets.map((wallet) => ({
-    value: wallet.walletId,
-    label: wallet.label?.trim() ? `${wallet.label} (${wallet.walletId})` : wallet.walletId,
-  }));
-}
 
 function buildCustodyWalletOptions(
   wallets: PaymentsPlaygroundWalletView[]
@@ -101,14 +92,19 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const rampProviderOptions = buildRampProviderOptions(rampProviders);
-  const providerWalletOptions = buildProviderWalletOptions(wallets);
   const custodyWalletOptions = buildCustodyWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
+  const balanceEndpoint = getOpenApiPlaygroundEndpoints("payments").find(
+    ({ id }) => id === "get-payment-wallet-balances"
+  );
+  if (balanceEndpoint === undefined) {
+    throw new Error("OpenAPI catalog is missing the wallet balances operation");
+  }
   const walletIdField = buildSelectBackedField(
     "walletId",
     "{walletId}",
     t("DashboardPayments.playground.walletIdPlaceholder"),
-    providerWalletOptions
+    custodyWalletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
@@ -128,10 +124,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
     t("DashboardPayments.playground.destinationWalletIdPlaceholder"),
     custodyWalletOptions
   );
-  const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
-  const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
-  const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
 
   const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
@@ -142,21 +135,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       path: "/v1/payments/wallets/{walletId}/balances",
       pathFields: [walletIdField],
       bodyFields: [],
-      expectedResponse: {
-        data: {
-          walletId: exampleWalletId,
-          address: exampleWalletAddress,
-          balances: [
-            {
-              token: "USDC",
-              mint: exampleMintAddress,
-              amount: "100000000",
-              uiAmount: "100.00",
-              decimals: 6,
-            },
-          ],
-        },
-      },
+      expectedResponse: balanceEndpoint.expectedResponse,
     },
     {
       id: "execute-transfer",

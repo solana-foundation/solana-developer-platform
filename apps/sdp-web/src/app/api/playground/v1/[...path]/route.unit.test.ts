@@ -371,7 +371,7 @@ describe("/api/playground/v1/[...path]", () => {
   it("forwards documented request bodies for DELETE operations", async () => {
     const request = upstreamRequest().mockResolvedValue(upstreamOk({ deleted: true }));
     mocks.createSdpApiClient.mockResolvedValue({ request });
-    const body = { provider: "anchorage", walletId: "anchorage_wallet_123" };
+    const body = { custodyWalletId: "cwlt_anchorage" };
 
     const response = await DELETE(playgroundRequest("DELETE", "/v1/wallets", { body }));
 

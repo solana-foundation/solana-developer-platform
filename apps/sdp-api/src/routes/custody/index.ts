@@ -12,7 +12,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { replayFromRecord } from "@/middleware/movement-steps";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
+import { validateBody, validateQuery } from "@/middleware/validate";
 import { getConfigs } from "@/routes/custody/handlers/configs";
 import { initializeSigning } from "@/routes/custody/handlers/provider";
 import { signerCheck } from "@/routes/custody/handlers/signer-check";
@@ -33,10 +33,12 @@ import {
   authorizeSignerCheck,
   authorizeUpdateWallet,
 } from "./access";
+import { legacyCustodyHttpResponse } from "./legacy-http-response";
 import {
   createWalletSchema,
   deleteWalletSchema,
   initializeSigningSchema,
+  publicKeyQuerySchema,
   signerCheckSchema,
   updateWalletSchema,
 } from "./schemas";
@@ -50,6 +52,7 @@ wallets.use("*", projectContextMiddleware());
 // Initialize signing (requires admin)
 wallets.post(
   "/initialize",
+  legacyCustodyHttpResponse("initialize"),
   requireAction("wallets.configure"),
   validateBody(initializeSigningSchema),
   authorizeNone("connects a provider in the caller's own project"),
@@ -58,6 +61,7 @@ wallets.post(
 );
 wallets.post(
   "/",
+  legacyCustodyHttpResponse("wallet"),
   requireAction("wallets.manage"),
   validateBody(createWalletSchema),
   authorize(authorizeCreateWallet),
@@ -77,6 +81,7 @@ wallets.delete(
 );
 wallets.patch(
   "/:walletId",
+  legacyCustodyHttpResponse("wallet"),
   requireAction("wallets.manage"),
   validateBody(updateWalletSchema),
   authorize(authorizeUpdateWallet),
@@ -98,5 +103,10 @@ wallets.post(
 wallets.get("/configs", requireAction("wallets.read"), getConfigs);
 wallets.get("/", requireAction("wallets.read"), listWallets);
 wallets.get("/aggregate", requireAction("wallets.read"), getWalletAggregate);
-wallets.get("/public-key", requireAction("wallets.read"), getPublicKey);
+wallets.get(
+  "/public-key",
+  requireAction("wallets.read"),
+  validateQuery(publicKeyQuerySchema),
+  getPublicKey
+);
 wallets.get("/:walletId", requireAction("wallets.read"), getWalletById);

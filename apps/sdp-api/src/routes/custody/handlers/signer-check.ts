@@ -20,14 +20,12 @@ import {
   verifySignature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { signerCheckSchema } from "@/routes/custody/schemas";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -63,24 +61,13 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
-  const resolvedWalletId = body.walletId;
+  const resolvedWalletId = body.custodyWalletId;
   const memo = `SDP signer check ${crypto.randomUUID()}`;
 
   try {
     const wallet = await findProjectOperationalWallet(c, resolvedWalletId);
     if (!wallet) {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
-    }
-    // Keep the legacy selector's retained-Connection checks; inventory hides inactive rows.
-    const target = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).resolve({
-      kind: "wallet",
-      organizationId: auth.organizationId,
-      projectId,
-      walletId: resolvedWalletId,
-    });
-    // The legacy selector and the inventory must agree on the Connection; a mismatch is ambiguous ownership.
-    if (target?.kind === "connection" && target.connectionId !== wallet.custodyConnectionId) {
-      throw conflict("Custody wallet ownership is ambiguous");
     }
     // Resolve once to an exact row, then admit before any signer, Kora, or RPC work.
     // The exact signer repeats its runtime guard against the same wallet row.
@@ -159,7 +146,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     }
 
     const response: SignerCheckResponse = {
-      walletId: resolvedWalletId,
+      custodyWalletId: resolvedWalletId,
       walletAddress: signer.address,
       feePayer,
       memo,

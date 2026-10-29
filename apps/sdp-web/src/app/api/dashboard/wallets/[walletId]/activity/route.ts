@@ -35,7 +35,6 @@ const walletActivityMetadataEnvelopeSchema = z.object({
   data: z.object({
     wallet: z.object({
       id: z.string().trim().min(1),
-      walletId: z.string().trim().min(1),
     }),
   }),
 });
@@ -67,7 +66,7 @@ async function verifyWalletVisibility(
 
     return {
       ok: true,
-      wallet: { custodyWalletId: wallet.id, providerWalletId: wallet.walletId },
+      wallet: { custodyWalletId: wallet.id },
     };
   } catch (error) {
     return {

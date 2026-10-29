@@ -396,9 +396,22 @@ describe("demo world", () => {
 });
 
 describe("Payments overview", () => {
+  it("identifies a wallet balance response with its internal custody ID", () => {
+    const body = paymentsDemoBody(
+      "/v1/payments/wallets/demo_cwlt_treasury/balances",
+      RAMP_PROVIDERS,
+      NOW
+    );
+
+    expect(body).toHaveProperty("data.walletBalances.custodyWalletId", "demo_cwlt_treasury");
+    expect(body).not.toHaveProperty("data.walletBalances.walletId");
+  });
+
   it("answers the balance with the sum of the wallets", async () => {
     const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
     expect(wallets.ok).toBe(true);
+    const inventory = demoData<{ wallets: PaymentsDashboardWallet[] }>("/v1/wallets");
+    for (const wallet of inventory.wallets) expect(wallet).not.toHaveProperty("walletId");
     expect(wallets.data?.map((wallet) => wallet.label)).toEqual([
       "Treasury",
       "Payroll",

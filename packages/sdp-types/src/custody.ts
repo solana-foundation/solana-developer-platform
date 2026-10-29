@@ -662,11 +662,11 @@ export type CreateWalletRequest = CustodyWalletOwnerTarget & {
 export interface DeleteWalletRequest {
   projectId?: string;
   provider?: CustodyProvider;
-  walletId: string;
+  custodyWalletId: string;
 }
 
 export interface SignerCheckRequest {
-  walletId?: string;
+  custodyWalletId: string;
 }
 
 export interface CustodyConfigSummary {
@@ -686,7 +686,6 @@ export type CustodyWalletSummary = CustodyWalletOwner & {
   id: string;
   provider?: CustodyProvider;
   isRuntimeExecutionAllowed: boolean;
-  walletId: string;
   publicKey: string;
   label: string | null;
   purpose: string | null;
@@ -753,18 +752,18 @@ export interface CustodyConfigsResponse {
 }
 
 export interface DeleteWalletResponse {
-  walletId: string;
+  custodyWalletId: string;
   deleted: true;
 }
 
 export interface InitializeSigningResponse {
   configId: string;
   publicKey: string;
-  walletId: string;
+  custodyWalletId: string;
 }
 
 export interface SignerCheckResponse {
-  walletId: string;
+  custodyWalletId: string;
   walletAddress: string;
   /** Funded fee payer address used in the simulated message; nothing is spent from it. */
   feePayer: string;

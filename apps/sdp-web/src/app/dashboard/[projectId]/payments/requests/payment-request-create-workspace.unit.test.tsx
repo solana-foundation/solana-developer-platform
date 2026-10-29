@@ -34,7 +34,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_treasury",
-  walletId: "wallet_treasury",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
@@ -100,7 +99,7 @@ describe("New request page", () => {
     const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
     expect(writes).toEqual([
       {
-        walletId: "wallet_treasury",
+        walletId: "cwlt_treasury",
         token: usdc?.mintAddress,
         amount: "25",
         expiresAt: null,

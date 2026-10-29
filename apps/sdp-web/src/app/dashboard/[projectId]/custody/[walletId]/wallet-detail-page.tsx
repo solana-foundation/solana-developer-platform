@@ -23,7 +23,6 @@ import { WalletDetailView } from "./wallet-detail-view";
 
 interface WalletBalancesResponse {
   walletBalances?: {
-    walletId: string;
     address: string;
     balances: WalletBalancesResult["balances"];
   };
@@ -113,7 +112,7 @@ function toWalletPageView(
     wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
   const label = wallet.label?.trim() || null;
   return {
-    walletId: wallet.walletId,
+    walletId: wallet.id,
     custodyWalletId: wallet.id,
     name: label ?? t("DashboardCustody.untitledWallet"),
     label,
