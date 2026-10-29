@@ -224,8 +224,8 @@ export interface PaymentRequestsRepository {
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   /**
-   * Requests closed without a payment inside the late-payment watch: expired since `closedSince`
-   * by `expires_at`, or canceled since then by `canceled_at`.
+   * Requests closed without a payment inside the late-payment watch, plus older requests that
+   * still have an unresolved chain signature. Those remain recoverable after the normal window.
    */
   listClosedPaymentRequestsForLateCheck(params: {
     environment: SdpEnvironment;

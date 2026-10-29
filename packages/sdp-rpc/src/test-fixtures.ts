@@ -8,7 +8,7 @@ import {
   type TransactionError,
 } from "@solana/kit";
 
-export type JsonParsedTransactionResponse = GetTransactionApiResponseJsonParsed<0>;
+export type JsonParsedTransactionResponse = GetTransactionApiResponseJsonParsed<0 | 1>;
 
 export type JsonParsedTransactionMeta = NonNullable<JsonParsedTransactionResponse["meta"]>;
 
@@ -50,17 +50,19 @@ export function jsonParsedTransactionMeta(params: {
 }
 
 /**
- * A version-0 transaction as a `jsonParsed` `getTransaction` read returns it.
+ * A versioned transaction as a `jsonParsed` `getTransaction` read returns it.
  *
  * @param params - The fields a test varies.
  * @param params.meta - The transaction metadata, or `null` when the RPC has none.
  * @param params.instructions - The top-level instructions.
+ * @param params.version - The transaction version; existing fixtures use v0.
  * @returns The full response.
  */
 export function jsonParsedTransactionResponse(params: {
   meta: JsonParsedTransactionMeta | null;
   instructions: readonly JsonParsedInstruction[];
   blockTime?: JsonParsedTransactionResponse["blockTime"];
+  version?: 0 | 1;
 }): JsonParsedTransactionResponse {
   return {
     blockTime: params.blockTime ?? null,
@@ -77,6 +79,6 @@ export function jsonParsedTransactionResponse(params: {
       },
       signatures: [FIXTURE_SIGNATURE],
     },
-    version: 0,
+    version: params.version === 1 ? 1 : 0,
   };
 }

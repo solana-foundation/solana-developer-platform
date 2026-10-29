@@ -1141,6 +1141,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect((await listLateCheck()).map((row) => row.id)).toEqual([inside.id]);
       });
 
+      it("keeps an older expired request in the watch while a signature is unresolved", async () => {
+        const unresolved = await closedRequest({
+          expires_at: ago(8 * DAY),
+          signature_scan_stuck_signature: "unresolved_signature",
+          signature_scan_stuck_since: ago(8 * DAY),
+        });
+
+        expect((await listLateCheck()).map((row) => row.id)).toEqual([unresolved.id]);
+      });
+
       it("lists canceled requests by when they were canceled, not when they expire", async () => {
         const canceled = {
           status: "canceled",
@@ -1264,6 +1274,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
         await expiredRequest({ expires_at: ago(DAY), settlement_blocked_reason: "invalid_amount" });
         expect(await countStaleLateWatch()).toBe(2);
         expect(await countStaleLateWatch("production")).toBe(0);
+      });
+
+      it("counts an old unresolved signature as still watched", async () => {
+        await expiredRequest({
+          expires_at: ago(8 * DAY),
+          signature_scan_stuck_signature: "unresolved_signature",
+          signature_scan_stuck_since: ago(8 * DAY),
+        });
+
+        expect(await countStaleLateWatch()).toBe(1);
       });
     });
 

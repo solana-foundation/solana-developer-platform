@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
@@ -19,6 +20,8 @@ import {
   lamports,
   pipe,
   type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION,
+  SolanaError,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
@@ -911,6 +914,7 @@ async function exactTransferResponse(params: {
   rawAmount: bigint;
   reference: Address;
   lookupTable: Address | null;
+  version?: 0 | 1;
 }): Promise<Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>>> {
   const { token, rawAmount, reference, lookupTable } = params;
   const owner = address(TEST_CUSTODY_PUBLIC_KEY);
@@ -953,13 +957,22 @@ async function exactTransferResponse(params: {
       ),
     (message) => appendTransactionMessageInstructions([referenced], message)
   );
-  const transaction = compileTransaction(
-    lookupTable === null
-      ? message
-      : compressTransactionMessageUsingAddressLookupTables(message, {
-          [lookupTable]: [destination],
+  // Kit 7 can encode and decode v1, but createTransactionMessage does not type v1 yet.
+  // This fixture uses the same static-account message with v1's mandatory limits.
+  const transaction =
+    params.version === 1
+      ? compileTransaction({
+          ...message,
+          version: 1 as const,
+          config: { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 64 * 1024 },
         })
-  );
+      : compileTransaction(
+          lookupTable === null
+            ? message
+            : compressTransactionMessageUsingAddressLookupTables(message, {
+                [lookupTable]: [destination],
+              })
+        );
   const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
   const loadedWritable = lookupTable === null ? [] : [destination];
   const accountKeys = [...compiled.staticAccounts, ...loadedWritable];
@@ -979,7 +992,7 @@ async function exactTransferResponse(params: {
   return {
     slot: 1n,
     blockTime: null,
-    version: 0,
+    version: params.version === 1 ? 1 : 0,
     meta: {
       err: null,
       fee: lamports(5_000n),
@@ -1083,6 +1096,26 @@ describe("exact transfer validation", () => {
     expect(rpc.requests.filter((request) => request.method === "getTransaction")).toHaveLength(1);
   });
 
+  it("settles an inbound v1 payment without broadcasting v1", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    mockExactCandidate();
+    const response = await exactTransferResponse({
+      token: SOL_MINT,
+      rawAmount: 1_500_000_000n,
+      reference: address(request.reference),
+      lookupTable: null,
+      version: 1,
+    });
+    rpc.answer("getTransaction", asRpcJson(response));
+
+    expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe("paid");
+    expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
+    expect(rpc.requests.find((call) => call.method === "getTransaction")?.params).toEqual([
+      SIGNATURE,
+      { encoding: "base64", maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
+    ]);
+  });
+
   it("reads the transfer at finalized commitment", async () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     mockExactCandidate();
@@ -1103,7 +1136,7 @@ describe("exact transfer validation", () => {
     // Kit omits the commitment from the request when it is the RPC default, finalized.
     expect(rpc.requests.find((request) => request.method === "getTransaction")?.params).toEqual([
       SIGNATURE,
-      { encoding: "base64", maxSupportedTransactionVersion: 0 },
+      { encoding: "base64", maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
     ]);
   });
 
@@ -1651,6 +1684,17 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
           );
         },
       },
+      {
+        reason: "unsupported_transaction_version",
+        setup: () => {
+          mockStatus(FINALIZED);
+          validateTransferSpy.mockRejectedValue(
+            new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION, {
+              __serverMessage: "Transaction version unsupported",
+            })
+          );
+        },
+      },
     ];
 
     function expectNoGiveUp(logSpy: MockInstance<typeof moneyPathEvents.logEvent>) {
@@ -1692,7 +1736,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     );
 
     it.for(unreadableVerdicts)(
-      "gives up on a signature that stayed $reason for over an hour and stores expired",
+      "expires after an hour of $reason while keeping the candidate recoverable",
       async ({ reason, setup }) => {
         const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
         mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
@@ -1707,9 +1751,8 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
         expect(result).toMatchObject({ status: "expired", paid_late: false });
         expect(await readStored(request.id)).toMatchObject({
           status: "expired",
-          signature_scan_cursor: SIGNATURE,
-          signature_scan_stuck_signature: null,
-          signature_scan_stuck_since: null,
+          signature_scan_cursor: null,
+          signature_scan_stuck_signature: SIGNATURE,
         });
         expect(logSpy).toHaveBeenCalledWith("warn", {
           event: "payment_requests.signature_unreadable",
@@ -1795,7 +1838,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       });
     });
 
-    it("starts the clock on the next unreadable signature after giving up on one", async () => {
+    it("expires with multiple unreadable candidates while retaining the scan cursor", async () => {
       mockSignatures(
         signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
         signatureInfo(SIGNATURE, { blockTime: null, err: null })
@@ -1809,13 +1852,13 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
       const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
-      expect(result.status).toBe("awaiting_payment");
+      expect(result.status).toBe("expired");
       const stored = await readStored(request.id);
-      expect(stored.signature_scan_cursor).toBe(SIGNATURE);
-      expectRecentlyStuck(stored, LATER_SIGNATURE);
+      expect(stored.signature_scan_cursor).toBeNull();
+      expect(stored.signature_scan_stuck_signature).toBe(SIGNATURE);
     });
 
-    it("settles a valid payment listed after an abandoned unreadable signature", async () => {
+    it("settles a valid payment listed after an older unreadable signature", async () => {
       mockSignatures(
         signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
         signatureInfo(SIGNATURE, { blockTime: null, err: null })
@@ -1831,9 +1874,32 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       expect(result.status).toBe("paid");
       expect(await listInboundTransfers()).toMatchObject([{ signature: LATER_SIGNATURE }]);
       expect(await readStored(request.id)).toMatchObject({
-        signature_scan_cursor: SIGNATURE,
+        signature_scan_cursor: null,
         signature_scan_stuck_signature: null,
       });
+    });
+
+    it("settles a previously unreadable payment after expiry", async () => {
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS, err: null }));
+      mockStatus(FINALIZED);
+      validateTransferSpy.mockRejectedValue(new ValidateTransferError("Transaction not found"));
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
+      );
+
+      const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+      expect(expired.status).toBe("expired");
+      expect((await readStored(request.id)).signature_scan_stuck_signature).toBe(SIGNATURE);
+
+      validateTransferSpy.mockResolvedValue(validatedTransfer(unixTimestamp(PAST_SECONDS)));
+      const paid = await onSandbox(async () =>
+        checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+      );
+
+      expect(paid).toMatchObject({ status: "paid", paid_late: false });
+      expect((await readStored(request.id)).signature_scan_stuck_signature).toBeNull();
+      expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
     });
   });
 

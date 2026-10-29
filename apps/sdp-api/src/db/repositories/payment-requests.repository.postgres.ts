@@ -524,8 +524,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              JOIN projects p ON p.id = pr.project_id
             WHERE p.environment = ?
               AND (
-                (pr.status = 'expired' AND pr.expires_at >= ?)
-                OR (pr.status = 'canceled' AND pr.canceled_at >= ?)
+                (pr.status = 'expired' AND (pr.expires_at >= ? OR pr.signature_scan_stuck_signature IS NOT NULL))
+                OR (pr.status = 'canceled' AND (pr.canceled_at >= ? OR pr.signature_scan_stuck_signature IS NOT NULL))
               )
               AND pr.custody_wallet_id IS NOT NULL
               AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
@@ -654,8 +654,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              JOIN projects p ON p.id = pr.project_id
             WHERE p.environment = ?
               AND (
-                (pr.status = 'expired' AND pr.expires_at >= ?)
-                OR (pr.status = 'canceled' AND pr.canceled_at >= ?)
+                (pr.status = 'expired' AND (pr.expires_at >= ? OR pr.signature_scan_stuck_signature IS NOT NULL))
+                OR (pr.status = 'canceled' AND (pr.canceled_at >= ? OR pr.signature_scan_stuck_signature IS NOT NULL))
               )
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.settlement_blocked_reason IS NULL

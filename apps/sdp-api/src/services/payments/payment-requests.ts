@@ -8,7 +8,13 @@ import {
   isClosedUnpaidPaymentRequestStatus,
 } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, isSolanaError, type Signature, signature } from "@solana/kit";
+import {
+  type Address,
+  isSolanaError,
+  type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION,
+  signature,
+} from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -49,6 +55,7 @@ const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
 const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set([
   "Transaction not found",
   "Transaction meta missing",
+  "Transaction decode failed",
 ]);
 const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
 
@@ -121,6 +128,37 @@ interface SignatureScanOutcome {
   exhausted: boolean;
   found: FoundPayment | null;
   stuck: StuckSignature;
+  agedUnresolved: boolean;
+}
+
+function trackUnreadableCandidate(
+  row: PaymentRequestRow,
+  candidate: SignatureInfo,
+  reason: string,
+  stuck: StuckSignature
+): { stuck: StuckSignature; aged: boolean } {
+  const since =
+    stuck.signature === candidate.signature && stuck.since !== null
+      ? Date.parse(stuck.since)
+      : Number.NaN;
+  if (Number.isNaN(since)) {
+    return {
+      stuck: { signature: candidate.signature, since: new Date().toISOString() },
+      aged: false,
+    };
+  }
+  if (Date.now() - since < UNREADABLE_SIGNATURE_GIVE_UP_MS) {
+    return { stuck, aged: false };
+  }
+  if (row.status === "awaiting_payment") {
+    logEvent("warn", {
+      event: "payment_requests.signature_unreadable",
+      payment_request_id: row.id,
+      signature: candidate.signature,
+      reason,
+    });
+  }
+  return { stuck, aged: true };
 }
 
 const transferExpectationSchema = z.discriminatedUnion("kind", [
@@ -319,6 +357,11 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
   if (scan.found !== null) {
     return { kind: "paid", found: scan.found };
   }
+  // An expired request can close after the unreadable candidate has aged, but
+  // its cursor stays behind that signature so the late watch can settle it later.
+  if (scan.agedUnresolved && from.before === null && isPaymentRequestExpired(row.expires_at)) {
+    return { kind: "none" };
+  }
   return scan.exhausted && from.before === null ? { kind: "none" } : { kind: "pending" };
 }
 
@@ -356,38 +399,32 @@ async function evaluateOldestFirst(
   let contiguous = true;
   let verified = 0;
   let stuck = stuckFrom;
+  let agedUnresolved = false;
   for (const candidate of oldestFirst) {
     let verdict: CandidateVerdict = { kind: "rejected" };
     if (candidate.err === null) {
       if (verified >= VERIFY_BUDGET) {
-        return { cursor, exhausted: false, found: null, stuck };
+        return { cursor, exhausted: false, found: null, stuck, agedUnresolved: false };
       }
       verified++;
       verdict = await judgeCandidate(expected, candidate);
     }
     if (verdict.kind === "retry" && contiguous) {
-      const stuckSince =
-        stuck.signature === candidate.signature && stuck.since !== null
-          ? Date.parse(stuck.since)
-          : Number.NaN;
-      if (Number.isNaN(stuckSince)) {
-        stuck = { signature: candidate.signature, since: new Date().toISOString() };
-      } else if (Date.now() - stuckSince >= UNREADABLE_SIGNATURE_GIVE_UP_MS) {
-        logEvent("warn", {
-          event: "payment_requests.signature_unreadable",
-          payment_request_id: row.id,
-          signature: candidate.signature,
-          reason: verdict.reason,
-        });
-        verdict = { kind: "rejected" };
-        stuck = NOT_STUCK;
-      }
+      const tracked = trackUnreadableCandidate(row, candidate, verdict.reason, stuck);
+      stuck = tracked.stuck;
+      agedUnresolved = tracked.aged;
     } else if (verdict.kind !== "retry" && candidate.signature === stuck.signature) {
       stuck = NOT_STUCK;
     }
     switch (verdict.kind) {
       case "paid":
-        return { cursor, exhausted: false, found: verdict.found, stuck: NOT_STUCK };
+        return {
+          cursor,
+          exhausted: false,
+          found: verdict.found,
+          stuck: NOT_STUCK,
+          agedUnresolved: false,
+        };
       case "retry":
         contiguous = false;
         break;
@@ -402,7 +439,13 @@ async function evaluateOldestFirst(
       }
     }
   }
-  return { cursor, exhausted: contiguous, found: null, stuck };
+  return {
+    cursor,
+    exhausted: contiguous,
+    found: null,
+    stuck,
+    agedUnresolved,
+  };
 }
 
 async function judgeCandidate(
@@ -425,6 +468,9 @@ async function judgeCandidate(
   try {
     validated = await validatePaymentRequestTransfer(candidate.signature, expected);
   } catch (err) {
+    if (isSolanaError(err, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION)) {
+      return { kind: "retry", reason: "unsupported_transaction_version" };
+    }
     if (!(err instanceof ValidateTransferError)) {
       throw err;
     }

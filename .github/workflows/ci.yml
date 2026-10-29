@@ -111,6 +111,9 @@ jobs:
       - name: Check module boundaries
         run: pnpm check:module-boundaries
 
+      - name: Check transaction read versions
+        run: pnpm check:transaction-reads
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
