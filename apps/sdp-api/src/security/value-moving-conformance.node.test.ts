@@ -80,7 +80,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/services/payments/recurring-payments/collection.ts",
       section: "export async function collectRecurringPayment",
       before: "await input.admitStart();",
-      after: "const sourceSigner = await createOrgSignerForCustodyWallet(",
+      after: 'const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(',
     },
     replay: [
       {

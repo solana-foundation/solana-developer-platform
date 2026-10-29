@@ -49,16 +49,18 @@ function base64AccountInfoResult(params: {
   owner: Address;
   data: ReadonlyUint8Array;
 }): JsonRpcResult {
+  return { context: { slot: 1 }, value: base64AccountValue(params) };
+}
+
+/** One base64 account as `getAccountInfo` and `getMultipleAccounts` serve it. */
+function base64AccountValue(params: { owner: Address; data: ReadonlyUint8Array }) {
   return {
-    context: { slot: 1 },
-    value: {
-      data: [getBase64Decoder().decode(params.data), "base64"],
-      executable: false,
-      lamports: 1_461_600,
-      owner: params.owner,
-      rentEpoch: 0,
-      space: params.data.length,
-    },
+    data: [getBase64Decoder().decode(params.data), "base64"],
+    executable: false,
+    lamports: 1_461_600,
+    owner: params.owner,
+    rentEpoch: 0,
+    space: params.data.length,
   };
 }
 
@@ -92,8 +94,12 @@ export function scaledUiAmountConfig(scale: {
  * @returns The JSON-RPC `result` to pass to `answer("getAccountInfo", …)`.
  */
 export function mintAccountInfoResult(mint: StubMint | LegacyStubMint): JsonRpcResult {
+  return { context: { slot: 1 }, value: mintAccountValue(mint) };
+}
+
+function mintAccountValue(mint: StubMint | LegacyStubMint) {
   if ("tokenProgram" in mint) {
-    return base64AccountInfoResult({
+    return base64AccountValue({
       owner: mint.tokenProgram,
       data: getLegacyMintEncoder().encode({
         mintAuthority: none(),
@@ -104,7 +110,7 @@ export function mintAccountInfoResult(mint: StubMint | LegacyStubMint): JsonRpcR
       }),
     });
   }
-  return base64AccountInfoResult({
+  return base64AccountValue({
     owner: TOKEN_2022_PROGRAM_ADDRESS,
     data: getMintEncoder().encode({
       mintAuthority: none(),
@@ -158,6 +164,40 @@ export function respondMintAccounts(
     return {
       result:
         mint === undefined ? { context: { slot: 1 }, value: null } : mintAccountInfoResult(mint),
+    };
+  });
+}
+
+/**
+ * Answer every `getMultipleAccounts` of the current test address by address: each of `mints` as
+ * its mint, each of `missing` as no account, and any other address as a token account owned by
+ * `tokenProgram` (its data is not read).
+ *
+ * @param rpc - The suite's cluster RPC responder.
+ * @param params.tokenProgram - The program that owns every other address.
+ * @param params.mints - The mints the cluster holds, by address.
+ * @param params.missing - Addresses that hold no account.
+ */
+export function respondTokenAccounts(
+  rpc: ClusterRpcResponder,
+  params: {
+    tokenProgram: Address;
+    mints?: ReadonlyMap<string, StubMint | LegacyStubMint>;
+    missing?: ReadonlySet<string>;
+  }
+): void {
+  rpc.respond("getMultipleAccounts", (request) => {
+    const addresses = z.array(z.string()).parse(request.params[0]);
+    return {
+      result: {
+        context: { slot: 1 },
+        value: addresses.map((accountAddress) => {
+          if (params.missing?.has(accountAddress)) return null;
+          const mint = params.mints?.get(accountAddress);
+          if (mint !== undefined) return mintAccountValue(mint);
+          return base64AccountValue({ owner: params.tokenProgram, data: new Uint8Array(165) });
+        }),
+      },
     };
   });
 }

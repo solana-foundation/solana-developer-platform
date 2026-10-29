@@ -13,6 +13,7 @@ import {
   type SponsorshipFeePayment,
 } from "@/services/sponsorship.service";
 import { executeChunk } from "./execute";
+import { readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -45,14 +46,14 @@ export async function prepareBatchChunks(
   resolved: ResolvedBatchRequest,
   maxRecipientsPerTransaction: number | undefined
 ): Promise<PreparedBatchChunks> {
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"payments">(
     c.env,
     resolveRequestSponsorshipScope(c),
     "payments.transfer_batch",
     { custodyWalletId: resolved.sourceWallet.id }
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet<"payments">(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,
@@ -72,11 +73,17 @@ export async function prepareBatchChunks(
     sourceSigner: signer,
     feePayer,
   });
+  const sponsoredRent = await readSponsoredRentLimit({
+    groups,
+    tokenContext: resolved.tokenContext,
+    readConfiguration: () => feePayment.getSponsorshipConfiguration(),
+  });
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner: signer,
     feePayer,
     lifetime,
+    sponsoredRent,
     maxRecipientsPerTransaction:
       maxRecipientsPerTransaction === undefined
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION

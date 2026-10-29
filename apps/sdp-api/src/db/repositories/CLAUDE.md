@@ -17,7 +17,6 @@ The mechanism-split predecessors
 longer have writers, and their code is retired.
 
 Things that will bite:
-
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
   never from the caller.** Terminal regression is unrepresentable rather than
   merely refused. The guard is applied as a compare-and-swap in the same
@@ -125,11 +124,25 @@ Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
 
+## Payment requests: unresolved signatures stay in the late watch
+
+The payment-request scan keeps `signature_scan_cursor` behind an unreadable
+candidate while `signature_scan_progress` tracks newer signatures already
+checked. `signature_scan_cycle_had_retry` survives verification-budget and
+pagination pauses. A full pass resets progress so unreadable signatures get
+another chance. An expired request can close after one hour, but it retains
+`signature_scan_stuck_signature`. The late-payment watch must continue checking
+such closed requests past its normal seven-day window so a recovered chain read
+can still settle them. Migration 0190 indexes that exception; migration 0191
+adds scan progress. Do not move the safe cursor past an unreadable candidate or
+drop the late-watch exception without another recovery path. A found payment
+does not advance the scan before settlement; the paid transition clears the
+stuck marker in the same transaction that records the inbound transfer.
+
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
 status change, with its source statuses, target and ramp types (HOO-2033).
-
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
   compare-and-swap on status and type, so an illegal source matches zero rows,
@@ -179,7 +192,6 @@ status change, with its source statuses, target and ramp types (HOO-2033).
 ## Ramps: status pull queue
 
 The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).
-
 - **One claim per row.** `claimRampTransferForStatusPull` selects and stamps
   `provider_status_last_polled_at` in one statement (`FOR UPDATE SKIP
   LOCKED`), so overlapping sweeps never ask about the same row. It leaves
@@ -222,7 +234,6 @@ deposit signature untouched, and withdraws the instruction for review.
 
 A removed ramp provider's id moves from `RAMP_PROVIDERS` to
 `RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
-
 - **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
   schema and the `ramp_webhook_events` row parse `provider` against
   `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id

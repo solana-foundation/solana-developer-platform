@@ -123,7 +123,11 @@ export function assertRequiredEnv(env: Env): void {
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
   assertSdpReleaseChannelConfigured(env);
-  assertKoraConfigured(env);
+  // Stage and prod run ENVIRONMENT=production on Cloud Run, where Kora admits only IAM
+  // invokers; dev, local and self-hosted reach Kora without an identity token.
+  assertKoraConfigured(env, {
+    requireCloudRunAudience: env.ENVIRONMENT === "production" && !isSelfHostedDeployment(env),
+  });
   if (!isSelfHostedDeployment(env)) {
     assertManagedRpcConfigured();
   }

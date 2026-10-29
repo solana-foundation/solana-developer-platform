@@ -103,6 +103,10 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
+### Token account rent per transaction
+
+SDP funds the rent of each recipient token account a token batch creates, up to a per-transaction limit, so a chunk carries only as many recipients without a token account as that limit covers. Recipients whose token accounts already exist are packed by count and size alone. The estimate's `transactionCount` is the number create submits. A recipient whose token account alone costs more than the limit is refused with `409 SPONSORED_RENT_OVER_CAP` (`details.recipientIndex`) before anything is written or sent; create that recipient's token account first.
+
 ## Paying recipients one transfer at a time
 
 For destinations that are not registered counterparty accounts, a run can send one transfer per recipient instead of a batch. A typical pattern:

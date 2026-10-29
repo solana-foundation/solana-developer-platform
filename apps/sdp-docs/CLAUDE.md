@@ -229,10 +229,28 @@ Swagger UI for their own release channel.
   dashboard playground sections from it into
   `packages/sdp-api-catalog/src/generated/playground-catalog.json`. That smaller
   artifact is the dashboard proxy's allowlist, so the move adds no callable
-  routes.
+  routes. It also drives `Run in dashboard` on operation pages
+  (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
+  The link carries the generated endpoint ID through sign-in and project
+  selection and opens a new tab; the dashboard resolves it to a curated form
+  when their IDs differ.
+  `vercel.json` pairs the docs project with `sdp-web`; `dashboard-url.ts` uses
+  `VERCEL_RELATED_PROJECTS` and `VERCEL_ENV` to link to the same branch's web
+  preview. A preview without pairing hides the action. Production falls back to
+  the canonical platform origin, and local development uses `localhost:3000`.
+  Malformed configured URLs fail the build.
 - `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`, sending an `Idempotency-Key` only where the route declares one) and an example per status. Under Responses, each JSON body's fields nest under its status, written by the request body's field renderer; a status whose fields an earlier status already lists (most errors share one envelope) says "Same fields as `400`." instead. The envelope's `code` lists no values: the document's list names held modules' codes on every channel, so the builder drops it, as Conventions > Errors names only the common ones. The generator fails if a table misses an operation or a page misses a sample.
 - A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
-- The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in a code span (search gets the same text) and unwraps the wrappers to their content: `<ApiOperationTable>` also points each row at its operation's `.md`, while `<ActionLinks>` (a page's action links as chips, the Postman download), `<ApiOperation>` and `<ApiPanel>` only lay a page out. A new reference component needs both forms. `check:links` accepts a page's `.md`, and `generate-ai-resources.ts` reads a family folder's index as its first page and names a group's section after its family (`Payments: Transfers`).
+- Reference content is Markdown, so `.md`, `llms-full.txt` and search carry
+  its text. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in
+  a code span (search gets the same text); the dashboard action appears only
+  in the browser. It unwraps the wrappers to their content:
+  `<ApiOperationTable>` also points each row at its operation's `.md`, while
+  `<ActionLinks>` (a page's action links as chips, the Postman download),
+  `<ApiOperation>` and `<ApiPanel>` only lay a page out. A new reference
+  component needs both forms. `check:links` accepts a page's `.md`, and
+  `generate-ai-resources.ts` reads a family folder's index as its first page
+  and names a group's section after its family (`Payments: Transfers`).
 - On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
 - On an operation page, `apiReference: true` makes the page full width with no table of contents and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`). Each sample is a box whose code scrolls inside it. From 1280px its `<ApiPanel>` (the samples and example responses) sits beside the body; on a window at least 750px tall it stays in view, sized to the window, and never scrolls itself: the last box (the example responses) takes the height left, which 750px keeps at 10 lines or more. Below, it follows the body.
 

@@ -141,7 +141,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
     { timeout: 240_000 },
     async (side) => {
       const api = requestWithApiKey();
-      const signer = await createOrgSignerForCustodyWallet(
+      const signer = await createOrgSignerForCustodyWallet<"issuance">(
         env as ApiTestEnv,
         TEST_ORG.id,
         TEST_PROJECT.id,

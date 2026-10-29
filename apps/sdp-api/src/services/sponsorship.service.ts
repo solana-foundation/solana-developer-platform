@@ -1,7 +1,8 @@
 import { createKoraAdapter, resolveKoraEndpoint } from "@sdp/fee-payment";
 import type { FeePaymentPort, SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementId, WaistMovement } from "@sdp/types/movements";
+import type { SdpModule } from "@sdp/types/release-channels";
 import type { Address, Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
@@ -16,7 +17,7 @@ import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./spon
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
-type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
+type SponsorshipActorType = "api_key" | "payment_request" | "project" | "user" | "wallet";
 
 /**
  * Who is sponsored. The environment and cluster are not here: the sponsor reads them from the open
@@ -161,16 +162,17 @@ function instrumentedAdapter(env: Env, userId: string): FeePaymentPort {
  *
  * @param env - API environment for provider, database and Redis access.
  * @param scope - Who is sponsored.
- * @param movement - The movement the sponsored transaction serves.
+ * @param movement - The movement the sponsored transaction serves, one of the calling module's
+ *   (HOO-2098).
  * @param subject - The custody wallet that signs the sponsored transaction, decided against the
  *   principal's wallet scope on every sponsor signature; null only when no custody wallet signs it
  *   (`/pay`).
  * @returns The sponsor.
  */
-export function createSponsorshipFeePayment(
+export function createSponsorshipFeePayment<Module extends SdpModule = never>(
   env: Env,
   scope: SponsorshipScope,
-  movement: MovementId,
+  movement: WaistMovement<Module>,
   subject: MoneyAdmissionSubject
 ): SponsorshipFeePayment {
   const admitted: SponsorshipMovementScope = {
