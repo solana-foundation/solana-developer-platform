@@ -17,7 +17,7 @@ import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./spon
 import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
 import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
 
-type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
+type SponsorshipActorType = "api_key" | "payment_request" | "project" | "user" | "wallet";
 
 /**
  * Who is sponsored. The environment and cluster are not here: the sponsor reads them from the open
