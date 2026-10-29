@@ -17,7 +17,7 @@ import {
   dvpToastAction,
 } from "@/app/dashboard/[projectId]/markets/dvp/dvp-action-toast";
 import { freshDvpIdempotencyKey } from "@/app/dashboard/[projectId]/markets/dvp/dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
+import { dvpFailureMessage } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -126,12 +126,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // Status before body. A non-2xx response carries an error envelope, not
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
-        const failure = dvpErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
-        setError(
-          failure.success
-            ? failure.data.error.message
-            : t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) })
-        );
+        setError(dvpFailureMessage(await response.json().catch(() => null), response.status, t));
         return;
       }
 

@@ -3,7 +3,7 @@ import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnVaultPositionsRead } from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
-import type { VaultActivity } from "./treasury-vault-balance";
+import type { VaultActivity, VaultMovementStatus } from "./treasury-vault-balance";
 import { treasuryRefreshRetryDelay, useTreasuryBalances } from "./use-treasury-balances";
 
 const mocks = vi.hoisted(() => ({
@@ -43,7 +43,7 @@ const position: EarnVaultPosition = {
   shares: "10",
   feeSponsored: false,
 };
-const movement = (status: string): VaultActivity => ({
+const movement = (status: VaultMovementStatus): VaultActivity => ({
   kind: "deposit",
   movement: {
     movementId: "movement",

@@ -471,7 +471,11 @@ function resolveWalletCoverage({
 
   for (const wallet of wallets) {
     const held = heldVaultShareMints(wallet, shareMints.known);
-    const open = openByPublicKey?.get(wallet.publicKey) ?? (openByPublicKey && []);
+    // `undefined` means the whole positions witness is missing (no map at
+    // all); an empty array means this wallet simply has none — a distinction
+    // `walletDeploymentLine` renders differently.
+    const open =
+      openByPublicKey === undefined ? undefined : (openByPublicKey.get(wallet.publicKey) ?? []);
     const recorded = new Set((open ?? []).map((position) => position.shareMint));
     const uncovered = held?.filter((mint) => !recorded.has(mint)) ?? [];
 

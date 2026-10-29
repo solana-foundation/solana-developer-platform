@@ -1,7 +1,21 @@
-import type { EarnVaultPosition } from "@sdp/types/earn";
+import type {
+  EarnVaultDirectMovementStatus,
+  EarnVaultMovementStatus,
+  EarnVaultPosition,
+} from "@sdp/types/earn";
+import { EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES } from "@sdp/types/earn";
 import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 
 type VaultMovementKind = "deposit" | "withdrawal";
+
+/**
+ * Every status a tracked vault movement can report, across the two wire
+ * vocabularies a watch list sees: the legacy deposit one (`pending`) and the
+ * unified vault-direct one (`requested`). Typed, not a bare `string`, so a
+ * typo'd status here is a compile error rather than a check that never
+ * matches.
+ */
+export type VaultMovementStatus = EarnVaultMovementStatus | EarnVaultDirectMovementStatus;
 
 export interface VaultPositionsRead {
   startedAt: number;
@@ -21,7 +35,7 @@ export interface VaultMovementBalanceState {
 export type TrackedVaultMovement = VaultMovementBalanceState & {
   movementId: string;
   positionId: string;
-  status: string;
+  status: VaultMovementStatus;
 };
 
 export interface VaultActivity<Movement extends TrackedVaultMovement = TrackedVaultMovement> {
@@ -29,8 +43,29 @@ export interface VaultActivity<Movement extends TrackedVaultMovement = TrackedVa
   movement: Movement;
 }
 
+/**
+ * The chain has committed the movement's transaction, so the balance may be
+ * re-read. The landed statuses are the shared vocabulary's own list — spelled
+ * there once, because "the chain answered" is a fact, not a per-surface guess.
+ */
+const COMMITTED_VAULT_MOVEMENT_STATUSES: ReadonlySet<VaultMovementStatus> = new Set(
+  EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES
+);
+
+/**
+ * A movement the chain has not (yet) reported on: the balance must not read as
+ * settled. `pending` and `requested` are the same fact in the legacy and
+ * unified vocabularies; `submitted` is on the wire in both, awaiting the
+ * chain's answer.
+ */
+const UNCONFIRMED_VAULT_MOVEMENT_STATUSES: ReadonlySet<VaultMovementStatus> = new Set([
+  "pending",
+  "requested",
+  "submitted",
+]);
+
 export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "status">): boolean {
-  return movement.status === "confirmed" || movement.status === "finalized";
+  return COMMITTED_VAULT_MOVEMENT_STATUSES.has(movement.status);
 }
 
 export function hasUnconfirmedVaultMovement(
@@ -40,7 +75,7 @@ export function hasUnconfirmedVaultMovement(
   return activities.some(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
-      ["pending", "requested", "submitted"].includes(movement.status)
+      UNCONFIRMED_VAULT_MOVEMENT_STATUSES.has(movement.status)
   );
 }
 

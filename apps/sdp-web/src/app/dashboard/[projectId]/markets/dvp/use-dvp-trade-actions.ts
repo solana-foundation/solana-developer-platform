@@ -31,7 +31,7 @@ import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "./dvp-trade";
+import { type DvpActionWallet, dvpErrorEnvelopeSchema, dvpFailureMessage } from "./dvp-trade";
 
 type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -199,6 +199,36 @@ function successOf(
     : null;
 }
 
+/**
+ * One leg's fund decision, shared by the inbound row and the detail card:
+ * the pending key, the disabled state and the guarded `act` call are written
+ * once so the two surfaces cannot drift on when funding may run. Presentation
+ * — variant, size, spinner, labels — stays with each surface.
+ *
+ * A custody wallet that cannot run executions is never asked to: the guard is
+ * the same strict `=== true` the disabled state shows.
+ */
+export function dvpFundLegAction(
+  act: DvpTradeActions["act"],
+  pending: DvpTradeActions["pending"],
+  leg: {
+    side: DvpTradeSide;
+    symbol: string | null;
+    wallet: DvpActionWallet | null | undefined;
+  }
+): { fund: () => void; funding: boolean; unavailable: boolean } {
+  const unavailable = leg.wallet?.isRuntimeExecutionAllowed !== true;
+  return {
+    fund: () => {
+      if (leg.wallet?.isRuntimeExecutionAllowed === true) {
+        void act("fund", { side: leg.side, walletId: leg.wallet.id, symbol: leg.symbol });
+      }
+    },
+    funding: pending.has(`fund:${leg.side}`),
+    unavailable,
+  };
+}
+
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
   const router = useRouter();
   const t = useTranslations();
@@ -208,7 +238,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
   function refusalMessage(body: unknown, status: number, symbol: string | null): string {
     const envelope = dvpErrorEnvelopeSchema.safeParse(body);
     if (!envelope.success) {
-      return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
+      return dvpFailureMessage(body, status, t);
     }
     const reasonCode = envelope.data.error.details?.reason;
     const legReason = legRefusalReasonSchema.safeParse(reasonCode);

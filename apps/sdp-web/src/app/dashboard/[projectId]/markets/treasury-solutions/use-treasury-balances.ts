@@ -93,7 +93,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       }
       try {
         const ids = [...request.movementIds];
-        const positionRead = Promise.resolve(
+        const positionRead =
           ids.length > 100
             ? vaults.refresh(
                 ids,
@@ -104,8 +104,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
                   ])
                 )
               )
-            : vaults.refresh(ids.length > 0 ? ids : undefined)
-        );
+            : vaults.refresh(ids.length > 0 ? ids : undefined);
         const results = await Promise.allSettled([
           positionRead,
           positionRead.then((read) => {

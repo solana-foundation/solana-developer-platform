@@ -26,7 +26,7 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AddressWithCopy } from "./dvp-party-cell";
 import { type DvpPartyRef, dvpTimestampToIso, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
-import { useDvpTradeActions } from "./use-dvp-trade-actions";
+import { dvpFundLegAction, useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /** One leg, in the same shape the rest of the table uses. */
 function InboundLegCell({ leg, yours }: { leg: DvpInboundLeg; yours: boolean }) {
@@ -79,7 +79,7 @@ function InboundFundAction({
   const canWrite = useCanWrite();
   const wallet = party.actionWallet;
   const shownWallet = wallet ?? party.wallet;
-  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
+  const { fund, funding, unavailable } = dvpFundLegAction(act, pending, { side, symbol, wallet });
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
@@ -99,19 +99,17 @@ function InboundFundAction({
         <Button
           // A transfer into a frozen escrow bounces, so offering to send one is
           // offering to waste a signature and a fee.
-          disabled={unavailable || frozen || pending.has(`fund:${side}`)}
-          onClick={() => {
-            if (wallet?.isRuntimeExecutionAllowed === true) {
-              void act("fund", { side, walletId: wallet.id, symbol });
-            }
-          }}
+          disabled={unavailable || frozen || funding}
+          onClick={fund}
           size="sm"
           type="button"
           variant="secondary"
         >
-          {pending.has(`fund:${side}`)
-            ? t("DashboardMarkets.dvp.inboundFunding")
-            : t("DashboardMarkets.dvp.inboundFundAction")}
+          {t(
+            funding
+              ? "DashboardMarkets.dvp.inboundFunding"
+              : "DashboardMarkets.dvp.inboundFundAction"
+          )}
         </Button>
       ) : null}
     </span>

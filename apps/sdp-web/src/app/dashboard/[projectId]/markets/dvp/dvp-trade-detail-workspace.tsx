@@ -56,7 +56,7 @@ import {
   legTransfers,
   overFundedLegs,
 } from "./dvp-trade";
-import { useDvpTradeActions } from "./use-dvp-trade-actions";
+import { dvpFundLegAction, useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /**
  * An address with a copy affordance.
@@ -1003,19 +1003,19 @@ export function DvpTradeDetailWorkspace({
       return undefined;
     }
     const wallet = trade.legs[side].party.actionWallet;
-    const funding = pending.has(`fund:${side}`);
+    const { fund, funding, unavailable } = dvpFundLegAction(act, pending, {
+      side,
+      symbol: trade.legs[side].symbol,
+      wallet,
+    });
     /* Clicked, not held. Funding moves your leg into the trade's own escrow,
        which is a step forward rather than something to walk back; hold is
        reserved for destroying something (HOO-1230). */
     return (
       <Button
-        disabled={funding || wallet?.isRuntimeExecutionAllowed !== true}
+        disabled={funding || unavailable}
         iconLeft={funding ? <Loader2Icon aria-hidden className="animate-spin" /> : undefined}
-        onClick={() => {
-          if (wallet?.isRuntimeExecutionAllowed === true) {
-            void act("fund", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
-          }
-        }}
+        onClick={fund}
         type="button"
       >
         {t(funding ? "DashboardMarkets.dvp.actionFunding" : "DashboardMarkets.dvp.actionFund")}

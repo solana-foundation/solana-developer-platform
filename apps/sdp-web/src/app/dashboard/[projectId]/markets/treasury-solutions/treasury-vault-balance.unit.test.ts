@@ -4,6 +4,7 @@ import {
   observeVaultMovementCommit,
   pendingVaultBalanceReads,
   type VaultActivity,
+  type VaultMovementStatus,
   type VaultPositionsRead,
 } from "./treasury-vault-balance";
 
@@ -143,7 +144,7 @@ describe("Treasury confirmed balances", () => {
   it("does not refresh forever when finality follows the same confirmation", () => {
     const submitted = {
       ...activity().movement,
-      status: "submitted",
+      status: "submitted" as VaultMovementStatus,
       committedObservedAt: undefined,
     };
     expect(observeVaultMovementCommit(submitted, 10)).toBe(submitted);

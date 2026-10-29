@@ -7,6 +7,7 @@
  * without scrolling past the other seven.
  */
 
+import { decimalScale } from "@sdp/solana/amount";
 import { cn } from "@sdp/ui/cn";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
@@ -194,12 +195,6 @@ function amountHintKey(
   return null;
 }
 
-/** Whether the text carries more fraction digits than the mint can represent. */
-function exceedsScale(value: string, decimals: number): boolean {
-  const fraction = value.split(".")[1];
-  return fraction !== undefined && fraction.length > decimals;
-}
-
 export function AmountField({
   decimals,
   disabled,
@@ -241,13 +236,14 @@ export function AmountField({
         size="xl"
         // Enforced at the keystroke: anything but digits and one dot never
         // lands, and neither does a digit the mint cannot represent — which
-        // is what makes the "N decimals" explainer hint unnecessary.
+        // is what makes the "N decimals" explainer hint unnecessary. The
+        // scale check is the same one `toBaseUnits` refuses at submit time.
         onChange={(event) => {
           const next = event.target.value;
           if (!/^\d*(?:\.\d*)?$/.test(next)) {
             return;
           }
-          if (decimals !== null && exceedsScale(next, decimals)) {
+          if (decimals !== null && decimalScale(next) > decimals) {
             return;
           }
           onChange(next);

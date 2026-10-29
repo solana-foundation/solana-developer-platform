@@ -15,6 +15,8 @@ import {
   type DvpTradeStatus,
 } from "@sdp/types/dvp";
 import { z } from "zod";
+import type { MessageKey } from "@/i18n/messages";
+import type { TranslationValues } from "@/i18n/translate";
 
 /**
  * The caller's standing on a trade, derived per caller by the API.
@@ -40,7 +42,7 @@ export const dvpActionWalletSchema = z.object({
   isRuntimeExecutionAllowed: z.boolean(),
 });
 
-type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
+export type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
 
 /**
  * A DvP endpoint's refusal envelope. Only the message — and, when the refusal
@@ -53,6 +55,23 @@ export const dvpErrorEnvelopeSchema = z.object({
     details: z.object({ reason: z.string() }).partial().optional(),
   }),
 });
+
+/**
+ * The message for a failed DvP action: the API's own message when the error
+ * envelope reads, else generic copy naming the HTTP status. Both action flows
+ * that surface a DvP failure — the trade actions and the create submit —
+ * answer with this, so an unreadable body says the same thing everywhere.
+ */
+export function dvpFailureMessage(
+  body: unknown,
+  status: number,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): string {
+  const envelope = dvpErrorEnvelopeSchema.safeParse(body);
+  return envelope.success
+    ? envelope.data.error.message
+    : t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
+}
 
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
