@@ -322,8 +322,8 @@ describe("vault execution validation", () => {
       })
     ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
 
-    // A mismatch is never cached, so each path re-probed, and nothing else left SDP.
-    expect(methods).toEqual(["getGenesisHash", "getGenesisHash", "getGenesisHash"]);
+    // The first path probed and cached the mismatch for the cooldown; nothing else left SDP.
+    expect(methods).toEqual(["getGenesisHash"]);
     expect(simulateSend).not.toHaveBeenCalled();
   });
 

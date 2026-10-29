@@ -46,10 +46,23 @@ const genesisProofExpiry = new Map<string, number>();
 const genesisProbes = new Map<string, Promise<void>>();
 
 /**
+ * `<cluster> <endpointUrl>` to a genesis mismatch and when it expires, so an endpoint serving another
+ * cluster is probed once per `ENDPOINT_COOLDOWN_MS`, not on every request.
+ */
+const genesisMismatches = new Map<string, { error: RpcUnavailableError; expiresAt: number }>();
+
+/**
  * How long an endpoint that failed or reported itself unhealthy stays at the back of its pool's order, so
  * requests return to the preferred provider once it recovers.
  */
 const ENDPOINT_COOLDOWN_MS = 30_000;
+
+/**
+ * The deadline for one request's whole walk across its pool, genesis probes included: one full
+ * attempt deadline (`DEFAULT_RPC_REQUEST_TIMEOUT_MS`, 30 s) plus 15 s to fail over once, so a request never waits an attempt deadline per
+ * endpoint.
+ */
+export const POOL_WALK_TIMEOUT_MS = 45_000;
 
 /** One family of pooled clients: they share failover and cooldown state only with each other. */
 interface PoolMemo {
@@ -130,6 +143,9 @@ function proveGenesis(
   cluster: SolanaCluster,
   genesisProofKey: string
 ): Promise<void> {
+  const mismatch = genesisMismatches.get(genesisProofKey);
+  if (mismatch !== undefined && mismatch.expiresAt > Date.now())
+    return Promise.reject(mismatch.error);
   const probeInFlight = genesisProbes.get(genesisProofKey);
   if (probeInFlight) return probeInFlight;
   const probe = (async () => {
@@ -139,12 +155,18 @@ function proveGenesis(
       .getGenesisHash()
       .send();
     if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
-      throw new RpcUnavailableError(
+      const error = new RpcUnavailableError(
         "cluster_mismatch",
         `An RPC endpoint configured for ${cluster} serves a different cluster`,
         { cluster, genesisHash: servedGenesisHash }
       );
+      genesisMismatches.set(genesisProofKey, {
+        error,
+        expiresAt: Date.now() + ENDPOINT_COOLDOWN_MS,
+      });
+      throw error;
     }
+    genesisMismatches.delete(genesisProofKey);
     genesisProofExpiry.set(genesisProofKey, Date.now() + GENESIS_PROOF_TTL_MS);
   })().finally(() => genesisProbes.delete(genesisProofKey));
   genesisProbes.set(genesisProofKey, probe);
@@ -154,9 +176,10 @@ function proveGenesis(
 /**
  * Wrap one endpoint's transport so it proves the endpoint serves `cluster` before the first
  * request and again once the previous proof is older than `GENESIS_PROOF_TTL_MS`.
- * A probe network error propagates as an ordinary transport failure (failover may hop);
- * a mismatch throws a non-transient error, so failover and retries stop on it. A caller whose
- * signal aborts while the probe runs stops waiting; the probe continues for other callers.
+ * A failed probe or a mismatch means the request was never sent, so the pool may hop to the next
+ * endpoint, even for `sendTransaction`; a mismatch is remembered for `ENDPOINT_COOLDOWN_MS` and
+ * stays non-transient, so retries stop on it once no endpoint is left. A caller whose signal
+ * aborts while the probe runs stops waiting; the probe continues for other callers.
  *
  * @param endpointTransport - The raw transport for `endpointUrl`.
  * @param cluster - The cluster the endpoint is configured for.
@@ -178,17 +201,23 @@ function withGenesisGuard(
           rpcRequest.signal
         );
       } catch (cause) {
-        if (rpcRequest.signal?.aborted || !isTransientRpcError(cause)) throw cause;
-        throw new UnsentRequestError(cause);
+        if (rpcRequest.signal?.aborted) throw cause;
+        if (isTransientRpcError(cause) || isClusterMismatch(cause))
+          throw new UnsentRequestError(cause);
+        throw cause;
       }
     }
     return await endpointTransport<TResponse>(rpcRequest);
   };
 }
 
+function isClusterMismatch(error: unknown): boolean {
+  return error instanceof RpcUnavailableError && error.reason === "cluster_mismatch";
+}
+
 /**
- * A transient failure that happened before the request left SDP (the genesis probe failed), so
- * the pool may try another endpoint even for `sendTransaction`.
+ * A failure that happened before the request left SDP (the genesis probe failed or found another
+ * cluster), so the pool may try another endpoint even for `sendTransaction`.
  */
 class UnsentRequestError extends Error {
   constructor(public readonly cause: unknown) {
@@ -244,6 +273,7 @@ function servedJsonRpcError(response: unknown) {
  * | ------------------------------------------ | -------- | -------- |
  * | Caller aborted                             | no       | no       |
  * | Never sent (`UnsentRequestError`)          | yes      | yes      |
+ * | Provider refused the key (HTTP 401/403)    | yes      | yes      |
  * | `requestAirdrop` got HTTP 429              | no       | yes      |
  * | Read threw a transient error               | yes      | yes      |
  * | `sendTransaction` threw a transient error  | yes      | no       |
@@ -255,7 +285,9 @@ function servedJsonRpcError(response: unknown) {
  * | Read answered anything else                | no       | no       |
  *
  * A send stops once it left SDP: the failure may arrive after the leader got the transaction, and
- * resubmitting is the send primitive's decision. Only "node unhealthy" cools a node down; the other
+ * resubmitting is the send primitive's decision. A 401 or 403 is the provider's gateway refusing
+ * SDP's key before any node saw the request, so even a send moves on, and the endpoint cools down
+ * because the key fails every request until it is replaced. Only "node unhealthy" cools a node down; the other
  * `failover` codes in `TRANSIENT_JSON_RPC_ERROR_VERDICTS` (behind the caller's `minContextSlot`,
  * missing history or block status) are about this request, not the node, and a cooldown applies to
  * every request on the cluster. An airdrop the node answered with an error did not happen, so the next provider's
@@ -275,13 +307,12 @@ function judgeAttempt<TResponse>(
   if (!outcome.ok) {
     if (rpcRequest.signal?.aborted) return { cooldown: false, tryNext: false };
     if (outcome.cause instanceof UnsentRequestError) return { cooldown: true, tryNext: true };
-    if (
-      method === "requestAirdrop" &&
-      isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
-      outcome.cause.context.statusCode === 429
-    ) {
+    const statusCode = isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+      ? outcome.cause.context.statusCode
+      : null;
+    if (statusCode === 401 || statusCode === 403) return { cooldown: true, tryNext: true };
+    if (method === "requestAirdrop" && statusCode === 429)
       return { cooldown: false, tryNext: true };
-    }
     if (!isTransientRpcError(outcome.cause)) return { cooldown: false, tryNext: false };
     return { cooldown: true, tryNext: !isSend };
   }
@@ -758,7 +789,11 @@ function pooledClusterTransport(
       ),
     };
   });
-  const poolTransport = createPoolTransport(endpoints);
+  const poolTransport = withTransportDeadline(
+    createPoolTransport(endpoints),
+    POOL_WALK_TIMEOUT_MS,
+    "attempt"
+  );
   memoizedTransports.set(poolKey, poolTransport);
   return { poolKey, poolTransport };
 }

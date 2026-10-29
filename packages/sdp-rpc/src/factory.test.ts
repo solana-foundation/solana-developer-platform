@@ -27,6 +27,7 @@ import {
   createClusterRpc,
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
+  POOL_WALK_TIMEOUT_MS,
   proveEarnClusterEndpoint,
 } from "./factory";
 import { runInClusterScope } from "./scope";
@@ -377,7 +378,8 @@ describe("createClusterRpc", () => {
     });
   });
 
-  it("rejects a cluster mismatch without failing over", async () => {
+  it("fails a cluster mismatch over, cools it down and probes it once per cooldown", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 2_000_000 });
     const wrongCluster = "https://devnet-mismatch-a.example.test";
     const healthy = "https://devnet-mismatch-b.example.test";
     configurePool({
@@ -385,19 +387,100 @@ describe("createClusterRpc", () => {
       SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
     });
     const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: SERVES_DEVNET });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
-    await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), {
-      name: "RpcUnavailableError",
-      message: "An RPC endpoint configured for devnet serves a different cluster",
-      code: "RPC_UNAVAILABLE",
-      statusCode: 503,
-      details: {
-        reason: "cluster_mismatch",
-        cluster: "devnet",
-        genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
-      },
+    for (let request = 0; request < 3; request += 1) {
+      assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    }
+    assert.deepEqual(calls, [
+      genesisProbe(wrongCluster),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+    ]);
+
+    const outage = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: DEVNET_FETCH_FAILS });
+    await assert.rejects(rpc.getSlot().send(), { name: "RpcUnavailableError" });
+    assert.deepEqual(outage, [slotRead(healthy)]);
+
+    mock.timers.tick(30_000);
+    const afterCooldown = stubEndpoints({
+      [wrongCluster]: SERVES_MAINNET,
+      [healthy]: SERVES_DEVNET,
     });
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(afterCooldown, [
+      genesisProbe(wrongCluster),
+      genesisProbe(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("surfaces a cluster mismatch on the last endpoint as cluster_mismatch", async () => {
+    const wrongCluster = "https://devnet-mismatch-only.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: wrongCluster });
+    const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    for (let request = 0; request < 2; request += 1) {
+      await assert.rejects(rpc.getSlot().send(), {
+        name: "RpcUnavailableError",
+        message: "An RPC endpoint configured for devnet serves a different cluster",
+        code: "RPC_UNAVAILABLE",
+        statusCode: 503,
+        details: {
+          reason: "cluster_mismatch",
+          cluster: "devnet",
+          genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+        },
+      });
+    }
     assert.deepEqual(calls, [genesisProbe(wrongCluster)]);
+  });
+
+  it("fails over a provider that refuses its key and skips it while it cools down", async () => {
+    const unauthorized = "https://devnet-unauthorized.example.test";
+    const healthy = "https://devnet-authorized.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: unauthorized,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({
+      [unauthorized]: devnetHttpStatus(401),
+      [healthy]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+
+    assert.deepEqual(calls, [
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("fails sendTransaction over when the provider refuses its key with 403", async () => {
+    const forbidden = "https://devnet-forbidden.example.test";
+    const healthy = "https://devnet-send-authorized.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: forbidden,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({ [forbidden]: devnetHttpStatus(403), [healthy]: SERVES_DEVNET });
+
+    await runInClusterScope(SANDBOX, () =>
+      createClusterRpc().sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send()
+    );
+
+    assert.deepEqual(
+      calls.filter((call) => call.method === "sendTransaction").map((call) => call.url),
+      [forbidden, healthy]
+    );
   });
 
   it("proves an endpoint URL configured for both clusters separately per cluster", async () => {
@@ -1022,6 +1105,50 @@ describe("createClusterRpc with a deadline", () => {
       events.map((event) => event.outcome),
       ["aborted"]
     );
+  });
+
+  it("bounds a whole walk across hanging endpoints by one deadline", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const first = "https://devnet-walk-hang-a.example.test";
+    const second = "https://devnet-walk-hang-b.example.test";
+    const third = "https://devnet-walk-hang-c.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: first,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: second,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: third,
+    });
+    const calls: RpcCall[] = [];
+    const reads: Array<() => void> = [];
+    globalThis.fetch = async (input, init) => {
+      const request = readRequest(input, init);
+      calls.push({ url: request.url, method: request.method });
+      if (request.method === "getGenesisHash") {
+        return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+      }
+      const { signal } = request;
+      assert.ok(signal instanceof AbortSignal);
+      for (const markStarted of reads.splice(0)) markStarted();
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const readStarted = () => new Promise<void>((resolve) => reads.push(resolve));
+
+    let started = readStarted();
+    const slot = runInClusterScope(SANDBOX, createClusterRpc).getSlot().send();
+    await started;
+    started = readStarted();
+    mock.timers.tick(DEFAULT_RPC_REQUEST_TIMEOUT_MS);
+    await started;
+    mock.timers.tick(POOL_WALK_TIMEOUT_MS - DEFAULT_RPC_REQUEST_TIMEOUT_MS);
+
+    await assert.rejects(slot, { name: "RpcTimeoutError" });
+    assert.deepEqual(calls, [
+      genesisProbe(first),
+      slotRead(first),
+      genesisProbe(second),
+      slotRead(second),
+    ]);
   });
 });
 
