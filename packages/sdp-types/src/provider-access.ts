@@ -681,9 +681,9 @@ export type ProjectProviderAvailabilityEntry = z.infer<
 >;
 
 /**
- * Which providers a project can use: every provider the deployment knows, in
- * `ORGANIZATION_PROVIDER_FAMILIES` order and each family's provider tuple order,
- * so a missing provider is never mistaken for an unavailable one.
+ * Which published providers a project can use, in
+ * `ORGANIZATION_PROVIDER_FAMILIES` order and each family's provider tuple order.
+ * Providers outside the deployment's public API are omitted.
  */
 export const projectProviderAvailabilitySchema = z.object({
   projectId: z.string(),

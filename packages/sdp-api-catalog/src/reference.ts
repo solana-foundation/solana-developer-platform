@@ -50,6 +50,11 @@ const scalarSchema = z.union([z.string(), z.number(), z.boolean()]);
 export const apiConstraintSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.enum(API_BOUND_KINDS), value: z.number() }),
   z.object({ kind: z.literal("pattern"), value: z.string() }),
+  /**
+   * `required` names the schema lists no property for, as a variant names its parent's: the
+   * value must include these properties.
+   */
+  z.object({ kind: z.literal("includes"), value: z.array(z.string().min(1)).min(1) }),
   /** `not: { required: [...] }`: the value must leave these properties out. */
   z.object({ kind: z.literal("excludes"), value: z.array(z.string().min(1)).min(1) }),
 ]);
@@ -129,7 +134,8 @@ export const apiRequestBodySchema = z.object({
 export type ApiRequestBody = z.infer<typeof apiRequestBodySchema>;
 
 export const apiResponseBodySchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("json"), example: z.json() }),
+  /** A JSON body: its schema, which names the fields an example can leave out, and an example. */
+  z.object({ kind: z.literal("json"), schema: apiSchemaSchema, example: z.json() }),
   /** No body, as with 204. */
   z.object({ kind: z.literal("empty") }),
 ]);

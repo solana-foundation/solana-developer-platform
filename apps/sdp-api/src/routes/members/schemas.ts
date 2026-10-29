@@ -9,3 +9,7 @@ export const inviteSchema = z.object({
 export const updateMemberRoleSchema = z.object({
   role: z.enum(ORGANIZATION_ROLES),
 });
+
+export const memberParamsSchema = z.object({
+  memberId: z.string().min(1),
+});

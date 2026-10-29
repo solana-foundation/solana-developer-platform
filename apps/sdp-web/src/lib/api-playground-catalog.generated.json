@@ -8232,6 +8232,15 @@
     "deploy": {
       "module": "issuance"
     },
+    "custody": {
+      "module": "custody"
+    },
+    "compliance": {
+      "module": "compliance"
+    },
+    "ramps": {
+      "module": "ramps"
+    },
     "onramp": {
       "module": "ramps"
     },
@@ -8239,9 +8248,6 @@
       "module": "ramps"
     },
     "offramp_channel": {
-      "module": "ramps"
-    },
-    "ramps": {
       "module": "ramps"
     },
     "ramp": {

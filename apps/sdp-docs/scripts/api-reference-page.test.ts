@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
+import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -39,6 +40,65 @@ const ERROR_EXAMPLE = {
   error: { code: "NOT_FOUND", message: "Resource not found" },
   meta: { requestId: "req_example" },
 };
+
+const ERROR_SCHEMA = schema({
+  type: "object",
+  properties: [
+    {
+      name: "error",
+      required: true,
+      schema: schema({
+        type: "object",
+        properties: [
+          { name: "code", required: true, schema: schema({}) },
+          { name: "message", required: true, schema: schema({}) },
+          {
+            name: "details",
+            required: false,
+            schema: schema({
+              type: "object",
+              additionalProperties: schema({ type: null, nullable: true }),
+            }),
+          },
+        ],
+      }),
+    },
+    {
+      name: "meta",
+      required: false,
+      schema: schema({
+        type: "object",
+        properties: [{ name: "requestId", required: true, schema: schema({}) }],
+      }),
+    },
+  ],
+});
+
+const WIDGET_SCHEMA = schema({
+  type: "object",
+  properties: [
+    {
+      name: "data",
+      required: true,
+      schema: schema({
+        type: "object",
+        description: "The widget.",
+        properties: [
+          { name: "id", required: true, schema: schema({ example: "wdg_1" }) },
+          {
+            name: "owner",
+            required: false,
+            schema: schema({
+              type: "object",
+              nullable: true,
+              properties: [{ name: "name", required: true, schema: schema({}) }],
+            }),
+          },
+        ],
+      }),
+    },
+  ],
+});
 
 const CREATE_WIDGET: ApiOperation = {
   operationId: "createWidget",
@@ -106,9 +166,26 @@ const CREATE_WIDGET: ApiOperation = {
     }),
   },
   responses: [
-    { status: "201", description: "Created it", body: { kind: "json", example: { id: "wdg_1" } } },
+    {
+      status: "201",
+      description: "Created it",
+      body: { kind: "json", schema: WIDGET_SCHEMA, example: { data: { id: "wdg_1" } } },
+    },
     { status: "204", description: "No body", body: { kind: "empty" } },
-    { status: "404", description: "Error", body: { kind: "json", example: ERROR_EXAMPLE } },
+    {
+      status: "404",
+      description: "Error",
+      body: { kind: "json", schema: ERROR_SCHEMA, example: ERROR_EXAMPLE },
+    },
+    {
+      status: "409",
+      description: "Error",
+      body: {
+        kind: "json",
+        schema: ERROR_SCHEMA,
+        example: { ...ERROR_EXAMPLE, error: { code: "CONFLICT", message: "Conflict" } },
+      },
+    },
   ],
   request: { path: "/v1/widgets/wdg_1", body: { kind: "round" } },
 };
@@ -119,7 +196,7 @@ describe("renderOperation", () => {
   it("leads with the endpoint, then the description after its first sentence", () => {
     assert.ok(
       markdown.startsWith(
-        '<ApiEndpoint method="POST" path="/v1/widgets/{widgetId}" />\n\nThen it shapes it'
+        '<ApiOperation>\n\n<ApiEndpoint method="POST" path="/v1/widgets/{widgetId}" />\n\nThen it shapes it'
       )
     );
     assert.ok(!markdown.includes("Creates a widget."));
@@ -169,20 +246,145 @@ describe("renderOperation", () => {
   });
 
   it("lists every status, and gives each JSON answer a response tab", () => {
-    assert.ok(
-      markdown.includes("- **`201`** Created it\n- **`204`** No body\n- **`404`** Not Found")
+    const at = ["- **`201`** Created it", "- **`204`** No body", "- **`404`** Not Found"].map(
+      (status) => markdown.indexOf(status)
     );
+    assert.ok(!at.includes(-1), at.join(", "));
+    assert.deepEqual(
+      at,
+      [...at].sort((left, right) => left - right)
+    );
+    assert.ok(markdown.includes("- **`204`** No body\n\n- **`404`** Not Found"));
     for (const tab of [
       'tab="cURL"',
       'tab="TypeScript"',
       'tab="Python"',
       'tab="201"',
       'tab="404"',
+      'tab="409"',
     ]) {
       assert.ok(markdown.includes(tab), tab);
     }
     assert.ok(!markdown.includes('tab="204"'));
     assert.ok(markdown.includes("curl -X POST 'https://api.solana.com/v1/widgets/wdg_1'"));
+  });
+
+  it("nests a JSON response's fields under its status, object in object", () => {
+    assert.ok(
+      markdown.includes(
+        [
+          "- **`201`** Created it",
+          "",
+          "  - **`data`** · `object` · required",
+          "",
+          "    The widget.",
+          "",
+          "    - **`id`** · `string` · required · example `wdg_1`",
+          "",
+          "    - **`owner`** · `object | null`",
+          "",
+          "      - **`name`** · `string` · required",
+          "",
+          "- **`204`** No body",
+        ].join("\n")
+      )
+    );
+    assert.ok(markdown.includes("    - **`details`** · `object`\n\n      - **`*`** · `any`\n"));
+  });
+
+  it("points a status at the first one listing the same fields", () => {
+    assert.ok(markdown.includes("- **`409`** Conflict\n\n  Same fields as `404`."));
+    assert.equal(markdown.match(/\*\*`error`\*\*/g)?.length, 1);
+    // A different example of the same schema changes no field, so it points there too.
+    const [, , notFound] = CREATE_WIDGET.responses;
+    assert.ok(notFound);
+    const page = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        notFound,
+        {
+          status: "503",
+          description: "Error",
+          body: {
+            kind: "json",
+            schema: { ...ERROR_SCHEMA, example: ERROR_EXAMPLE },
+            example: ERROR_EXAMPLE,
+          },
+        },
+      ],
+    });
+    assert.ok(page.includes("- **`503`** Service Unavailable\n\n  Same fields as `404`."));
+  });
+
+  it("lists a oneOf response's variants, an array of them included", () => {
+    const discriminatorProperty = (value: string) => ({
+      name: "kind",
+      required: true,
+      schema: schema({ enum: [value] }),
+    });
+    const page = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        {
+          status: "200",
+          description: "Widgets",
+          body: {
+            kind: "json",
+            schema: schema({
+              type: "object",
+              properties: [
+                {
+                  name: "data",
+                  required: true,
+                  schema: schema({
+                    type: "array",
+                    items: schema({
+                      type: null,
+                      variantMode: "oneOf",
+                      variants: [
+                        {
+                          title: 'kind: "round"',
+                          schema: schema({
+                            type: "object",
+                            properties: [discriminatorProperty("round")],
+                          }),
+                        },
+                        {
+                          title: "A square.",
+                          schema: schema({
+                            type: "object",
+                            constraints: [{ kind: "includes", value: ["side"] }],
+                            properties: [discriminatorProperty("square")],
+                          }),
+                        },
+                      ],
+                    }),
+                  }),
+                },
+              ],
+            }),
+            example: { data: [{ kind: "round" }] },
+          },
+        },
+      ],
+    });
+    assert.ok(
+      page.includes(
+        [
+          "- **`200`** Widgets",
+          "",
+          "  - **`data`** · `object[]` · required",
+          "",
+          "    One of:",
+          "",
+          '    - **kind: "round"**',
+          "",
+          "      - **`kind`** · `string` · required · always `round`",
+          "",
+          "    - **A square.** · must include `side`",
+        ].join("\n")
+      )
+    );
   });
 
   it("samples a public route without a key", () => {
@@ -207,6 +409,30 @@ describe("renderOperation", () => {
   });
 });
 
+describe("the operation's panel", () => {
+  const markdown = renderOperation(CREATE_WIDGET);
+
+  it("holds the samples and example responses, after the responses list", () => {
+    const panel = markdown.slice(markdown.indexOf("<ApiPanel>"), markdown.indexOf("</ApiPanel>"));
+    assert.ok(markdown.indexOf("## Responses") < markdown.indexOf("<ApiPanel>"));
+    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="404"']) {
+      assert.ok(panel.includes(part), part);
+    }
+    // The response fields stay in the body, under Responses.
+    assert.ok(markdown.indexOf("**`data`**") < markdown.indexOf("<ApiPanel>"));
+    assert.ok(!panel.includes("**`data`**"));
+    assert.ok(markdown.endsWith("</ApiPanel>\n\n</ApiOperation>"));
+  });
+
+  it("unwraps into the Markdown it holds, links and all", () => {
+    const expanded = expandDocsBlocks(`${markdown}\n`, "widgets/create-widget.mdx");
+    assert.ok(!/<\/?Api(Operation|Panel|Endpoint)/.test(expanded));
+    assert.ok(expanded.startsWith("`POST /v1/widgets/{widgetId}`\n\nThen it shapes it"));
+    assert.ok(expanded.includes("## Example request\n\n```bash"));
+    assert.ok(expanded.includes("[API key](/docs/developing-with-sdp/authentication) with"));
+  });
+});
+
 describe("renderOperationPage", () => {
   it("titles the page by its summary and describes it by its first sentence", () => {
     assert.ok(
@@ -218,6 +444,8 @@ describe("renderOperationPage", () => {
           "icon: method:POST",
           "apiReference: true",
           "---",
+          "",
+          "<ApiOperation>",
           "",
           '<ApiEndpoint method="POST"',
         ].join("\n")
@@ -389,14 +617,20 @@ describe("<ApiEndpoint />", () => {
   });
 
   it("stays a component on the page, with the same text for search", () => {
-    const tree = unified()
+    const body = page.replace(/^---[\s\S]*?---\n/, "");
+    const processor = unified()
       .use(remarkParse)
       .use(remarkMdx)
-      .parse(page.replace(/^---[\s\S]*?---\n/, ""));
-    remarkDocsBlocks({ surface: publicSurface })(tree, { path: "widgets.mdx" });
+      .use(remarkDocsBlocks, { surface: publicSurface });
+    const tree = processor.parse(body);
+    processor.runSync(tree);
     const [element] = tree.children;
     assert.equal(element?.type, "mdxJsxFlowElement");
-    assert.deepEqual(element?.data?._stringify, { text: "GET /v1/widgets/{widgetId}" });
+    const search = structure(body, [remarkMdx, [remarkDocsBlocks, { surface: publicSurface }]]);
+    assert.deepEqual(
+      search.contents.map(({ content }) => content),
+      ["GET /v1/widgets/{widgetId}"]
+    );
   });
 
   it("refuses a method the API does not use", () => {
@@ -409,9 +643,11 @@ describe("<ApiEndpoint />", () => {
 describe("fact separators", () => {
   const facts = "- **`page`** · `integer` · greater than 0\n";
   const compiled = (path: string) => {
-    const tree = unified().use(remarkParse).use(remarkMdx).parse(facts);
-    remarkDocsBlocks({ surface: publicSurface })(tree, { path });
-    return JSON.stringify(tree);
+    const processor = unified()
+      .use(remarkParse)
+      .use(remarkMdx)
+      .use(remarkDocsBlocks, { surface: publicSurface });
+    return JSON.stringify(processor.runSync(processor.parse(facts), { path }));
   };
 
   it("sets each dot apart on a generated reference page, and only there", () => {
