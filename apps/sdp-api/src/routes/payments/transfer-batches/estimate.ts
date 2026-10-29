@@ -3,6 +3,8 @@ import {
   getMinimumBalanceForRentExemption,
   getRecentBlockhash,
 } from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
+import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import {
   compileTransaction,
   createNoopSigner,
@@ -13,11 +15,18 @@ import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
+  describeSolRentShortfall,
+  findSolRentShortfall,
+  type SolMovement,
+  type SolRentShortfall,
+} from "@/services/payments/sol-rent-minimum";
+import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
+import { solBatchMovement } from "./sol-movement";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -83,9 +92,35 @@ async function estimateMissingAtaRentLamports(
   return rentLamports * BigInt(missing);
 }
 
+function rentShortfallOf(movement: SolMovement | null): Promise<SolRentShortfall | null> {
+  return movement === null ? Promise.resolve(null) : findSolRentShortfall(movement);
+}
+
+/** The estimate's warnings for what create would refuse for rent (HOO-2375). */
+function rentWarnings(shortfall: SolRentShortfall) {
+  const { minimumAmount } = shortfall;
+  const recipients = shortfall.recipientIndexes.map((recipientIndex) => ({
+    code: "AMOUNT_BELOW_RENT_MINIMUM" as const,
+    recipientIndex,
+    minimumAmount,
+    message: `Recipient ${recipientIndex}'s address has no account, so it must receive at least ${minimumAmount} SOL, the rent-exempt minimum`,
+  }));
+  if (shortfall.sourceRemainderLamports === null) return recipients;
+  return [
+    ...recipients,
+    {
+      code: "SOURCE_BELOW_RENT_MINIMUM" as const,
+      minimumAmount,
+      sourceRemainder: formatDecimalAmount(shortfall.sourceRemainderLamports, SOL_DECIMALS),
+      message: describeSolRentShortfall({ ...shortfall, recipientIndexes: [] }, "batch"),
+    },
+  ];
+}
+
 /**
  * POST /transfer-batches/estimate — prices a batch without executing it:
- * transaction count, network fees, and sponsored token-account rent.
+ * transaction count, network fees, sponsored token-account rent, and
+ * warnings for recipients create would refuse (HOO-2375).
  *
  * @param c - Request context.
  * @returns JSON estimate response.
@@ -114,10 +149,12 @@ export async function estimateTransferBatch(
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   });
-  const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
+  const [networkFeeLamports, tokenAccountRentLamports, rentShortfall] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
     estimateMissingAtaRentLamports(resolved.rpc, groups, resolved.tokenContext),
+    rentShortfallOf(solBatchMovement(resolved, chunks)),
   ]);
+  const warnings = rentShortfall === null ? [] : rentWarnings(rentShortfall);
 
   return success(c, {
     estimate: {
@@ -129,6 +166,7 @@ export async function estimateTransferBatch(
         tokenAccountRentLamports: tokenAccountRentLamports.toString(),
         sponsored: true,
       },
+      warnings,
     },
   });
 }

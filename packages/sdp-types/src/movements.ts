@@ -223,6 +223,11 @@ export const MOVEMENTS = {
 
 export type MovementId = keyof typeof MOVEMENTS;
 
+/** Parse operator and stored movement ids against the signing-waist inventory. */
+export function isMovementId(value: string): value is MovementId {
+  return Object.hasOwn(MOVEMENTS, value);
+}
+
 /** The movements that start new exposure, each with the actions that may sign it. */
 export type StartMovementId = {
   [Id in MovementId]: (typeof MOVEMENTS)[Id]["kind"] extends "start" ? Id : never;

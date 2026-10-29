@@ -49,7 +49,7 @@ import {
 } from "./use-issuance-token-list";
 import { useLatestDeploys } from "./use-latest-deploys";
 
-export const ISSUANCE_CREATE_PATH = "/dashboard/issuance/create";
+const ISSUANCE_CREATE_PATH = "/dashboard/issuance/create";
 
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),

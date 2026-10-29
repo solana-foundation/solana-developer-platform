@@ -1,6 +1,5 @@
 import type {
   PlaceDetailsResponse,
-  PlaceLocation,
   PlaceSuggestion,
   PlacesAutocompleteRequest,
   PlacesAutocompleteResponse,
@@ -39,12 +38,4 @@ export async function fetchPlaceDetails(
     throw new Error(result.error);
   }
   return result.data.data.place;
-}
-
-export function staticMapUrl(location: PlaceLocation): string {
-  const search = new URLSearchParams({
-    latitude: String(location.latitude),
-    longitude: String(location.longitude),
-  });
-  return `/api/dashboard/places/static-map?${search.toString()}`;
 }

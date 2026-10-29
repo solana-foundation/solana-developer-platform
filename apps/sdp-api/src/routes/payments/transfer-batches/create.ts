@@ -19,7 +19,8 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
-import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { admitPaymentStart } from "@/routes/payments/wallets";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -33,6 +34,7 @@ import {
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
+import { solBatchMovement } from "./sol-movement";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -69,7 +71,7 @@ export async function admitTransferBatchExecution(
   c: AppContext,
   input: MovementStepInput<AuthorizedBatchRequest>
 ): Promise<void> {
-  await admitPaymentWalletRuntimeExecution(c, input.authorized.sourceWallet);
+  await admitPaymentStart(c, input.authorized.sourceWallet, "payments.transfer_batch");
 }
 
 /**
@@ -179,6 +181,10 @@ export async function createTransferBatch(
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
         : body.options.maxRecipientsPerTransaction,
   });
+
+  // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
+  const solMovement = solBatchMovement(resolved, chunks);
+  if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;

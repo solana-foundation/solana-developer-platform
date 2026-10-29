@@ -20,6 +20,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
 import { getDb } from "@/db/client";
+import { matchesFreePath } from "@/middleware/path-match";
+import { AUTHENTICATED_PATHS } from "@/middleware/rate-limit";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import routeActionsJson from "@/openapi/route-actions.generated.json";
 import type { RegisteredRouteAuthorization } from "@/routes/route-actions";
@@ -72,6 +74,15 @@ describe("route actions", () => {
       ({ declaration }) => declaration.kind === "action" && !isAction(declaration.action)
     );
     expect(unknown).toEqual([]);
+  });
+
+  it("mounts every route with an action under an authenticated path", () => {
+    const outside = declared("action")
+      .filter(
+        ({ route }) => !matchesFreePath(route.slice(route.indexOf(" ") + 1), AUTHENTICATED_PATHS)
+      )
+      .map(({ route }) => route);
+    expect(outside).toEqual([]);
   });
 
   it("pins every route without an action, with its reason", () => {

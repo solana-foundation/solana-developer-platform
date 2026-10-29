@@ -13,7 +13,7 @@ import type { useTranslations } from "@/i18n/provider";
 type Translate = ReturnType<typeof useTranslations>;
 
 /** The tabs of one token's page, in the header's order. */
-export const TOKEN_TABS = [
+const TOKEN_TABS = [
   "overview",
   "details",
   "public",

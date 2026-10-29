@@ -183,9 +183,8 @@ nothing else; the program create still sends the body `requestId` form.
 
 ## Module map
 
-- `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
-  `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+- `earn-surfacing.ts` — the availability brain. `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`,
+  `earnVaultDepositAvailability` and
   `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
   verdict points at, so Jupiter/Ondo read "Production only" rather than the
   sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
@@ -210,10 +209,12 @@ nothing else; the program create still sends the body `requestId` form.
   direct withdraw, queued withdraw), tightened on a phone so all five fit.
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  an info callout that links to the API keys page (a Developer key includes
-  earn:read and earn:write), because the module they document carries a secret
-  API key. The module needs only the strategy id and that key: no strategy
-  object, no `sourceTokenMint` on a direct deposit.
+  an info callout that links to the API keys page, because the module they
+  document carries a secret API key. Keys hold explicit grants, not roles: the
+  module needs Earn Read and Execute, plus Manage, which the queued-withdrawal
+  cancellation build (`withdrawal-request-cancel-transactions`) requires. The
+  module needs only the strategy id and that key: no strategy object, no
+  `sourceTokenMint` on a direct deposit.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -640,9 +641,10 @@ Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
 importing a *value* from a client module receives a **client-reference proxy,
-not the value** — an object, so always truthy. `if (!EARN_PROGRAM_CREATION_ENABLED)`
-was therefore dead code and the deposit route happily rendered the full wizard
-with no provider that could create anything.
+not the value** — an object, so always truthy. The program-creation guard (since
+retired with the custodial provider) was therefore dead code and the deposit
+route happily rendered the full wizard with no provider that could create
+anything.
 
 What makes this worth a section: **nothing catches it but a browser.** The types
 are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
@@ -710,7 +712,10 @@ browser pass on `/dashboard/markets/embedded-yield` and
   `@2xl`, never its action; a dropped status reads under the row's balance.
   The integration guide's skeleton draws its intro and API key callout at the
   English copy's wrap widths, so editing `guideIntro` or the callout copy means
-  re-measuring it against the page from 360 to 1440.
+  re-measuring it against the page from 360 to 1440. Those blocks query their
+  own width (`@container` on the block), not the work area: the page's side
+  padding steps from 16px to 24px at the `md` viewport, so one work-area
+  breakpoint cannot match a wrap point in both layouts.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes

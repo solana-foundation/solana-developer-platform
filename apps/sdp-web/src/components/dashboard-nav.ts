@@ -156,7 +156,7 @@ export function getPaymentsActions(
  * is Earn-backed and shares its gate; DvP is the first sub-module with a flag of
  * its own, so an org can have one without the other.
  */
-export function getMarketsActions(
+function getMarketsActions(
   t: ReturnType<typeof useTranslations>,
   earnEnabled: boolean,
   dvpEnabled: boolean
@@ -193,7 +193,7 @@ export function getMarketsActions(
  * previously exposed in the page header. Families disappear with the module
  * that owns them, so unavailable providers are never discoverable here.
  */
-export function getIntegrationActions(
+function getIntegrationActions(
   t: ReturnType<typeof useTranslations>,
   options: Pick<
     Parameters<typeof getNavSections>[1],

@@ -22,7 +22,7 @@ import type { TranslationValues } from "@/i18n/translate";
  */
 
 /** Portfolio token (usdc/usdt) behind a deposit mint, when the rail routes it. */
-export function portfolioTokenForMint(mint: string): EarnPortfolioToken | undefined {
+function portfolioTokenForMint(mint: string): EarnPortfolioToken | undefined {
   const symbol = WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.symbol.toLowerCase();
   return EARN_PORTFOLIO_TOKENS.find((token) => token === symbol);
 }

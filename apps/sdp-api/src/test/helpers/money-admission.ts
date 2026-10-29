@@ -22,6 +22,7 @@ export function admittedMoneyFacts(
     organizationStatus: "active",
     projectEnvironment: "sandbox",
     rawSettings: null,
+    disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),
     ...overrides,

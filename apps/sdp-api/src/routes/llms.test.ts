@@ -14,7 +14,7 @@ describe("GET /llms.txt", () => {
     const body = await llmsBody("experimental");
 
     expect(body).toContain("/openapi.json");
-    expect(body).toContain("/docs");
+    expect(body).toContain("https://platform.solana.com/docs/reference/api");
     // Keys are managed in the dashboard by a signed-in person (HOO-2099).
     expect(body).not.toContain("/v1/api-keys");
     expect(body).toContain("/v1/wallets");

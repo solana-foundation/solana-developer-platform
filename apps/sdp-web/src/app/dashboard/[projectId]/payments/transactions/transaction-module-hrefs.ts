@@ -15,8 +15,3 @@ export const TRANSACTION_MODULE_HREFS = {
 export function walletHref(custodyWalletId: string): string {
   return `/dashboard/wallets/${encodeURIComponent(custodyWalletId)}`;
 }
-
-/** Dashboard detail route for a counterparty. */
-export function counterpartyHref(counterpartyId: string): string {
-  return `/dashboard/payments/counterparty/${encodeURIComponent(counterpartyId)}`;
-}

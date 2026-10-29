@@ -9,8 +9,8 @@ import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
  * `GET /v1/projects/:projectId/provider-availability`.
  *
  * @param client - The client scoped to the request's project.
- * @returns The project's environment and every provider the deployment knows,
- *   with its availability for the project.
+ * @returns The project's environment and every provider the deployment's
+ *   public API publishes, with its availability for the project.
  */
 export async function fetchProjectProviderAvailability(
   client: SdpApiClient

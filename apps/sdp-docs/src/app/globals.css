@@ -1,99 +1,40 @@
-@import "../styles/solana-design-system.css";
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/preflight" layer(base);
+@import "tailwindcss/utilities" layer(utilities);
+@import "@sdp/design-tokens/tokens.css";
+@import "@sdp/design-tokens/theme.css";
 
-@theme {
-  --color-cream: oklch(0.9553 0.0029 84.56);
-  --color-bg1: oklch(0.9826 0.0034 97.35);
-  --color-sand-100: oklch(0.9665 0.0067 97.35);
-  --color-sand-200: oklch(0.927 0.0122 96.43);
-  --color-sand-300: oklch(0.884 0.0163 82.79);
-  --color-sand-400: oklch(0.839 0.0187 78.23);
-  --color-sand-500: oklch(0.7935 0.0213 74.62);
-  --color-sand-700: oklch(0.6938 0.0247 56.8);
-  --color-sand-900: oklch(0.5916 0.0259 41.3);
-  --color-sand-1000: oklch(0.5438 0.0206 39.32);
-  --color-sand-1100: oklch(0.4947 0.0156 41.09);
-  --color-sand-1200: oklch(0.442 0.0111 34.3);
-  --color-sand-1300: oklch(0.3909 0.0076 43.22);
-  --color-sand-1400: oklch(0.3356 0.0046 39.42);
-  --color-sand-1500: oklch(0.279 0.0029 17.33);
-  --color-sand-1600: oklch(0.2189 0.0016 17.28);
-}
+/* next-themes puts .dark on <html>, so dark: utilities follow the theme switch, not the OS. */
+@custom-variant dark (&:is(.dark *));
 
-/* ── Light mode — matches dashboard (oklch values from sdp-web design system) ── */
+/* Fumadocs reads --color-fd-*. They point at the refresh palette from @sdp/design-tokens, which
+   switches with the .dark class on <html>, so one block covers light and dark. */
 :root {
-  --launch-cream: oklch(0.9553 0.0029 84.56);
-  --launch-bg: oklch(0.9826 0.0034 97.35);
-  --launch-white: oklch(1 0 0);
-  --launch-ink: oklch(0.2189 0.0016 17.28);
-  --launch-text: oklch(0.442 0.0111 34.3);
-  --launch-muted: oklch(0.5916 0.0259 41.3);
-  --launch-border: oklch(0.927 0.0122 96.43);
-  --launch-border-strong: oklch(0.839 0.0187 78.23);
-  --launch-hover-bg: oklch(1 0 0 / 48%);
-  --launch-active-bg: oklch(0.927 0.0122 96.43 / 68%);
-  --launch-active-muted-bg: oklch(0.927 0.0122 96.43 / 60%);
-  --launch-icon-muted: oklch(0.7935 0.0213 74.62);
-  --launch-marker: oklch(0.7454 0.0237 67.45);
-  --launch-live: oklch(0.64 0.16 150);
-  --launch-inline-code-bg: oklch(0.927 0.0122 96.43);
-  --launch-inline-code-text: var(--launch-ink);
-  --launch-inline-code-border: var(--launch-border-strong);
-  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
-  --font-abc-diatype: var(--font-abc-diatype), system-ui, sans-serif;
-  --font-berkeley-mono: var(--font-berkeley-mono), ui-monospace, monospace;
-  --color-fd-background: var(--launch-cream);
-  --color-fd-foreground: var(--launch-ink);
-  --color-fd-muted: var(--launch-bg);
-  --color-fd-muted-foreground: var(--launch-muted);
-  --color-fd-popover: oklch(1 0 0);
-  --color-fd-popover-foreground: var(--launch-ink);
-  --color-fd-card: oklch(1 0 0);
-  --color-fd-card-foreground: var(--launch-ink);
-  --color-fd-border: var(--launch-border);
-  --color-fd-primary: var(--launch-ink);
-  --color-fd-primary-foreground: oklch(1 0 0);
-  --color-fd-secondary: oklch(0.927 0.0122 96.43);
-  --color-fd-secondary-foreground: var(--launch-ink);
-  --color-fd-accent: oklch(0.9665 0.0067 97.35);
-  --color-fd-accent-foreground: var(--launch-ink);
-  --color-fd-ring: var(--launch-border-strong);
+  --color-fd-background: var(--paper);
+  --color-fd-foreground: var(--ink);
+  --color-fd-muted: var(--paper-tile);
+  --color-fd-muted-foreground: var(--ink-tertiary);
+  --color-fd-popover: var(--paper-card);
+  --color-fd-popover-foreground: var(--ink);
+  --color-fd-card: var(--paper-card);
+  --color-fd-card-foreground: var(--ink);
+  --color-fd-border: var(--rule);
+  --color-fd-primary: var(--ink);
+  --color-fd-primary-foreground: var(--paper);
+  --color-fd-secondary: var(--wash-strong);
+  --color-fd-secondary-foreground: var(--ink);
+  --color-fd-accent: var(--wash-strong);
+  --color-fd-accent-foreground: var(--ink);
+  --color-fd-ring: var(--ink);
 }
 
-/* ── Dark mode — matches dashboard dark tokens ── */
-.dark {
-  --launch-cream: oklch(0.145 0 0);
-  --launch-bg: oklch(0.18 0 0);
-  --launch-white: oklch(0.205 0 0);
-  --launch-ink: oklch(0.985 0 0);
-  --launch-text: oklch(0.82 0 0);
-  --launch-muted: oklch(0.708 0 0);
-  --launch-border: oklch(1 0 0 / 10%);
-  --launch-border-strong: oklch(1 0 0 / 18%);
-  --launch-hover-bg: oklch(1 0 0 / 8%);
-  --launch-active-bg: oklch(1 0 0 / 10%);
-  --launch-active-muted-bg: oklch(1 0 0 / 9%);
-  --launch-icon-muted: oklch(0.708 0 0);
-  --launch-marker: oklch(0.78 0 0);
-  --launch-live: oklch(0.75 0.17 150);
-  --launch-inline-code-bg: oklch(0.269 0 0);
-  --launch-inline-code-text: oklch(0.985 0 0);
-  --launch-inline-code-border: oklch(1 0 0 / 15%);
-  --color-fd-background: oklch(0.145 0 0);
-  --color-fd-foreground: oklch(0.985 0 0);
-  --color-fd-muted: oklch(0.269 0 0);
-  --color-fd-muted-foreground: oklch(0.556 0 0);
-  --color-fd-popover: oklch(0.205 0 0);
-  --color-fd-popover-foreground: oklch(0.985 0 0);
-  --color-fd-card: oklch(0.205 0 0);
-  --color-fd-card-foreground: oklch(0.985 0 0);
-  --color-fd-border: oklch(1 0 0 / 10%);
-  --color-fd-primary: oklch(0.922 0 0);
-  --color-fd-primary-foreground: oklch(0.205 0 0);
-  --color-fd-secondary: oklch(0.269 0 0);
-  --color-fd-secondary-foreground: oklch(0.985 0 0);
-  --color-fd-accent: oklch(0.269 0 0);
-  --color-fd-accent-foreground: oklch(0.985 0 0);
-  --color-fd-ring: oklch(0.556 0 0);
+/* Season Sans ships 400 and 500 only; never let the browser fake a bold. */
+html {
+  font-synthesis-weight: none;
+}
+
+.sdp-docs-shell :is(strong, b, th) {
+  font-weight: 500;
 }
 
 html,
@@ -104,9 +45,19 @@ body {
   min-height: 100%;
 }
 
+/* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
+   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   dashboard's ring-primary/50. */
+@layer base {
+  * {
+    border-color: var(--color-fd-border);
+    outline-color: color-mix(in oklab, var(--color-fd-ring) 50%, transparent);
+  }
+}
+
 .sdp-docs-shell {
   min-height: 100vh;
-  background-color: var(--launch-cream);
+  background-color: var(--paper);
   color: var(--color-fd-foreground);
   font-family: var(--font-sans);
 }
@@ -118,13 +69,13 @@ body {
 .sdp-docs-shell h5,
 .sdp-docs-shell h6 {
   color: var(--color-fd-foreground);
-  font-family: var(--font-abc-diatype);
+  font-family: var(--font-sans);
   letter-spacing: 0;
 }
 
 .launch-docs-main {
   min-height: 100vh;
-  background: var(--launch-cream);
+  background: var(--paper);
 }
 
 /* Canvas hero pattern — injected into .launch-docs-main by HomePageClass */
@@ -146,10 +97,11 @@ body {
   pointer-events: none;
 }
 
+/* Below 768px the top padding clears the fixed menu button (16px inset + 36px button + 16px gap). */
 .launch-docs-main-inner {
   width: min(100%, 1120px);
   margin: 0 auto;
-  padding: 44px 18px 72px;
+  padding: 68px 18px 72px;
 }
 
 .launch-docs-sidebar {
@@ -160,10 +112,10 @@ body {
   width: 320px;
   transform: translateX(-100%);
   flex-direction: column;
-  border-right: 1px solid var(--launch-border);
-  background: var(--launch-white);
-  color: var(--launch-ink);
-  transition: transform 180ms ease;
+  border-right: 1px solid var(--rule);
+  background: var(--paper-side);
+  color: var(--ink);
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
 }
 
 .launch-docs-sidebar.is-open {
@@ -171,7 +123,7 @@ body {
 }
 
 .launch-docs-sidebar-header {
-  border-bottom: 1px solid var(--launch-border);
+  border-bottom: 1px solid var(--rule);
   padding: 24px;
 }
 
@@ -187,11 +139,11 @@ body {
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 10px;
-  background: var(--launch-cream);
-  color: var(--launch-ink);
-  font-family: var(--font-berkeley-mono);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
   font-size: 15px;
 }
 
@@ -203,27 +155,32 @@ body {
 
 .launch-docs-brand strong {
   display: block;
-  color: var(--launch-ink);
-  font-family: var(--font-abc-diatype);
+  color: var(--ink);
+  font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.1;
 }
 
 .launch-docs-brand small {
   display: block;
   margin-top: 2px;
-  color: var(--launch-muted);
-  font-family: var(--font-berkeley-mono);
-  font-size: 12px;
-  line-height: 1.2;
+  color: var(--ink-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
 }
 
 .launch-docs-sidebar-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
+}
+
+/* Three chips don't fit one 272px row: the odd one out, Agent setup, takes a row of its own. */
+.launch-docs-sidebar-actions > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .launch-docs-sidebar-action {
@@ -231,29 +188,38 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 34px;
-  border: 1px solid var(--launch-border);
-  border-radius: 8px;
-  background: var(--launch-bg);
-  color: var(--launch-text);
-  font-family: var(--font-berkeley-mono);
-  font-size: 12px;
+  min-height: var(--control-height-sm);
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  border: 0;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
   text-decoration: none;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.launch-docs-sidebar-action:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-cream);
-  color: var(--launch-ink);
+.launch-docs-sidebar-action:hover,
+.launch-docs-sidebar-action[data-state="open"] {
+  color: var(--ink);
 }
 
 .launch-docs-sidebar-action svg {
   width: 13px;
   height: 13px;
+  flex: none;
+}
+
+/* A menu trigger's chevron turns over while its menu is open. */
+.launch-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[data-state="open"] > .launch-chevron {
+  transform: rotate(180deg);
 }
 
 .launch-docs-sidebar-search {
@@ -261,26 +227,26 @@ body {
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 34px;
+  min-height: var(--control-height-md);
   margin-top: 8px;
   padding: 0 10px;
-  border: 1px solid var(--launch-border);
-  border-radius: 8px;
-  background: var(--launch-bg);
-  color: var(--launch-muted);
+  border: 1px solid var(--rule-faint);
+  border-radius: var(--corner-control);
+  background: var(--wash);
+  color: var(--ink-tertiary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--font-size-body);
   cursor: pointer;
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-sidebar-search:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-cream);
-  color: var(--launch-text);
+  border-color: var(--rule);
+  background: var(--wash-strong);
+  color: var(--ink-secondary);
 }
 
 .launch-docs-sidebar-search svg {
@@ -300,13 +266,14 @@ body {
   align-items: center;
   justify-content: center;
   min-width: 18px;
-  padding: 2px 4px;
-  border: 1px solid var(--launch-border);
-  border-radius: 5px;
-  background: var(--launch-white);
-  color: var(--launch-muted);
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 10px;
+  padding: 0 5px;
+  border-radius: var(--corner-control-inner);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink-tertiary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .launch-docs-sidebar-nav {
@@ -318,10 +285,22 @@ body {
 /* ── Sidebar status footer ── */
 .launch-docs-sidebar-status {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--rule-faint);
+}
+
+.launch-docs-status-list {
+  display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--launch-border);
+}
+
+.launch-docs-theme-switch {
+  flex-shrink: 0;
+  border-color: var(--rule-faint);
 }
 
 .launch-docs-status-row {
@@ -329,9 +308,8 @@ body {
   align-items: center;
   gap: 9px;
   font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 550;
-  color: var(--launch-text);
+  font-size: var(--font-size-meta);
+  color: var(--ink-secondary);
 }
 
 .launch-docs-status-dot {
@@ -339,28 +317,45 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--launch-live);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--launch-live) 20%, transparent);
+  background: var(--positive);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--positive) 20%, transparent);
 }
 
 .launch-docs-status-dot.is-muted {
-  background: var(--launch-icon-muted);
+  background: var(--ink-tertiary);
   box-shadow: none;
+}
+
+.launch-docs-status-link {
+  text-decoration: none;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-status-link:hover {
+  color: var(--ink);
+}
+
+/* The icon sits in the 7px dot column, so its label lines up with the status rows'. */
+.launch-docs-status-link svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 -3px;
+  color: var(--ink-tertiary);
 }
 
 /* ── Badge — shared pill for "Coming soon"-style annotations ── */
 .launch-badge {
   display: inline-block;
-  padding: 2px 8px;
-  border: 1px solid var(--launch-border);
+  padding: 1px 8px;
+  border: 1px solid var(--rule);
   border-radius: 100px;
-  background: var(--launch-bg);
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--launch-muted);
+  background: var(--paper-tile);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--ink-tertiary);
   white-space: nowrap;
   vertical-align: middle;
 }
@@ -370,16 +365,16 @@ body {
   display: flex;
   align-items: center;
   min-height: 30px;
-  border-radius: 6px;
-  color: var(--launch-muted);
+  border-radius: var(--corner-control);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 450;
-  line-height: 1.3;
+  font-size: var(--font-size-body);
+  font-weight: 400;
+  line-height: var(--line-height-body);
   text-decoration: none;
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-item {
@@ -390,7 +385,7 @@ body {
   display: inline-flex;
   flex-shrink: 0;
   margin-right: 7px;
-  color: var(--launch-icon-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-nav-icon svg {
@@ -399,21 +394,22 @@ body {
 }
 
 .launch-docs-nav-item.is-active .launch-docs-nav-icon,
-.launch-docs-nav-folder-link.is-active .launch-docs-nav-icon {
-  color: var(--launch-ink);
+.launch-docs-nav-folder-row.is-active .launch-docs-nav-icon {
+  color: var(--ink);
 }
 
+/* A row's highlight: a folder's row is one, its toggle included. */
 .launch-docs-nav-item:hover,
-.launch-docs-nav-folder-link:hover {
-  background: var(--launch-hover-bg);
-  color: var(--launch-text);
+.launch-docs-nav-folder-row:hover {
+  background: var(--wash);
+  color: var(--ink);
 }
 
 .launch-docs-nav-item.is-active,
-.launch-docs-nav-folder-link.is-active {
-  background: var(--launch-active-muted-bg);
-  color: var(--launch-ink);
-  font-weight: 600;
+.launch-docs-nav-folder-row.is-active {
+  background: var(--wash-strong);
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .launch-docs-nav-folder {
@@ -423,6 +419,8 @@ body {
 .launch-docs-nav-folder-row {
   display: flex;
   align-items: center;
+  border-radius: var(--corner-control);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-folder-btn {
@@ -433,37 +431,29 @@ body {
   min-height: 30px;
   padding: 5px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--corner-control);
   background: transparent;
-  color: var(--launch-text);
+  color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.3;
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-}
-
-.launch-docs-nav-folder-btn:hover {
-  background: var(--launch-hover-bg);
-  color: var(--launch-ink);
 }
 
 .launch-docs-nav-toggle-icon {
   flex-shrink: 0;
   width: 12px;
   height: 12px;
-  color: var(--launch-icon-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-nav-folder-link {
   flex: 1;
   padding: 5px 12px;
-  font-weight: 600;
-  color: var(--launch-text);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .launch-docs-nav-toggle {
@@ -473,18 +463,15 @@ body {
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--corner-control);
   background: transparent;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-toggle:hover {
-  background: var(--launch-hover-bg);
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-docs-nav-toggle svg {
@@ -492,18 +479,27 @@ body {
   height: 12px;
 }
 
+/* A folder's chevron turns from right to down as it opens, like the menu chevrons. */
+.launch-docs-nav-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[aria-expanded="true"] > .launch-docs-nav-chevron {
+  transform: rotate(90deg);
+}
+
+/* Each level sits 14px further in, its highlight with it. */
 .launch-docs-nav-children {
-  margin: 1px 0 4px;
+  margin: 1px 0 4px 14px;
 }
 
 .launch-docs-sidebar-section {
-  margin: 20px 0 2px;
+  margin: 16px 0 4px;
   padding: 0 12px;
-  color: var(--launch-ink);
+  color: var(--ink-tertiary);
   font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.5;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
 }
 
 .launch-docs-sidebar-section span {
@@ -515,19 +511,20 @@ body {
 .launch-docs-sidebar-separator {
   height: 1px;
   margin: 16px 8px;
-  background: var(--launch-border);
+  background: var(--rule-faint);
 }
 
 .launch-docs-mobile-trigger,
 .launch-docs-mobile-close {
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: var(--control-height-md);
+  height: var(--control-height-md);
   place-items: center;
-  border: 1px solid var(--launch-border);
-  border-radius: 10px;
-  background: var(--launch-white);
-  color: var(--launch-ink);
+  border: 0;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink);
 }
 
 .launch-docs-mobile-trigger {
@@ -563,9 +560,9 @@ body {
   gap: 8px;
   min-height: 32px;
   margin: 0 0 28px;
-  color: var(--launch-text);
-  font-family: var(--font-berkeley-mono);
-  font-size: 12px;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
 }
 
 .launch-docs-breadcrumb a,
@@ -583,19 +580,20 @@ body {
 }
 
 .launch-docs-breadcrumb a:hover {
-  background: var(--launch-hover-bg);
-  color: var(--launch-ink);
+  background: var(--wash);
+  color: var(--ink);
 }
 
+/* A section without a page of its own: a label, quieter than the links beside it. */
 .launch-docs-breadcrumb span {
-  color: var(--launch-ink);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-breadcrumb svg {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-breadcrumb-home {
@@ -627,14 +625,14 @@ body {
   align-items: center;
   gap: 7px;
   margin-bottom: 12px;
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .launch-docs-toc nav {
-  border-left: 1px solid var(--launch-border);
+  border-left: 1px solid var(--rule);
 }
 
 .launch-docs-toc-link {
@@ -642,25 +640,25 @@ body {
   margin-left: -1px;
   border-left: 2px solid transparent;
   padding: 5px 0 5px 0;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.35;
   text-decoration: none;
   transition:
-    color 120ms ease,
-    border-color 120ms ease;
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-toc-link:hover {
-  color: var(--launch-text);
-  border-left-color: var(--launch-border-strong);
+  color: var(--ink-secondary);
+  border-left-color: var(--rule-strong);
 }
 
 .launch-docs-toc-link.is-active {
-  color: var(--launch-ink);
-  font-weight: 600;
-  border-left-color: var(--launch-ink);
+  color: var(--ink);
+  font-weight: 500;
+  border-left-color: var(--ink);
 }
 
 /* ── TOC footer card — left edge aligns with the TOC list; bleeds right past
@@ -671,9 +669,9 @@ body {
   margin-top: 28px;
   margin-right: clamp(-120px, calc(-42px - (100vw - 1560px) / 2), -40px);
   padding: 20px;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 12px;
-  background: var(--launch-white);
+  background: var(--paper-card);
 }
 
 .launch-docs-toc-card-title {
@@ -683,14 +681,14 @@ body {
   margin: 0 0 8px;
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 650;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .launch-docs-toc-card-title svg {
   flex-shrink: 0;
   margin-top: 1px;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-toc-card-desc {
@@ -698,7 +696,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.55;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-toc-card-link {
@@ -707,8 +705,8 @@ body {
   gap: 5px;
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 650;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   text-decoration: none;
 }
 
@@ -720,27 +718,387 @@ body {
 .launch-docs-title {
   margin: 0;
   white-space: pre-line;
-  color: var(--launch-ink);
-  font-family: var(--font-abc-diatype);
-  font-size: clamp(32px, 4.5vw, 40px);
-  font-weight: 700;
-  line-height: 1.03;
-  letter-spacing: 0;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: clamp(30px, 3.4vw, 36px);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .launch-docs-description {
   max-width: 720px;
   margin-top: 14px;
   margin-bottom: 36px;
-  color: var(--launch-text);
-  font-family: var(--font-abc-diatype);
-  font-size: 18px;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-subheading);
   line-height: 1.45;
+  text-wrap: pretty;
 }
 
 .launch-docs-body {
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
+}
+
+/* ── Page header: the title, with the page actions on its first line ── */
+.launch-docs-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.launch-docs-header .launch-docs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Copy page, with the other page actions behind its chevron: one raised chip split by a rule.
+   The top margin centres it on the title's first line, from the title's size and line height. */
+.launch-page-actions {
+  display: inline-flex;
+  flex: none;
+  height: var(--control-height-sm);
+  margin: calc((clamp(30px, 3.4vw, 36px) * 1.15 - var(--control-height-sm)) / 2) 0 0 auto;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+}
+
+.launch-page-actions-copy,
+.launch-page-actions-more {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-page-actions-copy {
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: var(--corner-control) 0 0 var(--corner-control);
+}
+
+.launch-page-actions-more {
+  justify-content: center;
+  width: 28px;
+  border-left: 1px solid var(--rule-faint);
+  border-radius: 0 var(--corner-control) var(--corner-control) 0;
+}
+
+.launch-page-actions-copy:hover,
+.launch-page-actions-more:hover,
+.launch-page-actions-more[data-state="open"] {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.launch-page-actions-more svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Both labels share one grid cell, so the chip stays as wide as "Copy page" when it says Copied. */
+.launch-page-actions-label {
+  display: grid;
+}
+
+.launch-page-actions-label > span {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    visibility var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-page-actions-label .is-copied,
+.launch-page-actions-copy[data-status="copied"] .is-idle {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.launch-page-actions-copy[data-status="copied"] .is-copied {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* On a phone Copy page drops its label (the menu still names every action), so the title keeps
+   its width. */
+@media (max-width: 639px) {
+  .launch-docs-header {
+    gap: 12px;
+  }
+
+  .launch-page-actions-copy {
+    justify-content: center;
+    width: var(--control-height-sm);
+    padding: 0;
+  }
+
+  .launch-page-actions-label {
+    display: none;
+  }
+}
+
+/* Copy, check and alert stacked in one box: the outcome morphs in place. */
+.launch-copy-icon {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.launch-copy-icon svg {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-copy-icon-copied {
+  color: var(--positive);
+}
+
+.launch-copy-icon-failed {
+  color: var(--critical);
+}
+
+.launch-copy-icon[data-status="idle"] .launch-copy-icon-idle,
+.launch-copy-icon[data-status="copied"] .launch-copy-icon-copied,
+.launch-copy-icon[data-status="failed"] .launch-copy-icon-failed {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Popovers render in a portal outside .sdp-docs-shell, so they set their own type and surface,
+   and replace Fumadocs' frosted panel and fixed 100ms animation with the motion tokens. */
+.launch-popover {
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
+  backdrop-filter: none;
+  box-shadow: var(--elevation-popover);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.launch-popover[data-state="open"] {
+  animation: launch-popover-in var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-popover[data-state="closed"] {
+  animation: launch-popover-out var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+@keyframes launch-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+@keyframes launch-popover-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+.launch-menu {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  width: 268px;
+}
+
+.launch-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--corner-control);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-menu-item:hover,
+.launch-menu-item:focus-visible {
+  background: var(--wash);
+}
+
+.launch-menu-item:focus-visible {
+  outline: none;
+}
+
+.launch-menu-item-icon {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink-secondary);
+}
+
+.launch-menu-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.launch-menu-item-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.launch-menu-item-title {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-menu-item-description {
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-menu-item-external {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 4px;
+  color: var(--ink-tertiary);
+}
+
+/* ── Agent setup menu (sidebar) ── */
+.launch-agent-setup {
+  width: min(400px, calc(100vw - 32px));
+  padding: 16px;
+}
+
+.launch-agent-setup-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-agent-setup-description {
+  margin: 4px 0 14px;
+  color: var(--ink-secondary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-agent-setup-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--corner-control);
+  background: var(--wash);
+}
+
+.launch-agent-setup-tab {
+  flex: 1 1 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-tab:hover {
+  color: var(--ink);
+}
+
+.launch-agent-setup-tab[aria-selected="true"] {
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink);
+}
+
+.launch-agent-setup-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--rule-faint);
+  border-radius: var(--corner-control);
+  background: var(--paper-tile);
+  color: var(--ink);
+}
+
+/* Not the inline code chip (`:not(pre) > code`): the panel is already the frame. */
+.launch-agent-setup-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.launch-agent-setup-word {
+  white-space: nowrap;
+}
+
+.launch-agent-setup-copy {
+  display: grid;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -3px -4px -3px 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-copy:hover {
+  background: var(--wash-strong);
+  color: var(--ink);
 }
 
 .page-feedback {
@@ -749,7 +1107,7 @@ body {
   gap: 1rem;
   margin-top: 3rem;
   padding-top: 1.5rem;
-  border-top: 1px solid var(--launch-border);
+  border-top: 1px solid var(--rule);
 }
 
 .page-feedback--col {
@@ -766,12 +1124,12 @@ body {
 .page-feedback-label {
   font-family: var(--font-sans);
   font-size: 0.875rem;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   white-space: nowrap;
 }
 
 .page-feedback-thanks {
-  color: var(--launch-text);
+  color: var(--ink-secondary);
 }
 
 .page-feedback-actions {
@@ -786,25 +1144,25 @@ body {
   width: 2rem;
   height: 2rem;
   border-radius: 50%;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   background: transparent;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
+    border-color var(--motion-duration-fast),
+    color var(--motion-duration-fast),
+    background var(--motion-duration-fast);
 }
 
 .page-feedback-btn:hover {
-  border-color: var(--launch-border-strong);
-  color: var(--launch-text);
+  border-color: var(--rule-strong);
+  color: var(--ink-secondary);
 }
 
 .page-feedback-btn.is-active {
-  border-color: var(--launch-ink);
-  color: var(--launch-ink);
-  background: var(--launch-active-bg);
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--wash-strongest);
 }
 
 .page-feedback-form {
@@ -817,45 +1175,45 @@ body {
 .page-feedback-textarea {
   width: 100%;
   padding: 0.75rem 1rem;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 10px;
-  background: var(--launch-hover-bg);
-  color: var(--launch-ink);
+  background: var(--wash);
+  color: var(--ink);
   font-family: var(--font-sans);
   font-size: 0.875rem;
   line-height: 1.6;
   resize: vertical;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--motion-duration-fast);
   box-sizing: border-box;
 }
 
 .page-feedback-textarea::placeholder {
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .page-feedback-textarea:focus {
-  border-color: var(--launch-border-strong);
+  border-color: var(--rule-strong);
 }
 
 .page-feedback-submit {
   align-self: flex-start;
   padding: 0.4rem 1rem;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 8px;
   background: transparent;
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: 0.875rem;
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    color 0.15s;
+    border-color var(--motion-duration-fast),
+    color var(--motion-duration-fast);
 }
 
 .page-feedback-submit:hover:not(:disabled) {
-  border-color: var(--launch-border-strong);
-  color: var(--launch-ink);
+  border-color: var(--rule-strong);
+  color: var(--ink);
 }
 
 .page-feedback-submit:disabled {
@@ -880,20 +1238,20 @@ body {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.875rem 1rem;
-  border: 1px solid var(--launch-border-strong);
+  border: 1px solid var(--rule-strong);
   border-radius: 10px;
-  background: var(--launch-white);
+  background: var(--paper-card);
   box-shadow:
     0 1px 3px oklch(0 0 0 / 0.07),
     0 1px 2px oklch(0 0 0 / 0.04);
   text-decoration: none;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color var(--motion-duration-fast),
+    box-shadow var(--motion-duration-fast);
 }
 
 .page-nav-link:hover {
-  border-color: var(--launch-ink);
+  border-color: var(--ink);
   box-shadow:
     0 2px 6px oklch(0 0 0 / 0.1),
     0 1px 2px oklch(0 0 0 / 0.06);
@@ -905,7 +1263,7 @@ body {
   gap: 0.375rem;
   font-family: var(--font-sans);
   font-size: 0.75rem;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .page-nav-link--next .page-nav-direction {
@@ -915,8 +1273,8 @@ body {
 .page-nav-title {
   font-family: var(--font-sans);
   font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -933,31 +1291,34 @@ body {
 }
 
 .launch-mdx-heading {
-  color: var(--launch-ink);
-  font-family: var(--font-abc-diatype);
-  font-weight: 700;
-  line-height: 1.18;
-  letter-spacing: 0;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: var(--letter-spacing-heading);
+  text-wrap: balance;
 }
 
 .launch-mdx-heading-2 {
   margin: 52px 0 18px;
-  font-size: 26px;
+  font-size: var(--font-size-heading);
+  line-height: var(--line-height-heading);
 }
 
 .launch-mdx-heading-3 {
   margin: 34px 0 12px;
-  font-size: 20px;
+  font-size: var(--font-size-subheading);
+  line-height: var(--line-height-subheading);
 }
 
 .launch-mdx-heading-4 {
   margin: 28px 0 10px;
-  font-size: 16px;
+  font-size: var(--font-size-field);
+  line-height: var(--line-height-field);
 }
 
 .launch-mdx-paragraph,
 .launch-mdx-list-item {
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.68;
@@ -968,35 +1329,101 @@ body {
 }
 
 .launch-mdx-link {
-  color: var(--launch-ink);
-  font-weight: 650;
+  color: var(--ink);
+  font-weight: 500;
   text-decoration: underline;
-  text-decoration-color: var(--launch-icon-muted);
+  text-decoration-color: var(--ink-tertiary);
   text-underline-offset: 3px;
 }
 
 .launch-mdx-link:hover {
-  text-decoration-color: var(--launch-ink);
+  text-decoration-color: var(--ink);
 }
 
 .launch-mdx-link-external svg {
   display: inline-block;
   margin-left: 1px;
   vertical-align: 1px;
-  color: var(--launch-icon-muted);
-  transition: color 120ms ease;
+  color: var(--ink-tertiary);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-mdx-link-external:hover svg {
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
+/* A page's action links (`<ActionLinks>`): raised chips like the page actions, a download led by
+   a download icon and a JSON link by braces. The hover wash is an inset shadow over the chip, so
+   it fades on the motion tokens. */
+.launch-docs-action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 28px;
+}
+
+.launch-docs-action-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  text-decoration: none;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-docs-action-links a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.launch-docs-action-links a::before {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--ink-tertiary);
+  mask: center / contain no-repeat;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a[download]::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a[href$=".json"]:not([download])::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1'/%3E%3Cpath d='M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a:hover::before {
+  background: var(--ink);
+}
+
+/* minmax(0, 1fr) holds an item to the column, so a code block inside it scrolls instead of
+   widening the page. */
 .launch-mdx-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 9px;
   margin: 12px 0 28px;
   padding-left: 22px;
-  color: var(--launch-text);
+  color: var(--ink-secondary);
 }
 
 .launch-mdx-unordered-list {
@@ -1008,46 +1435,49 @@ body {
 }
 
 .launch-mdx-list-item::marker {
-  color: var(--launch-marker);
+  color: var(--ink-tertiary);
 }
 
 .launch-mdx-blockquote {
-  border-left: 4px solid var(--launch-border-strong);
-  color: var(--launch-text);
+  border-left: 4px solid var(--rule-strong);
+  color: var(--ink-secondary);
 }
 
 .launch-mdx-strong {
-  color: var(--launch-ink);
-  font-weight: 700;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.launch-mdx-table-frame {
+  margin: 18px 0 34px;
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
 }
 
 .launch-mdx-table {
   width: 100%;
-  margin: 18px 0 34px;
-  overflow: hidden;
-  border: 1px solid var(--launch-border);
-  border-radius: 10px;
   border-collapse: separate;
   border-spacing: 0;
-  background: var(--launch-white);
   font-size: 14px;
   line-height: 1.45;
 }
 
 .launch-mdx-th {
-  border-bottom: 1px solid var(--launch-border);
-  background: var(--launch-bg);
-  color: var(--launch-ink);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-tile);
+  color: var(--ink);
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.35;
   text-align: left;
 }
 
 .launch-mdx-td {
-  border-bottom: 1px solid var(--launch-border);
-  color: var(--launch-text);
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-secondary);
   font-size: 14px;
   line-height: 1.45;
 }
@@ -1116,13 +1546,365 @@ body {
 }
 
 /* ── Inline code ── */
+/* break-word wraps a long identifier at the line edge in prose but leaves a table cell's
+   min-content width alone, so a wide table scrolls in its frame instead of splitting paths. */
 :not(pre) > code {
-  background-color: var(--launch-inline-code-bg);
-  color: var(--launch-inline-code-text);
-  border: 1px solid var(--launch-inline-code-border);
+  background-color: var(--wash-strong);
+  color: var(--ink);
+  border: 1px solid var(--rule);
   border-radius: 0.375rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
+  overflow-wrap: break-word;
+}
+
+/* ── API reference ── */
+/* The generated reference (scripts/lib/api-reference-page.ts). A family's page is its table of
+   operations, each row one link to the operation's page; an operation's page leads with its
+   endpoint, then sections whose field lists name the field, its type and facts on one line. */
+.is-api-reference .launch-mdx-heading-2 {
+  margin: 40px 0 10px;
+  font-size: var(--font-size-subheading);
+  line-height: var(--line-height-subheading);
+}
+
+/* A row is one link: the summary's link covers it, so the whole row opens the operation. */
+.launch-api-operation-table .launch-mdx-table tbody tr {
+  position: relative;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover {
+  background: var(--wash);
+}
+
+.launch-api-operation-table .launch-mdx-td:last-child {
+  padding-right: 40px;
+}
+
+/* A path stays on one line; a table too wide for a phone scrolls in its frame. */
+.launch-api-operation-table code {
+  white-space: nowrap;
+}
+
+.launch-api-operation-table .launch-mdx-link {
+  color: inherit;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.launch-api-operation-table .launch-mdx-link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible {
+  outline: none;
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* The chevron: drawn from the row's text colour, it moves a little toward the page on hover. */
+.launch-api-operation-table .launch-mdx-td:last-child::after {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  background: var(--ink-tertiary);
+  content: "";
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover .launch-mdx-td:last-child::after {
+  background: var(--ink);
+  transform: translateX(3px);
+}
+
+/* On a phone each row stacks: method and path on one line, the summary below. */
+@media (max-width: 639px) {
+  .launch-api-operation-table .launch-mdx-table,
+  .launch-api-operation-table .launch-mdx-table tbody,
+  .launch-api-operation-table .launch-mdx-table tr,
+  .launch-api-operation-table .launch-mdx-td {
+    display: block;
+  }
+
+  .launch-api-operation-table .launch-mdx-table thead {
+    display: none;
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr {
+    padding: 12px 40px 12px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td,
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:first-child {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:nth-child(2) {
+    display: inline;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    margin-top: 6px;
+  }
+
+  .launch-api-operation-table code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* An operation's method beside its name in the sidebar (`icon: method:<METHOD>`). */
+.launch-docs-nav-method {
+  width: 3.9em;
+  color: var(--positive);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+}
+
+.launch-docs-nav-method[data-method="POST"] {
+  color: var(--attention);
+}
+
+.launch-docs-nav-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+}
+
+.launch-docs-nav-method[data-method="DELETE"] {
+  color: var(--critical);
+}
+
+/* The path wraps beside its method on a phone rather than dropping below it. */
+.launch-api-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-api-endpoint code {
+  min-width: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--font-size-body);
+  overflow-wrap: break-word;
+}
+
+.launch-api-path-param {
+  color: var(--ink-tertiary);
+}
+
+/* Method colours follow the dashboard playground's badges. */
+.launch-api-method {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--corner-control-inner);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--positive);
+  background: var(--positive-wash);
+  box-shadow: inset 0 0 0 1px var(--positive-rule);
+}
+
+.launch-api-method[data-method="POST"] {
+  color: var(--attention);
+  background: var(--attention-wash);
+  box-shadow: inset 0 0 0 1px var(--attention-rule);
+}
+
+.launch-api-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+  background: var(--progress-wash);
+  box-shadow: inset 0 0 0 1px var(--progress-rule);
+}
+
+.launch-api-method[data-method="DELETE"] {
+  color: var(--critical);
+  background: var(--critical-wash);
+  box-shadow: inset 0 0 0 1px var(--critical-rule);
+}
+
+.is-api-reference .launch-mdx-unordered-list {
+  gap: 0;
+  margin: 4px 0 20px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.is-api-reference .launch-mdx-unordered-list > .launch-mdx-list-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule-faint);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* Nested fields hang off their parent on a guide rule. */
+.is-api-reference .launch-mdx-list-item .launch-mdx-unordered-list {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--rule);
+}
+
+.is-api-reference
+  .launch-mdx-list-item
+  .launch-mdx-unordered-list
+  > .launch-mdx-list-item:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph {
+  margin: 4px 0 0;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* The first line: field name, type and facts. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph:first-child {
+  margin-top: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+}
+
+/* Under Responses (the generator's `## Responses`), a status leads with its description, which
+   reads as body text; the fields under it keep the field style above. */
+.is-api-reference
+  #responses
+  + .launch-mdx-unordered-list
+  > .launch-mdx-list-item
+  > .launch-mdx-paragraph:first-child {
+  color: var(--ink-secondary);
+  font-size: var(--font-size-body);
+}
+
+/* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
+.launch-api-separator {
+  margin: 0 0.3em;
+}
+
+/* The field or status name, set apart from the inline code chips beside it. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-strong:first-child > code,
+.is-api-reference .launch-mdx-paragraph:first-child > .launch-mdx-strong:first-child > code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
+}
+
+/* An operation's page (`<ApiOperation>`): its body, then a panel of its samples and example
+   responses (`<ApiPanel>`), a box each whose code scrolls inside it. From 1280px the panel sits
+   beside the body; below, it follows, at the article's width. */
+.launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+  max-width: 780px;
+}
+
+.launch-api-operation-main,
+.launch-api-panel {
+  min-width: 0;
+}
+
+/* One frame per sample: the tab card's, not a second border on the code inside it. */
+.launch-api-panel figure.shiki {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.launch-api-panel .fd-scroll-container {
+  max-height: 26rem;
+}
+
+@media (min-width: 1280px) {
+  .launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+    max-width: none;
+  }
+
+  .launch-api-operation {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 42%, 500px);
+    column-gap: 40px;
+    align-items: start;
+  }
+
+  .launch-api-panel > .launch-mdx-heading-2:first-child {
+    margin-top: 0;
+  }
+}
+
+/* On a window this tall the panel stays in view, sized to the window, and never scrolls itself:
+   the samples keep their box, the last box (the example responses) takes the height left, and
+   only code scrolls, inside a whole box. 750px leaves that box at least 10 lines beside the
+   tallest samples; a shorter window keeps the panel in the page's flow. */
+@media (min-width: 1280px) and (min-height: 750px) {
+  .launch-api-panel {
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 48px);
+  }
+
+  /* A flex column keeps margins apart, so the panel sets the gaps the page's flow collapses
+     them to. */
+  .launch-api-panel > .launch-mdx-heading-2 {
+    margin: 40px 0 16px;
+  }
+
+  .launch-api-panel > div {
+    margin: 0;
+  }
+
+  .launch-api-panel > div:not(:last-child) .fd-scroll-container {
+    max-height: min(18rem, 25vh);
+  }
+
+  .launch-api-panel > div:last-child,
+  .launch-api-panel > div:last-child > [role="tabpanel"]:not([hidden]),
+  .launch-api-panel > div:last-child figure.shiki {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .launch-api-panel > div:last-child > [role="tablist"] {
+    flex: none;
+  }
+
+  .launch-api-panel > div:last-child .fd-scroll-container {
+    max-height: none;
+  }
 }
 
 /* ── Docs Home page ── */
@@ -1140,12 +1922,12 @@ body {
    (.launch-home h2.launch-home-section-label has higher specificity). */
 .launch-home h2.launch-home-section-label {
   margin: 0 0 20px;
-  font-family: var(--font-abc-diatype, sans-serif);
+  font-family: var(--font-sans);
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.02em;
   text-transform: none;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-heading-anchor {
@@ -1158,9 +1940,9 @@ body {
 
 .launch-home-heading-anchor svg {
   flex-shrink: 0;
-  color: var(--launch-icon-muted);
+  color: var(--ink-tertiary);
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-heading-anchor:hover svg {
@@ -1178,8 +1960,8 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1px;
-  background: var(--launch-border);
-  border: 1px solid var(--launch-border);
+  background: var(--rule);
+  border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -1189,22 +1971,22 @@ body {
   flex-direction: column;
   gap: 6px;
   padding: 18px 20px;
-  background: var(--launch-white);
+  background: var(--paper-card);
   text-decoration: none;
-  transition: background 140ms ease;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-cap-card:hover {
-  background: var(--launch-hover-bg);
+  background: var(--wash);
 }
 
 .launch-home h3.launch-home-cap-title {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-cap-desc {
@@ -1212,7 +1994,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.5;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 /* ── Platform model ── */
@@ -1220,8 +2002,8 @@ body {
   display: flex;
   align-items: stretch;
   flex-wrap: nowrap;
-  background: var(--launch-white);
-  border: 1px solid var(--launch-border);
+  background: var(--paper-card);
+  border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -1241,38 +2023,38 @@ body {
   min-width: 0;
   padding: 20px 18px;
   text-decoration: none;
-  transition: background 140ms ease;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-model-step:hover {
-  background: var(--launch-hover-bg);
+  background: var(--wash);
 }
 
 .launch-home-model-num {
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--launch-muted);
-  letter-spacing: 0.04em;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .launch-home-model-name {
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 600;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   white-space: nowrap;
 }
 
 .launch-home-model-desc {
   font-family: var(--font-sans);
   font-size: 12px;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   white-space: nowrap;
 }
 
 .launch-home-model-arrow {
-  color: var(--launch-border-strong);
+  color: var(--rule-strong);
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -1294,12 +2076,12 @@ body {
   margin: 0 0 24px;
   font-family: var(--font-sans);
   font-size: 14px;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-home-partners {
-  border: 1px solid var(--launch-border);
-  background: var(--launch-white);
+  border: 1px solid var(--rule);
+  background: var(--paper-card);
 }
 
 .launch-home-partners-row {
@@ -1307,7 +2089,7 @@ body {
 }
 
 .launch-home-partners-row + .launch-home-partners-row {
-  border-top: 1px solid var(--launch-border);
+  border-top: 1px solid var(--rule);
 }
 
 .launch-home-partners-category {
@@ -1317,8 +2099,8 @@ body {
   margin-bottom: 24px;
   font-family: var(--font-sans);
   font-size: 16px;
-  font-weight: 550;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
 }
 
 .launch-home-partners-logos {
@@ -1354,20 +2136,20 @@ body {
   flex-direction: column;
   gap: 10px;
   padding: 18px 20px;
-  outline: 1px solid var(--launch-border);
+  outline: 1px solid var(--rule);
   outline-offset: -1px;
   border-radius: 12px;
-  background: var(--launch-white);
+  background: var(--paper-card);
   text-decoration: none;
-  transition: background 150ms ease;
+  transition: background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-outcome:hover {
-  background: var(--launch-hover-bg);
+  background: var(--wash);
 }
 
 .launch-home-outcome:focus-visible {
-  outline: 2px solid var(--launch-ink);
+  outline: 2px solid var(--ink);
 }
 
 .launch-home-outcome.is-disabled {
@@ -1375,7 +2157,7 @@ body {
 }
 
 .launch-home-outcome.is-disabled:hover {
-  background: var(--launch-white);
+  background: var(--paper-card);
 }
 
 .launch-home-outcome-icon-wrap {
@@ -1383,7 +2165,7 @@ body {
   width: 32px;
   height: 32px;
   place-items: center;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-model-cards .launch-home-outcome-icon-wrap {
@@ -1396,7 +2178,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 8px 0 2px;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-outcome-sketch svg {
@@ -1405,7 +2187,7 @@ body {
 }
 
 .launch-home-outcome-sketch text {
-  font-family: var(--font-berkeley-mono);
+  font-family: var(--font-sans);
 }
 
 /* 3-column horizontal layout for platform model cards */
@@ -1416,7 +2198,7 @@ body {
 .launch-home-outcome-divider {
   height: 1px;
   margin: 8px -20px;
-  background: var(--launch-border);
+  background: var(--rule);
 }
 
 .launch-home-outcome-body {
@@ -1435,8 +2217,8 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 650;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   line-height: 1.35;
   letter-spacing: 0;
   text-wrap: balance;
@@ -1448,7 +2230,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.55;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   text-wrap: pretty;
 }
 
@@ -1458,13 +2240,13 @@ body {
   gap: 3px;
   font-family: var(--font-sans);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--launch-muted);
-  transition: color 150ms ease;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-outcome:hover .launch-home-outcome-cta {
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 /* ── Choose your path ── */
@@ -1479,27 +2261,27 @@ body {
   flex-direction: column;
   gap: 8px;
   padding: 24px;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 12px;
-  background: var(--launch-white);
+  background: var(--paper-card);
   text-decoration: none;
   transition:
-    border-color 140ms ease,
-    background 140ms ease;
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-path-card:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-hover-bg);
+  border-color: var(--rule-strong);
+  background: var(--wash);
 }
 
 .launch-home h3.launch-home-path-title {
   margin: 0;
-  font-family: var(--font-abc-diatype, sans-serif);
+  font-family: var(--font-sans);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-path-desc {
@@ -1507,7 +2289,7 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   flex: 1;
 }
 
@@ -1518,8 +2300,8 @@ body {
   margin-top: 4px;
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 600;
-  color: var(--launch-muted);
+  font-weight: 500;
+  color: var(--ink-tertiary);
 }
 
 /* ── Start here ── */
@@ -1527,7 +2309,7 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -1537,8 +2319,8 @@ body {
   align-items: flex-start;
   gap: 14px;
   padding: 16px 20px;
-  background: var(--launch-white);
-  border-bottom: 1px solid var(--launch-border);
+  background: var(--paper-card);
+  border-bottom: 1px solid var(--rule);
 }
 
 .launch-home-onboarding-step:last-child {
@@ -1553,11 +2335,13 @@ body {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--launch-ink);
-  color: var(--launch-cream);
-  font-family: var(--font-berkeley-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
+  background: var(--paper-card);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   margin-top: 1px;
 }
@@ -1571,10 +2355,10 @@ body {
 .launch-home-onboarding-link {
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   text-decoration: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-onboarding-link:hover {
@@ -1585,7 +2369,7 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 13px;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   line-height: 1.4;
 }
 
@@ -1601,27 +2385,27 @@ body {
   flex-direction: column;
   gap: 4px;
   padding: 16px 18px;
-  border: 1px solid var(--launch-border);
+  border: 1px solid var(--rule);
   border-radius: 10px;
-  background: var(--launch-white);
+  background: var(--paper-card);
   text-decoration: none;
   transition:
-    border-color 140ms ease,
-    background 140ms ease;
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-resource:hover {
-  border-color: var(--launch-border-strong);
-  background: var(--launch-hover-bg);
+  border-color: var(--rule-strong);
+  background: var(--wash);
 }
 
 .launch-home h3.launch-home-resource-title {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0;
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-home-resource-desc {
@@ -1629,7 +2413,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.4;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
 }
 
 .launch-home-actions {
@@ -1645,15 +2429,15 @@ body {
   height: 42px;
   padding: 0 20px;
   border-radius: 10px;
-  background: var(--launch-ink);
-  color: var(--launch-cream);
+  background: var(--ink);
+  color: var(--paper);
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
   transition:
-    opacity 160ms ease,
-    transform 100ms ease;
+    opacity var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-cta-primary:hover {
@@ -1675,25 +2459,25 @@ body {
   gap: 7px;
   height: 42px;
   padding: 0 20px;
-  border: 1px solid var(--launch-border-strong);
+  border: 1px solid var(--rule-strong);
   border-radius: 10px;
   background: transparent;
-  color: var(--launch-text);
+  color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 550;
+  font-weight: 500;
   text-decoration: none;
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 100ms ease;
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-cta-secondary:hover {
-  background: var(--launch-hover-bg);
-  border-color: var(--launch-border-strong);
-  color: var(--launch-ink);
+  background: var(--wash);
+  border-color: var(--rule-strong);
+  color: var(--ink);
 }
 
 .launch-home-cta-secondary:active {
@@ -1707,13 +2491,11 @@ body {
 .launch-home-browse-category {
   margin-bottom: 0;
   padding-bottom: 10px;
-  color: var(--launch-muted);
-  font-family: var(--font-berkeley-mono);
+  color: var(--ink-tertiary);
+  font-family: var(--font-sans);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--launch-border);
+  font-weight: 500;
+  border-bottom: 1px solid var(--rule);
 }
 
 .launch-home-browse-grid {
@@ -1723,18 +2505,18 @@ body {
 
 .launch-home-browse-item {
   padding: 16px 20px 16px 0;
-  border-bottom: 1px solid var(--launch-border);
+  border-bottom: 1px solid var(--rule);
 }
 
 .launch-home-browse-link {
   display: block;
   margin-bottom: 4px;
-  color: var(--launch-ink);
+  color: var(--ink);
   font-family: var(--font-sans);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-home-browse-link:hover {
@@ -1743,7 +2525,7 @@ body {
 
 .launch-home-browse-desc {
   margin: 0;
-  color: var(--launch-muted);
+  color: var(--ink-tertiary);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.4;
@@ -1778,8 +2560,9 @@ a.rounded-lg.border.p-4 > p.truncate {
   display: none;
 }
 
-/* ── Tab panels — white card on beige background (matches dashboard cards) ── */
-[role="tabpanel"] {
+/* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
+   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. ── */
+.sdp-docs-shell [role="tabpanel"] {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);
@@ -1798,7 +2581,7 @@ a.rounded-lg.border.p-4 > p.truncate {
   flex-direction: column;
   gap: 1rem;
   padding: 2rem 0;
-  border-top: 1px solid var(--launch-border);
+  border-top: 1px solid var(--rule);
 }
 
 .hiw-step-header {
@@ -1815,19 +2598,27 @@ a.rounded-lg.border.p-4 > p.truncate {
   width: 1.5rem;
   height: 1.5rem;
   border-radius: 50%;
-  background: var(--launch-ink);
-  color: var(--launch-cream);
-  font-size: 0.6875rem;
-  font-weight: 650;
-  font-family: var(--font-berkeley-mono, monospace);
+  font-size: 12px;
+  font-family: var(--font-sans);
   line-height: 1;
 }
 
+/* Both step renderers, How it works and Fumadocs <Steps>, number with the same ring chip. The fill
+   is opaque so the <Steps> guide line never shows through the digit. */
+.hiw-step-num,
+.fd-step::before {
+  background: var(--paper-card);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 .hiw-step-title {
-  font-family: var(--font-abc-diatype, sans-serif);
+  font-family: var(--font-sans);
   font-size: 1rem;
-  font-weight: 600;
-  color: var(--launch-ink);
+  font-weight: 500;
+  color: var(--ink);
   margin: 0;
   line-height: 1.4;
 }

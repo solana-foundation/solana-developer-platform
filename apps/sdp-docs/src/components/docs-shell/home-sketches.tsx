@@ -23,7 +23,7 @@ function LabelChip({ x, y, width, label }: { x: number; y: number; width: number
         width={width}
         height="18"
         rx="9"
-        fill="var(--launch-white)"
+        fill="var(--paper-card)"
         stroke="currentColor"
         strokeOpacity="0.22"
       />
@@ -454,7 +454,7 @@ export function MarketsSketch() {
         cx="174"
         cy="70"
         r="20"
-        fill="var(--launch-white)"
+        fill="var(--paper-card)"
         stroke="currentColor"
         strokeOpacity="0.55"
       />

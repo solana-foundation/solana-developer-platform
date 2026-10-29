@@ -156,7 +156,7 @@ export function moneyAnswerRetiresKey(answer: ApiAnswer): boolean {
  * from the one first sent under the key. It says nothing about whether that
  * one ran, so on a money route the key is kept ({@link moneyAnswerRetiresKey}).
  */
-export function isKeyReusedAnswer(answer: ApiAnswer): boolean {
+function isKeyReusedAnswer(answer: ApiAnswer): boolean {
   return answer.status === 422 && answer.code === "IDEMPOTENCY_KEY_REUSED";
 }
 

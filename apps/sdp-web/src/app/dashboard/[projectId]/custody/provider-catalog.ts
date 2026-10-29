@@ -1,5 +1,4 @@
 import {
-  CUSTODY_PROVIDER_CAPABILITIES,
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS,
   type CustodyProvider,
   type CustodyProviderAvailabilityClass,
@@ -52,20 +51,6 @@ export const CUSTODY_PROVIDER_CATALOG: CustodyProviderCatalogEntry[] =
     capabilities: provider.useCases,
   }));
 
-function getSharedProviderCapabilities(
-  provider: KnownCustodyProvider
-): CustodyProviderCapabilities {
-  return CUSTODY_PROVIDER_CAPABILITIES[provider];
-}
-
-export function providerSupportsAdditionalWallets(provider: KnownCustodyProvider): boolean {
-  return getSharedProviderCapabilities(provider).supportsAdditionalWalletCreation;
-}
-
-export function providerSupportsSigning(provider: KnownCustodyProvider): boolean {
-  return getSharedProviderCapabilities(provider).supportsSigning;
-}
-
 const PROVIDER_LABELS = new Map(
   CUSTODY_PROVIDER_CATALOG.map((provider) => [provider.id, provider.label])
 );
@@ -94,12 +79,6 @@ export function getCustodyProviderEntry(
     throw new Error(`Custody provider missing from the catalog: ${provider}`);
   }
   return entry;
-}
-
-export function getCustodyProvidersByCategory(
-  category: WalletProviderCategory
-): CustodyProviderCatalogEntry[] {
-  return CUSTODY_PROVIDER_CATALOG.filter((provider) => provider.category === category);
 }
 
 /**

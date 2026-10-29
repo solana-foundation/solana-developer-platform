@@ -4987,6 +4987,40 @@ describe("Payments routes — recurring", () => {
   });
 
   describe("money admission (HOO-1955)", () => {
+    it("skips a disabled project's collection without a failed attempt or signature", async () => {
+      const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+      const signaturesBefore = sendTransactionMock.mock.calls.length;
+      const now = new Date();
+      await setRecurringCollectionDue({
+        recurringPaymentId: recurringPayment.id,
+        subscriptionId: recurringPayment.subscriptionId,
+        dueAt: new Date(now.getTime() - 60 * 1000).toISOString(),
+      });
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+        .bind(["recurring.collect"], TEST_PROJECT.id)
+        .run();
+
+      expect(await collectDueRecurringPaymentsIn("sandbox", now)).toEqual({
+        recovered: 0,
+        collected: 0,
+        failed: 0,
+        skipped: 0,
+        refused: 1,
+      });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(signaturesBefore);
+      expect(await collectionAttempts(recurringPayment.subscriptionId)).toEqual([
+        expect.objectContaining({
+          status: "skipped",
+          error: "This movement is disabled for the project",
+          signature: null,
+        }),
+      ]);
+      expect((await recurringPaymentDueAt(recurringPayment.id)).dueAt).toBeGreaterThan(
+        now.getTime()
+      );
+    });
+
     it("skips a deleted organization's due period once, without signing or catching up", async () => {
       const recurringPayment = await activateRecurringPaymentForTest(RECURRING_HEADERS);
       const signaturesBefore = sendTransactionMock.mock.calls.length;

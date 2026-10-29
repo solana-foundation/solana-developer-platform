@@ -4,6 +4,7 @@ import {
   apiKeyDetailSchema,
   apiKeyResponseSchema,
   listApiKeysResponseSchema,
+  memberApiKeysResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
 } from "@/openapi/schemas/api-keys";
@@ -85,6 +86,7 @@ import {
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
+  paymentRequestSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionListResponseSchema,
   paymentSubscriptionPlanListResponseSchema,
@@ -115,6 +117,7 @@ export const createOrganizationResponse = successResponseSchema(createOrganizati
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
 export const inviteMemberResponse = successResponseSchema(inviteMemberResponseSchema);
 export const memberRoleResponse = successResponseSchema(memberRoleSchema);
+export const memberApiKeysResponse = successResponseSchema(memberApiKeysResponseSchema);
 export const actionSuccessResponse = successResponseSchema(actionSuccessSchema);
 
 export const listApiKeysResponse = successResponseSchema(listApiKeysResponseSchema);
@@ -285,6 +288,7 @@ export const transferBatchListResponse = paginatedResponseSchema(transferBatchSc
 export const transferBatchEstimateResponse = successResponseSchema(
   transferBatchEstimateResponseSchema
 );
+export const paymentRequestResponse = successResponseSchema(paymentRequestSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );

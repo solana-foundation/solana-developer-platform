@@ -15,7 +15,7 @@ import type { IssuanceTokenView } from "./issuance-token-fields";
  * component code is pulled into the server/route bundle.
  */
 export type IssuanceTokenListItem = IssuanceTokenView;
-export type IssuanceAssetProfileView = NonNullable<IssuanceTokenView["assetProfile"]>;
+type IssuanceAssetProfileView = NonNullable<IssuanceTokenView["assetProfile"]>;
 
 export interface IssuanceTokensPage {
   tokens: IssuanceTokenListItem[];
@@ -36,7 +36,7 @@ export interface IssuanceTokenFacets {
   total: number;
 }
 
-export const EMPTY_ISSUANCE_TOKEN_FACETS: IssuanceTokenFacets = {
+const EMPTY_ISSUANCE_TOKEN_FACETS: IssuanceTokenFacets = {
   templates: [],
   deploymentStatuses: { draft: 0, active: 0, paused: 0 },
   total: 0,

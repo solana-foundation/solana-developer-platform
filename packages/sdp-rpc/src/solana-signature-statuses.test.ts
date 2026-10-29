@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSolanaRpcFromTransport, type Signature } from "@solana/kit";
+import {
+  createSolanaRpcFromTransport,
+  getBase58Decoder,
+  type Signature,
+  signature,
+} from "@solana/kit";
 import { getSignatureStatuses, type SolanaRpc } from "./solana";
 
 const SIG = "sig111" as Signature;
+const SECOND_SIG = signature(getBase58Decoder().decode(new Uint8Array(64).fill(2)));
 
 const STATUS = {
   slot: 100n,
@@ -100,4 +106,15 @@ test("refuses a history search answered from below minContextSlot", async () => 
     getSignatureStatuses(rpc, [SIG], { searchTransactionHistory: true, minContextSlot: 123n }),
     { name: "SdpRpcError", code: "SOLANA_RPC_ERROR" }
   );
+});
+
+test("refuses an answer short a status instead of reading the gap as absence", async () => {
+  const rpc = createSolanaRpcFromTransport(async () =>
+    JSON.parse('{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":[null]}}')
+  );
+  await assert.rejects(getSignatureStatuses(rpc, [SIG, SECOND_SIG]), {
+    name: "SdpRpcError",
+    code: "SOLANA_RPC_ERROR",
+    message: "getSignatureStatuses returned 1 statuses for 2 signatures",
+  });
 });

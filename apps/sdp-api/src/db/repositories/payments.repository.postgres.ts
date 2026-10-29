@@ -1315,7 +1315,7 @@ export function createPostgresPaymentsRepository(
       statuses,
       fireblocks,
       types,
-      hasSignature,
+      unsigned,
       createdBefore,
       updatedBefore,
       limit,
@@ -1345,9 +1345,7 @@ export function createPostgresPaymentsRepository(
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
         values.push(...types);
       }
-      if (hasSignature === true) {
-        clauses.push("pt.signature IS NOT NULL");
-      } else if (hasSignature === false) {
+      if (unsigned) {
         clauses.push("pt.signature IS NULL");
       }
       if (createdBefore) {
@@ -1373,6 +1371,41 @@ export function createPostgresPaymentsRepository(
         .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
+    },
+
+    async listProcessingSignedSubmissions({ environment, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listProcessingSignedSubmissions is system-only"
+        );
+      }
+      const rows = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
+           WHERE p.environment = ?
+             AND pt.status = ?
+             AND pt.type = ANY(?)
+             AND pt.provider_data->'fireblocksTransfer' IS NULL
+             AND pt.signature IS NOT NULL
+             AND pt.signed_transaction IS NOT NULL
+             AND pt.last_valid_block_height IS NOT NULL
+           ORDER BY pt.updated_at ASC, pt.id ASC
+           LIMIT ?`
+        )
+        .bind(environment, "processing", [...WALLET_TRANSFER_TYPES], limit)
+        .all<PaymentTransferProjectionRow>();
+
+      return rows.results.map((row) => {
+        const transfer = mapTransferRow(row);
+        return {
+          ...transfer,
+          signature: z.string().parse(transfer.signature),
+          signed_transaction: z.string().parse(transfer.signed_transaction),
+          last_valid_block_height: z.string().parse(transfer.last_valid_block_height),
+        };
+      });
     },
 
     async listConfirmedTransfersToPoll({ environment, confirmedAfter, limit }) {

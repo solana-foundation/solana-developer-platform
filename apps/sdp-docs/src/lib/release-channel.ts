@@ -1,4 +1,5 @@
 import type { ActionModule, ActionVerb } from "@sdp/types/actions";
+import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
@@ -22,6 +23,12 @@ export type PublicSurface = {
   grantableActions: readonly { module: ActionModule; verbs: readonly ActionVerb[] }[];
   allModules: readonly SdpModule[];
   allRampProviders: readonly RampProviderId[];
+  /** The API's rate limits, which `<RateLimitTable />` shows (apps/sdp-api/src/middleware/rate-limit.ts). */
+  rateLimits: {
+    windowSeconds: number;
+    apiKeyTiers: Readonly<Record<RateLimitTier, number>>;
+    unauthenticatedPerIp: number;
+  };
 };
 
 // SAFETY: createPublicSurfaceManifest (apps/sdp-api/src/openapi/spec.ts) writes

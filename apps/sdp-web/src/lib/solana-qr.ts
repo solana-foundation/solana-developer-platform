@@ -1,13 +1,22 @@
-"use client";
-
 import type { Options } from "@solana/qr-code-styling";
-import { useEffect, useRef } from "react";
-import { useTranslations } from "@/i18n/provider";
 
 const QR_FOREGROUND = "#1c1c1d";
 const QR_BACKGROUND = "#ffffff";
+/**
+ * Every code is drawn at this size and scaled to fit. The library rounds each dot to a whole
+ * pixel and places the logo from a different rounding, so a code drawn small sets the logo off
+ * centre; at this size the slack is under a pixel at any display size.
+ */
+export const QR_DRAW_SIZE = 512;
 
-function solanaQrOptions(url: string, size: number): Partial<Options> {
+/**
+ * The styling every SDP pay-link QR code is drawn with.
+ *
+ * @param url - The link the code opens.
+ * @param size - The size it is drawn at, in px.
+ * @returns The library options.
+ */
+export function solanaQrOptions(url: string, size: number): Partial<Options> {
   return {
     type: "svg",
     width: size,
@@ -24,34 +33,19 @@ function solanaQrOptions(url: string, size: number): Partial<Options> {
   };
 }
 
-export function PayQrCode({ url, size }: { url: string; size: number }) {
-  const t = useTranslations();
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (container === null) return;
-
-    let active = true;
-    void import("@solana/qr-code-styling").then(({ default: QRCodeStyling }) => {
-      if (!active) return;
-      const qr = new QRCodeStyling(solanaQrOptions(url, size));
-      container.replaceChildren();
-      qr.append(container);
-    });
-
-    return () => {
-      active = false;
-      container.replaceChildren();
-    };
-  }, [url, size]);
-
-  return (
-    <div
-      ref={containerRef}
-      role="img"
-      aria-label={t("Shared.pay.qrCode")}
-      style={{ width: size, height: size }}
-    />
-  );
+/**
+ * Download a link's Solana-styled QR code as a PNG, drawn as the SolanaQrCode component draws it.
+ *
+ * @param params - What to encode and where to save it.
+ * @param params.url - The link the code opens.
+ * @param params.fileName - The file name, without its extension.
+ * @returns Once the browser has been handed the file.
+ */
+export async function downloadSolanaQrCode(params: {
+  url: string;
+  fileName: string;
+}): Promise<void> {
+  const { default: QRCodeStyling } = await import("@solana/qr-code-styling");
+  const qr = new QRCodeStyling({ ...solanaQrOptions(params.url, QR_DRAW_SIZE), type: "canvas" });
+  await qr.download({ name: params.fileName, extension: "png" });
 }

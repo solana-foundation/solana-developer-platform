@@ -156,9 +156,11 @@ development configuration described in
    API syncs the Earn strategy catalogue at startup and hourly afterward, so a
    fresh database lists strategies within a few seconds.
 
-4. In the local SDP dashboard, select a sandbox project and create a Developer
-   API key from **API keys** in the sidebar. The Developer role includes
-   `earn:read` and `earn:write`. Copy the full key when it is shown.
+4. In the local SDP dashboard, select a sandbox project and create an API key
+   from **API keys** in the sidebar. Grant **Earn** Read, Execute and Manage
+   (Manage builds the owner-signed recovery of an expired queued withdrawal).
+   Northstar never signs with a custody wallet, so give it the narrowest wallet
+   access the form allows. Copy the full key when it is shown.
 
 5. Generate the demo customer's managed wallet:
 

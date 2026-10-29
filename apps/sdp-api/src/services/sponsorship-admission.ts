@@ -42,6 +42,7 @@ export async function readSponsorshipAdmissionFacts(
   return readMoneyAdmissionFacts(
     env,
     { organizationId: scope.organizationId, projectId: scope.projectId },
+    scope.movement,
     sponsorSubject(scope)
   );
 }

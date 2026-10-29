@@ -2,6 +2,14 @@ import type { IdempotencyKeyMode } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema } from "@/openapi/schemas/base";
 
+/**
+ * The OpenAPI extension naming the group an operation sits in within its tag: the API reference
+ * shows a family's groups as folders of its operations (apps/sdp-docs). A tag's operations name
+ * one each or none, and its groups appear in the order its operations first name them
+ * (`buildApiReference`).
+ */
+export const DOCS_GROUP = "x-sdp-group";
+
 export const jsonContent = (schema: z.ZodTypeAny) => ({
   "application/json": { schema },
 });

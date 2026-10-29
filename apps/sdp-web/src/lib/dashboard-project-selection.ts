@@ -1,6 +1,6 @@
 import type { Project } from "@sdp/types/projects";
 
-export const DEFAULT_SANDBOX_PROJECT_SLUG = "default-sandbox";
+const DEFAULT_SANDBOX_PROJECT_SLUG = "default-sandbox";
 
 type ProjectLike = Pick<Project, "id" | "slug">;
 

@@ -8,7 +8,7 @@ export interface IssuanceTemplateCatalogEntry {
   defaultDecimals: number;
 }
 
-export const issuanceTemplateCatalog: IssuanceTemplateCatalogEntry[] = [
+const issuanceTemplateCatalog: IssuanceTemplateCatalogEntry[] = [
   {
     id: "stablecoin",
     nameKey: "stablecoinName",

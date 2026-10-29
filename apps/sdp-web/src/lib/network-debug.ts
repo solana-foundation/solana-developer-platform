@@ -1,4 +1,4 @@
-export const NETWORK_DEBUG_STORAGE_KEY = "sdp.debug.network.enabled";
+const NETWORK_DEBUG_STORAGE_KEY = "sdp.debug.network.enabled";
 export const MAX_NETWORK_DEBUG_ENTRIES = 50;
 const NETWORK_DEBUG_BODY_PREVIEW_LIMIT = 10_000;
 

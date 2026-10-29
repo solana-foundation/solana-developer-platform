@@ -32,7 +32,7 @@ import type { SdpApiClient } from "@/lib/sdp-api";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export const RECURRING_PAYMENTS_PAGE_SIZE = 100;
+const RECURRING_PAYMENTS_PAGE_SIZE = 100;
 
 export const RECURRING_LIST_DEFAULT_PAGE_SIZE = 25;
 
@@ -188,9 +188,7 @@ function setPositiveInteger(query: URLSearchParams, key: string, value: number |
   }
 }
 
-export function buildRecurringPaymentsQuery(
-  options: RecurringPaymentsListOptions
-): URLSearchParams {
+function buildRecurringPaymentsQuery(options: RecurringPaymentsListOptions): URLSearchParams {
   const query = new URLSearchParams();
   setPositiveInteger(query, "page", options.page);
   setPositiveInteger(query, "pageSize", options.pageSize);
