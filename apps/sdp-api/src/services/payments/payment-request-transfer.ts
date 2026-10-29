@@ -1,9 +1,11 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import {
   type Address,
   decodeTransactionFromRpcResponse,
   getAccountMetasFromCompiledTransactionMessage,
   getInstructionsFromCompiledTransactionMessage,
+  isSolanaError,
   type Signature,
   type TokenBalance,
 } from "@solana/kit";
@@ -49,7 +51,7 @@ export async function validatePaymentRequestTransfer(
   const response = await createClusterRpc()
     .getTransaction(signature, {
       commitment: "finalized",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       encoding: "base64",
     })
     .send();
@@ -62,11 +64,20 @@ export async function validatePaymentRequestTransfer(
   if (response.meta.err !== null) {
     throw new ValidateTransferError("Transaction failed");
   }
-  const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
-  const candidate = getInstructionsFromCompiledTransactionMessage(
-    compiledMessage,
-    loadedAddresses
-  ).at(-1);
+  let compiledMessage: ReturnType<typeof decodeTransactionFromRpcResponse>["compiledMessage"];
+  let loadedAddresses: ReturnType<typeof decodeTransactionFromRpcResponse>["loadedAddresses"];
+  let candidate:
+    | ReturnType<typeof getInstructionsFromCompiledTransactionMessage>[number]
+    | undefined;
+  try {
+    ({ compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response));
+    candidate = getInstructionsFromCompiledTransactionMessage(compiledMessage, loadedAddresses).at(
+      -1
+    );
+  } catch (error) {
+    if (!isSolanaError(error)) throw error;
+    throw new ValidateTransferError("Transaction decode failed");
+  }
   if (candidate === undefined || candidate.accounts === undefined || candidate.data === undefined) {
     throw new ValidateTransferError("Missing transfer instruction");
   }

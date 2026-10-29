@@ -161,6 +161,10 @@ jobs:
       - name: Check pinned dependencies
         run: pnpm check:pinned-dependencies
 
+      # Transaction-read validation parses TypeScript, so run it after dependency install.
+      - name: Check transaction read versions
+        run: pnpm check:transaction-reads
+
   translation_agent:
     name: Translation Agent
     runs-on: ubuntu-latest

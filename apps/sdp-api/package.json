@@ -24,6 +24,7 @@
     "movement:control": "tsx scripts/project-movement-control.ts",
     "keygen:local": "tsx scripts/generate-local-keypair.ts",
     "typecheck": "tsc --noEmit",
+    "verify:v1:surfpool": "node --import tsx scripts/verify-v1-surfpool.ts",
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
