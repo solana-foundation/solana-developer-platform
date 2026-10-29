@@ -100,6 +100,7 @@
     "status": "Statut :",
     "apiKeyRequired": "Créez d’abord une clé API pour activer les requêtes live.",
     "runRequest": "Exécuter",
+    "run": "Exécuter",
     "reset": "Réinitialiser",
     "retry": "Réessayer",
     "copyCode": "Copier le code",

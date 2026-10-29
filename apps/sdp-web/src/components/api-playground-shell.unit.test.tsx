@@ -656,9 +656,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
         </ThemeScopeProvider>
       </I18nProvider>
     );
-    expect((view.getByRole("button", { name: /Run request/ }) as HTMLButtonElement).disabled).toBe(
-      false
-    );
+    expect((view.getByRole("button", { name: "Run" }) as HTMLButtonElement).disabled).toBe(false);
     expect(view.queryByRole("link", { name: "Create an API key" })).toBeNull();
   });
 

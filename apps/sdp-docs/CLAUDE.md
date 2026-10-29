@@ -232,7 +232,12 @@ Swagger UI for their own release channel.
   routes. It also drives `Run in dashboard` on operation pages
   (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
   The link carries the generated endpoint ID through sign-in and project
-  selection; the dashboard resolves it to a curated form when their IDs differ.
+  selection and opens a new tab; the dashboard resolves it to a curated form
+  when their IDs differ.
+  `vercel.json` pairs the docs project with `sdp-web`; `dashboard-url.ts` uses
+  `VERCEL_RELATED_PROJECTS` and `VERCEL_ENV` to link to the same branch's web
+  preview. A preview without pairing hides the action. Production falls back to
+  the canonical platform origin, and local development uses `localhost:3000`.
 - `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`, sending an `Idempotency-Key` only where the route declares one) and an example per status. Under Responses, each JSON body's fields nest under its status, written by the request body's field renderer; a status whose fields an earlier status already lists (most errors share one envelope) says "Same fields as `400`." instead. The envelope's `code` lists no values: the document's list names held modules' codes on every channel, so the builder drops it, as Conventions > Errors names only the common ones. The generator fails if a table misses an operation or a page misses a sample.
 - A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
 - Reference content is Markdown, so `.md`, `llms-full.txt` and search carry

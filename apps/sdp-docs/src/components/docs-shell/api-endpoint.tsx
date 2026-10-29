@@ -55,7 +55,12 @@ export function ApiEndpoint({ method, path }: { method: ApiMethod; path: string 
         ))}
       </code>
       {playgroundHref ? (
-        <a href={playgroundHref} className="launch-api-playground-link">
+        <a
+          href={playgroundHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="launch-api-playground-link"
+        >
           Run in dashboard
           <ArrowRight size={14} aria-hidden="true" />
         </a>

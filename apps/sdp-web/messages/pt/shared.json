@@ -100,6 +100,7 @@
     "status": "Status:",
     "apiKeyRequired": "Crie uma chave de API primeiro para ativar requisições reais no API Playground.",
     "runRequest": "Executar requisição",
+    "run": "Executar",
     "reset": "Redefinir",
     "retry": "Tentar novamente",
     "copyCode": "Copiar código",

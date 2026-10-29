@@ -109,6 +109,7 @@
     "status": "Trạng thái:",
     "apiKeyRequired": "Tạo khóa API trước để gửi request Playground trực tiếp.",
     "runRequest": "Chạy request",
+    "run": "Chạy",
     "reset": "Đặt lại",
     "retry": "Thử lại",
     "copyCode": "Sao chép mã",
