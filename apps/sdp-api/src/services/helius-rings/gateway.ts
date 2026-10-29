@@ -7,13 +7,17 @@ import {
   type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk/outer-tx-policy";
+import { createRpcFromTransport } from "@sdp/rpc/solana";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { createGuardedFetch } from "@/services/guarded-egress";
+import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
 import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
+
+type RingsGatewaySdkConfig = Parameters<typeof createRingsGateway>[0];
 
 export interface RingsGatewayTenant {
   organizationId: string;
@@ -62,8 +66,9 @@ export async function resolvePersistedRingsGateway(
  * hostname cannot rebind or bounce the API into a private or metadata address
  * after passing the literal write-time check. Development returns undefined —
  * local endpoints legitimately resolve to loopback, which the guard exists to
- * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
- * transport, which the library builds internally (upstream gap).
+ * refuse. The Zolana client's own Solana RPC transport cannot take a fetch, so
+ * that leg is guarded by handing the client a Solana RPC built on the guarded
+ * transport instead (`createConfiguredRingsGateway` wires it).
  */
 export function ringsEgressFetch(
   env: Env,
@@ -104,6 +109,20 @@ export function createConfiguredRingsGateway(
   const create = dependencies.createGateway ?? createRingsGateway;
   const recordRingLookupTable = dependencies.recordRingLookupTable;
   const egressFetch = ringsEgressFetch(env);
+  // The Zolana client's Solana RPC leg is the one transport its `fetch` cannot
+  // carry, so outside development the gateway hands the client an RPC built on
+  // the guarded customer transport — the same guard the submit leg dials
+  // through. A saved hostname that rebinds DNS then still cannot reach a
+  // private or metadata address through the client's reads.
+  const guardedSolanaRpc = egressFetch
+    ? // zolana types its Solana RPC with the test-cluster API (`requestAirdrop`
+      // included) while Kit's own factory returns the all-clusters client; the
+      // SDK's flows never call the extra method, so the built client fits. Same
+      // boundary-cast rule as `createRpcForSdk` in `@sdp/rpc`.
+      (createRpcFromTransport(createCustomerRpcTransport(connection.solanaRpcUrl)) as NonNullable<
+        RingsGatewaySdkConfig["solanaRpc"]
+      >)
+    : undefined;
 
   const gatewayConfig = {
     solanaRpcUrl: connection.solanaRpcUrl,
@@ -112,6 +131,7 @@ export function createConfiguredRingsGateway(
     ...(connection.ringRpcUrl ? { ringRpcUrl: connection.ringRpcUrl } : {}),
     ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
     ...(egressFetch ? { fetch: egressFetch } : {}),
+    ...(guardedSolanaRpc ? { solanaRpc: guardedSolanaRpc } : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,

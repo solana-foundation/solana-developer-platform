@@ -85,6 +85,25 @@ describe("selectNotes", () => {
     expect((error as HeliusRingsError).code).toBe("insufficient_balance");
   });
 
+  it("refuses a non-positive amount", async () => {
+    const wallet = walletOf([note(1, 100n)]);
+
+    // An empty selection "covers" zero and every negative, which would build a
+    // zero-value operation. The API schema refuses these first; the selector
+    // refuses them locally so no caller can rely on the gap.
+    for (const amount of [0n, -1n]) {
+      const error = await Promise.resolve()
+        .then(() => selectNotes({ wallet, asset: SOL, amount }))
+        .then(
+          () => null,
+          (thrown: unknown) => thrown
+        );
+
+      expect(error).toBeInstanceOf(HeliusRingsError);
+      expect((error as HeliusRingsError).code).toBe("invalid_input");
+    }
+  });
+
   describe("pinned inputs", () => {
     it("spends exactly what a previous build committed to", async () => {
       const wallet = walletOf([note(1, 100n), note(2, 900n), note(3, 100n)]);

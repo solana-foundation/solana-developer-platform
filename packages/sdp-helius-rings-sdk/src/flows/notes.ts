@@ -40,6 +40,13 @@ export const MERGE_MAX_INPUTS = 5;
 const MERGE_MIN_INPUTS = 2;
 
 export function selectNotes(input: SelectNotesInput): NoteSelection {
+  if (input.amount <= 0n) {
+    // An empty selection "covers" zero and every negative, which would build a
+    // zero-value operation rather than fail. Callers' schemas refuse these
+    // first; the selector refuses them too, so the gap never depends on one.
+    throw new HeliusRingsError("invalid_input", "the amount must be greater than zero");
+  }
+
   const available = spendable(input);
 
   const notes = input.pinned ? repin(available, input.pinned) : cover(available, input.amount);

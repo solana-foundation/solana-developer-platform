@@ -23,3 +23,14 @@ test("rejects invalid output sizes and signed values", () => {
   assert.throws(() => toBufferLE(1n, -1), RangeError);
   assert.throws(() => toBufferBE(1n, 1.5), RangeError);
 });
+
+test("throws instead of wrapping when the value overflows the width", () => {
+  // A silent wrap encodes 2^64 as zero, so an oversized amount must refuse to
+  // encode at all — matching the native binding's contract.
+  assert.throws(() => toBufferBE(2n ** 64n, 8), RangeError);
+  assert.throws(() => toBufferLE(2n ** 64n, 8), RangeError);
+  assert.throws(() => toBufferBE(2n ** 128n, 16), RangeError);
+  // The boundary itself still encodes.
+  assert.deepEqual(toBufferBE(2n ** 64n - 1n, 8), Buffer.from("ffffffffffffffff", "hex"));
+  assert.deepEqual(toBufferLE(2n ** 64n - 1n, 8), Buffer.from("ffffffffffffffff", "hex"));
+});

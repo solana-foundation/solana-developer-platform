@@ -19,7 +19,7 @@ import type {
 } from "@sdp/helius-rings/port";
 import type { RuntimeHealth } from "@sdp/helius-rings/types";
 import { buildRingsOperation } from "./build.js";
-import { createRingsClient } from "./client.js";
+import { createRingsClient, type RingsSolanaRpc } from "./client.js";
 import { createCustodyMaterialSource } from "./custody-ka/derivation";
 import { withZolanaErrorBridge } from "./error-bridge.js";
 import { probeRingsHealth, withHealthTimeout } from "./health.js";
@@ -69,11 +69,18 @@ export interface RingsGatewayConfig {
   readonly healthTimeoutMs?: number;
   /**
    * Carries every leg this package dials directly — health probes, the
-   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
-   * own Solana RPC transport cannot take one (upstream gap), so that leg
-   * stays on the library's plain transport.
+   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's own
+   * Solana RPC transport cannot take one; pass {@link RingsGatewayConfig.solanaRpc}
+   * to guard that leg instead.
    */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Replaces the Zolana client's internally-built Solana RPC, the one leg the
+   * {@link RingsGatewayConfig.fetch} config cannot carry. A caller dials a
+   * tenant-supplied `solanaRpcUrl` through its egress guard by handing in a
+   * client built on a guarded transport.
+   */
+  readonly solanaRpc?: RingsSolanaRpc;
 }
 
 const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };

@@ -42,7 +42,14 @@ function toBufferBE(value, width) {
   assertBigInt(value);
   assertWidth(width);
   const hex = value.toString(16);
-  return Buffer.from(hex.padStart(width * 2, "0").slice(0, width * 2), "hex");
+  // Upstream's native binding throws when the value does not fit rather than
+  // wrapping; the truncating slice this replaces is exactly the silent
+  // overflow an amount encoding must never produce, so this copy refuses it
+  // too.
+  if (hex.length > width * 2) {
+    throw new RangeError(`Expected a bigint that fits in ${width} bytes`);
+  }
+  return Buffer.from(hex.padStart(width * 2, "0"), "hex");
 }
 
 module.exports = { toBigIntBE, toBigIntLE, toBufferBE, toBufferLE };

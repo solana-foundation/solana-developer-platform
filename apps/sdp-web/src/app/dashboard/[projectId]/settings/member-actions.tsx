@@ -217,6 +217,7 @@ function MemberApiKeys({ apiKeys, label }: { apiKeys: MemberApiKey[]; label: str
             <EntityLink
               href={projectHref(apiKey.projectId, API_KEYS_PAGE_PATH)}
               target="_blank"
+              rel="noreferrer"
               className="shrink-0"
             >
               {t("Shared.members.revokeApiKey")}
