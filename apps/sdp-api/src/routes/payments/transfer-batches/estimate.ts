@@ -1,8 +1,4 @@
-import {
-  accountExists,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
-} from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import {
@@ -10,7 +6,6 @@ import {
   createNoopSigner,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getTokenSize } from "@solana-program/token-2022";
 import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -21,20 +16,21 @@ import {
   type SolRentShortfall,
 } from "@/services/payments/sol-rent-minimum";
 import {
+  getManagedSponsorshipProviderConfiguration,
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
+import { readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
   DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-  type RecipientInstructionGroup,
   type TransactionChunk,
 } from "./transaction";
-import type { Rpc, TokenContext } from "./types";
+import type { Rpc } from "./types";
 
 /**
  * Sums the network fee across all chunk transactions via getFeeForMessage.
@@ -57,39 +53,6 @@ async function estimateNetworkFeeLamports(rpc: Rpc, chunks: TransactionChunk[]):
   );
 
   return fees.reduce((total, fee) => total + fee, 0n);
-}
-
-/**
- * Estimates the rent the fee payer would fund for recipient token accounts
- * that do not exist yet. Zero for SOL batches.
- *
- * @param rpc - Solana RPC client.
- * @param groups - Instruction groups with derived destination token accounts.
- * @param tokenContext - Resolved token parameters for the batch.
- * @returns Total rent-exemption lamports for missing token accounts.
- */
-async function estimateMissingAtaRentLamports(
-  rpc: Rpc,
-  groups: RecipientInstructionGroup[],
-  tokenContext: TokenContext
-): Promise<bigint> {
-  if (tokenContext.kind === "sol") {
-    return 0n;
-  }
-
-  const [rentLamports, existence] = await Promise.all([
-    getMinimumBalanceForRentExemption(rpc, getTokenSize()),
-    Promise.all(
-      groups.map((group) =>
-        group.destinationTokenAccount
-          ? accountExists(rpc, group.destinationTokenAccount)
-          : Promise.resolve(true)
-      )
-    ),
-  ]);
-
-  const missing = existence.filter((exists) => !exists).length;
-  return rentLamports * BigInt(missing);
 }
 
 function rentShortfallOf(movement: SolMovement | null): Promise<SolRentShortfall | null> {
@@ -141,19 +104,27 @@ export async function estimateTransferBatch(
     sourceSigner,
     feePayer,
   });
+  const sponsoredRent = await readSponsoredRentLimit({
+    rpc: resolved.rpc,
+    groups,
+    tokenContext: resolved.tokenContext,
+    readConfiguration: () => getManagedSponsorshipProviderConfiguration(c.env),
+  });
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner,
     feePayer,
     lifetime,
+    sponsoredRent,
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   });
-  const [networkFeeLamports, tokenAccountRentLamports, rentShortfall] = await Promise.all([
+  const [networkFeeLamports, rentShortfall] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
-    estimateMissingAtaRentLamports(resolved.rpc, groups, resolved.tokenContext),
     rentShortfallOf(solBatchMovement(resolved, chunks)),
   ]);
+  let tokenAccountRentLamports = 0n;
+  for (const rent of sponsoredRent.rentByTokenAccount.values()) tokenAccountRentLamports += rent;
   const warnings = rentShortfall === null ? [] : rentWarnings(rentShortfall);
 
   return success(c, {
