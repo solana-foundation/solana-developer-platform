@@ -365,6 +365,27 @@ describe("Payments routes — subscriptions", () => {
     expect(errorResponseSchema.parse(await authorizeRes.json()).error.message).toContain(
       "Use a recurring payment"
     );
+
+    // One already authorized: its collection is refused too, since a recurring collect from the
+    // wallet resets the shared allowance to zero.
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET status = 'active' WHERE id = ?")
+      .bind(legacyId)
+      .run();
+    const collectRes = await app.request(
+      `/v1/payments/subscriptions/${legacyId}/prepare-collection`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
+      },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    expect(errorResponseSchema.parse(await collectRes.json()).error.message).toContain(
+      "Use a recurring payment"
+    );
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {

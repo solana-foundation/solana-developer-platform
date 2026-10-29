@@ -24,8 +24,8 @@ incident or Linear ticket; the command logs them with the outcome as
   like the hourly sweep: an organization's suspension and a disabled movement
   (HOO-2334) never refuse it.
 - It ignores what still uses the approval. Every live recurring payment on that
-  wallet and token can no longer collect: the output lists them under
-  `brokenRecurringPayments`. Their collections fail on chain and pause them
+  wallet and token, in any project, can no longer collect: the output lists them
+  under `brokenRecurringPayments`, each with its `projectId`. Their collections fail on chain and pause them
   after the failed-attempt limit (HOO-2340). Cancel them, or once the incident
   is over, activate replacements; resuming a paused one does not re-approve.
 - Only a revoke already in flight for the same authority stops it (`held`).

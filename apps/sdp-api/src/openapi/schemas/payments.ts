@@ -878,7 +878,7 @@ const paymentRecurringPaymentTokenApprovalSchema = z
   .object({
     status: z.enum(RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES).openapi({
       description:
-        "`revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token still use it, listed in `sharedWith`; it is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.",
+        "`revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.",
       example: "kept",
     }),
     delegate: solanaAddressSchema.openapi({
@@ -896,7 +896,7 @@ const paymentRecurringPaymentTokenApprovalSchema = z
       )
       .openapi({
         description:
-          "The other live recurring payments on the same wallet and token that keep the approval. Empty unless `status` is `kept`.",
+          "The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.",
       }),
   })
   .openapi({

@@ -325,7 +325,9 @@ describe("revokeSubscriptionAuthorityNow", () => {
     expect(result).toEqual({
       outcome: "revoked",
       subscriptionAuthorityAddress: authority,
-      brokenRecurringPayments: [{ id: live.recurringPaymentId, status: "canceling" }],
+      brokenRecurringPayments: [
+        { id: live.recurringPaymentId, status: "canceling", projectId: expect.any(String) },
+      ],
     });
     expect(chain.sendCount).toBe(1);
     expect(await revocations()).toEqual([

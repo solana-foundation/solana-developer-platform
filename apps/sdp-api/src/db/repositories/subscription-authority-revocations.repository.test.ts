@@ -221,6 +221,46 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     expect(await claim("psar_live")).toBeNull();
   });
 
+  it("names the schedules sharing an authority in every project of the environment", async () => {
+    const live = await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "active",
+      changedAt: LONG_AGO,
+      recurring: { status: "canceling" },
+    });
+    await canceledSchedule();
+    const sharing = () =>
+      repo.listRecurringPaymentsSharingAuthority({
+        environment: "sandbox",
+        subscriptionAuthorityAddress: AUTHORITY,
+        excludeRecurringPaymentId: "",
+      });
+    const expected = [
+      {
+        id: required(live.recurringPaymentId),
+        status: "canceling",
+        organization_id: TEST_ORG.id,
+        project_id: tenant.projectId,
+      },
+    ];
+    expect(await sharing()).toEqual(expected);
+
+    // A project the caller is not in (archived here, since an org has one active project per
+    // environment) still holds the authority.
+    await getDb(env).execute("UPDATE projects SET status = 'archived' WHERE id = ?", [
+      tenant.projectId,
+    ]);
+    expect(await sharing()).toEqual(expected);
+    expect(
+      await repo.listRecurringPaymentsSharingAuthority({
+        environment: "production",
+        subscriptionAuthorityAddress: AUTHORITY,
+        excludeRecurringPaymentId: "",
+      })
+    ).toEqual([]);
+  });
+
   it("keeps every authority on a wallet while a schedule on it may be about to use one", async () => {
     const { recurringPaymentId } = await canceledSchedule();
     const id = required(recurringPaymentId);

@@ -209,8 +209,9 @@ export async function revokeSubscriptionAuthorityAfterCancel(
 /**
  * What became of the token approval a canceled recurring payment relied on (HOO-2339), from the
  * database alone: `revoked` once a revoke of its authority confirmed at or after the cancel,
- * `kept` while other recurring payments in the project still need the authority (named in
- * `sharedWith`), else `revoking`, which the hourly sweep finishes. Two reads, no RPC.
+ * `kept` while other recurring payments in any project still need the authority (`sharedWith`
+ * names the ones in this recurring payment's own project), else `revoking`, which the hourly
+ * sweep finishes. Two reads, no RPC.
  *
  * @param env - Runtime environment for repository construction.
  * @param recurringPayment - The recurring payment as read.
@@ -236,20 +237,32 @@ export async function describeTokenApprovalAfterCancel(
   ) {
     return { status: "revoked", delegate, sharedWith: [] };
   }
-  const sharedWith = await repo.listRecurringPaymentsSharingAuthority({
-    organizationId: recurringPayment.organization_id,
-    projectId: recurringPayment.project_id,
+  const sharing = await repo.listRecurringPaymentsSharingAuthority({
+    environment: currentClusterScope().environment,
     subscriptionAuthorityAddress: delegate,
     excludeRecurringPaymentId: recurringPayment.id,
   });
-  return { status: sharedWith.length > 0 ? "kept" : "revoking", delegate, sharedWith };
+  // The caller can read this project's schedules; one in another project still keeps the
+  // approval, but is not named.
+  const sharedWith = sharing
+    .filter(
+      (payment) =>
+        payment.organization_id === recurringPayment.organization_id &&
+        payment.project_id === recurringPayment.project_id
+    )
+    .map(({ id, status }) => ({ id, status }));
+  return { status: sharing.length > 0 ? "kept" : "revoking", delegate, sharedWith };
 }
 
 /** What an operator's incident revoke did, and the live schedules it leaves without an approval. */
 export interface OperatorRevokeResult {
   outcome: RevocationOutcome | "held";
   subscriptionAuthorityAddress: Address;
-  brokenRecurringPayments: { id: string; status: PaymentRecurringPaymentStatus }[];
+  brokenRecurringPayments: {
+    id: string;
+    status: PaymentRecurringPaymentStatus;
+    projectId: string;
+  }[];
 }
 
 /**
@@ -319,12 +332,13 @@ export async function revokeSubscriptionAuthorityNow(
   const outcome = claimed
     ? await settleRevocation(chain, repo, claimed, { resumed: false })
     : ("held" as const);
-  const brokenRecurringPayments = await repo.listRecurringPaymentsSharingAuthority({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    subscriptionAuthorityAddress,
-    excludeRecurringPaymentId: "",
-  });
+  const brokenRecurringPayments = (
+    await repo.listRecurringPaymentsSharingAuthority({
+      environment: currentClusterScope().environment,
+      subscriptionAuthorityAddress,
+      excludeRecurringPaymentId: "",
+    })
+  ).map(({ id, status, project_id }) => ({ id, status, projectId: project_id }));
   logEvent(outcome === "revoked" ? "warn" : "error", {
     event: "sdp_subscription_authority_operator_revoke",
     outcome,

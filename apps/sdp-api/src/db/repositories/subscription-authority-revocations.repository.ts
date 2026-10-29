@@ -5,7 +5,6 @@ import {
   PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION,
   PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY,
-  type PaymentRecurringPaymentStatus,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
   RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY,
   SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES,
@@ -268,16 +267,16 @@ export interface SubscriptionAuthorityRevocationsRepository {
     now: string;
   }): Promise<SubscriptionAuthorityRevocationRow | null>;
   /**
-   * The project's other recurring payments on the authority that still need it (any status but
-   * {@link RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY}), oldest first: the ones a cancel
-   * names when it keeps the approval (HOO-2339).
+   * The environment's other recurring payments on the authority that still need it (any status
+   * but {@link RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY}), in any project, oldest first: the
+   * ones that keep the approval after a cancel (HOO-2339). The authority is per wallet and mint,
+   * so, like the sweep's idle predicate, this spans projects; callers filter what they expose.
    */
   listRecurringPaymentsSharingAuthority(input: {
-    organizationId: string;
-    projectId: string;
+    environment: SdpEnvironment;
     subscriptionAuthorityAddress: string;
     excludeRecurringPaymentId: string;
-  }): Promise<{ id: string; status: PaymentRecurringPaymentStatus }[]>;
+  }): Promise<SharingRecurringPayment[]>;
   /** Whether a revoke of the authority has confirmed at or after `since`. */
   hasConfirmedRevocationSince(input: {
     environment: SdpEnvironment;
@@ -289,7 +288,12 @@ export interface SubscriptionAuthorityRevocationsRepository {
 const sharingRecurringPaymentSchema = z.object({
   id: z.string(),
   status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+  organization_id: z.string(),
+  project_id: z.string(),
 });
+
+/** A recurring payment that still needs a subscription authority. */
+export type SharingRecurringPayment = z.infer<typeof sharingRecurringPaymentSchema>;
 
 export function createPostgresSubscriptionAuthorityRevocationsRepository(
   db: DatabaseExecutor
@@ -450,15 +454,16 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
 
     async listRecurringPaymentsSharingAuthority(input) {
       const rows = await db.queryMany(
-        `SELECT id, status FROM payment_recurring_payments
-          WHERE organization_id = ? AND project_id = ?
-            AND subscription_authority_address = ?
-            AND id <> ?
-            AND status <> ALL(?::text[])
-          ORDER BY created_at ASC, id ASC`,
+        `SELECT payment.id, payment.status, payment.organization_id, payment.project_id
+           FROM payment_recurring_payments payment
+           JOIN projects payment_project ON payment_project.id = payment.project_id
+          WHERE payment_project.environment = ?
+            AND payment.subscription_authority_address = ?
+            AND payment.id <> ?
+            AND payment.status <> ALL(?::text[])
+          ORDER BY payment.created_at ASC, payment.id ASC`,
         [
-          input.organizationId,
-          input.projectId,
+          input.environment,
           input.subscriptionAuthorityAddress,
           input.excludeRecurringPaymentId,
           [...RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY],

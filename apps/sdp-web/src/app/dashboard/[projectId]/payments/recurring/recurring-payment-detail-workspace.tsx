@@ -338,6 +338,13 @@ function CanceledTokenApprovalNote({
         </span>
       );
     case "kept":
+      if (sharedWith.length === 0) {
+        return (
+          <span className="mt-1 block text-secondary" data-token-approval="kept">
+            {t("DashboardPayments.recurring.approvalKeptElsewhereBody")}
+          </span>
+        );
+      }
       return (
         <span className="mt-1 block text-secondary" data-token-approval="kept">
           {t(

@@ -1159,6 +1159,7 @@
       "approvalRevokedBody": "The wallet's token approval it used has been revoked.",
       "approvalRevokingBody": "Nothing else uses the wallet's token approval it relied on, and SDP is revoking it.",
       "approvalKeptOneBody": "The wallet's token approval stays, because {count} other schedule from this wallet in this token still uses it. It is revoked once that one ends:",
+      "approvalKeptElsewhereBody": "The wallet's token approval stays, because schedules from this wallet in this token in another project still use it. It is revoked once the last of them ends.",
       "approvalKeptManyBody": "The wallet's token approval stays, because {count} other schedules from this wallet in this token still use it. It is revoked once the last of them ends:",
       "stateExpiredBody": "It reached its stop date and will not run again. Create a new one to continue.",
       "stateWorkingBody": "Waiting on the network. Nothing else changes until it answers.",

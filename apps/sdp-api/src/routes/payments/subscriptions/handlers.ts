@@ -480,6 +480,9 @@ export const prepareSubscriptionCollection = async (
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   await assertStandaloneSubscription(c, subscription);
+  // One authorized before the create-time refusal: a recurring collect from the same wallet now
+  // resets the shared allowance to zero, so its pull would fail on chain.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (subscription.status !== "active") {
     throw badRequest("Subscription must be active before collection");
   }

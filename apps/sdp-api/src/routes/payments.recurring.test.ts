@@ -41,6 +41,7 @@ import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/p
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
+import * as subscriptionAuthorityRevocationsRepository from "@/db/repositories/subscription-authority-revocations.repository";
 import { app as baseApp } from "@/index";
 import {
   AppError,
@@ -2812,6 +2813,51 @@ describe("Payments routes — recurring", () => {
       expect(await readFirst()).toMatchObject({ status: "revoked", sharedWith: [] });
     }
   );
+
+  it("names only this project's schedules among those keeping the authority", async () => {
+    const first = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const other = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const cancel = await app.request(
+      `/v1/payments/recurring-payments/${first.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancel.status).toBe(200);
+    // The authority is per wallet and mint, so the schedule keeping it may sit in another project
+    // of the environment; this one may not link to it.
+    const createSubscriptionAuthorityRevocationsRepository =
+      subscriptionAuthorityRevocationsRepository.createPostgresSubscriptionAuthorityRevocationsRepository;
+    const repositorySpy = vi
+      .spyOn(
+        subscriptionAuthorityRevocationsRepository,
+        "createPostgresSubscriptionAuthorityRevocationsRepository"
+      )
+      .mockImplementation((db) => ({
+        ...createSubscriptionAuthorityRevocationsRepository(db),
+        listRecurringPaymentsSharingAuthority: vi.fn(async () => [
+          {
+            id: other.id,
+            status: "active" as const,
+            organization_id: "org_other",
+            project_id: "prj_other",
+          },
+        ]),
+      }));
+    onTestFinished(() => repositorySpy.mockRestore());
+
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${first.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+
+    expect(read.status).toBe(200);
+    expect((await parseRecurringResponse(read)).data.tokenApproval).toEqual({
+      status: "kept",
+      delegate: first.subscriptionAuthorityAddress,
+      sharedWith: [],
+    });
+  });
 
   it("answers a cancel whose authority revoke is refused, leaving the revoke failed for the sweep", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
