@@ -8325,7 +8325,7 @@ describe("Issuance Routes", () => {
         });
         // Exercise the real signer authorization rather than the suite's signer mock.
         vi.mocked(solanaSigner.createOrgSignerForCustodyWallet).mockRestore();
-        const update = vi.spyOn(TokenService.prototype, "updateToken");
+        const update = vi.spyOn(TokenService.prototype, "pinDeploySigningWallet");
         const prepare = vi.spyOn(MosaicService.prototype, "prepareCreateToken");
         try {
           const response = await app.request(
@@ -8360,7 +8360,7 @@ describe("Issuance Routes", () => {
           uri: null,
           requiresAllowlist: false,
         });
-        const updateTokenSpy = vi.spyOn(TokenService.prototype, "updateToken");
+        const updateTokenSpy = vi.spyOn(TokenService.prototype, "pinDeploySigningWallet");
         const signerSpy = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
         signerSpy.mockClear();
 
@@ -8386,6 +8386,170 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it.each([
+        {
+          selection: "different",
+          secondWalletId: "cwlt_prepare_competing",
+          statuses: [200, 409],
+          builds: 1,
+        },
+        {
+          selection: "same",
+          secondWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+          statuses: [200, 200],
+          builds: 2,
+        },
+      ])(
+        "keeps the winning wallet for concurrent preparations selecting $selection wallets",
+        async ({ secondWalletId, statuses, builds }) => {
+          const token = await seedIssuedToken({
+            id: "tok_prepare_competing_wallets",
+            mintAddress: null,
+            status: "pending",
+            signingCustodyWalletId: null,
+            signingWalletId: null,
+            requiresAllowlist: false,
+          });
+          await getDb(env)
+            .prepare(
+              `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+             VALUES ('cwlt_prepare_competing', 'cust_cfg_issuance_activity', 'wal_competing', ?, 'active')`
+            )
+            .bind(TEST_ACTIVE_TOKEN.mintAuthority)
+            .run();
+          const wallets = [DEFAULT_ISSUANCE_CUSTODY_WALLET_ID, secondWalletId];
+          const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+          const loadSigner = required(signer.getMockImplementation());
+          let releaseSigners: () => void;
+          const barrier = new Promise<void>((resolve) => {
+            releaseSigners = resolve;
+          });
+          let arrivals = 0;
+          signer.mockImplementation(async (...args) => {
+            const resolved = await loadSigner(...args);
+            // Both requests must read the unpinned token before either can save its choice.
+            if (++arrivals === 2) releaseSigners();
+            await barrier;
+            return resolved;
+          });
+          const prepare = vi
+            .spyOn(MosaicService.prototype, "prepareCreateToken")
+            .mockResolvedValue({
+              serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+              blockhash: "11111111111111111111111111111111",
+              lastValidBlockHeight: 0n,
+              mint: address(TEST_SOLANA_ADDRESSES.mint),
+              requiredSigners: [],
+            });
+          const simulate = vi.spyOn(SolanaRpc, "simulateTransaction").mockResolvedValue({
+            success: true,
+            logs: [],
+            unitsConsumed: 0n,
+            error: null,
+          });
+
+          try {
+            const responses = await Promise.all(
+              wallets.map((custodyWalletId) =>
+                app.request(
+                  `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                    },
+                    body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
+                  },
+                  env
+                )
+              )
+            );
+            expect(responses.map((response) => response.status).sort()).toEqual(statuses);
+            const winner = required(
+              wallets[responses.findIndex((response) => response.status === 200)]
+            );
+            const stored = await app.request(
+              `/v1/issuance/tokens/${token.id}`,
+              { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+              env
+            );
+            expect(stored.status).toBe(200);
+            expect(await stored.json()).toMatchObject({
+              data: { token: { signingCustodyWalletId: winner, status: "pending" } },
+            });
+            expect(prepare).toHaveBeenCalledTimes(builds);
+            expect(prepare).toHaveBeenCalledWith(
+              expect.objectContaining({
+                mintAuthority: { address: TEST_ACTIVE_TOKEN.mintAuthority },
+              })
+            );
+          } finally {
+            signer.mockImplementation(loadSigner);
+            prepare.mockRestore();
+            simulate.mockRestore();
+          }
+        }
+      );
+
+      it.each([
+        { status: "deploying", mintAddress: null },
+        { status: "pending", mintAddress: TEST_SOLANA_ADDRESSES.mint },
+      ])(
+        "refuses preparation if the token becomes $status with mint $mintAddress after being read",
+        async ({ status, mintAddress }) => {
+          const token = await seedIssuedToken({
+            id: "tok_prepare_lifecycle_changed",
+            mintAddress: null,
+            status: "pending",
+            requiresAllowlist: false,
+          });
+          const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+          const loadSigner = required(signer.getMockImplementation());
+          signer.mockImplementation(async (...args) => {
+            const resolved = await loadSigner(...args);
+            await getDb(env)
+              .prepare("UPDATE issued_tokens SET status = ?, mint_address = ? WHERE id = ?")
+              .bind(status, mintAddress, token.id)
+              .run();
+            return resolved;
+          });
+          const prepare = vi.spyOn(MosaicService.prototype, "prepareCreateToken");
+
+          try {
+            const response = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({}),
+              },
+              env
+            );
+            expect(response.status).toBe(409);
+            expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
+            expect(prepare).not.toHaveBeenCalled();
+            const stored = await app.request(
+              `/v1/issuance/tokens/${token.id}`,
+              { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+              env
+            );
+            expect(stored.status).toBe(200);
+            expect(await stored.json()).toMatchObject({
+              data: {
+                token: { signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID, mintAddress },
+              },
+            });
+          } finally {
+            signer.mockImplementation(loadSigner);
+            prepare.mockRestore();
+          }
+        }
+      );
+
       it("does not prepare a transaction when saving the exact wallet fails", async () => {
         const token = await seedIssuedToken({
           id: "tok_prepare_pin_failure",
@@ -8395,7 +8559,7 @@ describe("Issuance Routes", () => {
           signingWalletId: null,
           requiresAllowlist: false,
         });
-        const updateToken = vi.spyOn(TokenService.prototype, "updateToken");
+        const updateToken = vi.spyOn(TokenService.prototype, "pinDeploySigningWallet");
         updateToken.mockRejectedValueOnce(new Error("pin write failed"));
         const prepare = vi.spyOn(MosaicService.prototype, "prepareCreateToken");
         try {
@@ -8438,7 +8602,7 @@ describe("Issuance Routes", () => {
           signingWalletId: null,
           requiresAllowlist: false,
         });
-        const updateTokenSpy = vi.spyOn(TokenService.prototype, "updateToken");
+        const updateTokenSpy = vi.spyOn(TokenService.prototype, "pinDeploySigningWallet");
         const signerSpy = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
         signerSpy.mockClear();
 

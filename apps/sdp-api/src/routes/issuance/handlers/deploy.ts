@@ -780,11 +780,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof prepareDeploy
   const signer = authority.signer;
 
   // Confirm and metadata preparation use only this persisted exact selection.
-  if (authority.custodyWalletId !== token.signingCustodyWalletId) {
-    await tokenService.updateToken(tokenId, {
-      signingCustodyWalletId: authority.custodyWalletId,
-    });
-  }
+  await tokenService.pinDeploySigningWallet(tokenId, authority.custodyWalletId);
 
   const custodyAddress = signer.address;
 

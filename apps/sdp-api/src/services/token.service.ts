@@ -885,6 +885,25 @@ export class TokenService {
     };
   }
 
+  async pinDeploySigningWallet(tokenId: string, custodyWalletId: string): Promise<void> {
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens SET signing_custody_wallet_id = ?, updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL
+           AND (signing_custody_wallet_id IS NULL OR signing_custody_wallet_id = ?)`
+      )
+      .bind(custodyWalletId, new Date().toISOString(), tokenId, ...tenant.values, custodyWalletId)
+      .run();
+
+    if (rowsAffected === 0) {
+      throw new AppError(
+        "CONFLICT",
+        "Token deployment state or signing wallet changed during preparation"
+      );
+    }
+  }
+
   async updateToken(
     tokenId: string,
     input: UpdateTokenInput,
