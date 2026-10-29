@@ -146,9 +146,10 @@ export async function issuePaymentRequestTransaction(
     return signAndStore(claim.unsignedTransaction);
   };
 
-  // Counted once per call, before the first round trip toward a new signature: before a fresh
-  // claim is built, or before a stored unsigned claim is signed. A claim lost to a concurrent
-  // payer still counts, which only under-admits. Replays of signed bytes never reach it.
+  // Counted once per call, only once the payer and transaction are valid: before a fresh claim
+  // is taken, or before a stored unsigned claim is signed. A post the checks refuse never counts.
+  // A claim lost to a concurrent payer still counts, which only under-admits. Replays of signed
+  // bytes never reach it.
   let signatureAdmitted = false;
   const admitSponsorSignature = async (): Promise<void> => {
     if (signatureAdmitted) return;
@@ -255,7 +256,6 @@ export async function issuePaymentRequestTransaction(
     return served;
   }
 
-  await admitSponsorSignature();
   const feePayment = await getFeePayment();
   const feePayer = await feePayment.getFeePayer();
   if (payer === feePayer) {
@@ -268,6 +268,7 @@ export async function issuePaymentRequestTransaction(
     blockhash,
     lastValidBlockHeight,
   });
+  await admitSponsorSignature();
 
   const claimed = await repository.claimSponsoredTransactionWindow({
     requestId: request.id,

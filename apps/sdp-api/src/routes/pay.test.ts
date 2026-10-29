@@ -628,14 +628,12 @@ describe("Public payment request routes", () => {
         expect((await postTransaction(request.public_token)).status).toBe(200);
       }
       expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
-      const blockhashReads = getRecentBlockhashMock.mock.calls.length;
 
       const refused = await postTransaction(request.public_token);
       expect(refused.status).toBe(429);
       expect(Number(refused.headers.get("Retry-After"))).toBeGreaterThan(0);
       expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
-      expect(getRecentBlockhashMock.mock.calls.length).toBe(blockhashReads);
 
       // Another request on the same wallet keeps its own allowance.
       expect((await postTransaction(other.public_token)).status).toBe(200);
@@ -643,6 +641,26 @@ describe("Public payment request routes", () => {
       rpc.answer("getBlockHeight", 900);
       expect((await postTransaction(request.public_token)).status).toBe(200);
       expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR + 1);
+    });
+
+    it("counts only posts that reach the sponsor signature", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const sponsorAsPayer = () =>
+        app.request(
+          `/pay/${request.public_token}/tx`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: TEST_MOCK_FEE_PAYER }),
+          },
+          env
+        );
+
+      for (let attempt = 0; attempt <= PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await sponsorAsPayer()).status).toBe(400);
+      }
+      expect((await postTransaction(request.public_token)).status).toBe(200);
     });
 
     it("holds each clock hour to the cap across an hour boundary", async () => {
