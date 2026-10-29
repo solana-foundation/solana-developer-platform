@@ -317,10 +317,10 @@ describe("renderOperation", () => {
   });
 
   it("lists a oneOf response's variants, an array of them included", () => {
-    const shape = (name: string) => ({
-      name: "shape",
+    const discriminatorProperty = (value: string) => ({
+      name: "kind",
       required: true,
-      schema: schema({ enum: [name] }),
+      schema: schema({ enum: [value] }),
     });
     const page = renderOperation({
       ...CREATE_WIDGET,
@@ -343,15 +343,18 @@ describe("renderOperation", () => {
                       variantMode: "oneOf",
                       variants: [
                         {
-                          title: 'shape: "round"',
-                          schema: schema({ type: "object", properties: [shape("round")] }),
+                          title: 'kind: "round"',
+                          schema: schema({
+                            type: "object",
+                            properties: [discriminatorProperty("round")],
+                          }),
                         },
                         {
                           title: "A square.",
                           schema: schema({
                             type: "object",
                             constraints: [{ kind: "includes", value: ["side"] }],
-                            properties: [shape("square")],
+                            properties: [discriminatorProperty("square")],
                           }),
                         },
                       ],
@@ -360,7 +363,7 @@ describe("renderOperation", () => {
                 },
               ],
             }),
-            example: { data: [{ shape: "round" }] },
+            example: { data: [{ kind: "round" }] },
           },
         },
       ],
@@ -374,9 +377,9 @@ describe("renderOperation", () => {
           "",
           "    One of:",
           "",
-          '    - **shape: "round"**',
+          '    - **kind: "round"**',
           "",
-          "      - **`shape`** · `string` · required · always `round`",
+          "      - **`kind`** · `string` · required · always `round`",
           "",
           "    - **A square.** · must include `side`",
         ].join("\n")
