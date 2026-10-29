@@ -960,20 +960,30 @@ async function exactTransferResponse(params: {
   );
   // Kit 7 can encode and decode v1, but createTransactionMessage does not type v1 yet.
   // This fixture uses the same static-account message with v1's mandatory limits.
-  const transaction =
-    params.version === 1
-      ? compileTransaction({
-          ...message,
-          version: 1 as const,
-          config: { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 64 * 1024 },
-        })
-      : compileTransaction(
-          lookupTable === null
-            ? message
-            : compressTransactionMessageUsingAddressLookupTables(message, {
-                [lookupTable]: [destination],
-              })
-        );
+  let transaction: ReturnType<typeof compileTransaction>;
+  switch (params.version) {
+    case 1:
+      transaction = compileTransaction({
+        ...message,
+        version: 1 as const,
+        config: { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 64 * 1024 },
+      });
+      break;
+    case 0:
+    case undefined:
+      transaction = compileTransaction(
+        lookupTable === null
+          ? message
+          : compressTransactionMessageUsingAddressLookupTables(message, {
+              [lookupTable]: [destination],
+            })
+      );
+      break;
+    default: {
+      const exhaustive: never = params.version;
+      throw new Error(`Unsupported transaction version: ${exhaustive}`);
+    }
+  }
   const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
   const loadedWritable = lookupTable === null ? [] : [destination];
   const accountKeys = [...compiled.staticAccounts, ...loadedWritable];

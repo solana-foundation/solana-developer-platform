@@ -86,15 +86,23 @@ test("skips a candidate that serves mainnet and selects the next one that serves
   globalThis.fetch = async (url, init) => {
     const { id, method, params } = JSON.parse(init.body);
     calls.push({ url, method, params });
-    const result =
-      method === "getGenesisHash"
-        ? genesisHashByUrl[url]
-        : method === "getLatestBlockhash"
-          ? {
-              context: { slot: 7 },
-              value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
-            }
-          : { context: { slot: 7 }, value: true };
+    let result;
+    switch (method) {
+      case "getGenesisHash":
+        result = genesisHashByUrl[url];
+        break;
+      case "getLatestBlockhash":
+        result = {
+          context: { slot: 7 },
+          value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
+        };
+        break;
+      case "isBlockhashValid":
+        result = { context: { slot: 7 }, value: true };
+        break;
+      default:
+        throw new Error(`Unexpected RPC method: ${method}`);
+    }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
   };
 
@@ -132,12 +140,20 @@ test("skips a devnet RPC whose latest blockhash has already expired", async (t) 
   });
   globalThis.fetch = async (url, init) => {
     const { id, method } = JSON.parse(init.body);
-    const result =
-      method === "getGenesisHash"
-        ? DEVNET_GENESIS_HASH
-        : method === "getLatestBlockhash"
-          ? { context: { slot: 7 }, value: { blockhash: "rpc-health-blockhash" } }
-          : { context: { slot: 7 }, value: url === liveUrl };
+    let result;
+    switch (method) {
+      case "getGenesisHash":
+        result = DEVNET_GENESIS_HASH;
+        break;
+      case "getLatestBlockhash":
+        result = { context: { slot: 7 }, value: { blockhash: "rpc-health-blockhash" } };
+        break;
+      case "isBlockhashValid":
+        result = { context: { slot: 7 }, value: url === liveUrl };
+        break;
+      default:
+        throw new Error(`Unexpected RPC method: ${method}`);
+    }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
   };
 
