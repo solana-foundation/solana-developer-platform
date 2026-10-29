@@ -6,6 +6,7 @@ import {
   type ProjectProviderAvailabilityEntry,
   RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -484,9 +485,20 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
 
+  it("omits custody providers when the release channel leaves out Custody", async () => {
+    providerMaturity.moduleMaturityOverride = { module: "custody", stage: "experimental" };
+
+    const availability = await readAvailability(
+      "sandbox",
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
+    );
+
+    expect(availability.providers.filter((entry) => entry.family === "custody")).toEqual([]);
+  });
+
   // Like ramps and Earn: the public document names no compliance provider on a
   // channel without Compliance, so the response omits them there.
-  it.each(["stable", "beta", "experimental"] as const)(
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
     "lists compliance providers in %s only when the release channel runs Compliance",
     async (channel) => {
       providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };

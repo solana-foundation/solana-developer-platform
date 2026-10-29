@@ -16,7 +16,8 @@ type AppContext = Context<{ Bindings: Env }>;
  * response: Earn entries only when `EARN_PUBLIC_SURFACE_PUBLISHED` is true and
  * the release channel runs Earn, compliance entries only when the release
  * channel runs Compliance, ramp entries only for providers the release channel
- * runs (the document prunes the others; openapi/release-channel-values.ts).
+ * runs, and other families only when their module runs (the document prunes
+ * the others; openapi/release-channel-values.ts).
  *
  * @param c - Request context, for the deployment's release channel.
  * @param availability - The project's availability across every family.
@@ -26,15 +27,12 @@ function publishedProviderAvailability(
   c: AppContext,
   availability: ProjectProviderAvailability
 ): ProjectProviderAvailability {
-  const earnPublished = EARN_PUBLIC_SURFACE_PUBLISHED && isModuleInChannel(c, "earn");
-  const compliancePublished = isModuleInChannel(c, "compliance");
   return {
     ...availability,
     providers: availability.providers.filter((entry) => {
-      if (entry.family === "earn") return earnPublished;
-      if (entry.family === "compliance") return compliancePublished;
       if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
-      return true;
+      if (entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) return false;
+      return isModuleInChannel(c, entry.family);
     }),
   };
 }
