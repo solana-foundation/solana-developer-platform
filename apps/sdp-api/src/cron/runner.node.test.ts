@@ -18,12 +18,23 @@ import type { BackgroundRunner } from "@/runtime/background";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { required } from "@/test/helpers/required";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
+import { recurringPaymentsCron } from "./recurring-payments";
 import { ringsIndexingCron } from "./rings-indexing";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelMaturity(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
+});
 
 interface ScheduledFake {
   expression: string;
@@ -174,6 +185,7 @@ function deadlineEvent(cron: string, environment: SdpEnvironment | null) {
 }
 
 beforeEach(() => {
+  providerMaturity.moduleEnvironmentMaturityOverride = null;
   scheduler.tasks.length = 0;
   observations.length = 0;
   logEventSpy = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
@@ -239,6 +251,29 @@ describe("startCron", () => {
     expect(runEvents(ringsIndexingCron.name, null)).toEqual([disabled, disabled]);
     expect(ringsIndexingCron.run).not.toHaveBeenCalled();
     expect(ringsIndexingCron.enabled).toHaveBeenCalledExactlyOnceWith(env);
+  });
+
+  it("disables a starts definition only in the Environment the channel leaves its module out of", async () => {
+    providerMaturity.moduleEnvironmentMaturityOverride = {
+      module: "recurring_payments",
+      environment: "production",
+      stage: "beta",
+    };
+    const { bg } = recordingBackgroundRunner();
+    startCron({ env: { ...env, SDP_RELEASE_CHANNEL: "stable" }, bg });
+
+    for (const task of scheduler.tasks) {
+      task.fire();
+    }
+    await bg.awaitAll();
+
+    const starts = recurringPaymentsCron.name;
+    const finishes = pendingTransfersCron.name;
+    expect(runEvents(starts, "production")).toEqual([
+      ["info", slotEvent(starts, "production", "disabled")],
+    ]);
+    expect(runEvents(starts, "sandbox")).toEqual([okEvent(starts, "sandbox")]);
+    expect(runEvents(finishes, "production")).toEqual([okEvent(finishes, "production")]);
   });
 
   it("skips a slot while the same registration's run is in flight, and runs the next slot once it settles", async () => {
