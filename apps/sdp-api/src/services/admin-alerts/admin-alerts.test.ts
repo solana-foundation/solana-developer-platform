@@ -1,0 +1,496 @@
+import { hashString } from "@sdp/payments/hash";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { z } from "zod";
+import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { app } from "@/index";
+import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
+import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
+import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
+import { clearKVStores } from "@/test/mocks/kv";
+import { adminAlertEmail } from "./content";
+import { deliverAdminAlerts } from "./deliver";
+import { enqueueConfigAlerts, enqueueMoneyAlerts, MONEY_WINDOW_MS } from "./enqueue";
+
+const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
+const PRODUCTION_PROJECT = `prj_${ORGANIZATION_ID}_production`;
+const SANDBOX_PROJECT = `prj_${ORGANIZATION_ID}_sandbox`;
+/** An admin who is not a member of the production project. */
+const OTHER_ADMIN = { id: "usr_alert_other_admin", email: "other-admin@example.com" };
+const MEMBER = { id: "usr_alert_member", email: "member@example.com" };
+const ITERABLE_SEND_URL = "https://api.iterable.com/api/email/target";
+const DASHBOARD = "https://dashboard.example.com";
+
+let adminToken: string;
+let iterable: MockInstance<typeof fetch>;
+
+const sentEmailSchema = z.object({
+  recipientEmail: z.string(),
+  dataFields: z.object({ subject: z.string(), body: z.string() }).loose(),
+});
+
+function sentEmails() {
+  return iterable.mock.calls
+    .filter(([url]) => String(url) === ITERABLE_SEND_URL)
+    .map(([, init]) => {
+      const sent = sentEmailSchema.parse(JSON.parse(String(init?.body)));
+      return { to: sent.recipientEmail, ...sent.dataFields };
+    });
+}
+
+function asWorker<T>(fn: () => Promise<T>): Promise<T> {
+  return runWithSystemDatabaseIdentity("admin-alert-emails", fn);
+}
+
+/** One Worker run, as the cron does it. */
+async function runWorker(now = new Date()) {
+  return asWorker(async () => {
+    await enqueueConfigAlerts(env, now);
+    await enqueueMoneyAlerts(env, now);
+    return deliverAdminAlerts(env, now);
+  });
+}
+
+function audit(entry: Omit<SystemAuditLogEntry, "organizationId">) {
+  return asWorker(() =>
+    createSystemAuditService(env).logSystem({ organizationId: ORGANIZATION_ID, ...entry })
+  );
+}
+
+async function seedOrganization(): Promise<void> {
+  const db = getDb(env);
+  await db
+    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+    .bind(ORGANIZATION_ID, "Acme Pay", TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+    .run();
+  for (const [user, role, name] of [
+    [{ id: TEST_USER.id, email: TEST_USER.email }, "admin", "Ada Admin"],
+    [OTHER_ADMIN, "admin", null],
+    [MEMBER, "member", "Max Member"],
+  ] as const) {
+    await db
+      .prepare("INSERT INTO users (id, email, name, status) VALUES (?, ?, ?, 'active')")
+      .bind(user.id, user.email, name)
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, 'active')"
+      )
+      .bind(`mem_${user.id}`, ORGANIZATION_ID, user.id, role)
+      .run();
+  }
+  await seedDefaultProjects(db, {
+    organizationId: ORGANIZATION_ID,
+    createdBy: TEST_USER.id,
+    members: [TEST_USER.id, MEMBER.id],
+    productionEntitled: true,
+  });
+  await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+    ...TEST_SEEDED_API_KEY,
+    grants: ALL_API_KEY_GRANTS,
+  });
+  adminToken = await signSeededClerkMember(env, db, TEST_USER.id, ORGANIZATION_ID);
+}
+
+/** Puts both cursors where this test's history starts. */
+async function resetCursors(moneyFrom: number): Promise<void> {
+  await asWorker(async () => {
+    const db = getDb(env);
+    await db.execute("UPDATE admin_alert_cursors SET position = 0 WHERE source = 'audit_ledger'");
+    await db.execute("UPDATE admin_alert_cursors SET position = ? WHERE source = 'money'", [
+      moneyFrom,
+    ]);
+  });
+}
+
+async function insertTransfer(input: {
+  id: string;
+  projectId: string;
+  createdAt: string;
+  type?: string;
+  direction?: string;
+}) {
+  await asWorker(() =>
+    getDb(env).execute(
+      `INSERT INTO payment_transfers (id, organization_id, project_id, wallet_id, source_address,
+         destination_address, token, amount, type, direction, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'wal_1', 'src', 'dst', 'USDC', '1000000', ?, ?, 'processing', ?, ?)`,
+      [
+        input.id,
+        ORGANIZATION_ID,
+        input.projectId,
+        input.type ?? "transfer",
+        input.direction ?? "outbound",
+        input.createdAt,
+        input.createdAt,
+      ]
+    )
+  );
+}
+
+async function insertBatch(id: string, projectId: string, createdAt: string) {
+  await asWorker(() =>
+    getDb(env).execute(
+      `INSERT INTO payment_transfer_batches (id, organization_id, project_id, source_wallet_id,
+         source_address, token, status, recipient_count, created_at, updated_at)
+       VALUES (?, ?, ?, 'cwlt_1', 'src', 'USDC', 'processing', 250, ?, ?)`,
+      [id, ORGANIZATION_ID, projectId, createdAt, createdAt]
+    )
+  );
+}
+
+/** A recurring collection's attempt, which marks its transfer as a collection. */
+async function insertCollectionAttempt(transferId: string, projectId: string, createdAt: string) {
+  await asWorker(async () => {
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name)
+       VALUES ('cp_alert', ?, ?, 'individual', 'Subscriber')`,
+      [ORGANIZATION_ID, projectId]
+    );
+    await db.execute(
+      `INSERT INTO payment_subscription_plans (id, organization_id, project_id, owner_wallet_id,
+         owner_address, token, amount, period_hours, program_plan_id, status)
+       VALUES ('pplan_alert', ?, ?, 'cwlt_1', 'owner', 'USDC', '1000000', 720, 'plan', 'active')`,
+      [ORGANIZATION_ID, projectId]
+    );
+    await db.execute(
+      `INSERT INTO payment_subscriptions (id, organization_id, project_id, plan_id, counterparty_id,
+         subscriber_address, status)
+       VALUES ('psub_alert', ?, ?, 'pplan_alert', 'cp_alert', 'subscriber', 'active')`,
+      [ORGANIZATION_ID, projectId]
+    );
+    await db.execute(
+      `INSERT INTO payment_subscription_collection_attempts (id, organization_id, project_id,
+         subscription_id, transfer_id, token, amount, due_at, status, metadata, created_at, updated_at)
+       VALUES ('psca_alert', ?, ?, 'psub_alert', ?, 'USDC', '1000000', ?, 'processing',
+         '{"source":"manual","recurringPaymentId":"prp_alert","initiatedByKeyId":null}'::jsonb, ?, ?)`,
+      [ORGANIZATION_ID, projectId, transferId, createdAt, createdAt, createdAt]
+    );
+  });
+}
+
+describe("admin alert emails (HOO-2299)", () => {
+  // A window well in the past, aligned to the digest's windows.
+  const windowStart =
+    Math.floor(Date.parse("2026-10-30T10:00:00.000Z") / MONEY_WINDOW_MS) * MONEY_WINDOW_MS;
+  const inWindow = new Date(windowStart + 60_000).toISOString();
+  const afterWindow = new Date(windowStart + MONEY_WINDOW_MS + 5 * 60_000);
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await seedOrganization();
+    await resetCursors(windowStart);
+    env.ITERABLE_API_URL = "https://api.iterable.com";
+    env.ITERABLE_API_KEY = "iterable_test";
+    env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
+    env.FRONTEND_URL = DASHBOARD;
+    const realFetch = globalThis.fetch;
+    iterable = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) =>
+        String(input) === ITERABLE_SEND_URL
+          ? Response.json({ msg: "", code: "Success", params: null })
+          : realFetch(input, init)
+      );
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    env.ITERABLE_API_URL = undefined;
+    env.ITERABLE_API_KEY = undefined;
+    env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = undefined;
+    await clearKVStores(env);
+  });
+
+  describe("configuration changes email every organization admin", () => {
+    it("emails each admin once when a project API key is created", async () => {
+      const response = await app.request(
+        `/v1/projects/${PRODUCTION_PROJECT}/api-keys`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "ci-deployer",
+            grants: ["projects.read"],
+            walletScope: "all",
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(201);
+
+      await runWorker();
+      const emails = sentEmails();
+      expect(emails.map((email) => email.to).sort()).toEqual(
+        [OTHER_ADMIN.email, TEST_USER.email].sort()
+      );
+      expect(emails[0]?.subject).toBe("[SDP] API key created in Acme Pay");
+      expect(emails[0]?.body).toContain("The API key ci-deployer was created.");
+      expect(emails[0]?.body).toContain("By: Ada Admin");
+      expect(emails[0]?.body).toContain(`${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/api-keys`);
+      expect(emails[0]?.body).not.toMatch(/sk_|secret/i);
+    });
+
+    it.each([
+      [
+        "an invitation",
+        {
+          action: "invite",
+          resourceType: "invitation",
+          metadata: { email: "x@y.z", role: "admin" },
+        },
+        "[SDP] Member invited in Acme Pay",
+      ],
+      [
+        "a role change",
+        {
+          action: "update",
+          resourceType: "member",
+          resourceId: `mem_${MEMBER.id}`,
+          metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
+        },
+        "[SDP] Member role changed in Acme Pay",
+      ],
+      [
+        "a removal",
+        {
+          action: "delete",
+          resourceType: "member",
+          resourceId: `mem_${MEMBER.id}`,
+          metadata: { userId: MEMBER.id, left: false },
+        },
+        "[SDP] Member removed in Acme Pay",
+      ],
+      [
+        "an API key revocation",
+        {
+          action: "delete",
+          resourceType: "api_key",
+          resourceId: "key_revoked",
+          metadata: { action: "deactivate" },
+        },
+        "[SDP] API key revoked in Acme Pay",
+      ],
+      [
+        "a mainnet entitlement change",
+        {
+          action: "update",
+          resourceType: "organization",
+          resourceId: ORGANIZATION_ID,
+          metadata: { event: "production_entitlement_changed", enabled: false, source: "clerk" },
+        },
+        "[SDP] Mainnet disabled in Acme Pay",
+      ],
+    ] as const)("emails each admin once for %s", async (_, entry, subject) => {
+      await audit({ ...entry, status: "success" } as Omit<SystemAuditLogEntry, "organizationId">);
+      await runWorker();
+      const emails = sentEmails();
+      expect(emails).toHaveLength(2);
+      expect(new Set(emails.map((email) => email.subject))).toEqual(new Set([subject]));
+    });
+
+    it("names the member a role change is about", async () => {
+      await audit({
+        action: "update",
+        resourceType: "member",
+        metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
+      });
+      await runWorker();
+      expect(sentEmails()[0]?.body).toContain(
+        "Max Member (member@example.com)'s role changed from member to admin."
+      );
+    });
+
+    it("ignores a failed entry, an audit intent, and entries no alert covers", async () => {
+      await audit({ action: "invite", resourceType: "invitation", status: "failure" });
+      await audit({ action: "read", resourceType: "organization" });
+      await audit({ action: "update", resourceType: "api_key", metadata: { name: "renamed" } });
+      await audit({
+        action: "maintenance",
+        resourceType: "audit_ledger",
+        metadata: { auditPhase: "intent", target: { action: "create" } },
+      });
+      await runWorker();
+      expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("does not email an admin twice when a run repeats", async () => {
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      await runWorker();
+      await runWorker();
+      await asWorker(() => deliverAdminAlerts(env, new Date(Date.now() + 2 * 60 * 60_000)));
+      expect(sentEmails()).toHaveLength(2);
+    });
+
+    it("retries only the failed delivery, and sends it once", async () => {
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      iterable.mockImplementation(async (_input, init) => {
+        const to = sentEmailSchema.parse(JSON.parse(String(init?.body))).recipientEmail;
+        return to === OTHER_ADMIN.email
+          ? new Response("down", { status: 500 })
+          : Response.json({ msg: "", code: "Success", params: null });
+      });
+      const first = await runWorker();
+      expect(first).toMatchObject({ sent: 1, failed: 1 });
+
+      iterable.mockImplementation(async () =>
+        Response.json({ msg: "", code: "Success", params: null })
+      );
+      // Before the backoff ends nothing is due; after it, only the failed one.
+      expect(await runWorker()).toMatchObject({ sent: 0, failed: 0 });
+      const later = await runWorker(new Date(Date.now() + 2 * 60_000));
+      expect(later).toMatchObject({ sent: 1, failed: 0 });
+      expect(
+        sentEmails()
+          .map((email) => email.to)
+          .sort()
+      ).toEqual([TEST_USER.email, OTHER_ADMIN.email, OTHER_ADMIN.email].sort());
+      expect(await runWorker(new Date(Date.now() + 3 * 60 * 60_000))).toMatchObject({ sent: 0 });
+    });
+
+    it("emails admins when money movement emails are turned off", async () => {
+      const response = await app.request(
+        `/v1/organizations/${ORGANIZATION_ID}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ settings: { moneyMovementEmails: false } }),
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.settings).toMatchObject({ moneyMovementEmails: false });
+      await runWorker();
+      expect(sentEmails().map((email) => email.subject)).toEqual([
+        "[SDP] Money movement emails off in Acme Pay",
+        "[SDP] Money movement emails off in Acme Pay",
+      ]);
+    });
+
+    it("refuses an API key changing the money email setting", async () => {
+      const response = await app.request(
+        `/v1/organizations/${ORGANIZATION_ID}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ settings: { moneyMovementEmails: false } }),
+        },
+        env
+      );
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("money movement emails the project's admins, one digest per window", () => {
+    it("sends one email per admin of the project for transfers, a batch and a collection", async () => {
+      await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
+      await insertTransfer({ id: "ptx_2", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
+      await insertBatch("pbat_1", PRODUCTION_PROJECT, inWindow);
+      // A batch's chunk transfers count as its one batch, not as transfers.
+      await insertTransfer({
+        id: "ptx_chunk",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: inWindow,
+        type: "transfer_batch",
+      });
+      await insertTransfer({
+        id: "ptx_recurring",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: inWindow,
+      });
+      await insertCollectionAttempt("ptx_recurring", PRODUCTION_PROJECT, inWindow);
+
+      const result = await runWorker(afterWindow);
+      expect(result.sent).toBe(1);
+      const [email] = sentEmails();
+      // Only the admin who is a member of the project; the other admin and the member get none.
+      expect(email?.to).toBe(TEST_USER.email);
+      expect(email?.subject).toBe("[SDP] Money moved in Acme Pay");
+      expect(email?.body).toContain("2 transfers, 1 batch payout, 1 recurring collection");
+      expect(email?.body).toContain(
+        `${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/payments/transactions`
+      );
+      expect(email?.body).not.toContain("1000000");
+      expect(email?.body).not.toContain("dst");
+    });
+
+    it("writes the digest once, however many runs follow", async () => {
+      await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
+      await runWorker(afterWindow);
+      await runWorker(afterWindow);
+      await runWorker(new Date(afterWindow.getTime() + 60 * 60_000));
+      expect(sentEmails()).toHaveLength(1);
+    });
+
+    it("waits for the window to close before writing it", async () => {
+      await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
+      expect(await runWorker(new Date(windowStart + MONEY_WINDOW_MS))).toMatchObject({ sent: 0 });
+      expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("sends nothing for a devnet project", async () => {
+      await insertTransfer({ id: "ptx_1", projectId: SANDBOX_PROJECT, createdAt: inWindow });
+      await runWorker(afterWindow);
+      expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("sends nothing for plain inbound deposits", async () => {
+      await insertTransfer({
+        id: "ptx_in",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: inWindow,
+        direction: "inbound",
+      });
+      await runWorker(afterWindow);
+      expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("sends nothing once the organization opted out", async () => {
+      await asWorker(() =>
+        getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+          JSON.stringify({ enableProductionProject: true, moneyMovementEmails: false }),
+          ORGANIZATION_ID,
+        ])
+      );
+      await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
+      await insertBatch("pbat_1", PRODUCTION_PROJECT, inWindow);
+      await runWorker(afterWindow);
+      expect(sentEmails()).toHaveLength(0);
+    });
+  });
+
+  it("renders no field it was not given", () => {
+    const email = adminAlertEmail({
+      kind: "money_movement",
+      details: {
+        organizationName: "Acme",
+        project: { id: "prj_1", name: "Treasury", environment: "production" },
+        actor: null,
+        subject: null,
+        counts: {
+          transfers: 1,
+          batches: 0,
+          recurringCollections: 2,
+          paymentRequestSettlements: 0,
+          offramps: 0,
+          onramps: 0,
+        },
+        windowStart: "2026-10-30T10:00:00.000Z",
+        windowEnd: "2026-10-30T10:15:00.000Z",
+      },
+      occurredAt: "2026-10-30T10:15:00.000Z",
+      dashboardOrigin: DASHBOARD,
+    });
+    expect(email.body.split("\n")[0]).toBe(
+      "Money movement was started: 1 transfer, 2 recurring collections."
+    );
+  });
+});

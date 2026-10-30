@@ -134,6 +134,36 @@ describe("Clerk webhooks", () => {
       ).toEqual([]);
     }
   );
+  it("audits a mainnet entitlement change once, so the organization's admins are emailed (HOO-2299)", async () => {
+    await seedKnownOrganization();
+    const clerk = stubClerkBackend(env);
+    const enabled = {
+      id: KNOWN_CLERK_ORG_ID,
+      name: "Org",
+      slug: "org",
+      private_metadata: { sdp: { enableProductionProject: true } },
+    };
+    clerk.answer({ status: 200, body: enabled });
+    clerk.answer({ status: 200, body: enabled });
+
+    for (let delivery = 0; delivery < 2; delivery += 1) {
+      const response = await simulateClerkWebhook({
+        type: "organization.updated",
+        data: STALE_ORGANIZATION_EVENT,
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const entries = await getDb(env).queryMany<{ metadata: string }>(
+      `SELECT metadata FROM audit_logs
+        WHERE organization_id = ? AND action = 'update' AND resource_type = 'organization'`,
+      [KNOWN_ORGANIZATION.id]
+    );
+    expect(entries.map((entry) => JSON.parse(entry.metadata))).toEqual([
+      { event: "production_entitlement_changed", enabled: true, source: "clerk" },
+    ]);
+  });
+
   it("changes nothing when Clerk no longer has the organization an event names", async () => {
     await seedKnownOrganization();
     const before = await knownOrganizationState();
