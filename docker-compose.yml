@@ -110,7 +110,6 @@ services:
       args:
         NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
         NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
-        NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     restart: unless-stopped
     ports:

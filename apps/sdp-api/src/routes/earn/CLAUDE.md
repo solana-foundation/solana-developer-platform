@@ -744,7 +744,7 @@ transaction signed by the organization custody wallet or external owner.
     check in `lib/feature-flags.ts`): its `KORA_<CLUSTER>_URL`, with the boot
     check guaranteeing `KORA_<CLUSTER>_RPC_URL` beside it; there is no built-in
     default URL and no unsuffixed fallback, so a deployment wires BOTH cluster
-    trios (PRO-2007) and never relies on `SOLANA_NETWORK` to pick a paymaster.
+    trios (PRO-2007).
     The sponsor reads the movement's cluster from the open cluster scope, so
     the matching Kora signs, the matching budget network is charged and the fee
     is priced on that cluster's Kora upstream (`priceSponsoredTransaction`). Opening mainnet is wiring
@@ -1462,8 +1462,7 @@ each provider is deployed on; withdrawals remain open independently.
 goes to that scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`):
 a request in its project's scope (every Earn route takes an API key), a cron
 in its registration's, the catalogue sync in each lane's. Nothing in Earn takes a cluster to pick an RPC,
-and nothing reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or
-`SOLANA_NETWORK`: a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
+and a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
 the pooled client, `PROVIDER_NOT_CONFIGURED` on a provider operation) and never
 reads the other cluster. One-shot reads, simulation and broadcast use
 `createClusterRpc()`, or `createClusterRpc({ timeoutMs })` for a client handed

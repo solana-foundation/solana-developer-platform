@@ -31,7 +31,6 @@ if [ "${SDP_VEDA_SURFPOOL_IN_CONTAINER:-}" != "1" ]; then
 fi
 
 export SURFPOOL_REMOTE_RPC_URL="${REMOTE_RPC_URL}"
-export SOLANA_NETWORK=devnet
 export VEDA_SURFPOOL_E2E=true
 export KORA_SURFPOOL_MODE=shim
 export KORA_SURFPOOL_RUNTIME=embedded
