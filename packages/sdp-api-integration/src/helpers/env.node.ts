@@ -1,8 +1,15 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 
 const { getDb } = apiTestSupport;
 
-function readEnvFromProcess(): ApiTestEnv {
+/** The harness's own test chain, set by the CI scripts; the API never reads these. */
+interface TestChainEnv {
+  SOLANA_RPC_URL?: string;
+  SOLANA_NETWORK?: string;
+}
+
+function readEnvFromProcess(): ApiTestEnv & TestChainEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
   proc.DATABASE_URL = proc.TEST_DATABASE_URL;
   if (proc.SDP_INTEGRATION_CUSTODY_PROVIDER === "local" && !proc.SDP_DEPLOYMENT_MODE) {
@@ -15,7 +22,7 @@ function readEnvFromProcess(): ApiTestEnv {
   if (!proc.PUBLIC_API_ORIGIN) {
     proc.PUBLIC_API_ORIGIN = "http://localhost:8787";
   }
-  return proc as unknown as ApiTestEnv;
+  return proc as unknown as ApiTestEnv & TestChainEnv;
 }
 
 const providedEnv = readEnvFromProcess();
@@ -28,3 +35,34 @@ export const env = {
   ...providedEnv,
   db: getDb(providedEnv),
 };
+
+/**
+ * The cluster the test chain stands in for: `SOLANA_NETWORK`, which `vitest.config.ts` defaults to
+ * devnet.
+ *
+ * @returns The run's cluster.
+ * @throws When `SOLANA_NETWORK` names no cluster.
+ */
+function readTestChainCluster(): SolanaCluster {
+  const network = providedEnv.SOLANA_NETWORK;
+  if (network !== "devnet" && network !== "mainnet-beta") {
+    throw new Error(`SOLANA_NETWORK must be devnet or mainnet-beta, got ${network}`);
+  }
+  return network;
+}
+
+export const testChainCluster = readTestChainCluster();
+
+/**
+ * The test chain's RPC URL, for suites that cannot run without one.
+ *
+ * @returns `SOLANA_RPC_URL`.
+ * @throws When `SOLANA_RPC_URL` is unset.
+ */
+export function requireTestChainRpcUrl(): string {
+  const rpcUrl = providedEnv.SOLANA_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error("SOLANA_RPC_URL is required for the test chain.");
+  }
+  return rpcUrl;
+}

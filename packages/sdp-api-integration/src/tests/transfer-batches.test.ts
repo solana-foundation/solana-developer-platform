@@ -11,7 +11,7 @@ import {
   resetIntegrationState,
   SOLANA_CONFIGURED,
 } from "#/helpers/integration";
-import { env } from "#env-impl";
+import { env, requireTestChainRpcUrl } from "#env-impl";
 
 const { trackPendingTransfers } = apiTestSupport;
 
@@ -50,7 +50,7 @@ async function waitForSignatureCommitment(
   target: Exclude<Commitment, "processed">,
   timeoutMs: number
 ): Promise<void> {
-  const rpc = createRpc(env);
+  const rpc = createRpc(requireTestChainRpcUrl());
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const statuses = await getSignatureStatuses(rpc, signatures, {

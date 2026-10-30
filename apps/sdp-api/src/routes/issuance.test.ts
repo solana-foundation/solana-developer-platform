@@ -43,6 +43,7 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -268,6 +269,8 @@ async function deriveAssociatedTokenAccount(owner: string, mint: string): Promis
 }
 
 describe("Issuance Routes", () => {
+  const clusterRpc = installClusterRpcStub();
+
   let apiKeyHash: string;
 
   beforeAll(async () => {
@@ -344,7 +347,7 @@ describe("Issuance Routes", () => {
     );
 
     vi.spyOn(AuthorityResolution, "resolveCurrentAuthorityForRole").mockImplementation(
-      async (_runtimeEnv, _tokenService, token, role, override) => {
+      async (_tokenService, token, role, override) => {
         const currentAuthority = role === "freeze" ? token?.freezeAuthority : token?.mintAuthority;
         if (override !== undefined && override !== currentAuthority) {
           throw new AppError(
@@ -2955,7 +2958,7 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 404 when the token belongs to the sandbox project", async () => {
+    it("refuses a production project's key before any handler", async () => {
       const res = await app.request(
         `/v1/issuance/tokens/${tokenId}`,
         {
@@ -2963,7 +2966,14 @@ describe("Issuance Routes", () => {
         },
         env
       );
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message: "The issuance module is only available on devnet projects.",
+        },
+        meta: { requestId: expect.any(String) },
+      });
     });
   });
 
@@ -3676,10 +3686,6 @@ describe("Issuance Routes", () => {
     let activeTokenId: string;
 
     beforeEach(async () => {
-      if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-        (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-      }
-
       const db = getDb(env);
 
       await db
@@ -3703,20 +3709,10 @@ describe("Issuance Routes", () => {
     });
 
     it("refreshes cached supply from RPC", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: "1",
-            result: {
-              value: {
-                amount: "1500000000",
-              },
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
-      );
+      clusterRpc.answer("getTokenSupply", {
+        context: { slot: 1 },
+        value: { amount: "1500000000", decimals: 9, uiAmount: 1.5, uiAmountString: "1.5" },
+      });
 
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
@@ -3726,8 +3722,6 @@ describe("Issuance Routes", () => {
         },
         env
       );
-
-      fetchSpy.mockRestore();
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3767,10 +3761,6 @@ describe("Issuance Routes", () => {
     });
 
     it("returns 502 when RPC call fails", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("upstream unavailable", { status: 503 }));
-
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
         {
@@ -3779,8 +3769,6 @@ describe("Issuance Routes", () => {
         },
         env
       );
-
-      fetchSpy.mockRestore();
 
       expect(res.status).toBe(502);
       const body = await res.json();
@@ -8299,10 +8287,6 @@ describe("Issuance Routes", () => {
       });
 
       it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_uri_default",
           mintAddress: null,
@@ -8357,10 +8341,6 @@ describe("Issuance Routes", () => {
       });
 
       it("re-prepares with an empty uri and signals a follow-up when the create tx overflows", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_uri_overflow",
           mintAddress: null,
@@ -8443,10 +8423,6 @@ describe("Issuance Routes", () => {
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
       it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_followup",
           mintAddress: TEST_SOLANA_ADDRESSES.mint,
@@ -8502,10 +8478,6 @@ describe("Issuance Routes", () => {
       });
 
       it("ignores a request-body signingWalletId, using the wallet pinned at deploy/prepare", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         await seedIssuanceActivityWallet("wallet_pinned", TEST_SOLANA_ADDRESSES.wallet2);
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_wallet_pin",
@@ -8629,11 +8601,7 @@ describe("Issuance Routes", () => {
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
-      const ensureRpcUrl = () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-      };
+      const ensureRpcUrl = () => {};
 
       it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
         ensureRpcUrl();

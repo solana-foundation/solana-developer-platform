@@ -566,7 +566,7 @@ async function fundAddressViaKoraFeePayer(
     userId: "sdp:v1:system:integration-funding",
   });
   const feePayer = await feePayment.getFeePayer();
-  const rpc = createRpc(env);
+  const rpc = createRpc(rpcUrl);
   const maxTransferLamports =
     (await feePayment
       .getSponsorshipConfiguration?.()

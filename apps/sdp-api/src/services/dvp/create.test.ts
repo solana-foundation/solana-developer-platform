@@ -29,6 +29,7 @@ import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -153,6 +154,8 @@ async function rowsInDb(): Promise<
 }
 
 describe("createDvpTrade", () => {
+  installClusterRpcStub();
+
   let custodyWalletAddress: string;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;

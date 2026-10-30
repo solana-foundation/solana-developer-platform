@@ -78,8 +78,11 @@ vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint,
 }));
+vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
+  createClusterRpc: () => ({}),
+}));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({}),
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,

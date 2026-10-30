@@ -141,7 +141,7 @@ describe("collectFromEnv", () => {
     const network = FIELDS.find((f) => f.key === "NEXT_PUBLIC_SOLANA_NETWORK");
     expect(network?.derive).toBeTypeOf("function");
 
-    const env = generateEnv(collectFromEnv({ SOLANA_NETWORK: "mainnet-beta" }));
-    expect(env).toContain("NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta");
+    const env = generateEnv(collectFromEnv({}));
+    expect(env).toContain("NEXT_PUBLIC_SOLANA_NETWORK=devnet");
   });
 });

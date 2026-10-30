@@ -19,16 +19,6 @@ function endpoint(name: string): string {
   return `https://${name}-${poolSequence}.earn-cluster-rpc.test`;
 }
 
-/**
- * A process configured the way stage and prod are: `SOLANA_NETWORK=devnet` and a process
- * default that serves devnet, with no `SOLANA_MAINNET_RPC_URL`.
- */
-function stubDevnetDefaultProcess(): void {
-  vi.stubEnv("SOLANA_NETWORK", "devnet");
-  vi.stubEnv("SOLANA_RPC_URL", endpoint("process-default"));
-  vi.stubEnv("SOLANA_MAINNET_RPC_URL", "");
-}
-
 beforeEach(() => {
   poolSequence += 1;
   requests.length = 0;
@@ -62,9 +52,8 @@ function inSandbox<T>(work: () => T): T {
   return runInClusterScope(SANDBOX, work);
 }
 
-describe("earnProviderEndpointUrls on a devnet-default process", () => {
-  it("lists the scope's own pool, never the process default", () => {
-    stubDevnetDefaultProcess();
+describe("earnProviderEndpointUrls", () => {
+  it("lists the scope's own pool", () => {
     vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", endpoint("devnet-helius"));
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", endpoint("devnet-triton"));
     vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", endpoint("mainnet-triton"));
@@ -80,7 +69,6 @@ describe("earnProviderEndpointUrls on a devnet-default process", () => {
   });
 
   it("lists none when the scope's cluster has no pool, instead of the other cluster's", () => {
-    stubDevnetDefaultProcess();
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
 
     expect(runInClusterScope(PRODUCTION, () => earnProviderEndpointUrls("mainnet-beta"))).toEqual(

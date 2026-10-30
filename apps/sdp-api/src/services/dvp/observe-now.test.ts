@@ -20,8 +20,11 @@ const readDvpTradeObservation = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn(() => ({ send: async () => 100n })));
 const resolveDvpClose = vi.hoisted(() => vi.fn());
 
+vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
+  createClusterRpc: () => ({ getBlockHeight }),
+}));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight }),
   confirmTransaction: vi.fn(),
 }));
 vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({

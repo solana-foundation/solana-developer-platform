@@ -21,7 +21,9 @@ import * as dvpMints from "@/services/dvp/mints";
 import * as dvpObservation from "@/services/dvp/observe-now";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
-import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
+import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -492,6 +494,8 @@ describe("deriveDvpTradeKind", () => {
 });
 
 describe("DvP routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     originalMarkets = env.MARKETS_ENABLED;
@@ -514,6 +518,28 @@ describe("DvP routes", () => {
   it("requires authentication", async () => {
     const res = await app.request("/v1/dvp/trades", {}, env);
     expect(res.status).toBe(401);
+  });
+
+  it("refuses a production project's key before any handler", async () => {
+    await seedProjectApiKey(getDb(env), env, {
+      key: TEST_PRODUCTION_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: `${TEST_PROJECT.id}_production`,
+      createdBy: TEST_USER.id,
+      grants: ALL_API_KEY_GRANTS,
+    });
+
+    const res = await app.request(
+      "/v1/dvp/trades",
+      { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: { code: "FORBIDDEN", message: "The dvp module is only available on devnet projects." },
+      meta: { requestId: expect.any(String) },
+    });
   });
 
   it("429s a DvP create once the actor's metered quota is exhausted", async () => {

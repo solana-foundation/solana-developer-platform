@@ -23,7 +23,6 @@ function scope(env: Partial<Env> = {}) {
   return {
     env: {
       EARN_VAULT_FEE_SPONSORSHIP_ENABLED: "true",
-      SOLANA_NETWORK: "devnet",
       KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
       ...env,
     } as Env,
@@ -100,7 +99,6 @@ describe("resolveVaultSponsorship", () => {
    */
   it("keeps mainnet at wallet-pays while no mainnet paymaster is configured, flag on", async () => {
     const { env, input } = scope({
-      SOLANA_NETWORK: "devnet",
       KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
     });
 
@@ -112,7 +110,6 @@ describe("resolveVaultSponsorship", () => {
 
   it("sponsors mainnet once its own paymaster is wired (PRO-1738)", async () => {
     const { env, input } = scope({
-      SOLANA_NETWORK: "devnet",
       KORA_DEVNET_URL: "https://kora-devnet.mock.invalid",
       KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
     });

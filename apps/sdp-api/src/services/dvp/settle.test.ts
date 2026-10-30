@@ -92,8 +92,11 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
+  createClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+}));
 vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
   confirmTransaction,
   getRecentBlockhash,
   sendTransaction,

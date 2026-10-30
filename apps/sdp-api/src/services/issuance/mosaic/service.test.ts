@@ -11,6 +11,7 @@
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
+import * as RpcFactory from "@sdp/rpc/factory";
 import * as RpcModule from "@sdp/rpc/solana";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
@@ -99,6 +100,12 @@ function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateT
     ...overrides,
   };
 }
+
+const clusterRpc = RpcModule.createRpc("https://solana-rpc.mock.invalid");
+
+beforeEach(() => {
+  vi.spyOn(RpcFactory, "createClusterRpc").mockReturnValue(clusterRpc);
+});
 
 describe("MosaicService.createToken — Kora sponsorship", () => {
   let signer: TransactionSigner;
@@ -359,7 +366,6 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     }
 
     it("submits a custody-signed mint through the sponsor on the service's RPC after onBeforeSubmit", async () => {
-      const createRpcSpy = vi.spyOn(RpcModule, "createRpcForSdk");
       const sponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
         signer,
@@ -408,7 +414,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const [{ transaction, lastValidBlockHeight, rpc }] = fee.submitSponsored.mock.calls[0];
       expect(transaction).toEqual(new Uint8Array([1, 2, 3]));
       expect(lastValidBlockHeight).toBe(mintTx.lifetimeConstraint.lastValidBlockHeight);
-      expect(rpc).toBe(createRpcSpy.mock.results[0].value);
+      expect(rpc).toBe(clusterRpc);
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ signature: koraSignature, slot: 7n, tokenAccount });
     });
@@ -443,9 +449,9 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const sendTransaction = vi.fn().mockReturnValue({
         send: vi.fn().mockResolvedValue(directSignature),
       });
-      vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
+      vi.spyOn(RpcFactory, "createClusterRpc").mockReturnValue({
         sendTransaction,
-      } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
+      } as unknown as ReturnType<typeof RpcFactory.createClusterRpc>);
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
         signer,

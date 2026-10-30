@@ -12,7 +12,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc: () => ({}) }));
+vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
+  createClusterRpc: () => ({}),
+}));
 
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";

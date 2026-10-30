@@ -1,11 +1,10 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc/config";
-import { env } from "#env-impl";
+import { env, testChainCluster } from "#env-impl";
 
 const { KORA_ENV_KEYS } = apiTestSupport;
 
 /** The run's cluster's Kora env keys: the harness sponsors on `SOLANA_NETWORK`'s cluster. */
-const koraEnvKeys = KORA_ENV_KEYS[resolveDefaultCluster(env)];
+const koraEnvKeys = KORA_ENV_KEYS[testChainCluster];
 
 /** The env var that names {@link koraEndpoint}'s URL, for "missing" messages. */
 export const KORA_URL_ENV_KEY = koraEnvKeys.serviceUrl;
