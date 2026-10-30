@@ -257,27 +257,6 @@ body {
   padding: 20px 16px 28px;
 }
 
-.launch-docs-nav-item.is-start {
-  min-height: 40px;
-  margin-bottom: 0;
-  padding: 8px 12px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 500;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.launch-docs-nav-item.is-start.is-active {
-  background: transparent;
-}
-
-.launch-docs-nav-item.is-start:hover {
-  background: var(--wash);
-}
-
 /* ── Sidebar status footer ── */
 .launch-docs-sidebar-status {
   display: flex;
@@ -471,10 +450,6 @@ body {
   font-family: var(--font-sans);
   font-size: var(--font-size-meta);
   line-height: var(--line-height-meta);
-}
-
-.launch-docs-nav-item.is-start + .launch-docs-sidebar-section {
-  margin-top: 6px;
 }
 
 .launch-docs-sidebar-section span {
@@ -2206,7 +2181,6 @@ body {
   color: var(--ink-secondary);
 }
 
-.launch-docs-nav-item.is-start:focus-visible,
 .launch-home a:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 3px;
@@ -2361,14 +2335,4 @@ a.rounded-lg.border.p-4 > p.truncate {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
-}
-
-.launch-docs-nav-item.is-start .launch-docs-nav-icon {
-  margin-right: 10px;
-  color: var(--ink);
-}
-
-.launch-docs-nav-item.is-start .launch-docs-nav-icon svg {
-  width: 18px;
-  height: 18px;
 }

@@ -5,7 +5,7 @@
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
 - **Tailwind v4**, imported at the top of `src/app/globals.css`; `dark:` follows the `.dark` class the theme switch sets
 - **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
-- **Custom CSS** in `src/app/globals.css`: all layout classes are prefixed `launch-docs-*`
+- **Custom CSS** in `src/app/globals.css`: shell classes use `launch-docs-*`; home sections use `launch-home-*`
 - **Lucide React** for icons
 - **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
 
@@ -119,7 +119,7 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 | `.launch-mdx-td`            | Table cell: 14px                                                                                                                                         |
 | `.launch-docs-action-links` | `<ActionLinks>`: a page's action links as raised chips (`--chip` + `--chip-ring`); a `download` link leads with a download icon, a JSON link with braces |
 
-`DocsBreadcrumb` (`breadcrumb.tsx`) follows the root navigation: direct sidebar pages have no breadcrumb, and detail pages link back through their section pages. A page whose file folder is not its navigation parent sets `breadcrumbParent` in frontmatter; Create a wallet points to Wallets. Breadcrumbs never show unlinked folder labels.
+`DocsBreadcrumb` (`breadcrumb.tsx`) follows the root navigation: the home page and direct sidebar pages have no breadcrumb, and detail pages link back through their section pages. A page whose file folder is not its navigation parent sets `breadcrumbParent` in frontmatter; Create a wallet points to Wallets. Breadcrumbs never show unlinked folder labels.
 
 ---
 
@@ -129,10 +129,11 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
-The root `meta.json` keeps Get started first, then groups direct links under
-Learn, Modules and Resources. Keep detailed guides linked from their section
-landing pages and searchable; `generate:ai` includes every published page in
-`llms-full.txt` whether or not it appears in the sidebar.
+The root `meta.json` groups direct links under Learn, Modules and Resources.
+`/docs` is the home page, reached through the sidebar brand rather than another
+nav entry. Keep detailed guides linked from their section landing pages and
+searchable; `generate:ai` includes every published page, including the home,
+in `llms-full.txt` whether or not it appears in the sidebar.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
@@ -158,7 +159,6 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-sidebar-nav`        | Scrollable nav area                                                                                                               |
 | `.launch-docs-nav-item`           | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover                                                               |
 | `.launch-docs-nav-item.is-active` | Active page: `--wash-strong` bg, `--ink`, weight 500                                                                              |
-| `.launch-docs-nav-item.is-start`  | Ghost-style Get started link with a book icon                                                                                     |
 | `.launch-docs-nav-folder`         | Folder container                                                                                                                  |
 | `.launch-docs-nav-folder-row`     | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
 | `.launch-docs-nav-folder-btn`     | Non-linked folder label that toggles the folder: `--ink`, weight 500                                                              |
@@ -218,7 +218,8 @@ Gates follow module declarations, never sentences:
   it teaches a different body, query, retry key or multi-step flow.
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
-- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
+- `src/components/docs-shell/home.tsx` lists custody, ramp, compliance and RPC partners from the shared provider registries. Custody and ramp logos follow their release-channel gates; compliance appears only when its module is published. Add a logo mapping when a provider is added.
+- Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
 API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
