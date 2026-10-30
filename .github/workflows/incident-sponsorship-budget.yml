@@ -61,10 +61,6 @@ permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: sdp-incident-ops-${{ inputs.target }}
-  cancel-in-progress: false
-
 jobs:
   validate:
     name: Validate and stage the command
@@ -179,6 +175,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
+    # Executions serialize per target at the job, not the workflow: a gated run
+    # waiting on approval must never block an emergency kill.
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
     env:
       PROJECT_ID: solana-developer-platform
       REGION: us-central1
@@ -208,6 +209,9 @@ jobs:
     if: inputs.target == 'stage' && needs.validate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
     env:
       PROJECT_ID: solana-developer-platform-stg
       REGION: us-central1

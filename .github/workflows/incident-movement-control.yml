@@ -36,7 +36,7 @@ on:
         type: string
         required: true
       movement:
-        description: "disable/enable only: movement id (a start in MOVEMENTS, e.g. payments.transfer.start)"
+        description: "disable/enable only: movement id (a start in MOVEMENTS, e.g. payments.transfer)"
         type: string
       reason:
         description: "disable/enable only: why (recorded on the control row)"
@@ -51,10 +51,6 @@ on:
 permissions:
   contents: read
   id-token: write
-
-concurrency:
-  group: sdp-incident-ops-${{ inputs.target }}
-  cancel-in-progress: false
 
 jobs:
   validate:
@@ -158,6 +154,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
+    # Executions serialize per target at the job, not the workflow: a gated run
+    # waiting on approval must never block an emergency disable.
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
     env:
       PROJECT_ID: solana-developer-platform
       REGION: us-central1
@@ -187,6 +188,9 @@ jobs:
     if: inputs.target == 'stage' && needs.validate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
     env:
       PROJECT_ID: solana-developer-platform-stg
       REGION: us-central1

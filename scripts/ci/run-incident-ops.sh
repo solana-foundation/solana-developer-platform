@@ -8,13 +8,25 @@ set -euo pipefail
 
 scope=(--region "${REGION}" --project "${PROJECT_ID}")
 
-# Pin the ops job to the image whose migrations prod last applied, so the script
-# always runs against the schema it was built for.
+# Pin the ops job to the image whose migrations were last APPLIED, so the script
+# always runs against the schema it was built for. The migrate job's configured
+# image is updated before the migration runs, so after a failed migration it is
+# ahead of the schema; sdp_schema_sha (set only after a successful run, prod only)
+# names the applied commit, and images are tagged by that git sha.
 image="$(gcloud run jobs describe "${MIGRATE_JOB}" "${scope[@]}" \
   --format 'value(spec.template.spec.template.spec.containers[0].image)')"
 if [[ -z "${image}" ]]; then
   echo "Could not resolve the migrate job's image." >&2
   exit 1
+fi
+applied_sha="$(gcloud run jobs describe "${MIGRATE_JOB}" "${scope[@]}" \
+  --format 'value(metadata.labels.sdp_schema_sha)')"
+if [[ "${applied_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+  base="${image%@*}"
+  base="${base%:*}"
+  image="${base}:${applied_sha}"
+elif [[ -n "${applied_sha}" ]]; then
+  echo "Ignoring unexpected sdp_schema_sha '${applied_sha}'; using the migrate job's image." >&2
 fi
 current="$(gcloud run jobs describe "${OPS_JOB}" "${scope[@]}" \
   --format 'value(spec.template.spec.template.spec.containers[0].image)')"

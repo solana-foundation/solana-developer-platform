@@ -2,7 +2,7 @@
 // .github/workflows/incident-*.yml workflows). The job's command is pinned to
 // `node incident-ops.js`, so an execution can only choose among the tools and
 // actions allowlisted here — never an arbitrary command.
-const TOOL_ACTIONS: Record<string, { script: string; actions: ReadonlySet<string> }> = {
+const TOOL_ACTIONS = {
   "sponsorship-budget": {
     script: "sponsorship-budget",
     actions: new Set(["status", "kill", "resume", "set"]),
@@ -11,12 +11,16 @@ const TOOL_ACTIONS: Record<string, { script: string; actions: ReadonlySet<string
     script: "project-movement-control",
     actions: new Set(["status", "disable", "enable"]),
   },
-};
+} as const satisfies Record<string, { script: string; actions: ReadonlySet<string> }>;
+
+function isTool(value: string): value is keyof typeof TOOL_ACTIONS {
+  return value in TOOL_ACTIONS;
+}
 
 async function main(): Promise<void> {
   const tool = process.argv[2];
   const action = process.argv[3];
-  const entry = tool === undefined ? undefined : TOOL_ACTIONS[tool];
+  const entry = tool !== undefined && isTool(tool) ? TOOL_ACTIONS[tool] : undefined;
   if (!entry || action === undefined || !entry.actions.has(action)) {
     console.error(
       "Usage: incident-ops <sponsorship-budget|movement-control> <action> [flags]\n" +
