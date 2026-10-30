@@ -1,6 +1,7 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import {
+  isPendingActivationRecurringPaymentStatus,
   isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRampEstimate,
   type PaymentRampQuote,
@@ -929,7 +930,7 @@ function scheduleActionRefusal(
       return notEnough ? error(400, notEnough, "insufficient_funds") : null;
     }
     case "cancel":
-      return schedule.status === "pending_activation" ||
+      return isPendingActivationRecurringPaymentStatus(schedule.status) ||
         isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
         ? null
         : error(409, "This schedule is not running.", "conflict");
