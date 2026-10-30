@@ -4896,6 +4896,7 @@ describe("Payments routes — recurring", () => {
         expect.objectContaining({
           reason: "failed_attempts",
           failed_attempts: maxFailedAttemptsBeforePause,
+          error_code: "UNEXPECTED",
           recurring_payment_id: activated.id,
           due_at: dueAt,
         }),
@@ -4921,7 +4922,11 @@ describe("Payments routes — recurring", () => {
         )
       ).toBe("paused");
       expect(pauseEvents()).toEqual([
-        expect.objectContaining({ reason: "custody_policy_refused", failed_attempts: 1 }),
+        expect.objectContaining({
+          reason: "custody_policy_refused",
+          failed_attempts: 1,
+          error_code: "CUSTODY_POLICY_REFUSED",
+        }),
       ]);
       const paused = await app.request(
         `/v1/payments/recurring-payments/${activated.id}`,
@@ -4967,6 +4972,7 @@ describe("Payments routes — recurring", () => {
           expect.objectContaining({
             reason: "failed_attempts",
             failed_attempts: maxFailedAttemptsBeforePause,
+            error_code: "TRANSACTION_FAILED",
             recurring_payment_id: activated.id,
           }),
         ]);

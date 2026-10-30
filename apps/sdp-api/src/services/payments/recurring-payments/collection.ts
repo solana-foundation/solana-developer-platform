@@ -67,6 +67,7 @@ import {
   AppError,
   badRequest,
   conflict,
+  type ErrorCode,
   internalError,
   notFound,
   solanaRpcError,
@@ -624,6 +625,11 @@ interface RecurringPaymentPause {
   reason: RecurringPaymentPauseReason;
   /** Failed attempts at the due period since the schedule last resumed, this one included. */
   failedAttempts: number;
+  /**
+   * The pausing failure's API error code, or `UNEXPECTED` for an error SDP did not classify, so
+   * an alert can tell a payer's or issuer's refusal from an SDP or dependency fault.
+   */
+  errorCode: ErrorCode | "UNEXPECTED";
 }
 
 /**
@@ -675,7 +681,9 @@ async function pauseFailingRecurringPayment(
     reason,
     updatedAt: input.pausedAt,
   });
-  return paused === null ? null : { reason, failedAttempts };
+  if (paused === null) return null;
+  const errorCode = input.error instanceof AppError ? input.error.code : "UNEXPECTED";
+  return { reason, failedAttempts, errorCode };
 }
 
 /**
@@ -700,6 +708,7 @@ function logRecurringPaymentPaused(
     event: "sdp_recurring_payment_paused",
     reason: pause.reason,
     failed_attempts: pause.failedAttempts,
+    error_code: pause.errorCode,
     organization_id: context.organizationId,
     project_id: context.projectId,
     recurring_payment_id: context.recurringPaymentId,
