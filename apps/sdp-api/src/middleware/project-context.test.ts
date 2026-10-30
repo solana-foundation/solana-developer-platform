@@ -18,6 +18,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -307,12 +308,12 @@ describe("projectContextMiddleware", () => {
         stage: "beta",
       };
       await setOrganizationSettings(entitled);
-      const stableDeployment: Env = { ...env, SDP_RELEASE_CHANNEL: "stable" };
+      stubReleaseChannel("stable");
 
       const production = await buildApp().request(
         "/v1/payments/probe",
         { headers: actor.headers(PRODUCTION_PROJECT_ID) },
-        stableDeployment
+        env
       );
       expect(production.status).toBe(403);
       expect(await production.json()).toEqual({
@@ -326,7 +327,7 @@ describe("projectContextMiddleware", () => {
       const sandbox = await buildApp().request(
         "/v1/payments/probe",
         { headers: actor.headers(TEST_PROJECT.id) },
-        stableDeployment
+        env
       );
       expect(sandbox.status).toBe(200);
       expect(await sandbox.json()).toEqual({

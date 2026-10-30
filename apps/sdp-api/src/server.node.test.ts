@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import type { Env } from "@/types/env";
 import { assertRequiredEnv } from "./server";
 
@@ -11,7 +12,6 @@ function makeEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env {
     REDIS_URL: "redis://unit",
     SIGNING_PROVIDER: "coinbase_cdp",
     CUSTODY_KMS_KEY_NAME: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
-    SDP_RELEASE_CHANNEL: "stable",
     API_KEY_PEPPER: "unit-pepper",
     ...overrides,
   } as Env;
@@ -21,10 +21,10 @@ describe("server boot checks", () => {
   installClusterRpcStub();
 
   it("runs the release channel boot check", () => {
+    stubReleaseChannel("stable");
     expect(() => assertRequiredEnv(makeEnv())).not.toThrow();
-    expect(() => assertRequiredEnv(makeEnv({ SDP_RELEASE_CHANNEL: "" }))).toThrow(
-      /SDP_RELEASE_CHANNEL is required/
-    );
+    stubReleaseChannel(undefined);
+    expect(() => assertRequiredEnv(makeEnv())).toThrow(/SDP_RELEASE_CHANNEL is required/);
   });
 
   it("refuses to boot without an API key pepper", () => {

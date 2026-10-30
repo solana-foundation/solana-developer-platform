@@ -1,10 +1,13 @@
 import { readFile } from "node:fs/promises";
+import { SDP_RELEASE_CHANNEL_NAMES, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 
-async function llmsBody(releaseChannel: string): Promise<string> {
-  const res = await app.request("/llms.txt", {}, { ...env, SDP_RELEASE_CHANNEL: releaseChannel });
+async function llmsBody(releaseChannel: SdpReleaseChannel): Promise<string> {
+  stubReleaseChannel(releaseChannel);
+  const res = await app.request("/llms.txt", {}, env);
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("text/plain");
   return res.text();
@@ -34,7 +37,7 @@ describe("GET /llms.txt", () => {
     expect(body).not.toContain("/v1/organizations");
   });
 
-  it.each(["beta", "stable"])("lists only the families %s publishes", async (channel) => {
+  it.each(["beta", "stable"] as const)("lists only the families %s publishes", async (channel) => {
     const body = await llmsBody(channel);
 
     expect(body).toContain("/v1/payments");
@@ -44,7 +47,7 @@ describe("GET /llms.txt", () => {
   });
 
   it("leaves Earn out on every channel while its publication hold is on", async () => {
-    for (const releaseChannel of ["experimental", "beta", "stable"]) {
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
       expect(await llmsBody(releaseChannel)).not.toMatch(/earn/i);
     }
   });

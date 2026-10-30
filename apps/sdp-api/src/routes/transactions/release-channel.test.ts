@@ -14,6 +14,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 
 // `/v1/transactions` belongs to Payments, so it is served in every release channel,
 // but it must not list rows of a module the release channel leaves out (ADR 0005).
@@ -28,10 +29,11 @@ const errorResponseSchema = z.object({
 });
 
 async function listTransactionsOn(releaseChannel: SdpReleaseChannel, query = "") {
+  stubReleaseChannel(releaseChannel);
   return app.request(
     `/v1/transactions${query}`,
     { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-    { ...env, SDP_RELEASE_CHANNEL: releaseChannel }
+    env
   );
 }
 

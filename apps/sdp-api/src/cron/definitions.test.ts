@@ -21,7 +21,6 @@ describe("CRON_DEFINITIONS", () => {
   it("keeps every Money Exit but track-pending-withdrawals enabled with every feature flag off", () => {
     const featuresOff = {
       ...env,
-      SDP_RELEASE_CHANNEL: "experimental",
       MARKETS_ENABLED: "false",
       EARN_ENABLED: "false",
       PRIVATE_CHANNELS_ENABLED: "false",

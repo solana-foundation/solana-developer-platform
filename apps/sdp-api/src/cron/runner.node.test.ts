@@ -19,6 +19,7 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { required } from "@/test/helpers/required";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
@@ -259,8 +260,9 @@ describe("startCron", () => {
       environment: "production",
       stage: "beta",
     };
+    stubReleaseChannel("stable");
     const { bg } = recordingBackgroundRunner();
-    startCron({ env: { ...env, SDP_RELEASE_CHANNEL: "stable" }, bg });
+    startCron({ env, bg });
 
     for (const task of scheduler.tasks) {
       task.fire();

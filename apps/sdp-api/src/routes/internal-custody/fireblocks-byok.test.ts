@@ -16,6 +16,7 @@ import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -99,7 +100,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "beta";
+  stubReleaseChannel("beta");
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -161,7 +162,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       "SELECT id, status FROM provider_credentials WHERE organization_id = ? ORDER BY id",
       [ORGANIZATION_ID]
     );
-    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    stubReleaseChannel("stable");
     fetch.mockClear();
     const discoveryFields = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
     for (const [path, payload] of [

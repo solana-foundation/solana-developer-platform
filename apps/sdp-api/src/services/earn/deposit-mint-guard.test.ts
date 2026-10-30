@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import type { Env } from "@/types/env";
 
 const mocks = vi.hoisted(() => ({
@@ -38,7 +39,6 @@ const earnEnabledEnv = {
   ...env,
   MARKETS_ENABLED: "true",
   EARN_ENABLED: "true",
-  SDP_RELEASE_CHANNEL: "experimental",
 } as Env;
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const PYUSD_MAINNET = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
@@ -270,12 +270,13 @@ describe("guardDepositMints", () => {
   });
 
   it.each([
-    ["error", "enabled", earnEnabledEnv],
-    ["info", "disabled", { ...env, SDP_RELEASE_CHANNEL: "experimental" } as Env],
-    ["error", "unreadable", env],
+    ["error", "enabled", earnEnabledEnv, "experimental"],
+    ["info", "disabled", env, "experimental"],
+    ["error", "unreadable", env, undefined],
   ] as const)(
     "logs a skip at %s where Earn is %s when the cluster has no pool, never reading another",
-    async (level, _state, guardEnv) => {
+    async (level, _state, guardEnv, releaseChannel) => {
+      stubReleaseChannel(releaseChannel);
       stubDevnetDefaultProcess();
       vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
 

@@ -153,7 +153,6 @@ describe("signing.service custody provider enablement", () => {
     const { service, configStore } = createService({
       configRecord,
       wallets: [],
-      envOverrides: { SDP_RELEASE_CHANNEL: "experimental" },
     });
     configStore.findActiveByProvider.mockResolvedValue(configRecord);
     const assertManagedCustodyUseAllowed = vi
@@ -178,7 +177,7 @@ describe("signing.service custody provider enablement", () => {
       provider: "privy",
     });
     expect(assertCustodyProviderEnabled).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ SDP_RELEASE_CHANNEL: "experimental" }),
+      expect.objectContaining({ DATABASE_URL: testEnv.DATABASE_URL }),
       expect.anything(),
       orgId,
       "privy"

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { routeOwnerOf as ownerOf, ROUTE_OWNERS } from "@/routes/route-modules";
 import { env as baseEnv } from "@/test/helpers/env";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 
 function registeredRoutes() {
   const app = createApp({
@@ -63,10 +64,10 @@ describe("API route ownership", () => {
     if (cut.length === 0) continue;
 
     it(`${releaseChannel}: refuses every route of a module it leaves out`, async () => {
+      stubReleaseChannel(releaseChannel);
       let client = 0;
       const env = {
         ...baseEnv,
-        SDP_RELEASE_CHANNEL: releaseChannel,
         TRUST_PROXY_HEADERS: "true",
         MARKETS_ENABLED: "true",
         EARN_ENABLED: "true",

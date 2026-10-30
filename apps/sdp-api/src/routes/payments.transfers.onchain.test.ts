@@ -42,6 +42,7 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 
@@ -676,6 +677,7 @@ describe("Payments routes — on-chain transfers", () => {
     });
 
     // Every ramp provider is `experimental` today, so `stable` leaves MoonPay out.
+    stubReleaseChannel("stable");
     const res = await postTransfer(
       {
         transferId,
@@ -684,7 +686,7 @@ describe("Payments routes — on-chain transfers", () => {
         token: "SOL",
         amount: "1",
       },
-      { releaseChannel: "stable" }
+      {}
     );
 
     expect(res.status).toBe(403);

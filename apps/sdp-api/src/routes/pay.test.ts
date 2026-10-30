@@ -51,13 +51,13 @@ import {
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
   TEST_MOCK_FEE_PAYER_KEY_PAIR,
 } from "@/test/helpers/sponsor-signing";
 import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
-import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
@@ -220,17 +220,17 @@ describe("Public payment request routes", () => {
       environment: "production",
       stage: "beta",
     };
-    const stableDeployment: Env = { ...env, SDP_RELEASE_CHANNEL: "stable" };
     const production = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
     const sandbox = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+    stubReleaseChannel("stable");
 
-    const refused = await app.request(`/pay/${production.public_token}`, {}, stableDeployment);
+    const refused = await app.request(`/pay/${production.public_token}`, {}, env);
     expect(refused.status).toBe(404);
     expect(await refused.json()).toMatchObject({
       error: { code: "NOT_FOUND", message: "Payment request not found" },
     });
 
-    const served = await app.request(`/pay/${sandbox.public_token}`, {}, stableDeployment);
+    const served = await app.request(`/pay/${sandbox.public_token}`, {}, env);
     expect(served.status).toBe(200);
     await expect(served.json()).resolves.toMatchObject({ status: "awaiting_payment" });
   });

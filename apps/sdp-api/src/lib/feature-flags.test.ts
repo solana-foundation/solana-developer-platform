@@ -15,10 +15,10 @@ import {
   SDP_RELEASE_CHANNELS,
   type SdpRampProviderMaturity,
 } from "@sdp/types/release-channels";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import type { Env } from "@/types/env";
 import {
-  assertSdpReleaseChannelConfigured,
   isAssetProfilesEnabled,
   isCustodyProviderAvailable,
   isDvpEnabled,
@@ -31,16 +31,12 @@ import {
   isPrivateChannelsEnabled,
 } from "./feature-flags";
 
-// The channel with every module, so these cases exercise each flag on its own.
-const EXPERIMENTAL = { SDP_RELEASE_CHANNEL: "experimental" } as const;
-
 describe("isAssetProfilesEnabled", () => {
   it.each([undefined, "managed"] as const)(
     "keeps the managed API capability available when deployment mode is %s",
     (deploymentMode) => {
       expect(
         isAssetProfilesEnabled({
-          ...EXPERIMENTAL,
           ENVIRONMENT: "production",
           SDP_DEPLOYMENT_MODE: deploymentMode,
         })
@@ -53,7 +49,6 @@ describe("isAssetProfilesEnabled", () => {
     (flag) => {
       expect(
         isAssetProfilesEnabled({
-          ...EXPERIMENTAL,
           ENVIRONMENT: "development",
           SDP_FLAG_ASSET_PROFILES: flag,
           SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -67,7 +62,6 @@ describe("isAssetProfilesEnabled", () => {
     (flag) => {
       expect(
         isAssetProfilesEnabled({
-          ...EXPERIMENTAL,
           ENVIRONMENT: "production",
           SDP_FLAG_ASSET_PROFILES: flag,
           SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -79,7 +73,6 @@ describe("isAssetProfilesEnabled", () => {
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the production opt-in value %s", (flag) => {
     expect(
       isAssetProfilesEnabled({
-        ...EXPERIMENTAL,
         ENVIRONMENT: "production",
         SDP_FLAG_ASSET_PROFILES: flag,
         SDP_DEPLOYMENT_MODE: "self_hosted",
@@ -90,15 +83,11 @@ describe("isAssetProfilesEnabled", () => {
 
 describe("isPrivateChannelsEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
-      false
-    );
+    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(false);
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isPrivateChannelsEnabled({ ...EXPERIMENTAL, PRIVATE_CHANNELS_ENABLED: flag })).toBe(
-      true
-    );
+    expect(isPrivateChannelsEnabled({ PRIVATE_CHANNELS_ENABLED: flag })).toBe(true);
   });
 });
 
@@ -112,64 +101,61 @@ describe("isCustodyProviderAvailable", () => {
   );
 
   describe.each(releaseChannelsBelowStable)("on the %s release channel", (releaseChannel) => {
+    beforeEach(() => {
+      stubReleaseChannel(releaseChannel);
+    });
+
     it.each(nonPrivyCustodyProviders)("offers Managed %s", (provider) => {
-      expect(
-        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "managed")
-      ).toBe(true);
+      expect(isCustodyProviderAvailable(provider, "managed")).toBe(true);
     });
   });
 
   it.each(nonPrivyCustodyProviders)(
     "refuses Managed %s on the stable release channel",
     (provider) => {
-      expect(
-        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: "stable" }, provider, "managed")
-      ).toBe(false);
+      stubReleaseChannel("stable");
+      expect(isCustodyProviderAvailable(provider, "managed")).toBe(false);
     }
   );
 
   describe.each(SDP_RELEASE_CHANNEL_NAMES)("on the %s release channel", (releaseChannel) => {
+    beforeEach(() => {
+      stubReleaseChannel(releaseChannel);
+    });
+
     it("offers Managed privy", () => {
-      expect(
-        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, "privy", "managed")
-      ).toBe(true);
+      expect(isCustodyProviderAvailable("privy", "managed")).toBe(true);
     });
 
     it.each(BYOK_CUSTODY_PROVIDERS)("offers BYOK %s only within its channel", (provider) => {
-      expect(
-        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
-      ).toBe(provider !== "fireblocks" || releaseChannel !== "stable");
+      expect(isCustodyProviderAvailable(provider, "byok")).toBe(
+        provider !== "fireblocks" || releaseChannel !== "stable"
+      );
     });
 
     it.each(nonByokCustodyProviders)("never offers BYOK %s", (provider) => {
-      expect(
-        isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
-      ).toBe(false);
+      expect(isCustodyProviderAvailable(provider, "byok")).toBe(false);
     });
   });
 });
 
 describe("isMarketsEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
-    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(false);
+    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(false);
   });
 
   it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
-    expect(isMarketsEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag })).toBe(true);
+    expect(isMarketsEnabled({ MARKETS_ENABLED: flag })).toBe(true);
   });
 });
 
 describe("isEarnEnabled", () => {
   it("is disabled when both flags are unset", () => {
-    expect(
-      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })
-    ).toBe(false);
+    expect(isEarnEnabled({ MARKETS_ENABLED: undefined, EARN_ENABLED: undefined })).toBe(false);
   });
 
   it("is disabled when Markets is on but Earn is unset", () => {
-    expect(
-      isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: "true", EARN_ENABLED: undefined })
-    ).toBe(false);
+    expect(isEarnEnabled({ MARKETS_ENABLED: "true", EARN_ENABLED: undefined })).toBe(false);
   });
 
   // The parent gate has to win: Earn is a Markets sub-module, so disabling
@@ -177,18 +163,14 @@ describe("isEarnEnabled", () => {
   it.each([undefined, "", "false", "0", "off"])(
     "stays disabled when Earn is on but Markets is %s",
     (markets) => {
-      expect(
-        isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: markets, EARN_ENABLED: "true" })
-      ).toBe(false);
+      expect(isEarnEnabled({ MARKETS_ENABLED: markets, EARN_ENABLED: "true" })).toBe(false);
     }
   );
 
   it.each(["1", "true", " TRUE ", "yes", "on"])(
     "honors the opt-in value %s on both flags",
     (flag) => {
-      expect(isEarnEnabled({ ...EXPERIMENTAL, MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(
-        true
-      );
+      expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
     }
   );
 });
@@ -250,15 +232,12 @@ describe("release channels", () => {
     expect(() => resolveSdpReleaseChannel(value)).toThrow(/SDP_RELEASE_CHANNEL is required/);
   });
 
-  it("refuses an unknown release channel instead of running every module", () => {
-    expect(() => resolveSdpReleaseChannel("mainnet")).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
+  it("trims the configured release channel", () => {
+    expect(resolveSdpReleaseChannel(" stable ")).toBe("stable");
   });
 
-  it("requires a release channel at boot whatever ENVIRONMENT says", () => {
-    expect(() => assertSdpReleaseChannelConfigured({})).toThrow(/SDP_RELEASE_CHANNEL is required/);
-    expect(() =>
-      assertSdpReleaseChannelConfigured({ SDP_RELEASE_CHANNEL: "stable" })
-    ).not.toThrow();
+  it("refuses an unknown release channel instead of running every module", () => {
+    expect(() => resolveSdpReleaseChannel("mainnet")).toThrow(/SDP_RELEASE_CHANNEL must be one of/);
   });
 
   // Pinned on purpose: changing what a release channel ships must show up in review
@@ -329,8 +308,8 @@ describe("release channels", () => {
   });
 
   it("keeps release-channel-excluded modules off in stable even with every flag on", () => {
+    stubReleaseChannel("stable");
     const env = {
-      SDP_RELEASE_CHANNEL: " stable ",
       MARKETS_ENABLED: "true",
       EARN_ENABLED: "true",
       PRIVATE_CHANNELS_ENABLED: "true",
@@ -348,7 +327,7 @@ describe("release channels", () => {
   });
 
   it("leaves release-channel-included features to their flags", () => {
-    const env = { SDP_RELEASE_CHANNEL: "experimental", MARKETS_ENABLED: "true" } as Env;
+    const env = { MARKETS_ENABLED: "true" };
     expect(isDvpEnabled(env)).toBe(true);
     expect(isDvpEnabled({ ...env, MARKETS_ENABLED: undefined })).toBe(false);
   });

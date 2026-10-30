@@ -21,6 +21,7 @@ import { TerminalRampWebhookError } from "@/services/ramps/webhooks/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/services/ramps/webhooks/registry";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -792,14 +793,17 @@ describe("Ramp webhook event inbox", () => {
       ...SDP_RAMP_PROVIDER_MATURITY,
       moonpay: "beta",
     };
-    const betaEnv = (): Env => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
     const betaApp = createApp({
       rampProviderMaturity: MOONPAY_ONLY,
     });
 
+    beforeEach(() => {
+      stubReleaseChannel("beta");
+    });
+
     it("accepts the included provider's webhook and refuses the excluded one's", async () => {
       const { res } = await sendMoonpayWebhook(completedPayload, {
-        target: { app: betaApp, env: betaEnv() },
+        target: { app: betaApp, env },
       });
       expect(res.status).toBe(200);
       expect(await readTransferStatus()).toBe("settling");
@@ -807,7 +811,7 @@ describe("Ramp webhook event inbox", () => {
       const refused = await betaApp.request(
         "/webhooks/payments/ramps/sandbox/stripe",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
-        betaEnv()
+        env
       );
       expect(refused.status).toBe(403);
       expect(await readInboxRows()).toMatchObject([{ status: "discharged" }]);
@@ -817,7 +821,7 @@ describe("Ramp webhook event inbox", () => {
       const res = await betaApp.request(
         "/webhooks/payments/ramps/sandbox/not-a-provider",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
-        betaEnv()
+        env
       );
       expect(res.status).toBe(400);
     });
@@ -862,7 +866,7 @@ describe("Ramp webhook event inbox", () => {
         .bind(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS, excludedParked.id)
         .run();
 
-      const applied = await replayRampWebhookEvents(betaEnv(), MOONPAY_ONLY);
+      const applied = await replayRampWebhookEvents(env, MOONPAY_ONLY);
 
       expect(applied).toBe(1);
       expect(await readTransferStatus()).toBe("settling");
@@ -896,13 +900,9 @@ describe("Ramp webhook event inbox", () => {
         .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
         .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
         .run();
+      stubReleaseChannel("stable");
 
-      expect(
-        await replayRampWebhookEvents(
-          { ...env, SDP_RELEASE_CHANNEL: "stable" },
-          SDP_RAMP_PROVIDER_MATURITY
-        )
-      ).toBe(0);
+      expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY)).toBe(0);
 
       expect(await readInboxRows()).toMatchObject([
         { id: stored.id, status: "pending", attempts: 0 },

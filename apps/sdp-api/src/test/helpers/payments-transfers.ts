@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
@@ -36,8 +35,6 @@ export interface PostTransferOptions {
         kind: "clerk";
         token: string;
       };
-  /** Overrides `SDP_RELEASE_CHANNEL` for this request. */
-  releaseChannel?: SdpReleaseChannel;
 }
 
 export async function postTransfer(
@@ -71,9 +68,7 @@ export async function postRawTransfer(
   return app.request(
     "/v1/payments/transfers",
     { method: "POST", headers, body: JSON.stringify(body) },
-    options.releaseChannel === undefined
-      ? env
-      : { ...env, SDP_RELEASE_CHANNEL: options.releaseChannel }
+    env
   );
 }
 

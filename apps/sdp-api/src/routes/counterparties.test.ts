@@ -18,6 +18,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -627,6 +628,7 @@ describe("Counterparties Routes", () => {
         status: "archived",
         createdAt: "2026-01-02T00:00:00.000Z",
       });
+      stubReleaseChannel("beta");
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       // Today every provider is `experimental`; these stages put only MoonPay in `beta`.
       const betaApp = createApp({
@@ -636,7 +638,7 @@ describe("Counterparties Routes", () => {
       const response = await betaApp.request(
         `/v1/counterparties/${owner.id}/provider-accounts`,
         { headers: { Authorization: authHeader } },
-        { ...env, SDP_RELEASE_CHANNEL: "beta" }
+        env
       );
 
       expect(response.status).toBe(200);

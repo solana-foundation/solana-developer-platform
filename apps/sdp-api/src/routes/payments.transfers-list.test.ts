@@ -46,6 +46,7 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 const observedTransfersResponseSchema = z.object({
@@ -311,11 +312,12 @@ describe("Payments routes — list transfers", () => {
         app.request(
           path,
           { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-          { ...env, SDP_RELEASE_CHANNEL: "stable" }
+          env
         );
       const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
 
       beforeEach(async () => {
+        stubReleaseChannel("stable");
         await seedTransfer({ id: "xfr_stable_plain", status: "confirmed" });
         await seedTransfer({ id: "xfr_stable_onramp", status: "confirmed", type: "onramp" });
         await seedTransfer({ id: "xfr_stable_offramp", status: "confirmed", type: "offramp" });

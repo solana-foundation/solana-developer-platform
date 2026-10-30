@@ -24,6 +24,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -468,10 +469,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   it("reports custody providers the release channel leaves out as unavailable", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
 
-    const availability = await readAvailability(
-      "sandbox",
-      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
-    );
+    stubReleaseChannel("stable");
+    const availability = await readAvailability("sandbox", deploymentEnv({}));
 
     expect(availability.providers).toContainEqual({
       family: "custody",
@@ -488,10 +487,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   it("omits custody providers when the release channel leaves out Custody", async () => {
     providerMaturity.moduleMaturityOverride = { module: "custody", stage: "experimental" };
 
-    const availability = await readAvailability(
-      "sandbox",
-      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
-    );
+    stubReleaseChannel("stable");
+    const availability = await readAvailability("sandbox", deploymentEnv({}));
 
     expect(availability.providers.filter((entry) => entry.family === "custody")).toEqual([]);
   });
@@ -503,10 +500,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     async (channel) => {
       providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };
 
-      const availability = await readAvailability(
-        "sandbox",
-        deploymentEnv({ SDP_RELEASE_CHANNEL: channel })
-      );
+      stubReleaseChannel(channel);
+      const availability = await readAvailability("sandbox", deploymentEnv({}));
 
       expect(availability.providers.filter((entry) => entry.family === "compliance")).toEqual(
         channel === "experimental" ? COMPLIANCE_AVAILABILITY : []
@@ -518,10 +513,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     "advertises the actual Fireblocks BYOK stage to the dashboard in %s",
     async (channel) => {
       await setProviderOverrides({ custody: { fireblocks: true } });
-      const availability = await readAvailability(
-        "sandbox",
-        deploymentEnv({ SDP_RELEASE_CHANNEL: channel })
-      );
+      stubReleaseChannel(channel);
+      const availability = await readAvailability("sandbox", deploymentEnv({}));
       const fireblocks = availability.providers.find(
         (entry) => entry.family === "custody" && entry.provider === "fireblocks"
       );

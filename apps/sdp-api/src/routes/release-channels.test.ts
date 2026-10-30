@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { env as baseEnv } from "@/test/helpers/env";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 
 // One request per module, into a route that module owns. A module joins a
 // release channel's exclusions only once its probe is refused here.
@@ -61,13 +62,13 @@ function nextClientHeaders() {
 }
 
 async function probe(releaseChannel: SdpReleaseChannel, module: SdpModule) {
+  stubReleaseChannel(releaseChannel);
   const app = createApp({
     rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const env = {
     ...baseEnv,
     ...ALL_FLAGS_ON,
-    SDP_RELEASE_CHANNEL: releaseChannel,
     TRUST_PROXY_HEADERS: "true",
   };
   return Promise.all(
@@ -90,13 +91,14 @@ describe("release channels at the API", () => {
   }
 
   it("stable: serves wallet balances", async () => {
+    stubReleaseChannel("stable");
     const app = createApp({
       rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
     });
     const response = await app.request(
       "/v1/payments/wallets/wallet_1/balances",
       { headers: nextClientHeaders() },
-      { ...baseEnv, SDP_RELEASE_CHANNEL: "stable", TRUST_PROXY_HEADERS: "true" }
+      { ...baseEnv, TRUST_PROXY_HEADERS: "true" }
     );
     expect([403, 429]).not.toContain(response.status);
   });

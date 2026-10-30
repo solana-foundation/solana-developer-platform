@@ -5,6 +5,7 @@ import { getDb } from "@/db/client";
 import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -452,13 +453,8 @@ describe("sweepRampTransferStatuses", () => {
       200,
       session("cos_hidden", "fulfillment_processing", {})
     );
-    const saved = env.SDP_RELEASE_CHANNEL;
-    env.SDP_RELEASE_CHANNEL = "stable";
-    try {
-      await sweep();
-    } finally {
-      env.SDP_RELEASE_CHANNEL = saved;
-    }
+    stubReleaseChannel("stable");
+    await sweep();
 
     expect(requestsTo("api.stripe.com")).toBe(1);
     expect((await row("xfr_hidden")).status).toBe("settling");

@@ -16,6 +16,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
@@ -40,8 +41,6 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => {
 
 const ORGANIZATION_ID = "org_project_provider_rule";
 const USER_ID = "usr_project_provider_rule";
-const BETA_CHANNEL = { SDP_RELEASE_CHANNEL: "beta" } as const satisfies Partial<Env>;
-const STABLE_CHANNEL = { SDP_RELEASE_CHANNEL: "stable" } as const satisfies Partial<Env>;
 const PRIVY_CREDENTIALS = {
   PRIVY_APP_ID: "privy_project_provider_rule_app",
   PRIVY_APP_SECRET: "privy_project_provider_rule_secret",
@@ -142,14 +141,14 @@ describe("assertProjectProviderAdmitted", () => {
   it("checks a below-stable ramp provider's channel, entitlement and credentials in that order in a Production project", async () => {
     await setProviderOverrides({ ramps: { moonpay: false } });
 
-    await expect(
-      admit(projects.production, deploymentEnv(BETA_CHANNEL), MOONPAY)
-    ).rejects.toMatchObject(
+    stubReleaseChannel("beta");
+    await expect(admit(projects.production, deploymentEnv({}), MOONPAY)).rejects.toMatchObject(
       refusal(
         "MoonPay is not available in this release channel.",
         "provider_not_in_release_channel"
       )
     );
+    stubReleaseChannel("experimental");
     await expect(admit(projects.production, deploymentEnv({}), MOONPAY)).rejects.toMatchObject(
       refusal("MoonPay requires manual activation for this organization.", "provider_not_entitled")
     );
@@ -179,11 +178,11 @@ describe("assertProjectProviderAdmitted", () => {
   it("checks a below-stable compliance provider's channel, entitlement and credentials in that order in a Production project", async () => {
     providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };
 
-    await expect(
-      admit(projects.production, deploymentEnv(BETA_CHANNEL), RANGE)
-    ).rejects.toMatchObject(
+    stubReleaseChannel("beta");
+    await expect(admit(projects.production, deploymentEnv({}), RANGE)).rejects.toMatchObject(
       refusal("Range is not available in this release channel.", "provider_not_in_release_channel")
     );
+    stubReleaseChannel("experimental");
     await expect(admit(projects.production, deploymentEnv({}), RANGE)).rejects.toMatchObject(
       refusal("Range requires manual activation for this organization.", "provider_not_entitled")
     );
@@ -207,18 +206,16 @@ describe("assertProjectProviderAdmitted", () => {
         "provider_not_in_release_channel"
       )
     );
+    stubReleaseChannel("stable");
     await expect(
-      admit(
-        projects.production,
-        deploymentEnv({ ...STABLE_CHANNEL, ...EARN_ENABLED_FLAGS }),
-        UPSHIFT
-      )
+      admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(
       refusal(
         "Upshift is not available in this release channel.",
         "provider_not_in_release_channel"
       )
     );
+    stubReleaseChannel("experimental");
     await expect(
       admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(refusal("Upshift is not currently offered.", "provider_not_offered"));

@@ -17,6 +17,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -98,7 +99,7 @@ async function newRegistration(projectId = PROJECT_ID) {
 }
 
 beforeEach(async () => {
-  testEnv.SDP_RELEASE_CHANNEL = "beta";
+  stubReleaseChannel("beta");
   testEnv.SOLANA_NETWORK = "devnet";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
@@ -306,7 +307,7 @@ describe("native Fireblocks BYOK payment routes", () => {
     const response = await send();
     expect(response.status).toBe(200);
     const transfer = (await response.json()).data.transfer;
-    testEnv.SDP_RELEASE_CHANNEL = "stable";
+    stubReleaseChannel("stable");
     mock.mockClear();
     const refused = await send("stable-new");
     expect(refused.status).toBe(403);

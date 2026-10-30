@@ -43,7 +43,6 @@ function createEnv(): Env {
   return {
     ENVIRONMENT: "development",
     API_VERSION: "v1",
-    SDP_RELEASE_CHANNEL: "beta",
   } as Env;
 }
 

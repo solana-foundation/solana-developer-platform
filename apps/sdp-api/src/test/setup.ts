@@ -1,4 +1,4 @@
-import { afterAll, beforeEach } from "vitest";
+import { afterAll, afterEach, beforeEach, vi } from "vitest";
 import { closeDatabasePools } from "@/db/client";
 import { setDefaultDatabaseIdentityForTesting } from "@/db/identity";
 import { resetTerminalRefusalsForTesting } from "@/lib/api-key-refusal-cache";
@@ -8,6 +8,7 @@ import { KORA_UPSTREAM_ENV_KEYS, MANAGED_POOL_ENV_KEYS } from "@/test/helpers/ma
 for (const envKey of [...MANAGED_POOL_ENV_KEYS, ...KORA_UPSTREAM_ENV_KEYS]) {
   process.env[envKey] = "";
 }
+process.env.SDP_RELEASE_CHANNEL = "experimental";
 
 // Fixtures and direct repository tests talk to the database outside any HTTP
 // or worker entry point, so they get the privileged system identity by
@@ -33,6 +34,10 @@ if (!globalWithSecureContext.isSecureContext) {
 // active in the next), so each test starts with a cold refusal cache.
 beforeEach(() => {
   resetTerminalRefusalsForTesting();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 afterAll(async () => {

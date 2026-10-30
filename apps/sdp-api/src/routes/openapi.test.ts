@@ -1,16 +1,14 @@
-import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import type { Env } from "@/types/env";
 import { createWeakEtag, openapi } from "./openapi";
 
 const appEnv = {
   ENVIRONMENT: "development",
   API_VERSION: "v1",
-  SDP_RELEASE_CHANNEL: "experimental",
 } as Env;
-
-const stableEnv = { SDP_RELEASE_CHANNEL: "stable" } as Env;
 
 describe("OpenAPI response delivery", () => {
   it("hashes UTF-8 bytes for portable validators", () => {
@@ -18,7 +16,8 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("serves the pre-serialized document with aggressive cache validators", async () => {
-    const response = await openapi.request("/", {}, stableEnv);
+    stubReleaseChannel("stable");
+    const response = await openapi.request("/");
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("application/json; charset=UTF-8");
@@ -31,15 +30,14 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("returns 304 for a matching document validator", async () => {
-    const initial = await openapi.request("/", {}, stableEnv);
+    stubReleaseChannel("stable");
+    const initial = await openapi.request("/");
     const etag = initial.headers.get("ETag");
     expect(etag).toBeTruthy();
 
-    const response = await openapi.request(
-      "/",
-      { headers: { "If-None-Match": `W/"not-current", ${etag?.replace(/^W\//, "")}` } },
-      stableEnv
-    );
+    const response = await openapi.request("/", {
+      headers: { "If-None-Match": `W/"not-current", ${etag?.replace(/^W\//, "")}` },
+    });
 
     expect(response.status).toBe(304);
     expect(await response.text()).toBe("");
@@ -59,14 +57,10 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("documents only the routes the deployment's release channel serves", async () => {
-    const paths = async (releaseChannel: string) =>
-      Object.keys(
-        (
-          await (
-            await openapi.request("/", {}, { SDP_RELEASE_CHANNEL: releaseChannel } as Env)
-          ).json()
-        ).paths
-      );
+    const paths = async (releaseChannel: SdpReleaseChannel) => {
+      stubReleaseChannel(releaseChannel);
+      return Object.keys((await (await openapi.request("/")).json()).paths);
+    };
     const stable = await paths("stable");
     const experimental = await paths("experimental");
 
@@ -76,10 +70,10 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("gives each release channel's document its own validator", async () => {
-    const etag = async (releaseChannel: string) =>
-      (await openapi.request("/", {}, { SDP_RELEASE_CHANNEL: releaseChannel } as Env)).headers.get(
-        "ETag"
-      );
+    const etag = async (releaseChannel: SdpReleaseChannel) => {
+      stubReleaseChannel(releaseChannel);
+      return (await openapi.request("/")).headers.get("ETag");
+    };
 
     expect(await etag("stable")).not.toBe(await etag("experimental"));
   });

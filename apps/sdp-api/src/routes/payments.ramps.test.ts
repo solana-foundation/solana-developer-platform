@@ -41,6 +41,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerMaturity } from "@/test/helpers/provider-maturity";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { required } from "@/test/helpers/required";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedRateLimit } from "@/test/mocks/kv";
@@ -136,7 +137,6 @@ async function seedActiveConnectionWallet(params: {
 const moonpayOnlyBetaApp = createApp({
   rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
 });
-const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
 
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
@@ -936,6 +936,7 @@ describe("Payments routes — ramps", () => {
 
     it("refuses a quote for an experimental provider through the shared provider gate", async () => {
       const counterpartyId = await seedCounterparty({ externalId: "stable_channel_quote" });
+      stubReleaseChannel("stable");
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 
       const res = await app.request(
@@ -955,7 +956,7 @@ describe("Payments routes — ramps", () => {
             fiatAmount: "100.00",
           }),
         },
-        { ...env, SDP_RELEASE_CHANNEL: "stable" }
+        env
       );
 
       expect(res.status).toBe(403);
@@ -1081,6 +1082,7 @@ describe("Payments routes — ramps", () => {
       status: "awaiting_payment",
     });
 
+    stubReleaseChannel("beta");
     const res = await moonpayOnlyBetaApp.request(
       "/v1/payments/ramps/transfers/cancel",
       {
@@ -1091,7 +1093,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({ transferId: "xfr_cancel_excluded" }),
       },
-      betaEnv()
+      env
     );
 
     expect(res.status).toBe(403);
@@ -1113,6 +1115,7 @@ describe("Payments routes — ramps", () => {
       .bind("xfr_cancel_no_provider")
       .run();
 
+    stubReleaseChannel("beta");
     const res = await moonpayOnlyBetaApp.request(
       "/v1/payments/ramps/transfers/cancel",
       {
@@ -1123,7 +1126,7 @@ describe("Payments routes — ramps", () => {
         },
         body: JSON.stringify({ transferId: "xfr_cancel_no_provider" }),
       },
-      betaEnv()
+      env
     );
 
     expect(res.status).toBe(500);

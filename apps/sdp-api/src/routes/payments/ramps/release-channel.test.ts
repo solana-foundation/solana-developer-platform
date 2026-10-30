@@ -4,13 +4,14 @@ import {
   type SdpRampProviderMaturity,
 } from "@sdp/types/release-channels";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import { requireAction } from "@/middleware/require-action";
 import { getCounterpartyRequirements } from "@/routes/counterparties/handlers";
 import { listCounterpartyProviderAccounts } from "@/routes/counterparty-provider-accounts/handlers";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
-import { env as baseEnv } from "@/test/helpers/env";
+import { env } from "@/test/helpers/env";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import type { Env } from "@/types/env";
 import { listOfframpCurrencies } from "./offramp/handlers";
 import { listOnrampCurrencies } from "./onramp/handlers";
@@ -19,7 +20,6 @@ import { filterProviders } from "./shared";
 // Today every provider is `experimental`, so a `beta` deployment leaves them all
 // out. These stages put MoonPay in `beta` and keep every other provider out.
 const MOONPAY_ONLY: SdpRampProviderMaturity = { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" };
-const env: Env = { ...baseEnv, SDP_RELEASE_CHANNEL: "beta" };
 
 function buildApp(stages: SdpRampProviderMaturity) {
   const app = new Hono<{ Bindings: Env }>();
@@ -61,6 +61,10 @@ async function providersListed(response: Response): Promise<string[]> {
 
 describe("ramp providers outside the release channel", () => {
   const app = buildApp(MOONPAY_ONLY);
+
+  beforeEach(() => {
+    stubReleaseChannel("beta");
+  });
 
   it("offers only the providers in the release channel", async () => {
     const response = await app.request("/offered", {}, env);

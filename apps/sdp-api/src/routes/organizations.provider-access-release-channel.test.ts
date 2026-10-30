@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY, type SdpReleaseChannel } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
@@ -10,6 +10,7 @@ import {
   TEST_API_KEY,
   TEST_ORG,
 } from "@/test/helpers/payments-routes";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 
 // provider-access must evaluate the same ramp provider stages as the ramp routes:
 // the stages createApp was given, not the manifest (ADR 0005).
@@ -24,11 +25,12 @@ const providerAccessSchema = z.object({
   }),
 });
 
-async function rampsEnabled(on: typeof app, releaseChannel: string) {
+async function rampsEnabled(on: typeof app, releaseChannel: SdpReleaseChannel) {
+  stubReleaseChannel(releaseChannel);
   const response = await on.request(
     `/v1/organizations/${TEST_ORG.id}/provider-access`,
     { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
-    { ...env, SDP_RELEASE_CHANNEL: releaseChannel }
+    env
   );
   expect(response.status).toBe(200);
   const ramps = providerAccessSchema.parse(await response.json()).data.providers.ramps;

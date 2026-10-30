@@ -31,6 +31,7 @@ import {
   type SeededProject,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { stubReleaseChannel } from "@/test/helpers/release-channel";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -320,12 +321,8 @@ describe("provider-availability.service", () => {
       TEST_ORG_ID,
       MANIFEST_MATURITY
     );
-    const onStable = await getProviderAvailability(
-      { ...env, SDP_RELEASE_CHANNEL: "stable" },
-      getDb(env),
-      TEST_ORG_ID,
-      MANIFEST_MATURITY
-    );
+    stubReleaseChannel("stable");
+    const onStable = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_MATURITY);
 
     const enabledRamps = RAMP_PROVIDERS.filter((p) => onExperimental.providers.ramps[p]?.enabled);
     expect(enabledRamps.length).toBeGreaterThan(0);
@@ -364,7 +361,6 @@ describe("provider-availability.service", () => {
 
   it("follows injected ramp provider stages", async () => {
     await setOrganizationTier("enterprise");
-    const onBeta = { ...env, SDP_RELEASE_CHANNEL: "beta" };
     const onExperimental = await getProviderAvailability(
       env,
       getDb(env),
@@ -373,7 +369,8 @@ describe("provider-availability.service", () => {
     );
     expect(onExperimental.providers.ramps.moonpay?.enabled).toBe(true);
 
-    const availability = await getProviderAvailability(onBeta, getDb(env), TEST_ORG_ID, {
+    stubReleaseChannel("beta");
+    const availability = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, {
       rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
     });
 

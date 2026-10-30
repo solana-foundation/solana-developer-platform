@@ -25,7 +25,6 @@ const publicKey = address(
 const apiSecretPem = rsa.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const env = {
   ...testEnv,
-  SDP_RELEASE_CHANNEL: "beta",
   FIREBLOCKS_API_BASE_URL: "https://fireblocks.example.test",
   FIREBLOCKS_API_KEY: "deployment-key",
   FIREBLOCKS_API_SECRET: "deployment-secret",

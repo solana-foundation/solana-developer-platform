@@ -795,15 +795,13 @@ describe("value-moving authorization and replay conformance", () => {
       updatedAt: "2026-10-02T00:00:00.000Z",
     } as const;
     const decrypt = vi.fn().mockRejectedValue(new Error("decrypt reached"));
-    // SAFETY: the guards read only SDP_RELEASE_CHANNEL and SDP_DEPLOYMENT_MODE, and
+    // SAFETY: the guards read only SDP_DEPLOYMENT_MODE from env, and
     // decrypt is the one cipher method these paths can reach; the fakes implement exactly that.
     const managedEnv = {
-      SDP_RELEASE_CHANNEL: "beta",
       SDP_DEPLOYMENT_MODE: "managed",
       DATABASE_URL: "postgres://unused",
     } as never;
     const selfHostedEnv = {
-      SDP_RELEASE_CHANNEL: "beta",
       SDP_DEPLOYMENT_MODE: "self_hosted",
     } as never;
     const cipher = { decrypt } as never;
