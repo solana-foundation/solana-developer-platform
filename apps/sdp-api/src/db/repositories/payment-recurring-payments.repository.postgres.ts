@@ -829,7 +829,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND project_id = ?
               AND (
                 (status = ? AND paused_reason IS NOT DISTINCT FROM ?::text)
-                OR (status = ? AND updated_at <= ?)
+                OR (?::text IS NULL AND status = ? AND updated_at <= ?)
               )
           RETURNING *`
         )
@@ -841,6 +841,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.projectId,
           input.claimedFrom,
           input.pausedReason,
+          input.claimedFrom,
           RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
           input.staleBefore
         )
@@ -862,6 +863,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND status = ?
+              AND updated_at = ?
           RETURNING *`
         )
         .bind(
@@ -871,7 +873,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+          input.claimedUpdatedAt
         )
         .first<Record<string, unknown>>();
 

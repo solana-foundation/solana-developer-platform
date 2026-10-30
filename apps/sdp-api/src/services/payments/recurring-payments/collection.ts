@@ -99,6 +99,12 @@ import {
 } from "./shared";
 
 const COLLECTION_STALE_AFTER_MS = RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS;
+
+/** A new collection attempt id. */
+function newCollectionAttemptId(): string {
+  return `psca_${crypto.randomUUID()}`;
+}
+
 interface VerifiedRecurringPaymentCollection {
   attemptId: string;
   dueAt: string;
@@ -757,7 +763,7 @@ async function claimCollectionUnderRecurringLock(input: {
       return null;
     }
     const claimed = await subscriptionsRepo.createCollectionAttempt({
-      id: `psca_${crypto.randomUUID()}`,
+      id: newCollectionAttemptId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       subscriptionId: recurringPayment.subscription_id,
@@ -854,7 +860,7 @@ export async function skipRefusedRecurringCollectionPeriod(input: {
 
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     const skipped = await subscriptionsRepo.createCollectionAttempt({
-      id: `psca_${crypto.randomUUID()}`,
+      id: newCollectionAttemptId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       subscriptionId: recurringPayment.subscription_id,
@@ -940,7 +946,7 @@ export async function journalAutomatedCollectionFailure(input: {
     }
 
     const attempt = await subscriptionsRepo.createCollectionAttempt({
-      id: `psca_${crypto.randomUUID()}`,
+      id: newCollectionAttemptId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       subscriptionId: recurringPayment.subscription_id,

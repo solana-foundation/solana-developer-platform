@@ -347,6 +347,76 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       last_valid_block_height: null,
     });
   });
+
+  it("passes a stale cancel claim only to a takeover naming no status, and lets only the claim holding the row release it", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const tenant = {
+      recurringPaymentId: "recpay_repo_cancel_claim",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+    };
+    const staleAt = "2026-06-29T12:00:00.000Z";
+    required(
+      await repo.createRecurringPayment({
+        id: tenant.recurringPaymentId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_PROVIDER_WALLET_ID,
+        sourceAddress: TEST_SOURCE_ADDRESS,
+        counterpartyId: counterparty.id,
+        counterpartyAccountId: account.id,
+        destinationAddress: "Destination111111111111111111111111111111",
+        token: "USDC",
+        amount: "10.00",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        createdBy: TEST_USER.id,
+        createdAt: staleAt,
+        updatedAt: staleAt,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      })
+    );
+    await getDb(env)
+      // Paused, so the row needs no subscription or due date (an `active` one needs both).
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'paused', paused_reason = 'failed_attempts' WHERE id = ?"
+      )
+      .bind(tenant.recurringPaymentId)
+      .run();
+    const claim = (claimedFrom: "paused" | null, updatedAt: string) =>
+      repo.claimRecurringPaymentCancel({
+        ...tenant,
+        claimedFrom,
+        pausedReason: claimedFrom === null ? null : "failed_attempts",
+        updatedAt,
+        staleBefore: "2026-06-29T12:15:00.000Z",
+      });
+    const release = (claimedUpdatedAt: string) =>
+      repo.releaseRecurringPaymentCancelClaim({
+        ...tenant,
+        status: "paused",
+        pausedReason: "failed_attempts",
+        claimedUpdatedAt,
+        updatedAt: "2026-06-29T12:30:00.000Z",
+      });
+
+    const stale = required(await claim("paused", staleAt));
+    expect(await claim("paused", "2026-06-29T12:20:00.000Z")).toBeNull();
+    const takenOver = required(await claim(null, "2026-06-29T12:20:00.000Z"));
+
+    expect(await release(stale.updated_at)).toBeNull();
+    expect(required(await repo.getRecurringPaymentById(tenant))).toMatchObject({
+      status: "canceling",
+      updated_at: takenOver.updated_at,
+    });
+    expect(await release(takenOver.updated_at)).toMatchObject({
+      status: "paused",
+      paused_reason: "failed_attempts",
+    });
+  });
 });
 
 describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", () => {
