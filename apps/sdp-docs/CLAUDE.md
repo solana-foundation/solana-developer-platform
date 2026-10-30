@@ -227,12 +227,13 @@ after `generate:api`. `@sdp/api-catalog/ai-discovery` renders both the docs
 `llms.txt` and API `/llms.txt`, so their public endpoint family lists come from
 the same tags, including the Earn publication hold. Change that shared
 generator when changing family discovery, not either output alone.
-The generated API Reference index lists every published operation, grouped by
-family, with a direct link to its operation page. It reuses the family page's
-`<ApiOperationTable>` renderer, so both tables have the same responsive layout
-and Markdown form. The generator checks that every operation appears in the
-index. The canonical stable API's `/docs` redirects here; other API hosts keep
-Swagger UI for their own release channel.
+The generated API Reference index is a directory of published families: one
+link and description per family in `<ApiFamilyList>`. Shared API conventions
+and Postman resources stay on this parent page. Each family's own page holds
+its only operation table, with links to the dedicated operation pages. The
+generator checks directory coverage and each family's operation coverage.
+The canonical stable API's `/docs` redirects to the directory; other API hosts
+keep Swagger UI for their own release channel.
 - `openapi:generate` also writes the channel's reference model (`apps/sdp-api/generated/api-reference.json`, gitignored; the contract is `@sdp/api-catalog/reference`, built by `apps/sdp-api/src/openapi/reference.ts`). A schema keyword the model cannot carry fails the build there, and so does a `oneOf` or `anyOf` variant it cannot title (no property each variant pins to its own value, no description, no type): give that variant a `description` in its zod schema.
 - `@sdp/api-catalog/catalog` lists every operation in that reference,
   including Health and Projects. `playground:generate` projects the existing
@@ -255,7 +256,8 @@ Swagger UI for their own release channel.
   its text. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in
   a code span (search gets the same text); the dashboard action appears only
   in the browser. It unwraps the wrappers to their content:
-  `<ApiOperationTable>` also points each row at its operation's `.md`, while
+  `<ApiFamilyList>` points each entry at its family's `.md`, and
+  `<ApiOperationTable>` points each row at its operation's `.md`, while
   `<ActionLinks>` (a page's action links as chips, the Postman download),
   `<ApiOperation>` and `<ApiPanel>` only lay a page out. A new reference
   component needs both forms. `check:links` accepts a page's `.md`, and

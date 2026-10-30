@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
+import type { ApiFamily, ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
 import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -12,6 +12,7 @@ import {
   codeSpan,
   mdxText,
   operationGroups,
+  renderApiIndex,
   renderFamilyIndex,
   renderOperation,
   renderOperationPage,
@@ -568,6 +569,82 @@ describe("operation groups", () => {
       docsPageSlugOf("reference/api/payments/index.mdx"),
       "reference/api/payments/index"
     );
+  });
+});
+
+describe("renderApiIndex", () => {
+  const families: ApiFamily[] = [
+    { name: "Widgets", description: "Create and read widgets.", operations: [CREATE_WIDGET] },
+    { name: "Projects", description: "Manage project settings.", operations: [CREATE_WIDGET] },
+  ];
+  const page = renderApiIndex(
+    families,
+    (family) => `/docs/reference/api/${family.name.toLowerCase()}`,
+    "/docs/postman/collection.json"
+  );
+
+  it("links each family once and leaves its operations on the family page", () => {
+    for (const family of families) {
+      const link = `[${family.name}](/docs/reference/api/${family.name.toLowerCase()})`;
+      assert.equal(page.split(link).length - 1, 1);
+      assert.ok(page.includes(family.description));
+    }
+    assert.doesNotMatch(page, /ApiOperationTable|\| Method \| Endpoint \| Summary \|/);
+    assert.ok(!page.includes(CREATE_WIDGET.summary));
+    assert.ok(!page.includes(CREATE_WIDGET.path));
+    assert.ok(!page.includes(CREATE_WIDGET.endpointId));
+    assert.ok(page.includes("[API conventions](/docs/reference/conventions)"));
+    assert.ok(page.includes('href="/docs/postman/collection.json" download'));
+  });
+
+  it("keeps family descriptions and Markdown family links in the agent view", () => {
+    const markdown = expandDocsBlocks(page, "reference/api/index.mdx");
+    assert.doesNotMatch(markdown, /ApiFamilyList|ActionLinks|ApiOperationTable/);
+    for (const family of families) {
+      assert.ok(
+        markdown.includes(`[${family.name}](/docs/reference/api/${family.name.toLowerCase()}.md)`)
+      );
+      assert.ok(markdown.includes(family.description));
+    }
+    assert.ok(!markdown.includes(CREATE_WIDGET.path));
+  });
+
+  it("summarizes the directory while keeping the full description on the family page", () => {
+    const family: ApiFamily = {
+      name: "Projects",
+      description: "Manage project settings. Project members use the dashboard.",
+      operations: [CREATE_WIDGET],
+    };
+    const directory = renderApiIndex(
+      [family],
+      () => "/docs/reference/api/projects",
+      "/docs/postman/collection.json"
+    );
+    const familyPage = renderFamilyIndex(
+      family,
+      (operation) => `/docs/reference/api/projects/${operation.endpointId}`
+    );
+    assert.ok(directory.includes("Manage project settings."));
+    assert.ok(!directory.includes("Project members use the dashboard."));
+    assert.ok(familyPage.includes(family.description));
+  });
+
+  it("escapes family text that would otherwise open MDX expressions or JSX", () => {
+    const escaped = renderApiIndex(
+      [
+        {
+          name: "Widgets {owned} <public>",
+          description: "Read {state} < safely with `x < y` as code. Preserve more details.",
+          operations: [CREATE_WIDGET],
+        },
+      ],
+      () => "/docs/reference/api/widgets",
+      "/docs/postman/collection.json"
+    );
+    assert.ok(escaped.includes("Widgets \\{owned\\} \\<public>"));
+    assert.ok(escaped.includes("Read \\{state\\} \\< safely with `x < y` as code."));
+    const body = escaped.replace(/^---[\s\S]*?---\r?\n/, "");
+    assert.doesNotThrow(() => unified().use(remarkParse).use(remarkMdx).parse(body));
   });
 });
 

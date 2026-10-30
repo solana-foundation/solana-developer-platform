@@ -15,11 +15,11 @@ import { stringify as stringifyYaml } from "yaml";
 import { canonicalSite } from "@/lib/site";
 
 /**
- * The API reference as Markdown-first MDX: per family, a table of its operations
+ * The API reference as Markdown-first MDX: a directory of families; per family, its operations
  * (`<family>/index.mdx`), and per operation, its own page (`<family>/<endpointId>.mdx`) with its
  * parameters, request body, responses and their fields, a cURL, TypeScript and Python sample and
  * an example per status. Each page renders, searches and serves as `.md` from the same text; the
- * components it places (`<ApiEndpoint />`, and the wrappers `<ApiOperationTable>`,
+ * components it places (`<ApiEndpoint />`, and the wrappers `<ApiFamilyList>`, `<ApiOperationTable>`,
  * `<ApiOperation>` and `<ApiPanel>`) have their Markdown forms in `expandDocsBlocks`
  * (`src/lib/docs-blocks.ts`).
  */
@@ -459,8 +459,53 @@ export function operationGroups(family: ApiFamily): OperationGroup[] {
   return [...byTitle].map(([title, operations]) => ({ title, operations }));
 }
 
-/** The same endpoint table on a family's page and the all-endpoints index. */
-export function renderOperationTable(
+/**
+ * The reference directory links each published family to its dedicated endpoint list.
+ * Shared conventions and collection downloads belong here.
+ *
+ * @param families - The release channel's published families.
+ * @param href - The URL of a family's dedicated page.
+ * @param postmanCollectionHref - The channel's Postman collection URL.
+ * @returns The directory as Markdown-first MDX.
+ */
+export function renderApiIndex(
+  families: ApiFamily[],
+  href: (family: ApiFamily) => string,
+  postmanCollectionHref: string
+): string {
+  const entries = families.map((family) =>
+    [
+      `- [${mdxText(family.name)}](${href(family)})`,
+      "",
+      indented(mdxText(splitFirstSentence(family.description).first), 1),
+    ].join("\n")
+  );
+  return [
+    frontmatter({
+      title: "API Reference",
+      description: "Choose an API family to explore its endpoints.",
+    }),
+    "",
+    // biome-ignore lint/security/noSecrets: an MDX component tag.
+    "<ApiFamilyList>",
+    "",
+    entries.join("\n\n"),
+    "",
+    // biome-ignore lint/security/noSecrets: an MDX component tag.
+    "</ApiFamilyList>",
+    "",
+    "[API conventions](/docs/reference/conventions) cover authentication, environments, idempotency, errors, pagination, rate limits, and versioning.",
+    "",
+    "<ActionLinks>",
+    `  <a href="${postmanCollectionHref}" download>Download Postman collection</a>`,
+    `  <a href="${postmanCollectionHref}">Open raw JSON</a>`,
+    "</ActionLinks>",
+    "",
+  ].join("\n");
+}
+
+/** A family's endpoint table, linking each operation to its dedicated page. */
+function renderOperationTable(
   operations: ApiOperation[],
   href: (operation: ApiOperation) => string
 ): string {

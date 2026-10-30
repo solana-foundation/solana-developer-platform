@@ -5,9 +5,9 @@ import { listApiCatalogOperations } from "@sdp/api-catalog/catalog";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import {
   operationGroups,
+  renderApiIndex,
   renderFamilyIndex,
   renderOperationPage,
-  renderOperationTable,
   SAMPLE_TAB_MARKERS,
 } from "./lib/api-reference-page.ts";
 import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
@@ -41,41 +41,15 @@ const loadReference = async () => {
   return apiReferenceSchema.parse(JSON.parse(json));
 };
 
-const renderIndexPage = ({ families, operationCount }) => {
-  const sections = families
-    .map((family) => {
-      const slug = slugify(family.name);
-      const table = renderOperationTable(family.operations, (operation) =>
-        operationHref(slug, operation)
-      );
-      return `## ${family.name}\n\n${table}`;
-    })
-    .join("\n\n");
-
-  return `---
-title: API Reference
-description: Every public API endpoint, grouped by family and generated from OpenAPI.
----
-
-<ActionLinks>
-  <a href="${POSTMAN_COLLECTION_ROUTE}" download>Download Postman collection</a>
-  <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
-</ActionLinks>
-
-Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
-
-Browse ${operationCount} endpoints across ${families.length} API families. Select an operation to see its parameters, request body, responses and examples.
-
-${sections}
-`;
-};
-
 const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
 // Families every release channel runs, so every build must render them.
 const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
+
+/** The dedicated page for one API family. */
+const familyHref = (family) => `/docs/reference/api/${slugify(family.name)}`;
 
 /** An operation's page, beside its family's table: `/docs/reference/api/<family>/<endpointId>`. */
 const operationHref = (familySlug, operation) =>
@@ -101,8 +75,8 @@ const familyLayout = (family) => {
 };
 
 /**
- * Every family's table links each of its operations, and every operation has its page with the
- * three request samples: the reference's coverage, checked on what was written.
+ * The directory links every family, each family's table links all its operations, and every
+ * operation has its three request samples: coverage checked on what was written.
  */
 const validateGeneratedTagPages = async ({ outputDir, families }) => {
   const index = await fs.readFile(path.join(outputDir, "index.mdx"), "utf8");
@@ -115,11 +89,8 @@ const validateGeneratedTagPages = async ({ outputDir, families }) => {
   }
 
   for (const family of families) {
-    const slug = slugify(family.name);
-    for (const operation of family.operations) {
-      if (!index.includes(`](${operationHref(slug, operation)})`)) {
-        throw new Error(`The all-endpoints index does not link ${operation.operationId}`);
-      }
+    if (!index.includes(`](${familyHref(family)})`)) {
+      throw new Error(`The API directory does not link the ${family.name} family`);
     }
   }
 
@@ -234,7 +205,7 @@ const run = async () => {
   );
   const exposedOperationsCount = listApiCatalogOperations({ families }).length;
 
-  const indexContent = renderIndexPage({ families, operationCount: exposedOperationsCount });
+  const indexContent = renderApiIndex(families, familyHref, POSTMAN_COLLECTION_ROUTE);
 
   await fs.writeFile(path.join(outputDir, "index.mdx"), indexContent, "utf8");
 

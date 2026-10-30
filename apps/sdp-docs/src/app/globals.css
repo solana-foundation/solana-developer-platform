@@ -1533,6 +1533,54 @@ body {
 }
 
 /* ── API reference ── */
+.launch-api-family-list {
+  margin-bottom: 24px;
+}
+
+.launch-api-family-list > .launch-mdx-list {
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.launch-api-family-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2.5fr);
+  gap: 24px;
+  margin: 0;
+  padding: 20px 12px;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-family-list :where(li + li) {
+  border-top: 1px solid var(--rule-faint);
+}
+
+.launch-api-family-list li:hover {
+  background: var(--wash);
+}
+
+.launch-api-family-list .launch-mdx-paragraph {
+  margin: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-body);
+}
+
+.launch-api-family-list .launch-mdx-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+@media (max-width: 639px) {
+  .launch-api-family-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 18px 12px;
+  }
+}
+
 /* The generated reference (scripts/lib/api-reference-page.ts). A family's page is its table of
    operations, each row one link to the operation's page; an operation's page leads with its
    endpoint, then sections whose field lists name the field, its type and facts on one line. */
@@ -1567,17 +1615,17 @@ body {
   text-decoration: none;
 }
 
-.launch-api-operation-table .launch-mdx-link::after {
+:is(.launch-api-family-list, .launch-api-operation-table) .launch-mdx-link::after {
   position: absolute;
   inset: 0;
   content: "";
 }
 
-.launch-api-operation-table .launch-mdx-link:focus-visible {
+:is(.launch-api-family-list, .launch-api-operation-table) .launch-mdx-link:focus-visible {
   outline: none;
 }
 
-.launch-api-operation-table .launch-mdx-link:focus-visible::after {
+:is(.launch-api-family-list, .launch-api-operation-table) .launch-mdx-link:focus-visible::after {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
 }
