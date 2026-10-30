@@ -7,7 +7,10 @@ import {
 } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { refuseWhileSubscriptionAuthorityRevokes } from "@/services/payments/recurring-payments/shared";
+import {
+  refuseIfSubscriptionAuthorityRevokedSince,
+  refuseWhileSubscriptionAuthorityRevokes,
+} from "@/services/payments/recurring-payments/shared";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
@@ -406,7 +409,30 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         updatedAt: NOW,
       });
     }
-    await expect(guard()).resolves.toBeUndefined();
+    const fence = await guard();
+    expect(fence).toEqual({
+      wallets: [{ walletAddress: WALLET, environment: "sandbox", revocations: 2 }],
+    });
+    await expect(refuseIfSubscriptionAuthorityRevokedSince(env, fence)).resolves.toBeUndefined();
+    // An incident revoke claimed after the claim overtakes it: the claimed work sends no
+    // authority setup or subscribe (HOO-2339).
+    required(
+      await repo.claimRevocationNow({
+        id: "psar_incident",
+        leaseId: "lease_psar_incident",
+        organizationId: TEST_ORG.id,
+        projectId: tenant.projectId,
+        environment: "sandbox",
+        custodyWalletId: tenant.custodyWalletId,
+        walletAddress: WALLET,
+        tokenMint: MINT,
+        subscriptionAuthorityAddress: AUTHORITY,
+        now: NOW,
+      })
+    );
+    await expect(refuseIfSubscriptionAuthorityRevokedSince(env, fence)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
   });
 
   it("lets only the lease holder save, clear or finish a revoke", async () => {

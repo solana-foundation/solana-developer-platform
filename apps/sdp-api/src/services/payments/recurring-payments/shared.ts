@@ -419,16 +419,23 @@ async function clearSubscriptionStepSignature(
  *
  * @param step - The step's rows and the writer that saves its send to them.
  * @param step.save - Writes the signature and the block height to the step's rows.
+ * @param step.revokeFence - Checked before the save, for a step an incident revoke must stop.
  * @returns The store.
  */
 export function createSubscriptionStepStore(
   step: SubscriptionStep & {
     save: (send: { signature: Signature; lastValidBlockHeight: string }) => Promise<void>;
+    /** For a step that creates or subscribes to an authority: refused once a revoke overtook it. */
+    revokeFence?: SubscriptionAuthorityRevokeFence;
   }
 ): SignedSubmissionStore {
   return {
-    persistSigned: ({ signature, lastValidBlockHeight }) =>
-      step.save({ signature, lastValidBlockHeight }),
+    persistSigned: async ({ signature, lastValidBlockHeight }) => {
+      if (step.revokeFence) {
+        await refuseIfSubscriptionAuthorityRevokedSince(step.env, step.revokeFence);
+      }
+      await step.save({ signature, lastValidBlockHeight });
+    },
     markStarted: async () => {},
     hasStarted: async () => false,
     clearSigned: (signature) => clearSubscriptionStepSignature(step, signature, "refused"),
@@ -806,6 +813,18 @@ export async function lockLiveActivatingKey(
 }
 
 /**
+ * The revokes a claim saw on each of its wallets, under their locks (HOO-2339). An operator's
+ * incident revoke claims under the same lock but skips the idle predicate, so it can close an
+ * authority under an activation or update that claimed first. Before that work sends the setup
+ * that creates an authority, or the subscribe that binds a schedule to one, it checks this
+ * ({@link refuseIfSubscriptionAuthorityRevokedSince}), so it never recreates or subscribes to an
+ * authority revoked after its claim.
+ */
+export interface SubscriptionAuthorityRevokeFence {
+  wallets: readonly { walletAddress: string; environment: SdpEnvironment; revocations: number }[];
+}
+
+/**
  * Inside a claim that may use a wallet's Subscriptions authorities (activation, update, resume),
  * waits out and then refuses a revoke of them in flight (HOO-2210). The revoke cron claims under
  * the same per-wallet lock and skips a wallet with one of these in flight, so a subscription never
@@ -813,13 +832,13 @@ export async function lockLiveActivatingKey(
  *
  * @param tx - The claim's transaction.
  * @param input - The project and every custody wallet the claimed operation signs with.
- * @returns Resolves once no revoke holds the wallets' authorities.
+ * @returns The fence the claimed work checks before it sends an authority setup or a subscribe.
  * @throws AppError `CONFLICT` while a revoke on one of the wallets is in flight.
  */
 export async function refuseWhileSubscriptionAuthorityRevokes(
   tx: DatabaseExecutor,
   input: { projectId: string; custodyWalletIds: readonly string[] }
-): Promise<void> {
+): Promise<SubscriptionAuthorityRevokeFence> {
   const wallets = await tx.queryMany<{ public_key: string; environment: SdpEnvironment }>(
     `SELECT DISTINCT w.public_key, p.environment
        FROM custody_wallets w, projects p
@@ -828,6 +847,7 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
     [[...input.custodyWalletIds], input.projectId]
   );
   const revocations = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+  const fence: SubscriptionAuthorityRevokeFence["wallets"][number][] = [];
   for (const wallet of wallets) {
     await revocations.lockWalletAuthorities(wallet.public_key);
     if (
@@ -840,5 +860,41 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
         "This wallet's recurring payment authorization is being cleaned up; retry in a minute"
       );
     }
+    fence.push({
+      walletAddress: wallet.public_key,
+      environment: wallet.environment,
+      revocations: await revocations.countRevocations({
+        environment: wallet.environment,
+        walletAddress: wallet.public_key,
+      }),
+    });
   }
+  return { wallets: fence };
+}
+
+/**
+ * Refuses, before broadcast, an authority setup or subscribe whose claim a revoke has overtaken:
+ * one claimed on any of the fence's wallets since. The check commits before the send, so a revoke
+ * claimed in that gap reads the chain first; if a setup lands after it, the subscribe's own check
+ * refuses, and the authority it left, with no allowance and no subscription, is the sweep's.
+ *
+ * @param env - Runtime environment for the database.
+ * @param fence - What the claim saw.
+ * @throws AppError `CONFLICT` once a revoke was claimed on one of the wallets after the claim.
+ */
+export async function refuseIfSubscriptionAuthorityRevokedSince(
+  env: Env,
+  fence: SubscriptionAuthorityRevokeFence
+): Promise<void> {
+  await getDb(env).transaction(async (tx) => {
+    const revocations = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+    for (const wallet of fence.wallets) {
+      await revocations.lockWalletAuthorities(wallet.walletAddress);
+      if ((await revocations.countRevocations(wallet)) > wallet.revocations) {
+        throw conflict(
+          "This wallet's recurring payment authorization was revoked during this change; retry it"
+        );
+      }
+    }
+  });
 }

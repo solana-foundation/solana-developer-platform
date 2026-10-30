@@ -272,7 +272,10 @@ export interface OperatorRevokeResult {
  * fail on chain and pause them (HOO-2340); cancel them, or activate them again once the incident is
  * over. It signs the `recurring.revoke_authority` exit with no money principal, as the sweep does,
  * so neither an organization's status nor a disabled movement refuses it. Only a revoke already
- * holding the authority stops it (`held`): that one finishes it. Its RPC is the sweep's: one
+ * holding the authority stops it (`held`): that one finishes it. An activation or update that
+ * claimed first is fenced, not stopped: it refuses to send the setup that would recreate the
+ * authority, or a subscribe to one, once this revoke is claimed
+ * (`refuseIfSubscriptionAuthorityRevokedSince`). Its RPC is the sweep's: one
  * authority read, the revoke's send and its confirmation.
  *
  * @param env - Runtime environment for signer, sponsor and repository construction.
