@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
+import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { app } from "@/index";
@@ -13,8 +14,13 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import { adminAlertEmail } from "./content";
-import { deliverAdminAlerts } from "./deliver";
-import { enqueueConfigAlerts, enqueueMoneyAlerts, MONEY_WINDOW_MS } from "./enqueue";
+import { adminAlertEmailsEnabled, deliverAdminAlerts } from "./deliver";
+import {
+  ADMIN_ALERT_MAX_AGE_MS,
+  enqueueConfigAlerts,
+  enqueueMoneyAlerts,
+  MONEY_WINDOW_MS,
+} from "./enqueue";
 
 const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 const PRODUCTION_PROJECT = `prj_${ORGANIZATION_ID}_production`;
@@ -511,6 +517,44 @@ describe("admin alert emails (HOO-2299)", () => {
       await audit({ action: "invite", resourceType: "invitation", metadata: { role: "admin" } });
       await runWorker(afterWindow);
       expect(sentEmails()).toHaveLength(0);
+    });
+  });
+
+  describe("where email is not configured (dev, stage)", () => {
+    it.each([
+      ["no Iterable key", { ITERABLE_API_KEY: undefined }],
+      ["a placeholder campaign id", { ITERABLE_TRANSACTIONAL_CAMPAIGN_ID: "placeholder" }],
+      ["a placeholder Iterable URL", { ITERABLE_API_URL: "placeholder" }],
+      ["no dashboard URL", { FRONTEND_URL: undefined }],
+      ["a placeholder dashboard URL", { FRONTEND_URL: "placeholder" }],
+    ] as const)("does not register the cron with %s", (_, overrides) => {
+      const configured = { ...env, ...overrides };
+      expect(adminAlertEmailsEnabled(configured)).toBe(false);
+      expect(adminAlertEmailsCron.enabled(configured)).toBe(false);
+    });
+
+    it("registers it where Iterable and the dashboard are both configured", () => {
+      expect(adminAlertEmailsCron.enabled(env)).toBe(true);
+    });
+
+    it("summarizes at most a day of money when email is turned on long after", async () => {
+      const now = new Date(windowStart + 30 * 24 * 60 * 60_000);
+      await insertTransfer({
+        id: "ptx_old",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: new Date(now.getTime() - 10 * 24 * 60 * 60_000).toISOString(),
+      });
+      await insertTransfer({
+        id: "ptx_recent",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: new Date(now.getTime() - ADMIN_ALERT_MAX_AGE_MS / 2).toISOString(),
+      });
+      // Delivery runs on the real clock, which dated the delivery rows.
+      await asWorker(() => enqueueMoneyAlerts(env, now));
+      await asWorker(() => deliverAdminAlerts(env));
+      const emails = sentEmails();
+      expect(emails).toHaveLength(2);
+      expect(emails[0]?.body).toContain("Money moved: 1 transfer.");
     });
   });
 

@@ -34,9 +34,20 @@ const claimedDeliverySchema = z.object({
   occurred_at: z.string(),
 });
 
-/** Email is sent only where Iterable is configured and the dashboard has a URL to link to. */
+const dashboardUrlSchema = z
+  .string()
+  .trim()
+  .pipe(z.url({ protocol: /^https?$/ }));
+
+/**
+ * Alerts run only where Iterable is configured and the dashboard has a URL to link to: prod. On
+ * dev and stage there is no Iterable key, so the cron never registers, nothing is written and
+ * nothing retries. A mounted `placeholder` reads as unconfigured, like a missing key.
+ */
 export function adminAlertEmailsEnabled(env: Env): boolean {
-  return iterableEmailConfig(env) !== null && Boolean(env.FRONTEND_URL?.trim());
+  return (
+    iterableEmailConfig(env) !== null && dashboardUrlSchema.safeParse(env.FRONTEND_URL).success
+  );
 }
 
 /**
@@ -49,7 +60,7 @@ export async function deliverAdminAlerts(
   env: Env,
   now: Date = new Date()
 ): Promise<{ sent: number; failed: number; abandoned: number }> {
-  const dashboardOrigin = new URL(String(env.FRONTEND_URL)).origin;
+  const dashboardOrigin = new URL(dashboardUrlSchema.parse(env.FRONTEND_URL)).origin;
   const db = getDb(env);
   const nowIso = now.toISOString();
 

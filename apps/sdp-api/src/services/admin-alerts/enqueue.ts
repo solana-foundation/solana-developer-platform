@@ -475,7 +475,9 @@ async function moneyCounts(
 
 /**
  * Writes the money digests of every window closed since the cursor, as one window: after a
- * Worker outage the gap is summarized in one email per project rather than lost.
+ * Worker outage the gap is summarized in one email per project rather than lost. The window
+ * reaches back at most `ADMIN_ALERT_MAX_AGE_MS`, so a deployment that turns email on long after
+ * this migration does not summarize months of history.
  *
  * @returns How many digests were written.
  */
@@ -488,7 +490,9 @@ export async function enqueueMoneyAlerts(
     const closedUntil =
       Math.floor((now.getTime() - MONEY_WINDOW_GRACE_MS) / MONEY_WINDOW_MS) * MONEY_WINDOW_MS;
     if (closedUntil <= cursor) return { alerts: 0 };
-    const windowStart = new Date(cursor).toISOString();
+    const windowStart = new Date(
+      Math.max(cursor, closedUntil - ADMIN_ALERT_MAX_AGE_MS)
+    ).toISOString();
     const windowEnd = new Date(closedUntil).toISOString();
 
     const byProject = new Map<string, { organizationId: string; counts: MoneyMovementCounts }>();
