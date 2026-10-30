@@ -397,7 +397,9 @@ function statusBand({
   const failureReason =
     lastRunError === null ? null : (
       <span className="mt-1 block text-secondary">
-        {t("DashboardPayments.recurring.stateLastRunError", { error: lastRunError })}
+        {recurringPayment.status === "paused"
+          ? t("DashboardPayments.recurring.stateLastRunError", { error: lastRunError })
+          : lastRunError}
       </span>
     );
   switch (recurringPayment.status) {

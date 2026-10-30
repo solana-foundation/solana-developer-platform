@@ -47,6 +47,11 @@
       "@solana/keychain-core@1.4.0": "patches/@solana__keychain-core@1.4.0.patch"
     },
     "packageExtensions": {
+      "@solana/keychain-core@1.4.0": {
+        "dependencies": {
+          "zod": "4.6.7"
+        }
+      },
       "@kamino-finance/klend-sdk@10.0.0": {
         "dependencies": {
           "@solana-program/compute-budget": "^0.8.0",

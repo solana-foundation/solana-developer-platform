@@ -1,25 +1,25 @@
 diff --git a/dist/http.js b/dist/http.js
-index 7bd220f70a8a9dbb0d20207e038c088af0a28684..ba219139e63774578e85976cf1e24b94c8ceee13 100644
+index 7bd220f70a8a9dbb0d20207e038c088af0a28684..5167c64b38ec01f3b5d60353b94a237f176933b8 100644
 --- a/dist/http.js
 +++ b/dist/http.js
 @@ -1,6 +1,21 @@
++import { z } from 'zod';
  import { sanitizeRemoteErrorResponse, SignerErrorCode, throwSignerError } from './errors.js';
  /** Default timeout applied to remote signer API requests. */
  export const DEFAULT_FETCH_TIMEOUT_MS = 60000;
++const remoteErrorCodeSchema = z.object({
++    code: z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/),
++});
 +/** Keep a bounded provider code before the response body is redacted and truncated. */
 +function remoteErrorCode(body) {
 +    try {
-+        const parsed = JSON.parse(body);
-+        if (typeof parsed === 'object' && parsed !== null &&
-+            'code' in parsed && typeof parsed.code === 'string' &&
-+            /^[a-zA-Z0-9_.-]{1,64}$/.test(parsed.code)) {
-+            return parsed.code;
-+        }
++        const parsed = remoteErrorCodeSchema.safeParse(JSON.parse(body));
++        return parsed.success ? parsed.data.code : undefined;
 +    }
 +    catch {
 +        // Non-JSON errors keep the existing sanitized response context.
++        return undefined;
 +    }
-+    return undefined;
 +}
  /**
   * Perform a remote signer API request and parse the JSON response, mapping
@@ -33,34 +33,35 @@ index 7bd220f70a8a9dbb0d20207e038c088af0a28684..ba219139e63774578e85976cf1e24b94
              status: response.status,
          });
 diff --git a/src/http.ts b/src/http.ts
-index 73ac82a4f1e56ef3253b7258d7e08e9e55e8be5c..d5a8ee9badee3332c4b22e63c59bb9d09f67dcf4 100644
+index 73ac82a4f1e56ef3253b7258d7e08e9e55e8be5c..9c881041613dcd0b153d190865e00ae85749742a 100644
 --- a/src/http.ts
 +++ b/src/http.ts
-@@ -3,6 +3,23 @@ import { sanitizeRemoteErrorResponse, SignerErrorCode, throwSignerError } from '
+@@ -1,8 +1,24 @@
++import { z } from 'zod';
+ import { sanitizeRemoteErrorResponse, SignerErrorCode, throwSignerError } from './errors.js';
+ 
  /** Default timeout applied to remote signer API requests. */
  export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
  
++const remoteErrorCodeSchema = z.object({
++    code: z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/),
++});
++
 +/** Keep a bounded provider code before the response body is redacted and truncated. */
 +function remoteErrorCode(body: string): string | undefined {
 +    try {
-+        const parsed: unknown = JSON.parse(body);
-+        if (
-+            typeof parsed === 'object' && parsed !== null &&
-+            'code' in parsed && typeof parsed.code === 'string' &&
-+            /^[a-zA-Z0-9_.-]{1,64}$/.test(parsed.code)
-+        ) {
-+            return parsed.code;
-+        }
++        const parsed = remoteErrorCodeSchema.safeParse(JSON.parse(body));
++        return parsed.success ? parsed.data.code : undefined;
 +    } catch {
 +        // Non-JSON errors keep the existing sanitized response context.
++        return undefined;
 +    }
-+    return undefined;
 +}
 +
  export interface FetchSignerJsonOptions {
      /** Standard fetch options (method, headers, body, signal, ...). */
      init?: RequestInit;
-@@ -49,6 +66,7 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
+@@ -49,6 +65,7 @@ export async function fetchSignerJson<TResponse>(options: FetchSignerJsonOptions
          const errorText = await response.text().catch(() => 'Failed to read error response');
          throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
              message: `${providerName} API error: ${response.status}`,

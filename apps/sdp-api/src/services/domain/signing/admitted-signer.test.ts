@@ -202,7 +202,7 @@ describe("admittedSigner custody policy refusals (HOO-2333)", () => {
         await expect(sign(signer)).rejects.toMatchObject({
           code: "CUSTODY_POLICY_REFUSED",
           statusCode: 422,
-          message: `${label} refused to sign this request because of a wallet policy. Review the wallet's policy in ${label} or adjust the request before retrying.`,
+          message: `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`,
           cause: refusal,
         });
       }

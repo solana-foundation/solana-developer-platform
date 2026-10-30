@@ -183,7 +183,11 @@ describe("privy adapter", () => {
     ["error text", JSON.stringify({ error: "policy_violation" })],
     ["nested code", JSON.stringify({ error: { code: "policy_violation" } })],
     ["invalid JSON", '{"code":"policy_violation",'],
+    ["null response", "null"],
     ["array", JSON.stringify([{ code: "policy_violation" }])],
+    ["null code", JSON.stringify({ code: null })],
+    ["numeric code", JSON.stringify({ code: 400 })],
+    ["empty code", JSON.stringify({ code: "" })],
     ["invalid code", JSON.stringify({ code: "policy_violation\n" })],
     ["oversized code", JSON.stringify({ code: "policy_violation".repeat(100) })],
   ])("does not infer a refusal from %s", async (_case, body) => {

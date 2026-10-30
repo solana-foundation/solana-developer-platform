@@ -330,7 +330,7 @@ export function transactionExpired(message?: string, details?: Record<string, un
  */
 export function custodyPolicyRefused(cause: Error, provider: CustodyProvider): AppError {
   const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
-  const message = `${label} refused to sign this request because of a wallet policy. Review the wallet's policy in ${label} or adjust the request before retrying.`;
+  const message = `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`;
   return new AppError("CUSTODY_POLICY_REFUSED", message, undefined, { cause });
 }
 

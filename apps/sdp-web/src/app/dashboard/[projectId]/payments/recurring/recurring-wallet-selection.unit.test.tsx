@@ -339,7 +339,8 @@ describe("Recurring Payment exact source selection", () => {
 });
 
 describe("Recurring Payment lifecycle actions", () => {
-  const lastRunError = "The custody provider's policy refused to sign.";
+  const lastRunError =
+    "Privy blocked signing due to a wallet policy. Review the policy in Privy or adjust the request.";
   const pausedCopy = {
     failed_attempts: `SDP paused this schedule because its runs kept failing: one run failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`,
     custody_policy_refused:
@@ -400,9 +401,14 @@ describe("Recurring Payment lifecycle actions", () => {
     }
   );
 
-  it("shows the last failure while a schedule remains active", () => {
+  it("shows the last failure without repeating its label while a schedule remains active", () => {
     renderDetail({ ...recurring, status: "active", subscriptionId: "psub_test" }, [failedRun]);
-    expect(screen.getByText(`Last run: ${lastRunError}`)).toBeTruthy();
+    expect(screen.getByText("Last run failed")).toBeTruthy();
+    const failureNotice = screen.getByText(
+      "Schedule is active. Review the failure below before retrying."
+    );
+    expect(failureNotice.textContent).toContain(lastRunError);
+    expect(screen.queryByText(`Last run: ${lastRunError}`)).toBeNull();
   });
 
   it("clears the failure band after a later successful collection", () => {
@@ -416,7 +422,10 @@ describe("Recurring Payment lifecycle actions", () => {
         error: null,
       },
     ]);
-    expect(screen.queryByText(`Last run: ${lastRunError}`)).toBeNull();
+    expect(screen.queryByText("Last run failed")).toBeNull();
+    expect(
+      screen.queryByText("Schedule is active. Review the failure below before retrying.")
+    ).toBeNull();
   });
 
   it("a canceled schedule offers no lifecycle action", async () => {

@@ -1066,7 +1066,7 @@ describe("payment transfer batches", () => {
       expect(failed).toHaveLength(allowFirst ? 1 : 2);
       for (const recipient of failed) {
         expect(recipient).toMatchObject({
-          error: expect.stringContaining("Privy refused to sign"),
+          error: expect.stringContaining("Privy blocked signing"),
           transferId: null,
         });
         expect(recipient.error).not.toContain("private provider response");

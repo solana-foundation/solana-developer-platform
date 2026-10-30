@@ -1165,7 +1165,7 @@
       "stateActiveBody": "{schedule}, next on {date}.",
       "stateActiveNoNextBody": "{schedule}. The next run has not been set yet.",
       "statePendingBody": "Created and not started. Activating it schedules the first run, and nothing moves before that.",
-      "stateFailedBody": "The schedule is still active. The run that failed is in the history below with its reason, and it can be retried while it is due.",
+      "stateFailedBody": "Schedule is active. Review the failure below before retrying.",
       "statePausedBody": "SDP paused this schedule. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.",
       "statePausedFailedAttemptsBody": "SDP paused this schedule because its runs kept failing: one run failed {count} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.",
       "statePausedPolicyRefusedBody": "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Review the wallet's policy and payment details, then resume or cancel it.",

@@ -517,7 +517,7 @@ describe("Payments routes — signed submission", () => {
       expect(first.status).toBe(422);
       expect(firstBody.error).toMatchObject({
         code: "CUSTODY_POLICY_REFUSED",
-        message: expect.stringContaining("Privy refused to sign"),
+        message: expect.stringContaining("Privy blocked signing"),
       });
       expect(JSON.stringify(firstBody)).not.toContain("private provider response");
       expect(await latestTransferRow()).toMatchObject({
