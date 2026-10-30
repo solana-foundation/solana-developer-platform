@@ -91,7 +91,7 @@ export async function resolveVaultSponsorship(
     return { kind: "wallet-pays" };
   }
 
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"earn">(
     env,
     await resolveProjectSponsorshipScope(env, {
       organizationId: input.organizationId,

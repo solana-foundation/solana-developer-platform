@@ -4,6 +4,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { fetchFailedError, rpcHttpError } from "@/test/helpers/rpc-errors";
 import { assertClusterEndpoint } from "./cluster-rpc";
 import { createVaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
@@ -75,8 +76,7 @@ describe("Earn RPC fallback", () => {
     const result = await rpc.run("Read vault", async () => {
       const url = await rpc.resolve(runtime, "devnet");
       visited.push(url);
-      if (url === primary)
-        throw new Error("Vault unreadable", { cause: new Error("fetch failed") });
+      if (url === primary) throw new Error("Vault unreadable", { cause: fetchFailedError() });
       return "verified vault state";
     });
     expect(result).toBe("verified vault state");
@@ -147,10 +147,7 @@ describe("Earn RPC fallback", () => {
       const url = await rpc.resolve(runtime, "devnet");
       visited.push(url);
       if (url === primary)
-        throw fanOutFailure(
-          new TypeError("fetch failed", { cause: new Error("other side closed") }),
-          new Error("HTTP error (429): Too Many Requests")
-        );
+        throw fanOutFailure(fetchFailedError("UND_ERR_SOCKET"), rpcHttpError(429));
       return "verified vault state";
     });
     expect(result).toBe("verified vault state");
@@ -162,7 +159,7 @@ describe("Earn RPC fallback", () => {
   it.each([
     [
       "a fan-out with one deterministic failure",
-      fanOutFailure(new TypeError("fetch failed"), new Error("Vault account does not exist")),
+      fanOutFailure(fetchFailedError(), new Error("Vault account does not exist")),
     ],
     [
       "an empty fan-out",
@@ -186,7 +183,7 @@ describe("Earn RPC fallback", () => {
     const rpc = failoverIn("sandbox");
     const read = vi.fn(async () => {
       await rpc.resolve(runtime, "devnet");
-      throw new Error("503 service unavailable");
+      throw rpcHttpError(503);
     });
     await expect(rpc.run("Read vault", read)).rejects.toThrow(/reports genesis/);
     expect(read).toHaveBeenCalledTimes(2);
@@ -196,7 +193,7 @@ describe("Earn RPC fallback", () => {
   it("does not retain the fallback for later historical reads or reinterpret absent evidence", async () => {
     const rpc = failoverIn("sandbox");
     await rpc.run("Build", async () => {
-      if ((await rpc.resolve(runtime, "devnet")) === primary) throw new Error("fetch failed");
+      if ((await rpc.resolve(runtime, "devnet")) === primary) throw fetchFailedError();
     });
     const visited: string[] = [];
     const evidence = await rpc.run("Read receipt", async () => {
@@ -212,7 +209,7 @@ describe("Earn RPC fallback", () => {
     const single = failoverIn("sandbox");
     const read = vi.fn(async () => {
       await single.resolve(runtime, "devnet");
-      throw new Error("fetch failed");
+      throw fetchFailedError();
     });
     await expect(single.run("Read vault", read)).rejects.toThrow("fetch failed");
     expect(read).toHaveBeenCalledTimes(1);

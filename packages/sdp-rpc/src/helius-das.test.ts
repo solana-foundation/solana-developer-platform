@@ -102,9 +102,9 @@ describe("Helius DAS on the scope's cluster", () => {
       await assert.rejects(
         inScope(environment, async () => fetchHeliusDas(DAS_REQUEST_INIT)),
         {
-          name: "SdpRpcError",
-          code: "RPC_NOT_CONFIGURED",
-          details: { cluster },
+          name: "RpcUnavailableError",
+          code: "RPC_UNAVAILABLE",
+          details: { reason: "not_configured", cluster },
         }
       );
       assert.equal(fetchMock.mock.callCount(), 0);

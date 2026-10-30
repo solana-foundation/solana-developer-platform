@@ -204,7 +204,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
-See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries-for-single-transfers) for the same pattern applied to a run of transfers.
 
 ## Related
 

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  compareDecimalAmounts,
   decimalStringFromNumber,
   divideDecimalAmounts,
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "./decimal";
+import { SdpPaymentsError } from "./errors";
 
 describe("sumDecimalAmounts", () => {
   it("sums without float artifacts", () => {
@@ -16,6 +18,29 @@ describe("sumDecimalAmounts", () => {
   it("handles mixed scales and empty input", () => {
     assert.equal(sumDecimalAmounts(["1.5", "2", "0.000000001"]), "3.500000001");
     assert.equal(sumDecimalAmounts([]), "0");
+  });
+});
+
+describe("compareDecimalAmounts", () => {
+  it("compares a u64 amount against one at 20+ fractional digits exactly", () => {
+    assert.equal(compareDecimalAmounts("18446744073709551615", "0.18446744073709551615"), 1);
+    assert.equal(
+      compareDecimalAmounts("1.000000000000000000000000001", "1.000000000000000000000000001"),
+      0
+    );
+    assert.equal(compareDecimalAmounts("0.00000000000000000000000001", "1"), -1);
+  });
+});
+
+describe("decimal amount range", () => {
+  it("refuses an amount past 128 bits at its scale as a bad request", () => {
+    assert.throws(
+      () => sumDecimalAmounts(["18446744073709551615", "0.000000000000000000001"]),
+      (error) =>
+        error instanceof SdpPaymentsError &&
+        error.statusCode === 400 &&
+        error.message === "Amount is out of range"
+    );
   });
 });
 

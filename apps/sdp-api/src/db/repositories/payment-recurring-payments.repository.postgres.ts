@@ -991,6 +991,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND project_id = ?
               AND status = 'paused'
               AND next_collection_due_at = ?
+              AND updated_at = ?
           RETURNING *`
         )
         .bind(
@@ -1000,7 +1001,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          input.currentCollectionDueAt
+          input.currentCollectionDueAt,
+          input.expectedUpdatedAt
         )
         .first<Record<string, unknown>>();
 

@@ -1,16 +1,17 @@
+import type { RpcUnavailableReason } from "@sdp/types/rpc";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+
 export type SdpRpcErrorCode =
   | "BAD_REQUEST"
   | "SOLANA_RPC_ERROR"
-  | "RPC_NOT_CONFIGURED"
-  | "RPC_CLUSTER_MISMATCH"
+  | "RPC_UNAVAILABLE"
   | "CLUSTER_SCOPE_MISSING"
   | "CLUSTER_SCOPE_CONFLICT";
 
 const ERROR_STATUS_CODES: Record<SdpRpcErrorCode, number> = {
   BAD_REQUEST: 400,
   SOLANA_RPC_ERROR: 502,
-  RPC_NOT_CONFIGURED: 503,
-  RPC_CLUSTER_MISMATCH: 500,
+  RPC_UNAVAILABLE: 503,
   CLUSTER_SCOPE_MISSING: 500,
   CLUSTER_SCOPE_CONFLICT: 500,
 };
@@ -21,11 +22,38 @@ export class SdpRpcError extends Error {
   constructor(
     public readonly code: SdpRpcErrorCode,
     message: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = "SdpRpcError";
     this.statusCode = ERROR_STATUS_CODES[code];
+  }
+}
+
+/**
+ * Solana RPC can't serve the request, with `details: { reason, cluster }` saying why (see
+ * `RPC_UNAVAILABLE_REASONS`). Callers branch on `reason`, never on the message.
+ */
+export class RpcUnavailableError extends SdpRpcError {
+  /** The cluster RPC was unavailable for. */
+  public readonly cluster: SolanaCluster;
+
+  /**
+   * @param reason - Why RPC is unavailable.
+   * @param message - What failed, never quoting an endpoint URL.
+   * @param details - The cluster, plus any reason-specific facts.
+   * @param options - The failure this one wraps, if any.
+   */
+  constructor(
+    public readonly reason: RpcUnavailableReason,
+    message: string,
+    details: { cluster: SolanaCluster } & Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super("RPC_UNAVAILABLE", message, { reason, ...details }, options);
+    this.name = "RpcUnavailableError";
+    this.cluster = details.cluster;
   }
 }
 
@@ -43,9 +71,16 @@ export class RpcHttpStatusError extends Error {
  * `details.timedOut` stays for readers that walk error records.
  */
 export class RpcTimeoutError extends SdpRpcError {
-  constructor(timeoutMs: number) {
-    super("SOLANA_RPC_ERROR", `RPC request timed out after ${timeoutMs}ms`, { timedOut: true });
+  /**
+   * @param timeoutMs - The deadline that elapsed.
+   * @param options - `label` names the client in the message (default `RPC`); `cause` is kept.
+   */
+  constructor(timeoutMs: number, options: { label?: string; cause?: unknown } = {}) {
+    super("SOLANA_RPC_ERROR", `${options.label ?? "RPC"} request timed out after ${timeoutMs}ms`, {
+      timedOut: true,
+    });
     this.name = "RpcTimeoutError";
+    if (options.cause !== undefined) this.cause = options.cause;
   }
 }
 

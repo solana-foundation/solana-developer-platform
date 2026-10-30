@@ -1,3 +1,4 @@
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { type GetTransactionApi, getBase58Encoder, type Rpc, signature } from "@solana/kit";
@@ -245,7 +246,7 @@ export async function readKaminoDepositReceipt(
     .getTransaction(signature(input.signature), {
       encoding: "jsonParsed",
       commitment: "finalized",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     .send();
   return parseKaminoDepositReceipt(transaction, chain.cluster, input);

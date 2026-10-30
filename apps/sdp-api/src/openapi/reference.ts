@@ -305,6 +305,9 @@ function toApiParameter(
   }
   if (parameter.schema === undefined) throw new Error(`${label} has no schema`);
   const schema = toApiSchema(parameter.schema, document, label);
+  const sample = jsonValueSchema.parse(
+    sampleFromSchema(dereferenceSchema(parameter.schema, document), document, parameter.name)
+  );
   if (parameter.example !== undefined) schema.example = jsonValueSchema.parse(parameter.example);
   return {
     name: parameter.name,
@@ -312,17 +315,13 @@ function toApiParameter(
     required: parameter.in === "path" || parameter.required === true,
     description: parameter.description ?? schema.description,
     schema,
+    sample,
   };
 }
 
 /** A sampled parameter value as it travels in a URL, the way the playground fills its fields. */
-function sampleText(parameter: ParameterObject, document: OpenAPIObject, where: string): string {
-  if (parameter.schema === undefined) throw new Error(`${where}: ${parameter.name} has no schema`);
-  const sample = sampleFromSchema(
-    dereferenceSchema(parameter.schema, document),
-    document,
-    parameter.name
-  );
+function sampleText(parameter: ApiParameter): string {
+  const { sample } = parameter;
   return typeof sample === "string" ? sample : JSON.stringify(sample);
 }
 
@@ -365,7 +364,7 @@ function toApiRequestBody(
  */
 function sampleRequest(
   path: string,
-  parameters: ParameterObject[],
+  parameters: ApiParameter[],
   jsonBody: ReturnType<typeof jsonRequestBodyOf>,
   document: OpenAPIObject,
   where: string
@@ -373,12 +372,12 @@ function sampleRequest(
   const filled = path.replace(/\{([^}]+)\}/g, (_match, name: string) => {
     const parameter = parameters.find((entry) => entry.in === "path" && entry.name === name);
     if (parameter === undefined) throw new Error(`${where}: no path parameter ${name}`);
-    return encodeURIComponent(sampleText(parameter, document, where));
+    return encodeURIComponent(sampleText(parameter));
   });
   const query = new URLSearchParams(
     parameters
       .filter((parameter) => parameter.in === "query" && parameter.required === true)
-      .map((parameter) => [parameter.name, sampleText(parameter, document, where)])
+      .map((parameter) => [parameter.name, sampleText(parameter)])
   ).toString();
   return {
     path: query === "" ? filled : `${filled}?${query}`,
@@ -578,6 +577,9 @@ function toApiOperation(
     (parameter) => parameter.in === "header" && parameter.name === "Idempotency-Key"
   );
   const jsonBody = jsonRequestBodyOf(operation, document, where);
+  const apiParameters = parameters
+    .map((parameter) => toApiParameter(parameter, document, where))
+    .sort((left, right) => PARAMETER_ORDER[left.in] - PARAMETER_ORDER[right.in]);
   return {
     operationId,
     endpointId: toEndpointId(operationId),
@@ -591,12 +593,10 @@ function toApiOperation(
     group: docsGroupOf(operation, where),
     description: operation.description ?? null,
     deprecated: operation.deprecated === true,
-    parameters: parameters
-      .map((parameter) => toApiParameter(parameter, document, where))
-      .sort((left, right) => PARAMETER_ORDER[left.in] - PARAMETER_ORDER[right.in]),
+    parameters: apiParameters,
     requestBody: jsonBody === null ? null : toApiRequestBody(jsonBody, document, where),
     responses: toApiResponses(operation, action, takesIdempotencyKey, document, where),
-    request: sampleRequest(path, parameters, jsonBody, document, where),
+    request: sampleRequest(path, apiParameters, jsonBody, document, where),
   };
 }
 

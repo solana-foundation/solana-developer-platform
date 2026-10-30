@@ -11,9 +11,8 @@ import {
 /**
  * What the generators read from a generated public OpenAPI document: its operations by method,
  * dereferenced components, example values synthesized from schemas, and the dashboard's endpoint
- * ids. The playground catalog (`scripts/generate-playground-catalog.ts`) and the API reference
- * (`openapi/reference.ts`) both read through here, so a sample the docs show is the one the
- * dashboard playground starts from.
+ * ids. The API reference (`openapi/reference.ts`) reads through here; the
+ * playground catalog projects that reference, so both use the same sample.
  */
 
 export const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;

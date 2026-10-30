@@ -114,10 +114,44 @@ reconciler works from them.
 
 A transfer batch commits its row and its recipients before any chunk, and each chunk commits its
 transfer row and recipient links before it broadcasts. So a recipient still pending with no
-transfer row was never sent. When a takeover or a retry past the 24 hours finds its batch still
-`processing`, the record finder fails those unsent recipients and recomputes the batch before it
-answers; the pending-transfers job does the same for a batch over an hour old that no one retries.
-Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
+transfer row was never sent. The record finder answers a batch as it stands and never settles it,
+since the request that wrote it may still be running under another key (below); the
+pending-transfers job fails a batch's unsent recipients once it is over an hour old. Neither resumes
+or re-sends: a recipient with a transfer row is settled from that row as before.
+
+The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
+SA-2). `externalId` is required on create, and a batch is recorded under its run's key, derived
+from the project, source wallet and `externalId`, instead of the credential-bound record key: the
+HTTP key step is unchanged, only the row's identity is. So `replayFromRecord` finds the run under
+any key, before admission: the same request from the same credential is answered with the batch
+as it stands (never settled there, since its own request may still be running), and any other
+gets `409 TRANSFER_BATCH_RUN_EXISTS` with the batch's id, unstored. The batch key index
+(migration 0026) lets one of two concurrent sends win, so no migration was needed; SDP had no
+live batches when this shipped, so there is no older row keyed any other way. The guard protects
+only callers who send the same value on every attempt at a run, which is why the docs say to
+derive it from the caller's own data and never generate it at random.
+
+A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-2343), not a resend.
+It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them
+back to `pending` with no transfer under the batch lock, all or nothing, so a concurrent retry gets
+409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
+another writer failed or claimed first rolls the chunk back before it is sent. The claim writes a
+`payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
+0192), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
+5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.
+It pays the address each recipient recorded, and refuses (409) if the account now holds another. The row also
+records the failed chunk transfers the claim unlinked, so batch responses keep listing every chunk
+`transactionCount` counts.
+Unsent recipients age by their own last write, not the batch's: the stranded-batch job and the
+create takeover fail only recipients no live request can still be sending, so a retry's fresh claim
+on an old batch is left to it. Each recipient also records the lastValidBlockHeight of the attempt
+that wrote or claimed it (every chunk of an attempt shares one blockhash and is never re-signed).
+Once the chain passes it, nothing that attempt built can land, so the job fails it in minutes, and
+a resend of a run found under another request's key settles it the same way (one block-height
+read; the hour remains the fallback). The chunk link's compare-and-swap is what makes any of this
+safe: a recipient is linked before broadcast or failed, never both. Each attempt also owns the recipients it
+wrote or claimed (`attempt_id`), and a chunk links or fails only its own attempt's: an older attempt
+that finishes late never takes or fails a recipient a newer retry has claimed.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating` or `canceling` schedule, or a collection in flight) from the signature
@@ -196,7 +230,7 @@ records its outcome after all, which is then replayed). A released claim (a refu
 | Original's lease lapsed unreleased, within `claimed_at` + renewal cap + lease                                                                  | No                                                                                                            | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` (time left, at most 60s)                                                                                        |
 | Lapsed unreleased past that window, `rerun` or `recovery: "record"`                                                                            | Taken over                                                                                                    | Answered from the domain row (or run again on `rerun`)                                                                                                          |
 | Lapsed unreleased past that window, other `store` route                                                                                        | No; the claim is left as is                                                                                   | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key                                                                         |
-| Domain row exists, different fingerprint (`replayFromRecord`)                                                                                  | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`                                                                                                                                    |
+| Domain row exists, different fingerprint (`replayFromRecord`)                                                                                  | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`; a transfer batch's run, 409 `TRANSFER_BATCH_RUN_EXISTS`                                                                           |
 | Domain row exists, same fingerprint (`replayFromRecord`)                                                                                       | Yes                                                                                                           | The row's answer + `Idempotent-Replayed: true`                                                                                                                  |
 | 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts)                                                                        | No, unless the handler called `markIdempotencyCommitted`: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again                                                                                                                                   |
 | Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h                                                                                                      | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
