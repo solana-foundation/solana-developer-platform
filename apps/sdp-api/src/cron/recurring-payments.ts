@@ -18,6 +18,7 @@ export const recurringPaymentsCron = defineCron({
   schedule: "*/5 * * * *",
   scope: "cluster",
   effect: "starts",
+  module: "recurring_payments",
   enabled: alwaysEnabled,
   run: collectDueNow,
 });

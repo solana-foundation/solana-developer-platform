@@ -1,3 +1,4 @@
+import type { SdpModule } from "@sdp/types/release-channels";
 import type { Env } from "@/types/env";
 
 /**
@@ -24,17 +25,20 @@ type CronMoneyEffect = (typeof CRON_MONEY_EFFECTS)[number];
  *   through `createClusterRpc()` (ADR 0007). `scope: "global"` registers it once, outside any
  *   cluster scope.
  * - `enabled` is decided once, when the Worker registers the definition.
+ * - A `starts` definition names its `module`: a registration whose Environment the release
+ *   channel does not run that module for is disabled, so no new money moves there.
+ *   `finishes` and `observes` definitions run in every Environment, settling and recording
+ *   money already in flight.
  * - `runOnStart` also runs one slot as soon as the Worker registers the definition.
  */
 export type CronDefinition = {
   name: string;
   schedule: string;
   scope: "global" | "cluster";
-  effect: CronMoneyEffect;
   enabled: (env: Env) => boolean;
   run: (env: Env) => Promise<void>;
   runOnStart?: boolean;
-};
+} & ({ effect: "starts"; module: SdpModule } | { effect: Exclude<CronMoneyEffect, "starts"> });
 
 /**
  * Declare a Cron Definition. The runner registers it; the definition only says what it is.

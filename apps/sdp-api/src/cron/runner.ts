@@ -7,6 +7,7 @@
  */
 
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { type ScheduledTask, schedule } from "node-cron";
 import { dvpTradesCron } from "@/cron/dvp-trades";
 import { earnCatalogueSyncCron } from "@/cron/earn-catalogue-sync";
@@ -30,6 +31,7 @@ import { secretRetirementsCron } from "@/cron/secret-retirements";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { isModuleAvailableForEnvironment } from "@/lib/feature-flags";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { Env } from "@/types/env";
@@ -144,6 +146,32 @@ function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvi
 }
 
 /**
+ * Whether a registration may start new money movement in its Environment: a `starts`
+ * definition only where the release channel runs its module for that Environment. Other
+ * definitions settle or record money already in flight, so they run everywhere.
+ *
+ * @param definition - The definition being registered.
+ * @param environment - The registration's Environment, or `null` for a global one.
+ * @param env - Process environment naming the release channel.
+ * @returns True unless a `starts` definition's module is out of the channel for the Environment.
+ */
+function startsInEnvironment(
+  definition: CronDefinition,
+  environment: SdpEnvironment | null,
+  env: Env
+): boolean {
+  if (definition.effect !== "starts" || environment === null) {
+    return true;
+  }
+  return isModuleAvailableForEnvironment(
+    env,
+    definition.module,
+    environment,
+    SDP_RAMP_PROVIDER_MATURITY
+  );
+}
+
+/**
  * Run one slot of a definition's work under the system database identity (reconciliation is
  * cross-tenant, and row-level security denies an undeclared workload) and, for a `cluster`
  * registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
@@ -196,9 +224,10 @@ export function startCron(deps: CronDeps): CronHandle | null {
   const tasks: ScheduledTask[] = [];
 
   for (const definition of CRON_DEFINITIONS) {
-    const enabled = definition.enabled(deps.env);
     for (const environment of registrationEnvironments(definition)) {
       const registration: CronRegistration = { cron: definition.name, environment };
+      const enabled =
+        definition.enabled(deps.env) && startsInEnvironment(definition, environment, deps.env);
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;

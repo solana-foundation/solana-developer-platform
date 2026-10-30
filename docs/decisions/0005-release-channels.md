@@ -23,9 +23,9 @@ deployment can run.
   projects when that environment's maturity is at or above its own level, so each
   channel contains the more mature ones. Deployment-wide checks count a module in
   when either environment is; project requests are refused per environment by the
-  project context middleware. Exits for money already deployed stay open, and jobs
-  keep running for every environment while either environment runs the module. A
-  test pins each channel's module list.
+  project context middleware. Exits for money already deployed stay open; `starts`
+  crons stop for that environment, while crons that settle or record money in flight
+  keep running. A test pins each channel's module list.
 - Ramps has no maturity of its own. Each ramp provider has one
   (`SDP_RAMP_PROVIDER_MATURITY`), and Ramps is in a release channel when at least
   one provider is, so providers launch one at a time.
