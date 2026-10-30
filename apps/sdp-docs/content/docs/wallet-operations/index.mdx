@@ -1,20 +1,15 @@
 ---
-title: Overview
-description: Read custody-wallet balances and limit what an API key may do with a wallet.
+module: custody
+title: Wallets
+description: Create a custody wallet, check balances, and scope access.
 ---
 
-This section covers balance visibility for a custody wallet. What a caller may do with a wallet is set on the API key: its [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module) and the wallets it is bound to.
+Create a custody wallet, check its balances, and use API key grants to control what an integration can do with it.
 
-## What's in this section
+## Start here
 
-- [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
+- [Create a wallet](/docs/guides/setup-wallets): choose a provider and provision your first wallet.
+- [Wallet balances](/docs/wallet-operations/balances): read token balances and optional USD valuations.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys): grant only the actions and wallets an integration needs.
 
-## API surface
-
-The balance endpoint remains under `/v1/payments/wallets` because it was introduced with the Payments API. Its behavior is wallet-wide.
-
-## Related
-
-- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before binding keys to it.
-- [Payments](/docs/payments) — payment flows that sign from a custody wallet.
-- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — limit a key to the operations it needs.
+See the [Wallets API reference](/docs/reference/api/wallets) for request and response details.

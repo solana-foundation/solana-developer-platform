@@ -13,6 +13,7 @@ import {
   DOCS_ACTION_MODULES,
   DOCS_MODULES,
   DOCS_RAMP_PROVIDERS,
+  DOCS_TUTORIALS,
   type ModuleEntry,
   publishedRampProviderIds,
   ROTATE_PROVIDERS_TOKEN,
@@ -37,6 +38,7 @@ import { apiUrl, canonicalSite } from "./site";
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
  * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
+ * - `<TutorialLinks />`: tutorials available on this build.
  * - `<ApiExample operation="..." />`: a request from the public reference and
  *   snippet model.
  *
@@ -72,6 +74,10 @@ const BLOCKS = {
   ModuleCapabilities: (surface) =>
     publishedModules(surface)
       .map((entry) => `- ${entry.capability}`)
+      .join("\n"),
+  TutorialLinks: (surface) =>
+    DOCS_TUTORIALS.filter((entry) => !entry.module || isModulePublished(entry.module, surface))
+      .map((entry) => `- [${entry.title}](${entry.href}): ${entry.description}`)
       .join("\n"),
   RampProviderMatrix: (surface) =>
     table(
@@ -170,12 +176,13 @@ function isElementName(name: string | null): name is ElementName {
 
 /**
  * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
- * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
- * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
- * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips, and
+ * `<ApiFamilyList>` links the directory to family pages; `<ApiOperationTable>` links each
+ * family's operations to their pages. Both link to `.md` pages in Markdown, so an agent reads
+ * on in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips, and
  * `<ApiOperation>` an operation's body beside its `<ApiPanel>` of samples.
  */
 const WRAPPERS = {
+  ApiFamilyList: "links",
   ApiOperationTable: "links",
   ActionLinks: "layout",
   ApiOperation: "layout",
@@ -225,7 +232,7 @@ function unwrap(
   ];
   if (kind === "layout") return tags;
   const links = element.children.flatMap(linksIn).map((link) => {
-    // Each row links an operation's page inline: `[Summary](/docs/...)`.
+    // Each entry links a docs page inline: `[Label](/docs/...)`.
     const linkSpan = spanOf(link, where);
     const text = source.slice(linkSpan.start, linkSpan.end);
     const target = `](${link.url})`;
