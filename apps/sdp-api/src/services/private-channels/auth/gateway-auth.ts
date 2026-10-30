@@ -14,7 +14,7 @@
 
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
 import { PrivateChannelError } from "@sdp/private-channels/errors";
-import { createChannelGatewayRpc } from "@sdp/private-channels/gateway";
+import { createPrivateChannelLocalRpc } from "@sdp/private-channels/gateway";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { isUnauthorizedRpcError } from "@sdp/rpc/transient";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
@@ -153,7 +153,7 @@ export async function withGatewayRpc<T>(
 ): Promise<T> {
   const attempt = (token: string) =>
     run(
-      createChannelGatewayRpc(gatewayUrl, {
+      createPrivateChannelLocalRpc(gatewayUrl, {
         ...gatewayAuthOptions(token),
         // Egress-guarded transport: the factory receives the bearer-token headers
         // above, so the guarded transport dials with the same credentials kit

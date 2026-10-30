@@ -1,4 +1,4 @@
-import { createChannelGatewayRpc } from "@sdp/private-channels/gateway";
+import { createPrivateChannelLocalRpc } from "@sdp/private-channels/gateway";
 import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background Job: Track Pending Private Channel Withdrawals
@@ -120,7 +120,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createChannelGatewayRpc(instance.gateway_url);
+      rpc = createPrivateChannelLocalRpc(instance.gateway_url);
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;

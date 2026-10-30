@@ -7,8 +7,8 @@
  * (e.g. `getVersion`) return "Method not found" — don't call them.
  *
  * Because it is Solana-JSON-RPC-compatible, we reuse `@sdp/rpc`'s Kit client,
- * just re-pointed at the gateway URL. The engine passes a structural env in
- * (never `process.env`), the same discipline as `config.ts`.
+ * pointed at the gateway URL. It is never the cluster pool: burn signatures
+ * and channel balances live on the gateway, not on devnet or mainnet.
  */
 
 import {
@@ -40,11 +40,16 @@ export interface GatewayClientOptions {
 }
 
 /**
- * Build a Solana-Kit RPC client pointed at the SPC gateway. This is `@sdp/rpc`'s
- * standard client with the URL overridden; every read/write helper in
- * `@sdp/rpc/solana` works against the returned client.
+ * The Solana-Kit RPC client for a Private Channel's own gateway, never the cluster pool. Every
+ * read/write helper in `@sdp/rpc/solana` works against it, within the gateway's method subset.
+ *
+ * @param gatewayUrl - The instance's gateway URL.
+ * @param options - How to reach the gateway.
+ * @param options.headers - Request headers, such as the bearer token JWT-gated methods take.
+ * @param options.transportFactory - An egress-guarded transport that replaces kit's default one.
+ * @returns The gateway's RPC client.
  */
-export function createChannelGatewayRpc(
+export function createPrivateChannelLocalRpc(
   gatewayUrl: string,
   options?: GatewayClientOptions
 ): SolanaRpc {
