@@ -17,11 +17,11 @@ import {
   createDvpTradeRepository,
 } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, notFound, solanaRpcError } from "@/lib/errors";
+import { AppError, badRequest, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import { parseIdempotencyKey } from "@/middleware/idempotency-key";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { createDvpTrade } from "@/services/dvp/create";
@@ -69,6 +69,21 @@ import {
 } from "./trade-audit";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+/**
+ * The Idempotency-Key a money action requires (ADR 0009: money routes require
+ * the key at any stage). A DvP action without one would run with nothing
+ * recorded against it, so the retry after its ambiguous broadcast could sign
+ * and send a second time. Malformed keys are refused with 400, like the
+ * shared contract's.
+ */
+function requiredIdempotencyKey(c: AppContext): string {
+  const idempotencyKey = parseIdempotencyKey(c);
+  if (idempotencyKey === undefined) {
+    throw new AppError("IDEMPOTENCY_KEY_REQUIRED");
+  }
+  return idempotencyKey;
+}
 
 interface LegInput {
   mint: string;
@@ -495,9 +510,10 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
     // caller named that happens to equal the party.
     userASettlementDestination: body.userASettlementDestination ?? null,
     userBSettlementDestination: body.userBSettlementDestination ?? null,
-    // Optional. Its only job is to make a retry after an ambiguous broadcast
+    // Optional (creating a trade commits nobody), but validated like every
+    // other key. Its only job is to make a retry after an ambiguous broadcast
     // return the original trade rather than create a second one.
-    idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    idempotencyKey: parseIdempotencyKey(c) ?? null,
   });
 
   // The response derives everything from the caller's viewpoint: one custody
@@ -531,11 +547,14 @@ export const createTrade = async (c: ValidatedBodyContext<typeof createDvpTradeS
  * @returns A route handler for that close action.
  */
 const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
+  // Before anything is resolved: an unkeyed close records nothing, and its
+  // retry could sign a second close against an emptied escrow.
+  const idempotencyKey = requiredIdempotencyKey(c);
   const { trade, actor, settlement, projectId } = await resolveCloseAction(c, action);
 
   const { result, replayed } = await runDvpCloseOnce(
     c.env,
-    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    idempotencyKey,
     {
       action,
       tradeId: trade.id,
@@ -591,6 +610,9 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
  * @returns The funded-leg response envelope.
  */
 export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  // Before anything is resolved: an unkeyed fund records nothing, and its
+  // retry could deposit a second time.
+  const idempotencyKey = requiredIdempotencyKey(c);
   const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
 
   // Money IN to the escrow, so the intent is fail-closed and admitted after
@@ -608,7 +630,7 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
   try {
     ({ result, replayed } = await runDvpLegActionOnce(
       c.env,
-      c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+      idempotencyKey,
       { action: "fund", tradeId: trade.id, ...params },
       (recordAttempt) => fundDvpTradeLeg(c, trade, { ...params, recordAttempt })
     ));
@@ -645,10 +667,13 @@ export const fundTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchem
  * @returns The reclaimed-leg response envelope.
  */
 export const reclaimTrade = async (c: ValidatedBodyContext<typeof fundDvpTradeSchema>) => {
+  // Before anything is resolved: an unkeyed reclaim records nothing, and its
+  // retry could pull the deposit back a second time.
+  const idempotencyKey = requiredIdempotencyKey(c);
   const { trade, actor, params } = await resolveLegAction(c, c.req.valid("json"));
   const { result, replayed } = await runDvpLegActionOnce(
     c.env,
-    c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
+    idempotencyKey,
     { action: "reclaim", tradeId: trade.id, ...params },
     (recordAttempt) => reclaimDvpTradeLeg(c, trade, { ...params, recordAttempt })
   );

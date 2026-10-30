@@ -277,9 +277,11 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
 
       // One fund endpoint for both parties: naming the side, the right to fund
       // is derived from holding a custody wallet at that side's party address.
+      // The key is required (ADR 0009) and unique per leg, so each direction's
+      // retry replays its own transfer.
       const funded = await api(`/v1/dvp/trades/${trade.id}/fund`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": `dvp-it-fund-${side}` },
         body: JSON.stringify({ side }),
         timeoutMs: 90_000,
       });

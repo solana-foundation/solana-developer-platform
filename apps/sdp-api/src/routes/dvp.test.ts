@@ -124,10 +124,11 @@ async function seedAuth(): Promise<void> {
   ]);
 }
 
-function authHeaders() {
+function authHeaders(idempotencyKey?: string) {
   return {
     Authorization: `Bearer ${TEST_API_KEY.raw}`,
     "Content-Type": "application/json",
+    ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
   };
 }
 
@@ -787,6 +788,62 @@ describe("DvP routes", () => {
     });
   });
 
+  // Every money action commits a replayable step, so a missing key is a
+  // client error before anything is resolved: the route refuses with 400
+  // rather than running once with no record.
+  describe("money action requires an Idempotency-Key", () => {
+    beforeEach(async () => {
+      await seedCustodyWallets();
+    });
+
+    it("refuses an unkeyed fund before resolving anything, writing no claim", async () => {
+      await seedTradeFor({ tradeId: "dvp_fund_unkeyed" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_fund_unkeyed/fund",
+        { method: "POST", headers: authHeaders(), body: JSON.stringify({ side: "a" }) },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error?: { code?: string } };
+      expect(body.error?.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+      expect(await fundingClaimCount("dvp_fund_unkeyed")).toBe(0);
+    });
+
+    it("refuses an unkeyed settle", async () => {
+      await seedTradeFor({ tradeId: "dvp_settle_unkeyed" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_settle_unkeyed/settle",
+        { method: "POST", headers: authHeaders(), body: JSON.stringify({}) },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error?: { code?: string } };
+      expect(body.error?.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+    });
+
+    it("rejects an oversized key with BAD_REQUEST", async () => {
+      await seedTradeFor({ tradeId: "dvp_fund_oversized_key" });
+
+      const res = await app.request(
+        "/v1/dvp/trades/dvp_fund_oversized_key/fund",
+        {
+          method: "POST",
+          headers: authHeaders("k".repeat(300)),
+          body: JSON.stringify({ side: "a" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error?: { code?: string } };
+      expect(body.error?.code).toBe("BAD_REQUEST");
+    });
+  });
+
   // Funding authorization is the custody lookup: the caller must hold an
   // active custody wallet whose public key is the named side's party address,
   // re-read from the database before anything is signed or written.
@@ -802,7 +859,7 @@ describe("DvP routes", () => {
         "/v1/dvp/trades/dvp_no_custody/fund",
         {
           method: "POST",
-          headers: authHeaders(),
+          headers: authHeaders("test-fund-no-custody"),
           body: JSON.stringify({ side: "a" }),
         },
         env
@@ -824,7 +881,7 @@ describe("DvP routes", () => {
         "/v1/dvp/trades/dvp_wrong_wallet/fund",
         {
           method: "POST",
-          headers: authHeaders(),
+          headers: authHeaders("test-fund-wrong-wallet"),
           body: JSON.stringify({ side: "b", walletId: BOUND_WALLET.id }),
         },
         env
@@ -855,7 +912,11 @@ describe("DvP routes", () => {
 
       const res = await app.request(
         "/v1/dvp/trades/dvp_out_of_scope/fund",
-        { method: "POST", headers: authHeaders(), body: JSON.stringify({ side: "a" }) },
+        {
+          method: "POST",
+          headers: authHeaders("test-fund-out-of-scope"),
+          body: JSON.stringify({ side: "a" }),
+        },
         env
       );
 
@@ -910,7 +971,11 @@ describe("DvP routes", () => {
 
       const res = await app.request(
         `/v1/dvp/trades/dvp_out_of_scope_${action}/${action}`,
-        { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
+        {
+          method: "POST",
+          headers: authHeaders(`test-scope-${action}`),
+          body: JSON.stringify(body),
+        },
         env
       );
 
@@ -1078,7 +1143,11 @@ describe("DvP routes", () => {
 
       const res = await app.request(
         `/v1/dvp/trades/${tradeId}/reclaim`,
-        { method: "POST", headers: authHeaders(), body: JSON.stringify(body) },
+        {
+          method: "POST",
+          headers: authHeaders(`test-reclaim-${tradeId}`),
+          body: JSON.stringify(body),
+        },
         env
       );
 

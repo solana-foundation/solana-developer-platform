@@ -91,7 +91,7 @@ async function seed(): Promise<void> {
 
 /** Runs one keyed request as the caller's tenant, the way the handler does. */
 function once(
-  key: string | null,
+  key: string,
   run: (
     recordAttempt: RecordDvpLegActionAttempt
   ) => Promise<{ signature: typeof SIG; leg: "a" | "b"; amount: string }>,
@@ -115,14 +115,9 @@ describe("runDvpLegActionOnce", () => {
     await seed();
   });
 
-  it("runs every request that carries no key", async () => {
-    const run = vi.fn(sends);
-
-    await once(null, run);
-    await once(null, run);
-
-    expect(run).toHaveBeenCalledTimes(2);
-  });
+  // The route refuses an unkeyed request (ADR 0009: money routes require the
+  // key), so the machinery only ever sees a key. A close's runDvpCloseOnce
+  // holds the same contract.
 
   // The retry after a confirmed reclaim would pass every chain check again.
   it("answers a retry with the same key from the first result, without running again", async () => {
@@ -260,7 +255,7 @@ const CLOSE_SCOPE: DvpCloseRequestScope = {
 
 /** Runs one keyed close as the caller's tenant, the way the handler does. */
 function closeOnce(
-  key: string | null,
+  key: string,
   run: (
     recordAttempt: RecordDvpLegActionAttempt
   ) => Promise<{ signature: typeof SIG; landed: boolean }>,

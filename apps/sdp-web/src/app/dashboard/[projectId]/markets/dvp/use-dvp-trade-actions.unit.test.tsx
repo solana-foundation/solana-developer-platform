@@ -364,8 +364,8 @@ describe("useDvpTradeActions", () => {
   });
 
   // A request the proxy or network retries must be answered with the first
-  // result, so each press of fund or reclaim carries its own key.
-  it("sends a fresh Idempotency-Key with each fund and reclaim, and none with settle", async () => {
+  // result, so each press of any of the four actions carries its own key.
+  it("sends a fresh Idempotency-Key with each action", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
@@ -381,13 +381,15 @@ describe("useDvpTradeActions", () => {
         await result.current.act("reclaim", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
     );
     await act(async () => await result.current.act("settle"));
+    await act(async () => await result.current.act("cancel"));
 
     const keys = fetchMock.mock.calls.map(([, init]) =>
       new Headers((init as RequestInit).headers).get("Idempotency-Key")
     );
     expect(keys[0]).toMatch(/^dvp-fund-[0-9a-f]{32}$/);
     expect(keys[1]).toMatch(/^dvp-reclaim-[0-9a-f]{32}$/);
-    expect(keys[2]).toBeNull();
+    expect(keys[2]).toMatch(/^dvp-settle-[0-9a-f]{32}$/);
+    expect(keys[3]).toMatch(/^dvp-cancel-[0-9a-f]{32}$/);
   });
 
   it("reclaims the named leg through its own endpoint", async () => {

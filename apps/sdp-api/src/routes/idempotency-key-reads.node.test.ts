@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 const PINNED_READS: Record<string, number> = {
   // Reads the key for the domain-row replay; goes when requestGate's last user moves off it.
   "middleware/request-gate.ts": 1,
-  "routes/dvp/handlers.ts": 4,
+  "routes/dvp/handlers.ts": 2,
   "routes/earn/handlers/external-wallet.ts": 1,
   "routes/earn/handlers/program.ts": 1,
   "routes/earn/handlers/queued-withdrawals.ts": 2,

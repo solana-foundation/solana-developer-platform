@@ -154,6 +154,13 @@ afterAll(async () => {
 beforeEach(async () => {
   await client.query("BEGIN");
   await client.query("SET app.tenant_isolation_identity = 'system'");
+  // Suites sharing this worker database (the routes suite runs in the same
+  // worker database, in vitest file order) leave rows in dvp_trades. The
+  // rewind below re-adds a CHECK constraint Postgres validates against every
+  // existing row, so a leftover row from another suite fails it for reasons
+  // this migration never touched. Start each test from an empty table; the
+  // trailing ROLLBACK restores whatever was there.
+  await client.query("TRUNCATE dvp_trades CASCADE");
 });
 
 afterEach(async () => {

@@ -8,9 +8,10 @@
  *
  * Funding and reclaiming name a leg: both endpoints take `{ side, walletId }`,
  * authorizing by the caller holding custody of that side's party address,
- * whoever holds it, on whichever org's trade. Each press of either carries its
- * own Idempotency-Key, so a request the proxy or network retries is answered
- * with the first result instead of moving the leg twice.
+ * whoever holds it, on whichever org's trade. Each press of any of the four
+ * carries its own Idempotency-Key — the API requires one of every money
+ * action — so a request the proxy or network retries is answered with the
+ * first result instead of moving the leg twice.
  */
 
 import {
@@ -159,20 +160,25 @@ function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
 }
 
 /**
- * Fund and reclaim name the leg they move and carry their own Idempotency-Key;
- * settle and cancel carry neither.
+ * All four actions carry an Idempotency-Key, one per press: the API refuses a
+ * money action without one, and a request the proxy or network retries is
+ * answered with the first result instead of moving money twice. Fund and
+ * reclaim also name the leg they move.
  */
 function requestInit(
   action: DvpTradeActionName,
   leg: { side: DvpTradeSide; walletId: string } | null
 ): RequestInit {
+  const headers: Record<string, string> = {
+    [IDEMPOTENCY_KEY_HEADER]: freshDvpIdempotencyKey(`dvp-${action}`),
+  };
   if (leg === null) {
-    return { method: "POST" };
+    return { method: "POST", headers };
   }
   return {
     method: "POST",
     body: JSON.stringify({ side: leg.side, walletId: leg.walletId }),
-    headers: { [IDEMPOTENCY_KEY_HEADER]: freshDvpIdempotencyKey(`dvp-${action}`) },
+    headers,
   };
 }
 

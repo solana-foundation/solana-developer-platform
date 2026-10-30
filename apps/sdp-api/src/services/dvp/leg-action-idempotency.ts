@@ -83,9 +83,6 @@ export interface DvpCloseRequestScope {
   custodyWalletId: string;
 }
 
-/** Without a key there is nothing to record against. */
-const recordNothing: RecordDvpLegActionAttempt = async () => {};
-
 /**
  * Hashes everything that makes two requests the same one. The resolved wallet is
  * part of it, so a key replayed by a caller who resolves a different wallet is
@@ -178,22 +175,25 @@ async function resolveExisting(
 /**
  * Runs a leg action at most once per Idempotency-Key.
  *
- * Without a key the action simply runs. With one: a sent key replays the stored
- * answer; a key held by a request still running, or used for a different
- * request, is refused; otherwise the key is taken, the action records its
- * transaction before sending it, and its answer is marked sent. A refusal that
- * sent nothing frees the key. Any other failure keeps it, and the next try with
- * that key asks the chain what the recorded transaction did.
+ * The key is required (ADR 0009: money routes require it at any stage): a
+ * sent key replays the stored answer; a key held by a request still running,
+ * or used for a different request, is refused; otherwise the key is taken, the
+ * action records its transaction before sending it, and its answer is marked
+ * sent. A refusal that sent nothing frees the key. Any other failure keeps it,
+ * and the next try with that key asks the chain what the recorded transaction
+ * did. The route refuses the request that carries no key at all, before
+ * anything is resolved, because an unkeyed action records nothing and its
+ * retry could send a second time.
  *
  * @param env - API environment.
- * @param idempotencyKey - The caller's header, or null.
+ * @param idempotencyKey - The caller's validated Idempotency-Key.
  * @param scope - What the request asks for, and for whom.
  * @param run - The action, given the hook it must call before broadcast.
  * @returns The action's answer, replayed or fresh, and whether it was replayed.
  */
 export async function runDvpLegActionOnce(
   env: Env,
-  idempotencyKey: string | null,
+  idempotencyKey: string,
   scope: DvpLegActionRequestScope,
   run: (recordAttempt: RecordDvpLegActionAttempt) => Promise<DvpLegActionResult>
 ): Promise<{ result: DvpLegActionResult; replayed: boolean }> {
@@ -230,14 +230,14 @@ export async function runDvpLegActionOnce(
  * answer rather than from an error code.
  *
  * @param env - API environment.
- * @param idempotencyKey - The caller's header, or null.
+ * @param idempotencyKey - The caller's validated Idempotency-Key.
  * @param scope - Which close, on which trade, signed by which wallet.
  * @param run - The close, given the hook it must call before broadcast.
  * @returns The close's answer, replayed or fresh, and whether it was replayed.
  */
 export async function runDvpCloseOnce(
   env: Env,
-  idempotencyKey: string | null,
+  idempotencyKey: string,
   scope: DvpCloseRequestScope,
   run: (recordAttempt: RecordDvpLegActionAttempt) => Promise<DvpCloseActionResult>
 ): Promise<{ result: DvpCloseActionResult; replayed: boolean }> {
@@ -262,7 +262,7 @@ export async function runDvpCloseOnce(
  * answer.
  *
  * @param env - API environment.
- * @param idempotencyKey - The caller's header, or null.
+ * @param idempotencyKey - The caller's validated Idempotency-Key.
  * @param scope - What the request asks for, and for whom.
  * @param handlers - How to replay a recorded attempt, when to free the key on a
  *   failure, and the action itself.
@@ -270,7 +270,7 @@ export async function runDvpCloseOnce(
  */
 async function runDvpActionOnce<TResult extends { signature: Signature }>(
   env: Env,
-  idempotencyKey: string | null,
+  idempotencyKey: string,
   scope: DvpLegActionRequestScope | DvpCloseRequestScope,
   handlers: {
     run: (recordAttempt: RecordDvpLegActionAttempt) => Promise<TResult>;
@@ -284,10 +284,6 @@ async function runDvpActionOnce<TResult extends { signature: Signature }>(
     markSent?: (result: TResult) => boolean;
   }
 ): Promise<{ result: TResult; replayed: boolean }> {
-  if (idempotencyKey === null) {
-    return { result: await handlers.run(recordNothing), replayed: false };
-  }
-
   const requests = createPostgresDvpLegActionRequestRepository(getDb(env));
   const fingerprint = fingerprintOf(scope);
   let id = `dvpla_${crypto.randomUUID().replace(/-/g, "")}`;

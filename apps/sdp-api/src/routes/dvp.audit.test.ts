@@ -210,7 +210,8 @@ async function postAction(tradeId: string, action: string, body?: unknown) {
     `/v1/dvp/trades/${tradeId}/${action}`,
     {
       method: "POST",
-      headers: authHeaders(),
+      // Money actions require the key (ADR 0009); one per action under test.
+      headers: { ...authHeaders(), "Idempotency-Key": `test-audit-${tradeId}-${action}` },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
     env
