@@ -521,8 +521,8 @@
           {
             "key": "walletId",
             "label": "{walletId}",
-            "description": "Provider wallet ID — the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.",
-            "defaultValue": "privy_wallet_123",
+            "description": "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
+            "defaultValue": "cwlt_example",
             "required": true
           },
           {
@@ -535,7 +535,7 @@
         "expectedResponse": {
           "data": {
             "walletBalances": {
-              "walletId": "privy_wallet_123",
+              "custodyWalletId": "cwlt_example",
               "address": "So11111111111111111111111111111111111111112",
               "balances": [
                 {

@@ -112,12 +112,12 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
  * on the pre-transaction balance.
  */
 export async function fetchLiveFundingWalletBalance(
-  walletId: string,
+  custodyWalletId: string,
   minimumSlot?: number
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
   const query = minimumSlot === undefined ? "" : `?minimumSlot=${minimumSlot}`;
   const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances${query}`,
+    `/api/dashboard/payments/wallets/${encodeURIComponent(custodyWalletId)}/balances${query}`,
     { cache: "no-store" }
   );
   if (!response.ok) {
@@ -160,7 +160,7 @@ export async function refreshFundingWalletBalances(
     wallets.map(async (wallet) => {
       const slot =
         typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
+      const balances = await fetchLiveFundingWalletBalance(wallet.id, slot);
       return { ...wallet, balances };
     })
   );

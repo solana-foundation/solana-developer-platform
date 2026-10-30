@@ -113,7 +113,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
-      "Retrieves balances for a custody wallet. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
+      "Retrieves balances for the exact SDP Wallet ID (`id` from GET /v1/wallets). Provider wallet references are not accepted as path selectors and return 404. The response identifies the wallet with custodyWalletId and does not expose a provider wallet reference. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

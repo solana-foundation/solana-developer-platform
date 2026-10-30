@@ -107,12 +107,8 @@ export async function resolveScope(c: AppContext, retainedCustodyWalletId?: stri
 export type ResolvedScope = Awaited<ReturnType<typeof resolveScope>>;
 
 /**
- * Resolve the wallet addressed by the `walletId` route param (the wallet
- * balances route). A wallet detail read, so a selected API key sees only the
- * wallets it lists (HOO-2099); any other is not found.
- *
- * @param c - Request context.
- * @returns The auth context and the resolved operational wallet.
+ * Resolve the exact SDP wallet addressed by the balance route.
+ * A selected API key sees only the internal IDs in its wallet scope.
  */
 export async function resolveWalletFromParams(c: AppContext) {
   const auth = getAuth(c);
@@ -124,10 +120,10 @@ export async function resolveWalletFromParams(c: AppContext) {
     getDb(c.env),
     c.env,
     new Map()
-  ).findOperationalWallet({
+  ).findOperationalWalletById({
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
-    walletId,
+    custodyWalletId: walletId,
   });
   if (!wallet || !walletAccessAllows(auth.walletAccess, wallet.id)) {
     throw walletNotFound();

@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
 
 import type { CustodyWalletSummary } from "@sdp/types/custody";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { readWalletFavorites, walletFavoritesKey } from "@/lib/wallet-favorites";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import * as custodyActions from "./actions";
 
 const mocks = vi.hoisted(() => ({
   query: "",
-  toast: vi.fn(),
+  toast: Object.assign(vi.fn(), { loading: vi.fn(), success: vi.fn(), error: vi.fn() }),
   refresh: vi.fn(),
   mutate: vi.fn(),
   replaceSearchParams: vi.fn(),
@@ -108,9 +110,42 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("wallet cards", () => {
+  it("keeps the signer-check provider selector while linking to the exact wallet", async () => {
+    const check = vi.spyOn(custodyActions, "checkWalletSignerMemoAction").mockResolvedValue({
+      status: "success",
+      walletId: "provider_selected",
+      signature: "sig",
+    });
+    try {
+      renderOverview({
+        wallets: [makeWallet({ id: "cwlt_selected", walletId: "provider_selected" })],
+      });
+      const user = userEvent.setup();
+      await user.click(
+        screen.getByRole("button", { name: "Wallet actions for Settlement Fireblocks" })
+      );
+      await user.click(await screen.findByRole("menuitem", { name: "Prove ownership" }));
+      await waitFor(() => expect(check).toHaveBeenCalledWith("provider_selected"));
+      expect(
+        screen.getByRole("link", { name: "Open Settlement Fireblocks" }).getAttribute("href")
+      ).toBe("/dashboard/prj_test_sandbox/wallets/cwlt_selected");
+    } finally {
+      check.mockRestore();
+    }
+  });
+
+  it("copies the exact Wallet ID from its card", () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", Object.create(navigator, { clipboard: { value: { writeText } } }));
+    renderOverview({ wallets: [makeWallet({ id: "cwlt_selected", walletId: "provider_shared" })] });
+    fireEvent.click(screen.getByRole("button", { name: "Copy wallet id" }));
+    expect(writeText).toHaveBeenCalledWith("cwlt_selected");
+  });
+
   it("names each wallet with its purpose and provider, root wallets included", () => {
     renderOverview();
     const settlement = screen.getByText("Settlement Fireblocks").closest("article");
@@ -121,7 +156,7 @@ describe("wallet cards", () => {
     expect(within(offRamp as HTMLElement).getByText("Wallet ID")).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Open Off ramp demo wallet" }).getAttribute("href")
-    ).toBe("/dashboard/prj_test_sandbox/wallets/wa-offramp");
+    ).toBe("/dashboard/prj_test_sandbox/wallets/row-2");
   });
 
   it("marks only a wallet whose signing is restricted", () => {
@@ -145,7 +180,7 @@ describe("wallet cards", () => {
     renderOverview();
     expect(document.querySelector("[data-wallets-refreshed-at]")).toBeNull();
     cleanup();
-    mocks.balances = { fb_wallet: [] };
+    mocks.balances = { row: [] };
     renderOverview();
     const time = document.querySelector("[data-wallets-refreshed-at]");
     expect(time?.getAttribute("dateTime")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -215,7 +250,7 @@ describe("favorites", () => {
     fireEvent.click(star);
 
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
     expect(
       screen
@@ -241,30 +276,27 @@ describe("favorites", () => {
       screen.getByRole("button", { name: "Remove Settlement Fireblocks from favorites" })
     );
 
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["wa-offramp"]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row-2"]);
     const [title, options] = mocks.toast.mock.calls[2] as [
       string,
       { action: { onClick: () => void } },
     ];
     expect(title).toBe("Removed from favorites");
     options.action.onClick();
-    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual([
-      "fb_wallet",
-      "wa-offramp",
-    ]);
+    expect(readWalletFavorites(KEY).map((favorite) => favorite.walletId)).toEqual(["row", "row-2"]);
   });
 
   it("renames pins and drops wallets that are gone when the list loads", () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify([
-        { walletId: "wa-offramp", name: "Old name", provider: "dfns" },
+        { walletId: "row-2", name: "Old name", provider: "dfns" },
         { walletId: "deleted", name: "Gone", provider: "para" },
       ])
     );
     renderOverview();
     expect(readWalletFavorites(KEY)).toEqual([
-      { walletId: "wa-offramp", name: "Off ramp demo wallet", provider: "dfns" },
+      { walletId: "row-2", name: "Off ramp demo wallet", provider: "dfns" },
     ]);
   });
 

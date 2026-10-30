@@ -307,6 +307,7 @@ describe("WalletDetailPage", () => {
     const props = await renderPage();
     expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
     await expect(props.balancesPromise).resolves.toEqual({ balances: [solBalance], error: null });
+    expect(mockRequest).toHaveBeenCalledWith("/v1/payments/wallets/wallet_record/balances");
     await expect(props.issuedTokensPromise).resolves.toEqual({});
   });
 

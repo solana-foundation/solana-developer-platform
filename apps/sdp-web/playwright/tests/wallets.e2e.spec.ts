@@ -199,7 +199,7 @@ test.describe
         labelPrefix: "Wallet Routes",
       });
 
-      const encodedWalletId = encodeURIComponent(wallet.walletId);
+      const encodedWalletId = encodeURIComponent(wallet.id);
       const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
       const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 

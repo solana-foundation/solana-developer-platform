@@ -2127,17 +2127,19 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 ## Request
 
+Use the exact SDP Wallet ID (`id` from `GET /v1/wallets`) in `{walletId}`. Provider wallet references are not accepted and return `404`.
+
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
+curl https://api.solana.com/v1/payments/wallets/cwlt_example/balances \
   -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-balances.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
+  "https://api.solana.com/v1/payments/wallets/cwlt_example/balances",
   { headers: { Authorization: "Bearer sf_..." } }
 );
 const { data } = await response.json();
@@ -2147,7 +2149,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
+    .uri(URI.create("https://api.solana.com/v1/payments/wallets/cwlt_example/balances"))
     .header("Authorization", "Bearer sf_...")
     .GET()
     .build();
@@ -2157,13 +2159,13 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Response shape
 
-The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key:
+The payload is wrapped in the standard `data` / `meta` envelope, with the balances under a `walletBalances` key. `custodyWalletId` identifies the requested SDP wallet. Provider wallet references are not included in this response:
 
 ```json title="response.json"
 {
   "data": {
     "walletBalances": {
-      "walletId": "wal_abc123",
+      "custodyWalletId": "cwlt_example",
       "address": "3xYZa...2aBc",
       "balances": [
         {
@@ -22776,19 +22778,19 @@ Source: https://platform.solana.com/docs/reference/api/payments
 ### Get wallet balances
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-wallet-balances
 
-> Retrieves balances for a custody wallet.
+> Retrieves balances for the exact SDP Wallet ID (id from GET /v1/wallets).
 
 `GET /v1/payments/wallets/{walletId}/balances`
 
-If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.
+Provider wallet references are not accepted as path selectors and return 404. The response identifies the wallet with custodyWalletId and does not expose a provider wallet reference. If any SOL or SPL balance read fails, returns 503 instead of partial or zero balances. Optional minimumSlot requires confirmed account state at or after that Solana slot; the response acknowledges the bound in data.balanceReadContext.minimumSlot. Wallet lifecycle and provisioning are managed through /v1/wallets.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.read` action.
 
 ## Path parameters
 
-- **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+- **`walletId`** · `string` · required · min length 1 · example `cwlt_example`
 
-  Provider wallet ID — the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.
+  Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.
 
 ## Query parameters
 
@@ -22812,9 +22814,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       Wallet balances details.
 
-      - **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`custodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets.
 
       - **`address`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -22925,12 +22927,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances' \
+curl 'https://api.solana.com/v1/payments/wallets/cwlt_example/balances' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances", {
+const res = await fetch("https://api.solana.com/v1/payments/wallets/cwlt_example/balances", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -22941,7 +22943,7 @@ const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances",
+r = requests.get("https://api.solana.com/v1/payments/wallets/cwlt_example/balances",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -22951,7 +22953,7 @@ r = requests.get("https://api.solana.com/v1/payments/wallets/privy_wallet_123/ba
 {
   "data": {
     "walletBalances": {
-      "walletId": "privy_wallet_123",
+      "custodyWalletId": "cwlt_example",
       "address": "So11111111111111111111111111111111111111112",
       "balances": [
         {
