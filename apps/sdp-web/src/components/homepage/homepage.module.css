@@ -344,6 +344,7 @@
 .soon {
   display: inline-flex;
   flex: none;
+  width: fit-content;
   align-items: center;
   height: 20px;
   padding: 0 8px;

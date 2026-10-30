@@ -278,12 +278,22 @@
   transform: translateY(-0.02em);
 }
 
-/* the pill after a held-back service, sized with the word so it scales with the bubble */
+/*
+ * The pill after a held-back service, sized with the word so it scales with the bubble. Under
+ * 1000px the bubble is too small for it to be read, so it goes; the drawing's label still names the
+ * held-back services, and the nav, footer and sections carry their own pills.
+ */
 .word .wordSoon {
   height: 1.8em;
   margin-left: 0.5em;
   padding: 0 0.7em;
-  font-size: 0.26em;
+  font-size: max(0.3em, 9px);
+}
+
+@media (max-width: 1000px) {
+  .word .wordSoon {
+    display: none;
+  }
 }
 
 .wordIcon svg {

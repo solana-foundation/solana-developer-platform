@@ -25,7 +25,10 @@ export async function MarketsSection() {
       <div className={cn(shared.wrap, styles.layout)}>
         <Rise index={1} className={styles.head}>
           {comingSoon ? (
-            <ComingSoon label={t("Homepage.comingSoon")} className={shared.soonHead} />
+            <ComingSoon
+              label={t("Homepage.comingSoon")}
+              className={cn(shared.soonHead, styles.soon)}
+            />
           ) : null}
           <FormHeadline
             as="h2"
