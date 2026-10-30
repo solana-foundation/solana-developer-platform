@@ -1742,19 +1742,57 @@ describe("payment transfer batches", () => {
     const confirmed = [
       { slot: 101n, confirmations: 1n, confirmationStatus: "confirmed" as const, err: null },
     ];
-    // A ledger failure rolls the settle back with it: the chunk stays
-    // processing, unaudited, for the next run.
-    const ledgerDown = vi
-      .spyOn(AuditService.prototype, "logSystemWithin")
-      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
-    getSignatureStatusesMock.mockResolvedValueOnce(confirmed);
-    await runInEachClusterScope(() => trackPendingTransfers(env));
-    ledgerDown.mockRestore();
-    const stillProcessing = await getDb(env)
-      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
-      .bind(transferId)
-      .first<{ status: string }>();
-    expect(required(stillProcessing).status).toBe("processing");
+    // The real settle runs, then the ledger refuses its outcome row: every
+    // write the settle made rolls back with it, leaving the chunk processing
+    // and unaudited for the next run.
+    const readChunkState = async () => ({
+      transfer: (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+          .bind(transferId)
+          .first<{ status: string }>()
+      )?.status,
+      recipients: (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfer_recipients WHERE batch_id = ?")
+          .bind(body.data.batch.id)
+          .all<{ status: string }>()
+      ).results.map((row) => row.status),
+      batch: (
+        await getDb(env)
+          .prepare("SELECT status FROM payment_transfer_batches WHERE id = ?")
+          .bind(body.data.batch.id)
+          .first<{ status: string }>()
+      )?.status,
+    });
+    const beforeSettle = await readChunkState();
+    expect(beforeSettle).toEqual({
+      transfer: "processing",
+      recipients: ["processing"],
+      batch: "processing",
+    });
+    const settleSpy = vi.spyOn(
+      batchesRepositoryPostgres,
+      "createPostgresPaymentTransferBatchesRepository"
+    );
+    await getDb(env)
+      .prepare(
+        `ALTER TABLE audit_logs ADD CONSTRAINT test_chunk_outcome_refused
+           CHECK (NOT (action = 'transfer' AND resource_type = 'payment_transfer')) NOT VALID`
+      )
+      .run();
+    try {
+      getSignatureStatusesMock.mockResolvedValueOnce(confirmed);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+    } finally {
+      await getDb(env)
+        .prepare("ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS test_chunk_outcome_refused")
+        .run();
+    }
+    // The settle ran inside the ledger's transaction before the refusal.
+    expect(settleSpy).toHaveBeenCalled();
+    settleSpy.mockRestore();
+    expect(await readChunkState()).toEqual(beforeSettle);
     expect((await readChunkAudit(transferId)).outcome).toBeNull();
 
     getSignatureStatusesMock.mockResolvedValueOnce(confirmed);
