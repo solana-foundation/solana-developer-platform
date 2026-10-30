@@ -328,6 +328,12 @@ export function createGlobeScene({
   function measure(tag: GlobeTag) {
     tagSize.set(tag, { width: tag.offsetWidth, height: tag.offsetHeight });
   }
+  /* writeTags measures both tags before either is placed */
+  function measuredSize(tag: GlobeTag) {
+    const size = tagSize.get(tag);
+    if (!size) throw new Error("globe tag placed before it was measured");
+    return size;
+  }
   function writeTags(flight: Flight) {
     const fromFigure = tagFrom.querySelector("b");
     const fromLine = tagFrom.querySelector("span");
@@ -362,7 +368,7 @@ export function createGlobeScene({
     const PIN = 6;
     const minX = 16 - hostLeft;
     const maxX = Math.min(width, viewportWidth - hostLeft) - 16;
-    const { width: tagWidth, height: tagHeight } = tagSize.get(tag) ?? { width: 0, height: 0 };
+    const { width: tagWidth, height: tagHeight } = measuredSize(tag);
     let flip = px + GAP + tagWidth > maxX;
     let tx = flip ? px - tagWidth - GAP : Math.max(minX, px + GAP);
     if (flip && tx < minX) {

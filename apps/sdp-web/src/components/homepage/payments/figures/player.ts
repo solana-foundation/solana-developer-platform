@@ -35,6 +35,20 @@ type Counter = {
 
 type Sequence = { el: SVGElement; list: string[]; i: number; inc: number; at: number | null };
 
+/**
+ * A data attribute the element was selected by, so it is always present.
+ *
+ * @param el - The element.
+ * @param key - The dataset key, as in `el.dataset`.
+ * @returns The attribute's value.
+ * @throws When the attribute is missing, which would mean the selector and the read disagree.
+ */
+function requireData(el: SVGElement, key: string): string {
+  const value = el.dataset[key];
+  if (value === undefined) throw new Error(`figure element is missing data-${key}`);
+  return value;
+}
+
 export function createFigurePlayer(
   svg: SVGSVGElement,
   locale: string,
@@ -67,7 +81,7 @@ export function createFigurePlayer(
       dec: Number(d.dec || 0),
       dur: Number(d.dur || 0),
       max: d.max != null ? Number(d.max) : null,
-      at: (d.at ?? "").split(",").map(Number),
+      at: requireData(el, "at").split(",").map(Number),
       unit: d.unit || "",
     };
   });
@@ -105,7 +119,7 @@ export function createFigurePlayer(
     const d = el.dataset;
     return {
       el,
-      list: (d.seq ?? "").split("|"),
+      list: requireData(el, "seq").split("|"),
       i: Number(d.i) || 0,
       inc: Number(d.inc || 1),
       at: d.stepAt ? Number(d.stepAt) : null,
