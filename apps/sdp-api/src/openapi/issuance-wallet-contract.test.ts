@@ -26,7 +26,7 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     expect(token?.properties).not.toHaveProperty("signingWalletId");
   });
 
-  it("documents exact action selectors and keeps legacy confirm unchanged", () => {
+  it("documents exact action selectors and saved identity for client-signed follow-ups", () => {
     const doc = createOpenApiDocument();
     const mint = requestSchema(
       doc.paths?.["/v1/issuance/tokens/{tokenId}/mint"]?.post?.requestBody
@@ -45,11 +45,27 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     expect(mint.properties).not.toHaveProperty("signingWalletId");
     expect(burn.required).toContain("signingCustodyWalletId");
     expect(deploy.properties).toHaveProperty("signingCustodyWalletId");
-    expect(confirm.properties).toHaveProperty("signingWalletId");
+    expect(confirm.properties).not.toHaveProperty("signingWalletId");
     expect(confirm.properties).not.toHaveProperty("signingCustodyWalletId");
   });
 
-  it("adds the exact participant-history selector alongside the legacy selector", () => {
+  it("documents an optional prepare body with the exact wallet selector", () => {
+    const doc = createOpenApiDocument();
+    const prepareBody =
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy/prepare"]?.post?.requestBody;
+    const metadataBody =
+      doc.paths?.["/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata"]?.post?.requestBody;
+
+    expect(prepareBody).toMatchObject({ required: false });
+    const prepare = requestSchema(prepareBody);
+    expect(prepare.properties).toHaveProperty("signingCustodyWalletId");
+    expect(prepare.required ?? []).not.toContain("signingCustodyWalletId");
+    expect(prepare.properties).not.toHaveProperty("signingWalletId");
+    expect(prepare.properties).not.toHaveProperty("feePayment");
+    expect(metadataBody).toBeUndefined();
+  });
+
+  it("publishes only the exact participant-history selector", () => {
     const doc = createOpenApiDocument();
     const parameters = doc.paths?.["/v1/issuance/transactions"]?.get?.parameters ?? [];
     const names = parameters.map((parameter) =>
@@ -57,7 +73,7 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     );
 
     expect(names).toContain("custodyWalletId");
-    expect(names).toContain("walletId");
+    expect(names).not.toContain("walletId");
   });
 
   it("documents optional selectors for automatic-authority actions and the live list authority read", () => {

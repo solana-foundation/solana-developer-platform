@@ -247,7 +247,7 @@ describe("issuance authority resolution across an organization's projects", () =
         movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
-        walletId: REQUESTER_WALLET.providerWalletId,
+        custodyWalletId: REQUESTER_WALLET.custodyWalletId,
       })
     ).resolves.toEqual({
       signer,
@@ -271,11 +271,40 @@ describe("issuance authority resolution across an organization's projects", () =
         movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
-        walletId: OWNER_WALLETS[1].providerWalletId,
+        custodyWalletId: OWNER_WALLETS[1].custodyWalletId,
       })
     ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(exactSigner).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      name: "another organization",
+      projectId: REQUESTER_PROJECT_ID,
+      custodyWalletId: OWNER_WALLETS[0].custodyWalletId,
+    },
+    {
+      name: "another project",
+      projectId: OWNER_PROJECT_ID,
+      custodyWalletId: REQUESTER_WALLET.custodyWalletId,
+    },
+  ])(
+    "refuses a client-signed deploy using a Config wallet from $name before loading the signer",
+    async ({ projectId, custodyWalletId }) => {
+      await seedRequesterProjectWallet();
+      const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
+
+      await expect(
+        createLegacyResolvedAuthoritySigner({
+          movement: "issuance.authority",
+          env,
+          auth: clerkAuth(ORGANIZATION_ID, projectId),
+          custodyWalletId,
+        })
+      ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
+      expect(exactSigner).not.toHaveBeenCalled();
+    }
+  );
 
   it("refuses a legacy deploy that names no wallet before any signer is loaded", async () => {
     await seedRequesterProjectWallet();
@@ -286,12 +315,12 @@ describe("issuance authority resolution across an organization's projects", () =
         movement: "issuance.authority",
         env,
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
-        walletId: null,
+        custodyWalletId: null,
       })
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       statusCode: 400,
-      message: "signingWalletId is required for the legacy issuance prepare flow",
+      message: "signingCustodyWalletId is required for client-signed deployment",
     });
     expect(exactSigner).not.toHaveBeenCalled();
   });

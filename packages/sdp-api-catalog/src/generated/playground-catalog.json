@@ -6107,20 +6107,13 @@
         "operationId": "listIssuanceTransactions",
         "title": "List issuance transactions",
         "method": "GET",
-        "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "custodyWalletId",
             "label": "custodyWalletId",
             "description": "Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.",
             "defaultValue": "cwlt_example",
-            "required": false
-          },
-          {
-            "key": "walletId",
-            "label": "walletId",
-            "description": "Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.",
-            "defaultValue": "privy_wallet_123",
             "required": false
           },
           {
@@ -6906,7 +6899,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
+            "required": false
+          }
+        ],
         "expectedResponse": {
           "data": {
             "transaction": {
@@ -6957,7 +6960,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\",\n  \"signingWalletId\": \"privy_wallet_123\"\n}",
+            "defaultValue": "{\n  \"signature\": \"5x...signature\",\n  \"mint\": \"So11111111111111111111111111111111111111112\",\n  \"listAddress\": \"So11111111111111111111111111111111111111112\"\n}",
             "required": true
           }
         ],

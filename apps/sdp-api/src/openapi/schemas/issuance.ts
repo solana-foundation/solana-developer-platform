@@ -17,6 +17,7 @@ import {
   listTokensQuerySchema as listTokensQuerySchemaBase,
   mintSchema as mintSchemaBase,
   pauseTokenSchema as pauseTokenSchemaBase,
+  prepareDeploySchema as prepareDeploySchemaBase,
   removeAllowlistQuerySchema as removeAllowlistQuerySchemaBase,
   seizeSchema as seizeSchemaBase,
   unfreezeSchema as unfreezeSchemaBase,
@@ -995,7 +996,19 @@ export const deployTokenRequestSchema = deployTokenSchemaBase
   })
   .openapi({ description: "Direct token deployment request body." });
 
+export const prepareDeployRequestSchema = prepareDeploySchemaBase
+  .omit({ signingWalletId: true, feePayment: true })
+  .extend({
+    signingCustodyWalletId: withOpenApi(prepareDeploySchemaBase.shape.signingCustodyWalletId, {
+      description:
+        "Optional exact SDP Wallet ID. Omit it to use the token's saved internal wallet choice. An existing pin cannot be replaced with a different wallet.",
+      example: "cwlt_example",
+    }),
+  })
+  .openapi({ description: "Client-signed deployment preparation request body." });
+
 export const confirmDeployRequestSchema = confirmDeploySchemaBase
+  .omit({ signingWalletId: true })
   .extend({
     signature: withOpenApi(confirmDeploySchemaBase.shape.signature, {
       description: "Signature of the confirmed create transaction the client submitted.",
@@ -1009,11 +1022,6 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
       description:
         "Accepted for backward compatibility but ignored: the server re-derives the ABL list-config PDA deterministically from the mint authority and mint.",
       example: "So11111111111111111111111111111111111111112",
-    }),
-    signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
-      description:
-        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.",
-      example: "privy_wallet_123",
     }),
   })
   .openapi({ description: "Confirm non-custodial deploy request body." });

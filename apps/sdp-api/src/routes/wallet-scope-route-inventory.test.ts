@@ -225,7 +225,12 @@ const WALLET_SCOPE_ROUTES = {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/deploy/prepare": { gap: LEGACY_DEPLOY },
+  "POST /v1/issuance/tokens/:tokenId/deploy/prepare": {
+    refusedEarly: {
+      file: "routes/issuance.test.ts",
+      test: "refuses preparation outside the API key's wallet scope without pinning or building",
+    },
+  },
   "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata": { gap: LEGACY_DEPLOY },
   "POST /v1/issuance/tokens/:tokenId/deploy/confirm": { gap: LEGACY_DEPLOY },
   "POST /v1/issuance/tokens/:tokenId/mint": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
@@ -420,7 +425,6 @@ describe("wallet-scope route inventory", () => {
         .filter(([, classification]) => "gap" in classification)
         .map(([route]) => route)
     ).toEqual([
-      "POST /v1/issuance/tokens/:tokenId/deploy/prepare",
       "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata",
       "POST /v1/issuance/tokens/:tokenId/deploy/confirm",
       "POST /v1/helius-rings/rings",

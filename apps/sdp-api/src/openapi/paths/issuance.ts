@@ -9,7 +9,6 @@ import {
   pageSizeQuerySchema,
   tokenIdParamSchema,
   tokenTransactionStatusQuerySchema,
-  walletIdParamSchema,
 } from "@/openapi/schemas/base";
 import {
   addTokenAllowlistRequestSchema,
@@ -23,6 +22,7 @@ import {
   listTokensQueryOpenApiSchema,
   mintRequestSchema,
   pauseTokenRequestSchema,
+  prepareDeployRequestSchema,
   removeTokenAllowlistQuerySchema,
   seizeRequestSchema,
   templateIdParamSchema,
@@ -229,7 +229,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "List issuance transactions",
     operationId: "listIssuanceTransactions",
     description:
-      "Lists issuance transactions across tokens for the current organization or project. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.",
+      "Lists issuance transactions across tokens for the current organization or project. Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. Use custodyWalletId for address and associated-token-account participation history. The retired walletId parameter is rejected, including empty or mixed requests.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -237,9 +237,6 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
         custodyWalletId: custodyWalletIdParamSchema.optional().openapi({
           description:
             "Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.",
-        }),
-        walletId: walletIdParamSchema.optional().openapi({
-          description: "Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.",
         }),
         type: z
           .array(tokenTransactionTypeQuerySchema)
@@ -474,13 +471,17 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Prepare token deploy transaction",
     operationId: "prepareDeployToken",
     description:
-      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.",
+      "Builds an unsigned deploy transaction for client-side signing. Uses the body's optional `signingCustodyWalletId`, else the token's saved internal ID; rejects with 400 when neither exists. The request body may be omitted when the token has a saved choice. Saves the exact wallet before returning, and refuses a different choice when already pinned. Confirmation and metadata preparation use only that saved ID. The retired `signingWalletId` input is rejected.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      body: {
+        required: false,
+        content: jsonContent(prepareDeployRequestSchema),
+      },
     },
     responses: {
       200: {
@@ -499,7 +500,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Confirm non-custodial deploy",
     operationId: "confirmDeploy",
     description:
-      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain using the token's saved `signingCustodyWalletId`, then marks the token deployed. No wallet override is accepted. Missing saved internal identity returns 400 without reconstructing it from a provider reference or address; existing records and the on-chain result are retained. The retired `signingWalletId` input is rejected.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -528,7 +529,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
-      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
+      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Uses only the token's saved `signingCustodyWalletId`; a missing internal ID returns 400 and no provider or address lookup repairs it. Existing records and the on-chain result are retained. The retired `signingWalletId` input is rejected. Returns a null transaction when the on-chain URI already matches.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

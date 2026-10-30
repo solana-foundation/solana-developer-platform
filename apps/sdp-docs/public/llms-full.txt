@@ -13151,7 +13151,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/list-issuance-tr
 
 `GET /v1/issuance/transactions`
 
-Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.
+Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. Use custodyWalletId for address and associated-token-account participation history. The retired walletId parameter is rejected, including empty or mixed requests.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
 
@@ -13160,10 +13160,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 - **`custodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
   Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.
-
-- **`walletId`** · `string` · min length 1 · example `privy_wallet_123`
-
-  Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.
 
 - **`type`** · `string[]` · each one of `mint`, `burn`, `freeze`, `unfreeze`, `seize`, `force_burn`, `update_authority`, `pause`, `unpause`, `deploy` · each example `burn`
 
@@ -14588,7 +14584,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-deploy-t
 
 `POST /v1/issuance/tokens/{tokenId}/deploy/prepare`
 
-A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.
+Uses the body's optional `signingCustodyWalletId`, else the token's saved internal ID; rejects with 400 when neither exists. The request body may be omitted when the token has a saved choice. Saves the exact wallet before returning, and refuses a different choice when already pinned. Confirmation and metadata preparation use only that saved ID. The retired `signingWalletId` input is rejected.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -14603,6 +14599,16 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 - **`x-project-id`** · `string` · min length 1 · example `prj_example`
 
   Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+## Request body
+
+`application/json`
+
+Client-signed deployment preparation request body.
+
+- **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
+
+  Optional exact SDP Wallet ID. Omit it to use the token's saved internal wallet choice. An existing pin cannot be replaced with a different wallet.
 
 ## Responses
 
@@ -14736,15 +14742,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare' \
-  -H "Authorization: Bearer $SDP_API_KEY"
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "signingCustodyWalletId": "cwlt_example"
+  }'
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "signingCustodyWalletId": "cwlt_example"
+  })
 });
 ```
 
@@ -14752,7 +14766,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "signingCustodyWalletId": "cwlt_example"
+  })
 ```
 
 ## Example responses
@@ -14883,7 +14900,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/confirm-deploy
 
 `POST /v1/issuance/tokens/{tokenId}/deploy/confirm`
 
-Verifies the transaction landed on-chain, then marks the token deployed.
+Verifies the transaction landed on-chain using the token's saved `signingCustodyWalletId`, then marks the token deployed. No wallet override is accepted. Missing saved internal identity returns 400 without reconstructing it from a provider reference or address; existing records and the on-chain result are retained. The retired `signingWalletId` input is rejected.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
@@ -14916,10 +14933,6 @@ Confirm non-custodial deploy request body.
 - **`listAddress`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
   Accepted for backward compatibility but ignored: the server re-derives the ABL list-config PDA deterministically from the mint authority and mint.
-
-- **`signingWalletId`** · `string` · min length 1 · example `privy_wallet_123`
-
-  Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.
 
 ## Responses
 
@@ -15216,8 +15229,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confi
   -d '{
     "signature": "5x...signature",
     "mint": "So11111111111111111111111111111111111111112",
-    "listAddress": "So11111111111111111111111111111111111111112",
-    "signingWalletId": "privy_wallet_123"
+    "listAddress": "So11111111111111111111111111111111111111112"
   }'
 ```
 
@@ -15231,8 +15243,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
   body: JSON.stringify({
     "signature": "5x...signature",
     "mint": "So11111111111111111111111111111111111111112",
-    "listAddress": "So11111111111111111111111111111111111111112",
-    "signingWalletId": "privy_wallet_123"
+    "listAddress": "So11111111111111111111111111111111111111112"
   })
 });
 ```
@@ -15245,8 +15256,7 @@ r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/
   json={
     "signature": "5x...signature",
     "mint": "So11111111111111111111111111111111111111112",
-    "listAddress": "So11111111111111111111111111111111111111112",
-    "signingWalletId": "privy_wallet_123"
+    "listAddress": "So11111111111111111111111111111111111111112"
   })
 ```
 
@@ -15431,7 +15441,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance/prepare-deploy-m
 
 `POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata`
 
-When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.
+When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Uses only the token's saved `signingCustodyWalletId`; a missing internal ID returns 400 and no provider or address lookup repairs it. Existing records and the on-chain result are retained. The retired `signingWalletId` input is rejected. Returns a null transaction when the on-chain URI already matches.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.execute` action.
 
