@@ -47,7 +47,11 @@ export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
       <Link
         href={node.url}
         onClick={onNavigate}
-        className={cn("launch-docs-nav-item", isActive && "is-active")}
+        className={cn(
+          "launch-docs-nav-item",
+          node.url === "/docs" && "is-start",
+          isActive && "is-active"
+        )}
         aria-current={isActive ? "page" : undefined}
       >
         {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}

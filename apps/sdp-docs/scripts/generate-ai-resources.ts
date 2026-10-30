@@ -279,8 +279,6 @@ function buildSections(
   // The full AI corpus keeps the overview even though the sidebar links to it
   // only from the home page.
   visit("introduction", "", null);
-  // The docs home is reached through the brand, not a sidebar entry.
-  visit("index", "", null);
   for (const entry of meta.pages || []) {
     visit(entry, "", null);
   }

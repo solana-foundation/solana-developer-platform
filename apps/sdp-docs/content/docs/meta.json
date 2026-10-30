@@ -1,6 +1,7 @@
 {
   "title": "Solana Developer Platform Docs",
   "pages": [
+    "index",
     "---Learn---",
     "tutorials/index",
     "developing-with-sdp/index",

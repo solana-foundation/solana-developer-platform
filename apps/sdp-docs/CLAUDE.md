@@ -129,11 +129,10 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
-The root `meta.json` groups direct links under Learn, Modules and Resources.
-`/docs` is the home page, reached through the sidebar brand rather than another
-nav entry. Keep detailed guides linked from their section landing pages and
-searchable; `generate:ai` includes every published page, including the home,
-in `llms-full.txt` whether or not it appears in the sidebar.
+The root `meta.json` keeps Get started first, then groups direct links under
+Learn, Modules and Resources. Keep detailed guides linked from their section
+landing pages and searchable; `generate:ai` includes every published page in
+`llms-full.txt` whether or not it appears in the sidebar.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
