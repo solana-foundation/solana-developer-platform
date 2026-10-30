@@ -59,6 +59,7 @@ import {
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
+  keepAttemptRevokeFence,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -710,7 +711,7 @@ export async function activateRecurringPayment(input: {
       recurringPaymentId: input.recurringPayment.id,
       custodyWalletIds: [input.sourceWallet.id],
     });
-    const revokeFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
+    const claimFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
       projectId: input.projectId,
       custodyWalletIds: [input.sourceWallet.id],
     });
@@ -732,6 +733,13 @@ export async function activateRecurringPayment(input: {
       nowIso,
       recoveringStaleActivation,
       idempotencyKey: input.idempotencyKey,
+    });
+    const revokeFence = await keepAttemptRevokeFence(tx, {
+      attempt: "activation",
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      fence: claimFence,
     });
     return { claimed, attempt, revokeFence };
   });

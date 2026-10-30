@@ -83,6 +83,7 @@ import {
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
+  keepAttemptRevokeFence,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -2122,7 +2123,7 @@ async function claimActiveRecurringPaymentUpdate(input: {
         ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
         : [input.sourceWallet.id],
     });
-    const revokeFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
+    const claimFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
       projectId: input.projectId,
       custodyWalletIds: input.newSourceCustodyWalletId
         ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
@@ -2164,6 +2165,13 @@ async function claimActiveRecurringPaymentUpdate(input: {
       recoveringStaleUpdate: input.recoveringStaleUpdate,
       idempotency: input.idempotency,
       previousActivator,
+    });
+    const revokeFence = await keepAttemptRevokeFence(tx, {
+      attempt: "update",
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      fence: claimFence,
     });
     return { claimed, attempt, revokeFence };
   });

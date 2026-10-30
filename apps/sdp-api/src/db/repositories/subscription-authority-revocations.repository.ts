@@ -29,6 +29,28 @@ import type { DatabaseExecutor } from "@/db/client";
  */
 const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
 
+/**
+ * The revokes a claim saw on each of its wallets, under their locks (HOO-2339). An operator's
+ * incident revoke claims under the same lock but skips the idle predicate, so it can close an
+ * authority under an activation or update that claimed first. Before that work sends the setup
+ * that creates an authority, or the subscribe that binds a schedule to one, it recounts, so it
+ * never recreates or subscribes to an authority revoked after its claim. The attempt keeps its
+ * first claim's fence (migration 0196), so recovering it later checks against that claim.
+ */
+export interface SubscriptionAuthorityRevokeFence {
+  wallets: readonly { walletAddress: string; environment: SdpEnvironment; revocations: number }[];
+}
+
+const revokeFenceSchema = z.object({
+  wallets: z.array(
+    z.object({
+      walletAddress: z.string(),
+      environment: z.enum(SDP_ENVIRONMENTS),
+      revocations: z.number().int().nonnegative(),
+    })
+  ),
+});
+
 const revocationRowSchema = z.object({
   id: z.string(),
   organization_id: z.string(),
@@ -199,6 +221,17 @@ export interface SubscriptionAuthorityRevocationsRepository {
    * wallet's lock.
    */
   countRevocations(input: { environment: SdpEnvironment; walletAddress: string }): Promise<number>;
+  /**
+   * Stores `fence` on the attempt unless it already has one, in its claim's transaction, and
+   * returns the attempt's fence: the one its first claim saw, so a recovery checks against that.
+   */
+  keepAttemptRevokeFence(input: {
+    attempt: "activation" | "update";
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+    fence: SubscriptionAuthorityRevokeFence;
+  }): Promise<SubscriptionAuthorityRevokeFence>;
   /** Whether a revoke holds any of the wallet's authorities. Call under the wallet's lock. */
   hasRevocationHolding(input: {
     environment: SdpEnvironment;
@@ -283,7 +316,11 @@ export interface SubscriptionAuthorityRevocationsRepository {
     subscriptionAuthorityAddress: string;
     excludeRecurringPaymentId: string;
   }): Promise<SharingRecurringPayment[]>;
-  /** Whether a revoke of the authority has confirmed at or after `since`. */
+  /**
+   * Whether a revoke of the authority has confirmed at or after `since`. A confirmed row changes
+   * no more, so its `updated_at` is when it confirmed; a revoke claimed before `since` that
+   * confirms after it counts.
+   */
   hasConfirmedRevocationSince(input: {
     environment: SdpEnvironment;
     subscriptionAuthorityAddress: string;
@@ -338,6 +375,24 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
         "SELECT pg_advisory_xact_lock(hashtext('sdp:subscription-authority'), hashtext(?::text))",
         [walletAddress]
       );
+    },
+
+    async keepAttemptRevokeFence({ attempt, attemptId, organizationId, projectId, fence }) {
+      const table =
+        attempt === "activation"
+          ? "payment_recurring_payment_activation_attempts"
+          : "payment_recurring_payment_update_attempts";
+      const row = await db.queryOne<{ revoke_fence: unknown }>(
+        `UPDATE ${table}
+            SET revoke_fence = COALESCE(revoke_fence, ?::jsonb)
+          WHERE id = ? AND organization_id = ? AND project_id = ?
+          RETURNING revoke_fence`,
+        [JSON.stringify(fence), attemptId, organizationId, projectId]
+      );
+      if (!row) {
+        throw new Error(`Recurring payment ${attempt} attempt ${attemptId} not found`);
+      }
+      return revokeFenceSchema.parse(row.revoke_fence);
     },
 
     async countRevocations({ environment, walletAddress }) {
@@ -491,7 +546,7 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
       const row = await db.queryOne(
         `SELECT 1 AS revoked FROM payment_subscription_authority_revocations
           WHERE environment = ? AND subscription_authority_address = ?
-            AND status = 'confirmed' AND created_at >= ?
+            AND status = 'confirmed' AND updated_at >= ?
           LIMIT 1`,
         [environment, subscriptionAuthorityAddress, since]
       );
