@@ -152,7 +152,7 @@ export function makeFig({
   const SANS = fonts.sans;
   const MONO = fonts.mono;
   const P = (x: number, y: number, z = 0): Pt => [ox + (x - y) * C * k, oy + ((x + y) * S - z) * k];
-  const P3 = (p: Pt) => P(p[0], p[1], p[2] ?? 0);
+  const projectPoint = (p: Pt) => P(p[0], p[1], p[2] ?? 0);
   const pts = (a: Pt[]) => a.map((p) => `${r2(p[0])},${r2(p[1])}`).join(" ");
   const d2 = (a: Pt[], close?: boolean) =>
     `M${a.map((p) => `${r2(p[0])} ${r2(p[1])}`).join("L")}${close ? "Z" : ""}`;
@@ -324,7 +324,7 @@ export function makeFig({
 
   const api = {
     P,
-    P3,
+    projectPoint,
     d2,
     pts,
     INK,
@@ -464,8 +464,8 @@ export function makeFig({
     },
 
     line(a: Pt, b: Pt, st: Stroke = {}) {
-      const A = P3(a);
-      const B = P3(b);
+      const A = projectPoint(a);
+      const B = projectPoint(b);
       emit(`<path d="${d2([A, B])}" ${strokeAttrs(st)}/>`);
       if (st.arrow) api.head(B, A, 6, st.stroke);
     },

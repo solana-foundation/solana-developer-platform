@@ -58,7 +58,7 @@ export function depositScene({ fonts, label, copy }: SceneInput): string {
   );
   const poly = (a: Pt[], f: string) =>
     g.raw(
-      `<polygon points="${g.pts(a.map(g.P3))}" fill="${f}" stroke="${g.LINE}" stroke-width="1" stroke-linejoin="round" ${SW}/>`
+      `<polygon points="${g.pts(a.map(g.projectPoint))}" fill="${f}" stroke="${g.LINE}" stroke-width="1" stroke-linejoin="round" ${SW}/>`
     );
   poly(
     [
