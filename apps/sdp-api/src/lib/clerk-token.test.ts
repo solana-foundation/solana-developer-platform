@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { errors, generateKeyPair, SignJWT } from "jose";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ClerkKeysUnavailableError,
   isSigningKeyFetchFailure,
   verifyClerkJwt,
   warmClerkSigningKeys,
 } from "@/lib/clerk-token";
+import { getLogger } from "@/runtime/logger";
 import { ensureTestClerkIssuer, signTestClerkClaims } from "@/test/helpers/clerk";
 import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
@@ -161,6 +162,10 @@ describe("Clerk signing key resolution", () => {
 });
 
 describe("Clerk authorized party", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   async function envFor(environment: Env["ENVIRONMENT"]): Promise<Env> {
     const { issuer, jwksUrl } = await ensureTestClerkIssuer({ ...testEnv });
     return {
@@ -183,14 +188,23 @@ describe("Clerk authorized party", () => {
   });
 
   it.each([
-    ["no azp", { sub: "user_no_azp" }],
-    ["another origin's azp", { sub: "user_foreign_azp", azp: "https://evil.example" }],
-  ])("refuses a production token with %s", async (_label, claims) => {
+    ["no azp", { sub: "user_no_azp" }, null],
+    [
+      "another origin's azp",
+      { sub: "user_foreign_azp", azp: "https://evil.example" },
+      "https://evil.example",
+    ],
+  ])("refuses a production token with %s", async (_label, claims, azp) => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => undefined);
     const env = await envFor("production");
     const token = await signTestClerkClaims(claims, 300);
 
     await expect(verifyClerkJwt(token, env)).rejects.toThrow(
       "Clerk session was not issued to the dashboard"
+    );
+    expect(warn).toHaveBeenCalledWith(
+      { event: "sdp_api_clerk_session_azp_refused", azp, clerk_user_id: claims.sub },
+      "Clerk session refused: not issued to the dashboard"
     );
   });
 
