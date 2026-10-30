@@ -70,6 +70,11 @@ import {
 const CANCEL_MOVEMENT = "recurring.cancel" satisfies MovementOf<"recurring_payments">;
 const CANCEL_FAILED_MESSAGE = "Recurring payment cancellation failed on-chain";
 
+/** A new lifecycle attempt id. */
+function newLifecycleAttemptId(): string {
+  return `prpl_${crypto.randomUUID()}`;
+}
+
 /**
  * What a cancel attempt records about its claim (HOO-2340): the status it claimed the schedule
  * from and, for a paused one, its pause reason, which the claim clears. A cancel that definitely
@@ -187,7 +192,7 @@ async function getOrCreateCancelAttempt(input: {
     throw internalError("A stale recurring payment cancel claim has no in-flight attempt");
   }
   const attempt = await input.recurringRepo.createLifecycleAttempt({
-    id: `prpl_${crypto.randomUUID()}`,
+    id: newLifecycleAttemptId(),
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPaymentId: input.claimed.id,
@@ -230,7 +235,7 @@ async function answerFinalLifecycle(input: {
   }
   const answeredAt = new Date().toISOString();
   const attempt = await input.recurringRepo.createLifecycleAttempt({
-    id: `prpl_${crypto.randomUUID()}`,
+    id: newLifecycleAttemptId(),
     organizationId: input.organizationId,
     projectId: input.projectId,
     recurringPaymentId: input.recurringPayment.id,
@@ -257,6 +262,7 @@ async function answerFinalLifecycle(input: {
  *
  * @param input.env - Runtime environment.
  * @param input.attempt - The cancel attempt, whose metadata records the claim.
+ * @param input.claimedUpdatedAt - The schedule's `updated_at` as this run's claim wrote it.
  * @param input.organizationId - Tenant organization.
  * @param input.projectId - Tenant project.
  * @param input.stage - The stage it failed at.
@@ -267,18 +273,14 @@ async function answerFinalLifecycle(input: {
 async function recordCancelFailure(input: {
   env: Env;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
+  claimedUpdatedAt: string;
   organizationId: string;
   projectId: string;
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   error: Error;
   failedAt: string;
 }): Promise<void> {
-  // Attempts from the release before HOO-2340 record `{}`; that release claimed only from `active`.
-  const claim = cancelAttemptMetadataSchema.parse(
-    Object.keys(input.attempt.metadata).length === 0
-      ? { claimedFrom: "active", pausedReason: null }
-      : input.attempt.metadata
-  );
+  const claim = cancelAttemptMetadataSchema.parse(input.attempt.metadata);
   const restored =
     claim.claimedFrom === "active"
       ? { status: "active" as const, pausedReason: null }
@@ -302,6 +304,7 @@ async function recordCancelFailure(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       ...restored,
+      claimedUpdatedAt: input.claimedUpdatedAt,
       updatedAt: input.failedAt,
     });
     if (updatedRecurringPayment === null)
@@ -610,8 +613,19 @@ async function runRecurringPaymentCancel(input: {
     // send's own failure.
     const canceledElsewhere = async (sendError: Error) => {
       if (signature !== null && !isDefiniteSubmissionError(sendError)) return false;
-      const delegation = await readDelegation("finalized").catch(() => null);
-      return delegation !== null && isCanceled(delegation);
+      try {
+        return isCanceled(await readDelegation("finalized"));
+      } catch (readError) {
+        getLogger().warn(
+          {
+            error: readError instanceof Error ? readError.message : String(readError),
+            recurring_payment_id: claimed.id,
+            attempt_id: attempt.id,
+          },
+          "Recurring payment cancel could not read its delegation after a failed send"
+        );
+        return false;
+      }
     };
     const lifecycleStep = {
       env: input.env,
@@ -767,6 +781,7 @@ async function runRecurringPaymentCancel(input: {
       await recordCancelFailure({
         env: input.env,
         attempt,
+        claimedUpdatedAt: claimed.updated_at,
         organizationId: input.organizationId,
         projectId: input.projectId,
         stage: currentStage,
@@ -831,7 +846,7 @@ async function cancelPendingRecurringPayment(input: {
       throw conflict("Recurring payment status changed before it could be canceled");
     }
     const attempt = await recurringRepo.createLifecycleAttempt({
-      id: `prpl_${crypto.randomUUID()}`,
+      id: newLifecycleAttemptId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.recurringPayment.id,
@@ -970,7 +985,7 @@ export async function resumeRecurringPayment(input: {
       throw conflict("Subscription changed before the recurring payment could be resumed");
     }
     const attempt = await recurringRepo.createLifecycleAttempt({
-      id: `prpl_${crypto.randomUUID()}`,
+      id: newLifecycleAttemptId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: recurringPayment.id,
