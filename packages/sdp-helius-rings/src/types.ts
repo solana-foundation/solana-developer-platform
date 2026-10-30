@@ -40,7 +40,7 @@ export interface ProofArtifact {
 
 export interface PrivateWallet {
   id: string;
-  sdpWalletId: string;
+  custodyWalletId: string;
   name: string;
   shieldedAddress: string | null;
   status: WalletStatus;

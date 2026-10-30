@@ -164,10 +164,22 @@ describe("pollRingsIndexing", () => {
       createdBy: TEST_USER.id,
     });
 
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_hr_job_test', ?, ?, 'privy', '{}')`,
+      [TEST_ORG.id, TEST_PROJECT_ID]
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES ('cw_hr_job_test', 'cfg_hr_job_test', 'wal_hr_job_test', ?)`,
+      [OWNER]
+    );
+
     const wallets = createHeliusRingsWalletRepository(env);
     const wallet = await wallets.createWallet({
       ...tenant,
       sdpWalletId: "wal_hr_job_test",
+      custodyWalletId: "cw_hr_job_test",
       name: "Treasury",
       materialTag: "simulated",
     });

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
   type ClaimHeliusRingsWalletInput,
@@ -33,7 +34,7 @@ function mapRow(row: Record<string, unknown>): HeliusRingsWalletRow {
       row.last_indexed_slot === null || row.last_indexed_slot === undefined
         ? null
         : String(row.last_indexed_slot),
-    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
+    custody_wallet_id: z.string().min(1).parse(row.custody_wallet_id),
     material_tag: row.material_tag as HeliusRingsWalletRow["material_tag"],
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
@@ -59,15 +60,9 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
            -- Self-assignment so RETURNING * emits the row that already exists.
            -- DO NOTHING would return zero rows and make a retried provision
            -- look like a failure.
-           DO UPDATE SET updated_at = helius_rings_wallets.updated_at,
-                         -- Fills in the link for a wallet created before this
-                         -- column existed, but never repoints one that is
-                         -- already bound: the identity on chain was registered
-                         -- to that custody wallet and cannot be moved.
-                         custody_wallet_id = COALESCE(
-                           helius_rings_wallets.custody_wallet_id,
-                           EXCLUDED.custody_wallet_id
-                         )
+           DO UPDATE SET updated_at = helius_rings_wallets.updated_at
+           WHERE helius_rings_wallets.organization_id = EXCLUDED.organization_id
+             AND helius_rings_wallets.custody_wallet_id = EXCLUDED.custody_wallet_id
            RETURNING *`
         )
         .bind(
@@ -77,7 +72,7 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
           input.sdpWalletId,
           input.name,
           input.materialTag,
-          input.custodyWalletId ?? null
+          input.custodyWalletId
         )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;

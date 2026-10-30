@@ -29,6 +29,16 @@ const scope = {
   projectId: TEST_PROJECT_ID,
 };
 
+async function seedCustodyWallet(providerWalletId: string) {
+  const id = `cw_${providerWalletId}`;
+  await getDb(env).execute(
+    `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+     VALUES (?, 'cfg_hro_repo_test', ?, 'Owner')`,
+    [id, providerWalletId]
+  );
+  return id;
+}
+
 function shieldIntent(
   overrides: Partial<ReserveHeliusRingsIntentInput> = {}
 ): ReserveHeliusRingsIntentInput {
@@ -123,12 +133,19 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       ids: { sandbox: TEST_PROJECT_ID, production: OTHER_PROJECT_ID },
     });
 
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_hro_repo_test', ?, ?, 'privy', '{}')`,
+      [TEST_ORG.id, TEST_PROJECT_ID]
+    );
+
     walletRepo = createPostgresHeliusRingsWalletRepository(db);
     repo = createPostgresHeliusRingsOperationRepository(db);
 
     const wallet = await walletRepo.createWallet({
       ...scope,
       sdpWalletId: "wal_hro_repo_test",
+      custodyWalletId: await seedCustodyWallet("wal_hro_repo_test"),
       name: "Treasury",
       materialTag: "simulated",
     });
@@ -558,6 +575,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
       const other = await walletRepo.createWallet({
         ...scope,
         sdpWalletId: "wal_hro_zone_other",
+        custodyWalletId: await seedCustodyWallet("wal_hro_zone_other"),
         name: "Operations",
         materialTag: "simulated",
       });
@@ -637,6 +655,7 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
         const row = await walletRepo.createWallet({
           ...scope,
           sdpWalletId: `wal_inflight_${tag}`,
+          custodyWalletId: await seedCustodyWallet(`wal_inflight_${tag}`),
           name: tag,
           materialTag: "simulated",
         });

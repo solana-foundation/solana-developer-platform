@@ -18,7 +18,7 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
 /** The wallet this control is offered for: provisioning never completed. */
 const WALLET: RingsWallet = {
   id: "hrw_pending",
-  sdpWalletId: "wal_pending",
+  custodyWalletId: "wal_pending",
   name: "Treasury",
   shieldedAddress: null,
   status: "pending",

@@ -7,7 +7,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { getRingsSetupStatus } from "@/services/helius-rings/connection.service";
 import type { HeliusRingsActor } from "@/services/helius-rings/service";
@@ -21,6 +21,7 @@ import {
   requireParam,
   requireRingsOperation,
   requireRingsWallet,
+  resolveRingsWalletOwner,
   withRingsErrors,
 } from "./context";
 import {
@@ -102,7 +103,7 @@ export async function createRingsWallet(c: AppContext) {
   const { tenant } = tenantOf(c);
 
   const scope = await resolveScope(c);
-  const custodyWallet = resolveWallet(scope.wallets, parsed.data.walletId);
+  const custodyWallet = resolveWalletByCustodyWalletId(scope.wallets, parsed.data.custodyWalletId);
   assertCallerWalletInScope(getAuth(c), custodyWallet.id);
 
   const service = getHeliusRingsService(c, tenant);
@@ -125,8 +126,11 @@ export async function createRingsWallet(c: AppContext) {
 export async function listRingsWallets(c: AppContext) {
   const { tenant } = tenantOf(c);
   const limit = listLimitSchema.parse(c.req.query("limit"));
-  const rows = await getHeliusRingsWalletRepository(c).listWallets({ ...tenant, limit });
-  return success(c, { wallets: rows.map(mapHeliusRingsWalletRow) });
+  const repository = getHeliusRingsWalletRepository(c);
+  const rows = await repository.listWallets({ ...tenant, limit });
+  return success(c, {
+    wallets: rows.map(mapHeliusRingsWalletRow),
+  });
 }
 
 /** GET /wallets/:walletId */
@@ -174,8 +178,7 @@ export async function rekeyRingsWallet(c: AppContext) {
   const walletId = requireParam(c, "walletId");
   const ringsWallet = await requireRingsWallet(c, tenant, walletId, "write");
 
-  const scope = await resolveScope(c);
-  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+  const owner = await resolveRingsWalletOwner(c, ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
   const wallet = await withRingsErrors(() =>
@@ -183,7 +186,7 @@ export async function rekeyRingsWallet(c: AppContext) {
       walletId,
       {
         confirmation: parsed.data.confirmation,
-        custodyOwner: custodyWallet?.publicKey ?? null,
+        custodyOwner: owner,
       },
       auditActorFromAuth(auth)
     )
@@ -262,13 +265,10 @@ export async function getRingsWalletIdentity(c: AppContext) {
   });
   if (!ringsWallet) throw notFound("rings wallet");
 
-  const scope = await resolveScope(c);
-  const custodyWallet = scope.wallets.find((entry) => entry.walletId === ringsWallet.sdp_wallet_id);
+  const owner = await resolveRingsWalletOwner(c, ringsWallet);
 
   const service = getHeliusRingsService(c, tenant);
-  const identity = await withRingsErrors(() =>
-    service.readWalletIdentity(walletId, custodyWallet?.publicKey ?? null)
-  );
+  const identity = await withRingsErrors(() => service.readWalletIdentity(walletId, owner));
   return success(c, { identity });
 }
 
