@@ -16,7 +16,7 @@ import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { createApp } from "@/app";
 import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
 import { parseDatabaseEnv } from "@/db/database-env";
-import { warmClerkSigningKeys } from "@/lib/clerk-token";
+import { assertClerkConfigured, warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -119,6 +119,7 @@ export function assertRequiredEnv(env: Env): void {
     throw new Error("API_KEY_PEPPER is required");
   }
   resolveGatewayIdentityConfig(env);
+  assertClerkConfigured(env);
   parseDatabaseEnv(env);
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
