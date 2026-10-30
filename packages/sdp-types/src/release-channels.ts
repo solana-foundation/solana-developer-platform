@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "./api-keys";
 import {
   BYOK_CUSTODY_PROVIDERS,
   type ByokCustodyProvider,
@@ -42,10 +43,16 @@ export const SDP_RELEASE_CHANNEL_NAMES = ["experimental", "beta", "stable"] as c
 
 export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
 
+/** A module's maturity in each SDP environment (Sandbox on devnet, Production on mainnet). */
+export type SdpEnvironmentMaturity = Readonly<Record<SdpEnvironment, SdpReleaseChannel>>;
+
 /**
- * Each module's maturity. A release channel runs every module at or above its
- * own level, so each channel contains the more mature ones by construction.
- * Promoting a module is a one-line change here.
+ * Each module's maturity per environment. A release channel runs a module for an
+ * environment's projects when that environment's maturity is at or above the channel's
+ * level, so each channel contains the more mature ones by construction. Deployment-wide
+ * readers (jobs, flags, the public surface) count a module in when either environment
+ * is; `projectContextMiddleware({ module })` refuses a project whose environment is not.
+ * Promoting a module, or one environment of it, is a one-line change here.
  *
  * Three modules have no maturity of their own:
  * - Custody is in a release channel when at least one (provider, custody mode)
@@ -57,15 +64,18 @@ export type SdpReleaseChannel = (typeof SDP_RELEASE_CHANNEL_NAMES)[number];
  *   sub-module always takes effect.
  */
 export const SDP_MODULE_MATURITY = {
-  payments: "stable",
-  recurring_payments: "stable",
-  compliance: "experimental",
-  issuance: "experimental",
-  earn: "beta",
-  dvp: "experimental",
-  private_channels: "experimental",
-  helius_rings: "experimental",
-} as const satisfies Record<Exclude<SdpModule, "custody" | "ramps" | "markets">, SdpReleaseChannel>;
+  payments: { sandbox: "stable", production: "stable" },
+  recurring_payments: { sandbox: "stable", production: "stable" },
+  compliance: { sandbox: "experimental", production: "experimental" },
+  issuance: { sandbox: "experimental", production: "experimental" },
+  earn: { sandbox: "beta", production: "beta" },
+  dvp: { sandbox: "experimental", production: "experimental" },
+  private_channels: { sandbox: "experimental", production: "experimental" },
+  helius_rings: { sandbox: "experimental", production: "experimental" },
+} as const satisfies Record<
+  Exclude<SdpModule, "custody" | "ramps" | "markets">,
+  SdpEnvironmentMaturity
+>;
 
 /**
  * Each custody provider's maturity, per custody mode. Promoting a (provider, mode)
@@ -200,7 +210,48 @@ export function isModuleInReleaseChannel(
       isModuleInReleaseChannel(releaseChannel, "dvp", rampProviderMaturity)
     );
   }
-  return isMaturityInReleaseChannel(SDP_MODULE_MATURITY[module], releaseChannel);
+  return SDP_ENVIRONMENTS.some((environment) =>
+    isMaturityInReleaseChannel(SDP_MODULE_MATURITY[module][environment], releaseChannel)
+  );
+}
+
+/**
+ * Whether the release channel runs `module` for projects in `environment`. Custody and
+ * ramps carry no per-environment maturity, so they answer as `isModuleInReleaseChannel`;
+ * Markets is in when Earn or DvP is for the environment.
+ *
+ * @param releaseChannel - The deployment's release channel.
+ * @param module - The module the request belongs to.
+ * @param environment - The project's environment.
+ * @param rampProviderMaturity - `SDP_RAMP_PROVIDER_MATURITY`; tests pass their own table.
+ * @returns True when the channel runs the module for that environment.
+ */
+export function isModuleInReleaseChannelForEnvironment(
+  releaseChannel: SdpReleaseChannel,
+  module: SdpModule,
+  environment: SdpEnvironment,
+  rampProviderMaturity: SdpRampProviderMaturity
+): boolean {
+  if (module === "custody" || module === "ramps") {
+    return isModuleInReleaseChannel(releaseChannel, module, rampProviderMaturity);
+  }
+  if (module === "markets") {
+    return (
+      isModuleInReleaseChannelForEnvironment(
+        releaseChannel,
+        "earn",
+        environment,
+        rampProviderMaturity
+      ) ||
+      isModuleInReleaseChannelForEnvironment(
+        releaseChannel,
+        "dvp",
+        environment,
+        rampProviderMaturity
+      )
+    );
+  }
+  return isMaturityInReleaseChannel(SDP_MODULE_MATURITY[module][environment], releaseChannel);
 }
 
 function modulesInReleaseChannel(releaseChannel: SdpReleaseChannel): readonly SdpModule[] {

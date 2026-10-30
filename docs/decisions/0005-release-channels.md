@@ -16,12 +16,14 @@ flag: their dashboard flags hide the UI, but the API still serves their routes.
 
 `SDP_RELEASE_CHANNEL` selects a release channel: the set of modules a
 deployment can run.
-
 - A module outside the release channel is disabled in the API, background jobs
   and dashboard, regardless of its flag. Inside it, module flags apply as before.
-- Each module has a maturity in code (`SDP_MODULE_MATURITY`). A release
-  channel runs every module at or above its own level, so each channel contains
-  the more mature ones. A test pins each channel's module list.
+- Each module has a maturity per environment in code (`SDP_MODULE_MATURITY`,
+  Sandbox and Production). A release channel runs a module for an environment's
+  projects when that environment's maturity is at or above its own level, so each
+  channel contains the more mature ones. Deployment-wide checks count a module in
+  when either environment is; project requests are refused per environment by the
+  project context middleware. A test pins each channel's module list.
 - Ramps has no maturity of its own. Each ramp provider has one
   (`SDP_RAMP_PROVIDER_MATURITY`), and Ramps is in a release channel when at least
   one provider is, so providers launch one at a time.
@@ -31,11 +33,11 @@ deployment can run.
   startup in the API, its jobs and the dashboard server. Builds do not read it.
   Names are lowercase and case-sensitive.
 
-| Release channel | Modules                                           | Target deployment                            |
-| --------------- | ------------------------------------------------- | -------------------------------------------- |
-| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                            |
-| `beta`          | `stable` plus modules in final validation         | None yet                                     |
-| `experimental`  | All modules                                       | Development, previews, self-hosted           |
+| Release channel | Modules                                           | Target deployment                  |
+| --------------- | ------------------------------------------------- | ---------------------------------- |
+| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                  |
+| `beta`          | `stable` plus modules in final validation         | None yet                           |
+| `experimental`  | All modules                                       | Development, previews, self-hosted |
 
 Every deployment starts on `experimental`, which matches the behavior before
 release channels. Stage and production move to `beta` and `stable` in a later

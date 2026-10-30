@@ -3,7 +3,9 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { badRequest, forbidden, notFound, unauthorized } from "@/lib/errors";
+import { isModuleAvailableForEnvironment } from "@/lib/feature-flags";
 import { isProductionEntitled, productionNotEnabled } from "@/lib/production-entitlement";
+import { routeOwnerOf } from "@/routes/route-modules";
 import type { Env } from "@/types/env";
 
 const PROJECT_HEADER = "x-project-id";
@@ -37,8 +39,10 @@ export interface ProjectContextOptions {
  * Settles the project and environment a request acts on, for every actor
  * (API key, Clerk, approved-operation replay), and is the one place that
  * refuses a production project whose organization lacks the production
- * entitlement (APE-351). Listing filters alone left stale selectors, production
- * API keys and approval replays working.
+ * entitlement (APE-351), and a project whose environment the release channel
+ * does not run the route's module for (`SDP_MODULE_MATURITY` is per environment;
+ * the module comes from `routes/route-modules.ts`). Listing filters alone left
+ * stale selectors, production API keys and approval replays working.
  */
 export function projectContextMiddleware(options: ProjectContextOptions = {}) {
   // Named, so the route inventory test can see which routes it guards.
@@ -53,6 +57,22 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
       !(await options.allowUnentitledProduction?.(c))
     ) {
       throw productionNotEnabled();
+    }
+
+    const routeModule = routeOwnerOf(c.req.path);
+    if (
+      routeModule !== undefined &&
+      routeModule !== "core" &&
+      !isModuleAvailableForEnvironment(
+        c.env,
+        routeModule,
+        scope.environment,
+        c.get("rampProviderMaturity")
+      )
+    ) {
+      throw forbidden(
+        `The ${routeModule} module is not available for ${scope.environment} projects in this release channel.`
+      );
     }
 
     c.set("projectId", scope.projectId);

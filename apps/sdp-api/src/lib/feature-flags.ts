@@ -1,10 +1,12 @@
 import { KORA_ENV_KEYS } from "@sdp/fee-payment";
 import type { FeePaymentEnv } from "@sdp/fee-payment/port";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   isCustodyProviderInReleaseChannel,
   isModuleInReleaseChannel,
+  isModuleInReleaseChannelForEnvironment,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
@@ -33,6 +35,30 @@ export function isModuleAvailable(
   return isModuleInReleaseChannel(
     resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
     module,
+    rampProviderMaturity
+  );
+}
+
+/**
+ * Whether the deployment's release channel runs `module` for projects in `environment`
+ * (`SDP_MODULE_MATURITY` is per environment).
+ *
+ * @param env - Process environment naming the release channel.
+ * @param module - The module the request belongs to.
+ * @param environment - The project's environment.
+ * @param rampProviderMaturity - `SDP_RAMP_PROVIDER_MATURITY`; tests pass their own table.
+ * @returns True when the channel runs the module for that environment.
+ */
+export function isModuleAvailableForEnvironment(
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
+  module: SdpModule,
+  environment: SdpEnvironment,
+  rampProviderMaturity: SdpRampProviderMaturity
+): boolean {
+  return isModuleInReleaseChannelForEnvironment(
+    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
+    module,
+    environment,
     rampProviderMaturity
   );
 }
