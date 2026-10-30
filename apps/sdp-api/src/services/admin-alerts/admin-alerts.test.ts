@@ -36,7 +36,7 @@ let iterable: MockInstance<typeof fetch>;
 
 const sentEmailSchema = z.object({
   recipientEmail: z.string(),
-  dataFields: z.object({ subject: z.string(), body: z.string() }).loose(),
+  dataFields: z.object({ subject: z.string(), body: z.string(), bodyHtml: z.string() }).loose(),
 });
 
 function sentEmails() {
@@ -368,6 +368,21 @@ describe("admin alert emails (HOO-2299)", () => {
       });
       await runWorker();
       expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("escapes customer-supplied names in the HTML part and keeps the line breaks", async () => {
+      await asWorker(() =>
+        getDb(env).execute("UPDATE organizations SET name = ? WHERE id = ?", [
+          "Acme <b>Pay</b> & Co",
+          ORGANIZATION_ID,
+        ])
+      );
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      await runWorker();
+      const [email] = sentEmails();
+      expect(email?.body).toContain("Organization: Acme <b>Pay</b> & Co");
+      expect(email?.bodyHtml).toContain("Organization: Acme &lt;b&gt;Pay&lt;/b&gt; &amp; Co<br>");
+      expect(email?.bodyHtml).not.toContain("<b>");
     });
 
     it("does not email an admin twice when a run repeats", async () => {
