@@ -72,7 +72,7 @@ describe("HeroGlobe", () => {
     const options = createGlobeScene.mock.calls[0][0];
     expect(options.reduced).toBe(false);
     expect(options.labels.from("Lagos")).toBe("from Lagos");
-    expect(options.labels.confirmed).toBe("Confirmed");
+    expect(options.labels.confirmed()).toBe("Confirmed");
     expect(options.labels.landed("Lagos")).toBe("Lagos · under a second");
     expect(scene.setActive).toHaveBeenCalledWith(true);
     cleanup();
