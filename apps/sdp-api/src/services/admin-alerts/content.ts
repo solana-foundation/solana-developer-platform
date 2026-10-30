@@ -18,7 +18,7 @@ export const CONFIG_ALERT_KINDS = [
   "custody_wallet_created",
   "custody_wallet_removed",
   "ip_allowlist_changed",
-  "money_emails_changed",
+  "alert_emails_changed",
   "mainnet_entitlement_changed",
 ] as const;
 
@@ -33,6 +33,7 @@ export const moneyMovementCountsSchema = z.object({
   batches: z.number().int().nonnegative(),
   recurringCollections: z.number().int().nonnegative(),
   paymentRequestSettlements: z.number().int().nonnegative(),
+  deposits: z.number().int().nonnegative(),
   offramps: z.number().int().nonnegative(),
   onramps: z.number().int().nonnegative(),
 });
@@ -67,6 +68,7 @@ const MONEY_COUNT_LABELS: Record<keyof MoneyMovementCounts, [string, string]> = 
   batches: ["batch payout", "batch payouts"],
   recurringCollections: ["recurring collection", "recurring collections"],
   paymentRequestSettlements: ["payment request settlement", "payment request settlements"],
+  deposits: ["deposit", "deposits"],
   offramps: ["off-ramp", "off-ramps"],
   onramps: ["on-ramp", "on-ramps"],
 };
@@ -134,16 +136,13 @@ function describe(
         headline: "IP allowlist changed",
         sentence: "The organization's API IP allowlist changed.",
       };
-    case "money_emails_changed":
+    case "alert_emails_changed":
       return details.enabled
-        ? {
-            headline: "Money movement emails on",
-            sentence: "Money movement emails were turned on.",
-          }
+        ? { headline: "Alert emails on", sentence: "Alert emails to admins were turned on." }
         : {
-            headline: "Money movement emails off",
+            headline: "Alert emails off",
             sentence:
-              "Money movement emails were turned off. Admins will no longer be emailed when money moves.",
+              "Alert emails were turned off. Admins will no longer be emailed when money moves or the organization changes.",
           };
     case "mainnet_entitlement_changed":
       return details.enabled
@@ -159,7 +158,7 @@ function describe(
       const summary = details.counts ? moneyMovementSummary(details.counts) : "";
       return {
         headline: "Money moved",
-        sentence: `Money movement was started: ${summary || "see the dashboard"}.`,
+        sentence: `Money moved: ${summary || "see the dashboard"}.`,
       };
     }
     default: {

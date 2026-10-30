@@ -36,8 +36,8 @@ export const updateOrgSchema = z.object({
         .max(MAX_ORGANIZATION_ALLOWED_IPS)
         .transform((entries) => [...new Set(entries)])
         .optional(),
-      /** HOO-2299: false stops the money movement emails to admins; configuration emails stay. */
-      moneyMovementEmails: z.boolean().optional(),
+      /** HOO-2299: false stops every alert email to admins, except the one saying so. */
+      alertEmails: z.boolean().optional(),
     })
     .optional(),
 });

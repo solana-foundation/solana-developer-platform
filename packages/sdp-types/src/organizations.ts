@@ -97,10 +97,10 @@ export interface OrganizationSettings {
    */
   enableProductionProject?: boolean;
   /**
-   * `false` stops the emails admins get when money moves (HOO-2299); unset or `true` sends them.
-   * Emails about configuration changes, this setting's own included, are always sent.
+   * `false` stops the alert emails admins get when money moves or the organization's
+   * configuration changes (HOO-2299); unset or `true` sends them. Turning it off is itself emailed.
    */
-  moneyMovementEmails?: boolean;
+  alertEmails?: boolean;
   customRateLimits?: {
     requestsPerMinute?: number;
     requestsPerDay?: number;

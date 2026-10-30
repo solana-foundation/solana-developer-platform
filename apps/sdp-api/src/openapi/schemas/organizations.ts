@@ -56,9 +56,9 @@ const organizationSettingsSchema = z
       })
       .optional()
       .openapi({ description: "Custom rate limit overrides." }),
-    moneyMovementEmails: z.boolean().optional().openapi({
+    alertEmails: z.boolean().optional().openapi({
       description:
-        "Whether admins are emailed when money moves in a mainnet project. Unset means true. Emails about member, API key, custody and organization changes are always sent.",
+        "Whether organization admins are emailed when money moves in a mainnet project or the organization's members, API keys, custody or mainnet access change. Unset means true. Turning it off is itself emailed to the admins.",
       example: true,
     }),
   })

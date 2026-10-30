@@ -178,7 +178,7 @@ describe("admin alert emails (HOO-2299)", () => {
   // A window well in the past, aligned to the digest's windows.
   const windowStart =
     Math.floor(Date.parse("2026-10-30T10:00:00.000Z") / MONEY_WINDOW_MS) * MONEY_WINDOW_MS;
-  const inWindow = new Date(windowStart + 60_000).toISOString();
+  const inWindow = new Date(windowStart + 10_000).toISOString();
   const afterWindow = new Date(windowStart + MONEY_WINDOW_MS + 5 * 60_000);
 
   beforeEach(async () => {
@@ -236,6 +236,61 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(emails[0]?.body).not.toMatch(/sk_|secret/i);
     });
 
+    it("emails each admin once when a mainnet API key is revoked", async () => {
+      const created = await app.request(
+        `/v1/projects/${PRODUCTION_PROJECT}/api-keys`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "leaked", grants: ["projects.read"], walletScope: "all" }),
+        },
+        env
+      );
+      expect(created.status).toBe(201);
+      const keyId = z
+        .object({ data: z.object({ apiKey: z.object({ id: z.string() }) }) })
+        .parse(await created.json()).data.apiKey.id;
+      await runWorker();
+      iterable.mockClear();
+
+      const revoked = await app.request(
+        `/v1/api-keys/${keyId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+            "Content-Type": "application/json",
+            "x-project-id": PRODUCTION_PROJECT,
+          },
+          body: JSON.stringify({ confirmation: "leaked" }),
+        },
+        env
+      );
+      expect(revoked.status).toBe(200);
+      await runWorker();
+      const emails = sentEmails();
+      expect(emails.map((email) => email.subject)).toEqual([
+        "[SDP] API key revoked in Acme Pay",
+        "[SDP] API key revoked in Acme Pay",
+      ]);
+      expect(emails[0]?.body).toContain("Project: ");
+    });
+
+    it("sends nothing for an API key created in a devnet project", async () => {
+      const response = await app.request(
+        `/v1/projects/${SANDBOX_PROJECT}/api-keys`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "dev-key", grants: ["projects.read"], walletScope: "all" }),
+        },
+        env
+      );
+      expect(response.status).toBe(201);
+      await runWorker();
+      expect(sentEmails()).toHaveLength(0);
+    });
+
     it.each([
       [
         "an invitation",
@@ -265,16 +320,6 @@ describe("admin alert emails (HOO-2299)", () => {
           metadata: { userId: MEMBER.id, left: false },
         },
         "[SDP] Member removed in Acme Pay",
-      ],
-      [
-        "an API key revocation",
-        {
-          action: "delete",
-          resourceType: "api_key",
-          resourceId: "key_revoked",
-          metadata: { action: "deactivate" },
-        },
-        "[SDP] API key revoked in Acme Pay",
       ],
       [
         "a mainnet entitlement change",
@@ -353,26 +398,27 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(await runWorker(new Date(Date.now() + 3 * 60 * 60_000))).toMatchObject({ sent: 0 });
     });
 
-    it("emails admins when money movement emails are turned off", async () => {
+    it("emails admins when alert emails are turned off, and nothing after", async () => {
       const response = await app.request(
         `/v1/organizations/${ORGANIZATION_ID}`,
         {
           method: "PATCH",
           headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ settings: { moneyMovementEmails: false } }),
+          body: JSON.stringify({ settings: { alertEmails: false } }),
         },
         env
       );
       expect(response.status).toBe(200);
-      expect((await response.json()).data.settings).toMatchObject({ moneyMovementEmails: false });
+      expect((await response.json()).data.settings).toMatchObject({ alertEmails: false });
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "admin" } });
       await runWorker();
       expect(sentEmails().map((email) => email.subject)).toEqual([
-        "[SDP] Money movement emails off in Acme Pay",
-        "[SDP] Money movement emails off in Acme Pay",
+        "[SDP] Alert emails off in Acme Pay",
+        "[SDP] Alert emails off in Acme Pay",
       ]);
     });
 
-    it("refuses an API key changing the money email setting", async () => {
+    it("refuses an API key changing the alert email setting", async () => {
       const response = await app.request(
         `/v1/organizations/${ORGANIZATION_ID}`,
         {
@@ -381,7 +427,7 @@ describe("admin alert emails (HOO-2299)", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ settings: { moneyMovementEmails: false } }),
+          body: JSON.stringify({ settings: { alertEmails: false } }),
         },
         env
       );
@@ -389,8 +435,8 @@ describe("admin alert emails (HOO-2299)", () => {
     });
   });
 
-  describe("money movement emails the project's admins, one digest per window", () => {
-    it("sends one email per admin of the project for transfers, a batch and a collection", async () => {
+  describe("money movement emails every organization admin, one digest per window", () => {
+    it("sends one email per admin for transfers, a batch, a collection and a deposit", async () => {
       await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
       await insertTransfer({ id: "ptx_2", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
       await insertBatch("pbat_1", PRODUCTION_PROJECT, inWindow);
@@ -407,14 +453,25 @@ describe("admin alert emails (HOO-2299)", () => {
         createdAt: inWindow,
       });
       await insertCollectionAttempt("ptx_recurring", PRODUCTION_PROJECT, inWindow);
+      await insertTransfer({
+        id: "ptx_in",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: inWindow,
+        direction: "inbound",
+      });
 
       const result = await runWorker(afterWindow);
-      expect(result.sent).toBe(1);
-      const [email] = sentEmails();
-      // Only the admin who is a member of the project; the other admin and the member get none.
-      expect(email?.to).toBe(TEST_USER.email);
+      expect(result.sent).toBe(2);
+      const emails = sentEmails();
+      // Every admin, whether or not a member of the project; the member gets none.
+      expect(emails.map((email) => email.to).sort()).toEqual(
+        [OTHER_ADMIN.email, TEST_USER.email].sort()
+      );
+      const [email] = emails;
       expect(email?.subject).toBe("[SDP] Money moved in Acme Pay");
-      expect(email?.body).toContain("2 transfers, 1 batch payout, 1 recurring collection");
+      expect(email?.body).toContain(
+        "Money moved: 2 transfers, 1 batch payout, 1 recurring collection, 1 deposit."
+      );
       expect(email?.body).toContain(
         `${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/payments/transactions`
       );
@@ -427,7 +484,7 @@ describe("admin alert emails (HOO-2299)", () => {
       await runWorker(afterWindow);
       await runWorker(afterWindow);
       await runWorker(new Date(afterWindow.getTime() + 60 * 60_000));
-      expect(sentEmails()).toHaveLength(1);
+      expect(sentEmails()).toHaveLength(2);
     });
 
     it("waits for the window to close before writing it", async () => {
@@ -442,26 +499,16 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(sentEmails()).toHaveLength(0);
     });
 
-    it("sends nothing for plain inbound deposits", async () => {
-      await insertTransfer({
-        id: "ptx_in",
-        projectId: PRODUCTION_PROJECT,
-        createdAt: inWindow,
-        direction: "inbound",
-      });
-      await runWorker(afterWindow);
-      expect(sentEmails()).toHaveLength(0);
-    });
-
-    it("sends nothing once the organization opted out", async () => {
+    it("sends nothing once the organization turned alert emails off", async () => {
       await asWorker(() =>
         getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
-          JSON.stringify({ enableProductionProject: true, moneyMovementEmails: false }),
+          JSON.stringify({ enableProductionProject: true, alertEmails: false }),
           ORGANIZATION_ID,
         ])
       );
       await insertTransfer({ id: "ptx_1", projectId: PRODUCTION_PROJECT, createdAt: inWindow });
       await insertBatch("pbat_1", PRODUCTION_PROJECT, inWindow);
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "admin" } });
       await runWorker(afterWindow);
       expect(sentEmails()).toHaveLength(0);
     });
@@ -480,6 +527,7 @@ describe("admin alert emails (HOO-2299)", () => {
           batches: 0,
           recurringCollections: 2,
           paymentRequestSettlements: 0,
+          deposits: 0,
           offramps: 0,
           onramps: 0,
         },
@@ -489,8 +537,6 @@ describe("admin alert emails (HOO-2299)", () => {
       occurredAt: "2026-10-30T10:15:00.000Z",
       dashboardOrigin: DASHBOARD,
     });
-    expect(email.body.split("\n")[0]).toBe(
-      "Money movement was started: 1 transfer, 2 recurring collections."
-    );
+    expect(email.body.split("\n")[0]).toBe("Money moved: 1 transfer, 2 recurring collections.");
   });
 });

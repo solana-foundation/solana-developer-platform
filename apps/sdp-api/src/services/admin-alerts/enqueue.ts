@@ -26,14 +26,17 @@ import type {
 
 /** Audit entries read per run; a longer backlog drains over the next runs. */
 export const AUDIT_ALERT_BATCH = 500;
-/** One money digest per project per window. */
-export const MONEY_WINDOW_MS = 15 * 60_000;
+/** One money digest per project per window: a busy project gets one email a minute at most. */
+export const MONEY_WINDOW_MS = 60_000;
 /** How long after a window ends its digest is written. */
-export const MONEY_WINDOW_GRACE_MS = 2 * 60_000;
+export const MONEY_WINDOW_GRACE_MS = 30_000;
 /** An event older than this when the Worker reaches it emails nobody: it is history, not news. */
 export const ADMIN_ALERT_MAX_AGE_MS = 24 * 60 * 60_000;
-/** Money emails cover mainnet projects only; devnet movement is test traffic. */
-const MONEY_ALERT_ENVIRONMENTS = ["production"] as const;
+/**
+ * Alerts about a project cover mainnet projects only; devnet is test traffic. Organization-wide
+ * changes (members, the allowlist, the entitlement, this setting) have no project and always alert.
+ */
+const ALERTING_PROJECT_ENVIRONMENT = "production";
 
 interface AuditRow {
   ledger_sequence: string | number;
@@ -73,7 +76,7 @@ const auditMetadataSchema = z
     settings: z
       .object({
         allowedIpAddresses: z.unknown().optional(),
-        moneyMovementEmails: z.boolean().optional(),
+        alertEmails: z.boolean().optional(),
       })
       .loose()
       .optional(),
@@ -101,7 +104,7 @@ function parseAuditMetadata(raw: string | null): AuditMetadata {
 
 /**
  * The alerts one audit entry raises; most raise none. An organization update can raise two (an
- * allowlist and the money-email setting in one request). Entries of critical operations count
+ * allowlist and the alert-email setting in one request). Entries of critical operations count
  * only as their successful outcome, never as the intent that admitted them.
  */
 export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
@@ -169,11 +172,11 @@ export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
       if (metadata.settings && "allowedIpAddresses" in metadata.settings) {
         alerts.push({ kind: "ip_allowlist_changed", projectId: null });
       }
-      if (metadata.settings?.moneyMovementEmails !== undefined) {
+      if (metadata.settings?.alertEmails !== undefined) {
         alerts.push({
-          kind: "money_emails_changed",
+          kind: "alert_emails_changed",
           projectId: null,
-          enabled: metadata.settings.moneyMovementEmails,
+          enabled: metadata.settings.alertEmails,
         });
       }
       return alerts;
@@ -201,18 +204,40 @@ async function organizationAdmins(db: DatabaseExecutor, organizationId: string) 
   );
 }
 
-/** The organization's active admins who are members of the project. */
-async function projectAdmins(db: DatabaseExecutor, organizationId: string, projectId: string) {
-  return db.queryMany<Recipient>(
-    `SELECT u.id AS user_id, u.email
-       FROM organization_members om
-       JOIN users u ON u.id = om.user_id
-       JOIN project_members pm ON pm.user_id = om.user_id AND pm.project_id = ?
-      WHERE om.organization_id = ? AND om.role = 'admin' AND om.status = 'active'
-        AND u.status = 'active'
-      ORDER BY u.id`,
-    [projectId, organizationId]
+/** The organization's name, and whether it turned alert emails off (`settings.alertEmails`). */
+async function organizationAlerting(db: DatabaseExecutor, organizationId: string) {
+  const organization = await db.queryOne<{ name: string; alert_emails: string | null }>(
+    `SELECT name, settings::jsonb ->> 'alertEmails' AS alert_emails
+       FROM organizations WHERE id = ?`,
+    [organizationId]
   );
+  return organization
+    ? { name: organization.name, alertEmailsOff: organization.alert_emails === "false" }
+    : null;
+}
+
+/**
+ * The project an entry is about when its metadata does not name it: an API key's or a custody
+ * connection's own row says.
+ */
+async function resolveProjectId(
+  db: DatabaseExecutor,
+  row: AuditRow,
+  alert: ConfigAlert
+): Promise<string | null> {
+  if (alert.projectId || !row.resource_id) return alert.projectId;
+  const table =
+    row.resource_type === "api_key"
+      ? "api_keys"
+      : row.resource_type === "custody_connection"
+        ? "custody_connections"
+        : null;
+  if (!table) return null;
+  const owner = await db.queryOne<{ project_id: string | null }>(
+    `SELECT project_id FROM ${table} WHERE id = ? AND organization_id = ?`,
+    [row.resource_id, row.organization_id]
+  );
+  return owner?.project_id ?? null;
 }
 
 /** A person as an email names them: their name, else their email. */
@@ -236,27 +261,17 @@ async function actorLabel(db: DatabaseExecutor, row: AuditRow): Promise<string |
   return null;
 }
 
-interface AlertContext {
-  organizationName: string;
-  project: AdminAlertDetails["project"];
-}
-
-async function alertContext(
+async function projectOf(
   db: DatabaseExecutor,
   organizationId: string,
   projectId: string | null
-): Promise<AlertContext | null> {
-  const organization = await db.queryOne<{ name: string }>(
-    "SELECT name FROM organizations WHERE id = ?",
-    [organizationId]
-  );
-  if (!organization) return null;
-  if (!projectId) return { organizationName: organization.name, project: null };
+): Promise<AdminAlertDetails["project"]> {
+  if (!projectId) return null;
   const project = await db.queryOne<{ id: string; name: string; environment: string }>(
     "SELECT id, name, environment FROM projects WHERE id = ? AND organization_id = ?",
     [projectId, organizationId]
   );
-  return { organizationName: organization.name, project: project ?? null };
+  return project ?? null;
 }
 
 /**
@@ -330,14 +345,23 @@ async function moveCursor(
 async function writeConfigAlerts(tx: DatabaseExecutor, row: AuditRow): Promise<number> {
   const raised = configAlertsFromAudit(row);
   if (raised.length === 0) return 0;
+  const organization = await organizationAlerting(tx, row.organization_id);
+  if (!organization) return 0;
   const recipients = await organizationAdmins(tx, row.organization_id);
   const actor = await actorLabel(tx, row);
   let written = 0;
   for (const [index, alert] of raised.entries()) {
-    const context = await alertContext(tx, row.organization_id, alert.projectId);
-    if (!context) continue;
+    // Turning alerts off is itself emailed, so it can never happen unnoticed.
+    if (organization.alertEmailsOff && alert.kind !== "alert_emails_changed") continue;
+    const project = await projectOf(
+      tx,
+      row.organization_id,
+      await resolveProjectId(tx, row, alert)
+    );
+    if (project && project.environment !== ALERTING_PROJECT_ENVIRONMENT) continue;
     const details: AdminAlertDetails = {
-      ...context,
+      organizationName: organization.name,
+      project,
       actor,
       subject: alert.subjectUserId
         ? await userLabel(tx, alert.subjectUserId)
@@ -350,7 +374,7 @@ async function writeConfigAlerts(tx: DatabaseExecutor, row: AuditRow): Promise<n
       tx,
       {
         organizationId: row.organization_id,
-        projectId: context.project?.id ?? null,
+        projectId: project?.id ?? null,
         kind: alert.kind,
         sourceKey: `audit:${row.ledger_sequence}:${index}`,
         details,
@@ -416,8 +440,7 @@ interface MoneyCountRow {
 
 /**
  * Counts the window's movements per project and kind. A transfer's kind follows the dashboard's
- * (`unified_transactions`); batch chunks are left to the batch row, and plain inbound deposits
- * are not movement an admin started.
+ * (`unified_transactions`); batch chunks are left to the batch row.
  */
 async function moneyCounts(
   db: DatabaseExecutor,
@@ -434,7 +457,7 @@ async function moneyCounts(
                               WHERE psca.transfer_id = pt.id) THEN 'recurringCollections'
                 WHEN EXISTS (SELECT 1 FROM payment_requests pr
                               WHERE pr.fulfilled_by_transfer_id = pt.id) THEN 'paymentRequestSettlements'
-                WHEN pt.direction = 'inbound' THEN NULL
+                WHEN pt.direction = 'inbound' THEN 'deposits'
                 ELSE 'transfers'
               END AS kind
          FROM payment_transfers pt
@@ -445,7 +468,6 @@ async function moneyCounts(
          FROM payment_transfer_batches b
         WHERE b.created_at >= ? AND b.created_at < ?
      ) movements
-     WHERE kind IS NOT NULL
      GROUP BY organization_id, project_id, kind`,
     [windowStart, windowEnd, windowStart, windowEnd]
   );
@@ -478,6 +500,7 @@ export async function enqueueMoneyAlerts(
           batches: 0,
           recurringCollections: 0,
           paymentRequestSettlements: 0,
+          deposits: 0,
           offramps: 0,
           onramps: 0,
         },
@@ -488,23 +511,10 @@ export async function enqueueMoneyAlerts(
 
     let alerts = 0;
     for (const [projectId, { organizationId, counts }] of byProject) {
-      const target = await tx.queryOne<{
-        organization_name: string;
-        money_movement_emails: string | null;
-        project_name: string;
-        environment: string;
-      }>(
-        `SELECT o.name AS organization_name,
-                o.settings::jsonb ->> 'moneyMovementEmails' AS money_movement_emails,
-                p.name AS project_name, p.environment
-           FROM projects p
-           JOIN organizations o ON o.id = p.organization_id
-          WHERE p.id = ? AND o.id = ?`,
-        [projectId, organizationId]
-      );
-      if (!target) continue;
-      if (target.money_movement_emails === "false") continue;
-      if (!(MONEY_ALERT_ENVIRONMENTS as readonly string[]).includes(target.environment)) continue;
+      const organization = await organizationAlerting(tx, organizationId);
+      if (!organization || organization.alertEmailsOff) continue;
+      const project = await projectOf(tx, organizationId, projectId);
+      if (project?.environment !== ALERTING_PROJECT_ENVIRONMENT) continue;
       const inserted = await insertAlert(
         tx,
         {
@@ -513,8 +523,8 @@ export async function enqueueMoneyAlerts(
           kind: "money_movement",
           sourceKey: `money:${projectId}:${windowStart}`,
           details: {
-            organizationName: target.organization_name,
-            project: { id: projectId, name: target.project_name, environment: target.environment },
+            organizationName: organization.name,
+            project,
             actor: null,
             subject: null,
             counts,
@@ -523,7 +533,7 @@ export async function enqueueMoneyAlerts(
           },
           occurredAt: windowEnd,
         },
-        await projectAdmins(tx, organizationId, projectId)
+        await organizationAdmins(tx, organizationId)
       );
       if (inserted) alerts += 1;
     }

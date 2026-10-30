@@ -101,6 +101,17 @@
     "saveFailed": "Could not save the IP allowlist: {error}",
     "loadFailed": "Could not load the IP allowlist: {error}"
   },
+  "organizationAlertEmails": {
+    "title": "Email alerts",
+    "description": "Email organization admins when money moves or members, API keys, custody or mainnet access change.",
+    "switchLabel": "Send alert emails",
+    "onHelper": "Every admin gets these emails. Turning them off is itself emailed to admins.",
+    "offHelper": "No alert emails are sent to admins.",
+    "savedOn": "Alert emails turned on",
+    "savedOff": "Alert emails turned off",
+    "saveFailed": "Could not save the email alert setting: {error}",
+    "loadFailed": "Could not load the email alert setting: {error}"
+  },
   "mainnetAccess": {
     "title": "Mainnet access",
     "description": "Enable mainnet for your organization.",
