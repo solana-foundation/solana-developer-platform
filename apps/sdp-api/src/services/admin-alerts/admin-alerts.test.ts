@@ -1,9 +1,15 @@
 import { hashString } from "@sdp/payments/hash";
+import type {
+  PaymentTransferBatchStatus,
+  PaymentTransferStatus,
+  PaymentTransferType,
+} from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { z } from "zod";
 import { adminAlertEmailsCron } from "@/cron/admin-alert-emails";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import type { PaymentTransferDirection } from "@/db/repositories/payments.repository";
 import { app } from "@/index";
 import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
@@ -117,9 +123,9 @@ async function insertTransfer(input: {
   id: string;
   projectId: string;
   createdAt: string;
-  type?: string;
-  direction?: string;
-  status?: string;
+  type?: PaymentTransferType;
+  direction?: PaymentTransferDirection;
+  status?: PaymentTransferStatus;
 }) {
   await asWorker(() =>
     getDb(env).execute(
@@ -144,7 +150,7 @@ async function insertBatch(
   id: string,
   projectId: string,
   createdAt: string,
-  status = "processing"
+  status: PaymentTransferBatchStatus = "processing"
 ) {
   await asWorker(() =>
     getDb(env).execute(
@@ -698,6 +704,17 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(emails).toHaveLength(2);
       expect(emails[0]?.body).toContain("New money movement: 1 transfer.");
     });
+  });
+
+  it("refuses to render a money alert without its counts and window", () => {
+    expect(() =>
+      adminAlertEmail({
+        kind: "money_movement",
+        details: { organizationName: "Acme", project: null, actor: null, subject: null },
+        occurredAt: "2026-10-30T10:15:00.000Z",
+        dashboardOrigin: DASHBOARD,
+      })
+    ).toThrow();
   });
 
   it("renders no field it was not given", () => {

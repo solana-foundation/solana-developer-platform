@@ -59,6 +59,13 @@ export const adminAlertDetailsSchema = z.object({
 
 export type AdminAlertDetails = z.infer<typeof adminAlertDetailsSchema>;
 
+/** A money digest's details: its counts and window are required, so a partial one fails loudly. */
+const moneyAlertDetailsSchema = adminAlertDetailsSchema.extend({
+  counts: moneyMovementCountsSchema,
+  windowStart: z.string(),
+  windowEnd: z.string(),
+});
+
 export interface AdminAlertEmailContent {
   subject: string;
   body: string;
@@ -152,10 +159,10 @@ function describe(
             sentence: "The organization can no longer use mainnet projects.",
           };
     case "money_movement": {
-      const summary = details.counts ? moneyMovementSummary(details.counts) : "";
+      const { counts } = moneyAlertDetailsSchema.parse(details);
       return {
         headline: "Money movement",
-        sentence: `New money movement: ${summary || "see the dashboard"}.`,
+        sentence: `New money movement: ${moneyMovementSummary(counts)}.`,
       };
     }
     default: {
@@ -197,9 +204,8 @@ export function adminAlertEmail(input: {
     lines.push(`Project: ${details.project.name} (${details.project.environment})`);
   }
   if (kind === "money_movement") {
-    lines.push(
-      `Between: ${details.windowStart ?? input.occurredAt} and ${details.windowEnd ?? ""}`
-    );
+    const { windowStart, windowEnd } = moneyAlertDetailsSchema.parse(details);
+    lines.push(`Between: ${windowStart} and ${windowEnd}`);
   } else {
     lines.push(`By: ${details.actor ?? "SDP"}`, `When: ${input.occurredAt}`);
   }
@@ -207,14 +213,9 @@ export function adminAlertEmail(input: {
     "",
     `Review it in the dashboard: ${input.dashboardOrigin}${dashboardPath(kind, details)}`,
     "",
-    `You get this email because you are an admin of ${details.organizationName}.`
+    `You get this email because you are an admin of ${details.organizationName}.`,
+    "If you did not expect this, review your organization's members and API keys.",
+    "An organization admin can turn off alert emails in organization settings."
   );
-  if (kind === "money_movement") {
-    lines.push(
-      "An organization admin can turn off money movement emails in organization settings."
-    );
-  } else {
-    lines.push("If you did not expect this, review your organization's members and API keys.");
-  }
   return { subject: `[SDP] ${headline} in ${details.organizationName}`, body: lines.join("\n") };
 }
