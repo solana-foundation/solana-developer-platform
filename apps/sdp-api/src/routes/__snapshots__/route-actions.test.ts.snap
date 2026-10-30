@@ -239,6 +239,7 @@ exports[`route actions > pins each route's action 1`] = `
   "recurring.read GET /v1/payments/subscriptions/:subscriptionId/collection-attempts",
   "transactions.read GET /v1/transactions",
   "transfer_batches.execute POST /v1/payments/transfer-batches",
+  "transfer_batches.execute POST /v1/payments/transfer-batches/:batchId/retry",
   "transfer_batches.read GET /v1/payments/transfer-batches",
   "transfer_batches.read GET /v1/payments/transfer-batches/:batchId",
   "transfer_batches.read POST /v1/payments/transfer-batches/estimate",

@@ -83,6 +83,8 @@ export function setTabShowsDemo(on: boolean): void {
 const DASHBOARD_REQUIRED_ROUTES = {
   "POST /v1/payments/transfers": "POST /api/dashboard/payments/transfers",
   "POST /v1/payments/transfer-batches": "POST /api/dashboard/payments/transfers/batch",
+  "POST /v1/payments/transfer-batches/:batchId/retry":
+    "POST /api/dashboard/payments/transfers/batch/:batchId/retry",
   "POST /v1/payments/recurring-payments": "POST /api/dashboard/payments/recurring-payments",
   "PATCH /v1/payments/recurring-payments/:id":
     "PATCH /api/dashboard/payments/recurring-payments/:id",
@@ -488,12 +490,12 @@ export function resetMovementWatchesForTests(): void {
  * stays kept; the next send under it starts a new watch. One watch per path.
  *
  * @param readPath - The movement's GET path ({@link MOVEMENT_READ_PATHS}).
- * @param settle - Retires the kept key.
+ * @param settle - Retires the kept key; it is given the final status.
  * @param statusOf - Reads the movement's status from the GET body.
  */
 export function settleWhenMovementFinal(
   readPath: string,
-  settle: () => void,
+  settle: (status: MoneyMovementStatus) => void,
   statusOf: (json: unknown) => MoneyMovementStatus | null = movementStatusOf
 ): void {
   if (watchedMovements.has(readPath)) return;
@@ -506,7 +508,7 @@ export function settleWhenMovementFinal(
       const status = response.ok ? statusOf(await response.json()) : null;
       if (status !== null && !isMovementInFlight(status)) {
         watchedMovements.delete(readPath);
-        settle();
+        settle(status);
         return;
       }
     } catch {

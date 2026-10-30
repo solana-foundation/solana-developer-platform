@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
+/** The most recipients one batch holds; retry reads a whole batch at this size. */
+export const MAX_TRANSFER_BATCH_RECIPIENTS = 500;
+
 const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
 
 export const transferBatchIdParamsSchema = z.object({
@@ -37,16 +40,32 @@ export const transferBatchOptionsSchema = z.object({
   preflight: z.boolean().optional(),
 });
 
-export const createTransferBatchSchema = z.strictObject({
+const transferBatchMovementSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
-  externalId: z.string().min(1).max(256).optional(),
   sourceCustodyWalletId: z.string().min(1),
   token: paymentTokenSchema,
-  recipients: z.array(transferBatchRecipientSchema).min(1).max(500),
+  recipients: z.array(transferBatchRecipientSchema).min(1).max(MAX_TRANSFER_BATCH_RECIPIENTS),
   options: transferBatchOptionsSchema.optional(),
 });
 
-export const estimateTransferBatchSchema = createTransferBatchSchema;
+/** A payout run's name (HOO-2335): the run key is derived from it. */
+export const transferBatchExternalIdSchema = z.string().min(1).max(256);
+
+/**
+ * A batch names its payout run (HOO-2335): the run key that keeps a resend
+ * under a new Idempotency-Key from paying anyone twice is derived from it.
+ */
+export const createTransferBatchSchema = transferBatchMovementSchema.extend({
+  externalId: transferBatchExternalIdSchema,
+});
+
+/** An estimate moves nothing, so it needs no run name; one sent is accepted. */
+export const estimateTransferBatchSchema = transferBatchMovementSchema.extend({
+  externalId: transferBatchExternalIdSchema.optional(),
+});
+
+/** A retry names its batch in the path and carries no body. */
+export const retryTransferBatchSchema = z.strictObject({});
 
 export const listTransferBatchesQuerySchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1).optional(),

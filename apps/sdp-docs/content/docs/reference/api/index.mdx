@@ -10,7 +10,7 @@ description: Every public API endpoint, grouped by family and generated from Ope
 
 Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
 
-Browse 109 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
+Browse 110 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
 
 ## Health
 
@@ -114,6 +114,7 @@ Browse 109 endpoints across 8 API families. Select an operation to see its param
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch) |
 | `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches) |
+| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch) |
 | `POST` | `/v1/payments/recurring-payments` | [Create recurring payment](/docs/reference/api/payments/create-payment-recurring-payment) |
 | `GET` | `/v1/payments/recurring-payments` | [List recurring payments](/docs/reference/api/payments/list-payment-recurring-payments) |

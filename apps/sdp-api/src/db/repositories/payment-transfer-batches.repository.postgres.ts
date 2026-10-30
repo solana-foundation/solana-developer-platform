@@ -1,7 +1,10 @@
+import { z } from "zod";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
+  type ClaimFailedTransferRecipientsInput,
   type CreatePaymentTransferBatchInput,
   type CreatePaymentTransferBatchWithRecipientsInput,
   type CreatePaymentTransferRecipientInput,
@@ -11,16 +14,19 @@ import {
   type GetPaymentTransferBatchInput,
   type GetPaymentTransferRecipientInput,
   generatePaymentTransferBatchId,
+  generatePaymentTransferBatchRetryId,
   generatePaymentTransferRecipientId,
   type ListPaymentTransferBatchesInput,
   type ListPaymentTransferBatchesResult,
   type ListPaymentTransferRecipientsInput,
   type ListPaymentTransferRecipientsResult,
   type PaymentTransferBatchesRepository,
+  type PaymentTransferBatchRetryRow,
   type PaymentTransferBatchRow,
   type PaymentTransferRecipientRow,
   type RecomputeTransferBatchStatusInput,
   type SettlePaymentTransferBatchInput,
+  type StrandedRecipientCutoff,
   type UpdatePaymentTransferBatchInput,
   type UpdatePaymentTransferRecipientInput,
   type UpdatePaymentTransferRecipientsStatusInput,
@@ -199,7 +205,7 @@ async function insertTransferRecipients(
     return [];
   }
 
-  const rowPlaceholder = `(${Array(12).fill("?").join(", ")})`;
+  const rowPlaceholder = `(${Array(14).fill("?").join(", ")})`;
   const values = inputs.flatMap((input) => [
     generatePaymentTransferRecipientId(),
     input.batchId,
@@ -213,6 +219,10 @@ async function insertTransferRecipients(
     input.amount,
     input.status ?? "pending",
     input.error ?? null,
+    input.attemptLastValidBlockHeight === undefined || input.attemptLastValidBlockHeight === null
+      ? null
+      : input.attemptLastValidBlockHeight.toString(),
+    input.attemptId ?? null,
   ]);
 
   const result = await db
@@ -229,7 +239,9 @@ async function insertTransferRecipients(
          destination_address,
          amount,
          status,
-         error
+         error,
+         attempt_last_valid_block_height,
+         attempt_id
        ) VALUES ${inputs.map(() => rowPlaceholder).join(", ")}
        RETURNING *`
     )
@@ -633,9 +645,14 @@ export function createPostgresPaymentTransferBatchesRepository(
         projectId: input.projectId,
         extraClauses: [
           `id IN (${input.recipientIds.map(() => "?").join(", ")})`,
-          "status <> 'archived'",
+          input.requireUnsentFor === undefined
+            ? "status <> 'archived'"
+            : "status = 'pending' AND transfer_id IS NULL AND attempt_id = ?",
         ],
-        extraValues: input.recipientIds,
+        extraValues:
+          input.requireUnsentFor === undefined
+            ? input.recipientIds
+            : [...input.recipientIds, input.requireUnsentFor.attemptId],
       });
 
       const result = await db
@@ -813,6 +830,7 @@ export function createPostgresPaymentTransferBatchesRepository(
     },
 
     async listStrandedTransferBatches(input) {
+      const strandedCutoff = strandedRecipientCutoff(input);
       const result = await db
         .prepare(
           `SELECT b.id, b.organization_id, b.project_id
@@ -820,15 +838,15 @@ export function createPostgresPaymentTransferBatchesRepository(
              JOIN projects p ON p.id = b.project_id
             WHERE p.environment = ?
               AND b.status = 'processing'
-              AND b.created_at < ?
               AND EXISTS (
                 SELECT 1 FROM payment_transfer_recipients r
                  WHERE r.batch_id = b.id AND r.status = 'pending' AND r.transfer_id IS NULL
+                   AND ${strandedCutoff.sql("r.")}
               )
             ORDER BY b.created_at
             LIMIT ?`
         )
-        .bind(input.environment, input.createdBefore, input.limit)
+        .bind(input.environment, ...strandedCutoff.values, input.limit)
         .all<{ id: string; organization_id: string; project_id: string }>();
       return result.results.map((row) => ({
         batchId: row.id,
@@ -837,7 +855,57 @@ export function createPostgresPaymentTransferBatchesRepository(
       }));
     },
 
+    async lowestUnsentAttemptBlockHeight({ environment }) {
+      const row = await db
+        .prepare(
+          `SELECT MIN(r.attempt_last_valid_block_height)::text AS height
+             FROM payment_transfer_recipients r
+             JOIN payment_transfer_batches b ON b.id = r.batch_id
+             JOIN projects p ON p.id = b.project_id
+            WHERE p.environment = ?
+              AND b.status = 'processing'
+              AND r.status = 'pending'
+              AND r.transfer_id IS NULL
+              AND r.attempt_last_valid_block_height IS NOT NULL`
+        )
+        .bind(environment)
+        .first<{ height: string | null }>();
+      return row?.height == null ? null : BigInt(row.height);
+    },
+
+    async listSupersededTransferIds({ batchId, organizationId, projectId }) {
+      const result = await db
+        .prepare(
+          `SELECT superseded_transfer_ids FROM payment_transfer_batch_retries
+            WHERE batch_id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+            ORDER BY created_at`
+        )
+        .bind(batchId, organizationId, projectId)
+        .all<{ superseded_transfer_ids: unknown }>();
+      return result.results.flatMap((row) =>
+        idListSchema.parse(parsePostgresJson<unknown>(row.superseded_transfer_ids))
+      );
+    },
+
+    async findTransferBatchRetryByIdempotency({
+      batchId,
+      organizationId,
+      projectId,
+      idempotencyKey,
+    }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_transfer_batch_retries
+            WHERE organization_id = ? AND project_id = ? AND batch_id = ?
+              AND idempotency_key = ? AND status = 'active'`
+        )
+        .bind(organizationId, projectId, batchId, idempotencyKey)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentTransferBatchRetryRow(row) : null;
+    },
+
     async failUnsentTransferRecipients(input) {
+      const strandedCutoff = strandedRecipientCutoff(input);
       return db.transaction(async (tx) => {
         // The batch lock first, as every batch status writer takes it.
         await tx
@@ -856,15 +924,162 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND organization_id = ?
                 AND project_id = ?
                 AND status = 'pending'
-                AND transfer_id IS NULL`
+                AND transfer_id IS NULL
+                AND ${strandedCutoff.sql("")}
+                ${recipientIdClause(input.recipientIds)}`
           )
-          .bind(input.error, input.batchId, input.organizationId, input.projectId)
+          .bind(
+            input.error,
+            input.batchId,
+            input.organizationId,
+            input.projectId,
+            ...strandedCutoff.values,
+            ...(input.recipientIds ?? [])
+          )
           .run();
         return recomputeBatchStatusInTransaction(tx, input);
       });
     },
+
+    async claimFailedTransferRecipients(input: ClaimFailedTransferRecipientsInput) {
+      if (input.recipientIds.length === 0) return null;
+      try {
+        return await db.transaction(async (tx) => {
+          // The batch lock first, as every batch status writer takes it.
+          const batch = await tx
+            .prepare(
+              `UPDATE payment_transfer_batches
+                SET transaction_count = transaction_count + ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+                AND status <> 'archived'
+              RETURNING id`
+            )
+            .bind(input.addedTransactionCount, input.batchId, input.organizationId, input.projectId)
+            .first<{ id: string }>();
+          if (!batch) return null;
+          const claimed = await tx
+            .prepare(
+              `UPDATE payment_transfer_recipients r
+                SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now(),
+                    attempt_last_valid_block_height = ?, attempt_id = ?
+               FROM (
+                 SELECT id, transfer_id FROM payment_transfer_recipients
+                  WHERE batch_id = ?
+                    AND organization_id = ?
+                    AND project_id = ?
+                    AND status = 'failed'
+                    AND id IN (${input.recipientIds.map(() => "?").join(", ")})
+                  FOR UPDATE
+               ) previous
+              WHERE r.id = previous.id
+              RETURNING r.*, previous.transfer_id AS superseded_transfer_id`
+            )
+            .bind(
+              input.attemptLastValidBlockHeight.toString(),
+              input.attemptId,
+              input.batchId,
+              input.organizationId,
+              input.projectId,
+              ...input.recipientIds
+            )
+            .all<Record<string, unknown>>();
+          if (claimed.results.length !== input.recipientIds.length) {
+            throw new ClaimLostError();
+          }
+          const supersededTransferIds = [
+            ...new Set(
+              claimed.results.flatMap((row) =>
+                typeof row.superseded_transfer_id === "string" ? [row.superseded_transfer_id] : []
+              )
+            ),
+          ];
+          const retry = await tx
+            .prepare(
+              `INSERT INTO payment_transfer_batch_retries
+                 (id, batch_id, organization_id, project_id, idempotency_key,
+                  idempotency_fingerprint, initiated_by_key_id, recipient_ids,
+                  superseded_transfer_ids)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+               RETURNING *`
+            )
+            .bind(
+              generatePaymentTransferBatchRetryId(),
+              input.batchId,
+              input.organizationId,
+              input.projectId,
+              input.retry.idempotencyKey,
+              input.retry.idempotencyFingerprint,
+              input.retry.initiatedByKeyId,
+              JSON.stringify(input.recipientIds),
+              JSON.stringify(supersededTransferIds)
+            )
+            .first<Record<string, unknown>>();
+          if (!retry) throw internalError("Transfer batch retry was not recorded");
+          return {
+            batch: await recomputeBatchStatusInTransaction(tx, input),
+            recipients: claimed.results.map(mapPaymentTransferRecipientRow),
+            retry: mapPaymentTransferBatchRetryRow(retry),
+          };
+        });
+      } catch (error) {
+        if (error instanceof ClaimLostError) return null;
+        throw error;
+      }
+    },
   };
 }
+
+const idListSchema = z.array(z.string());
+
+function mapPaymentTransferBatchRetryRow(
+  row: Record<string, unknown>
+): PaymentTransferBatchRetryRow {
+  return {
+    id: String(row.id),
+    batch_id: String(row.batch_id),
+    idempotency_fingerprint: String(row.idempotency_fingerprint),
+    initiated_by_key_id: row.initiated_by_key_id === null ? null : String(row.initiated_by_key_id),
+    recipient_ids: idListSchema.parse(parsePostgresJson<unknown>(row.recipient_ids)),
+    superseded_transfer_ids: idListSchema.parse(
+      parsePostgresJson<unknown>(row.superseded_transfer_ids)
+    ),
+    created_at: String(row.created_at),
+  };
+}
+
+/**
+ * The SQL test for a stranded unsent recipient: written before an instant, or
+ * written by an attempt whose lastValidBlockHeight the chain has passed.
+ */
+function strandedRecipientCutoff(cutoff: StrandedRecipientCutoff): {
+  sql: (alias: string) => string;
+  values: string[];
+} {
+  const tests: string[] = [];
+  const values: string[] = [];
+  if (cutoff.attemptedBefore !== undefined) {
+    tests.push("{a}updated_at < ?");
+    values.push(cutoff.attemptedBefore);
+  }
+  if (cutoff.expiredBelowBlockHeight !== undefined) {
+    tests.push(
+      "({a}attempt_last_valid_block_height IS NOT NULL AND {a}attempt_last_valid_block_height < ?)"
+    );
+    values.push(cutoff.expiredBelowBlockHeight.toString());
+  }
+  return { sql: (alias) => `(${tests.join(" OR ").replaceAll("{a}", alias)})`, values };
+}
+
+/** Limits a recipient update to the named ids; none named matches none. */
+function recipientIdClause(recipientIds: string[] | undefined): string {
+  if (recipientIds === undefined) return "";
+  if (recipientIds.length === 0) return "AND FALSE";
+  return `AND id IN (${recipientIds.map(() => "?").join(", ")})`;
+}
+
+/** Rolls a partial claim back: another resend took one of the recipients. */
+class ClaimLostError extends Error {}
 
 /**
  * Locks the batch row, derives the batch status from its recipient rows, and

@@ -53,7 +53,8 @@ const contracts: ValueMovingContract[] = [
       section: 'transferBatches.post(\n  "/",',
       before:
         'requireAction("transfer_batches.execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
-      through: "replayFromRecord(findTransferBatchRecordReplay),\n  admit(",
+      through:
+        "replayFromRecord(findTransferBatchRecordReplay),\n  // Meters only new sends: a replay, an in-flight poll or a record answer has\n  // exited by now. A 429 is never stored under the key (ADR 0009).\n  meteredQuota(TRANSFER_BATCH_QUOTA),\n  admit(",
       after: "\n  createTransferBatch\n",
     },
     replay: [

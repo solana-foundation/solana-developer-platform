@@ -87,6 +87,12 @@ const WALLET_SCOPE_ROUTES = {
       test: "refuses a batch from a wallet outside the key's scope before writing anything",
     },
   },
+  "POST /v1/payments/transfer-batches/:batchId/retry": {
+    refusedEarly: {
+      file: "routes/payments/transfer-batches/handlers.test.ts",
+      test: "refuses a retry from a wallet outside the key's scope before writing anything",
+    },
+  },
   "POST /v1/payments/requests": { exempt: "a `/pay` link: SDP signs only as fee sponsor" },
   "POST /v1/payments/requests/:paymentRequestId/cancel": { exempt: SIGNS_NOTHING },
   "POST /v1/counterparties": { exempt: SIGNS_NOTHING },

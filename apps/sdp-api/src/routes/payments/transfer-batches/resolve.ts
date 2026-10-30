@@ -24,10 +24,10 @@ import {
 import { loadPaymentMint, type PaymentAmountConverter } from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
-  CreateTransferBatchInput,
   ResolvedBatchRequest,
   ResolvedRecipient,
   TokenContext,
+  TransferBatchMovementInput,
   TransferBatchRecipientInput,
 } from "./types";
 
@@ -167,7 +167,7 @@ export interface AuthorizedBatchRequest {
  */
 export async function authorizeBatchRequest(
   c: AppContext,
-  input: CreateTransferBatchInput,
+  input: TransferBatchMovementInput,
   retainedCustodyWalletId?: string
 ): Promise<AuthorizedBatchRequest> {
   const projectId = requireProjectId(c);
@@ -204,7 +204,7 @@ export async function authorizeBatchRequest(
  * reaches it.
  */
 export async function resolveBatchMovement(
-  input: CreateTransferBatchInput,
+  input: TransferBatchMovementInput,
   authorized: AuthorizedBatchRequest
 ): Promise<ResolvedBatchRequest> {
   const token = normalizePaymentToken(input.token);
@@ -236,7 +236,7 @@ export async function resolveBatchMovement(
  */
 export async function resolveBatchRequest(
   c: AppContext,
-  input: CreateTransferBatchInput
+  input: TransferBatchMovementInput
 ): Promise<ResolvedBatchRequest> {
   return resolveBatchMovement(input, await authorizeBatchRequest(c, input));
 }

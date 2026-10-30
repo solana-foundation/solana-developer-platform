@@ -1,4 +1,5 @@
-import { getRecentBlockhash } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -6,41 +7,33 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError, badRequest, internalError } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
-  getIdempotencyRecordKey,
   idempotencyFingerprintMatches,
   markIdempotencyCommitted,
-  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
-import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
+import {
+  type MovementStepInput,
+  markReplayed,
+  type RecordAnswer,
+} from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentStart } from "@/routes/payments/wallets";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  createSponsorshipFeePayment,
-  resolveRequestSponsorshipScope,
-} from "@/services/sponsorship.service";
-import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
   resolveBatchMovement,
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
+import { prepareBatchChunks, runBatchChunks } from "./run";
 import type { createTransferBatchSchema } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
-import { readSponsoredRentLimit } from "./sponsored-rent";
-import {
-  buildInstructionGroups,
-  chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-} from "./transaction";
 import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
@@ -51,6 +44,107 @@ async function respondToTransferBatchReplay(
 ) {
   const response = await buildTransferBatchResponse(c, batch, organizationId, projectId);
   return success(c, response);
+}
+
+/**
+ * The key a batch row is recorded under (ADR 0009): its payout run (project,
+ * source wallet, externalId), never the request's key, so a resend of the run
+ * under any Idempotency-Key finds the same row and pays nobody again
+ * (HOO-2335, SDP-021 SA-2).
+ */
+function transferBatchRunKey(authorized: AuthorizedBatchRequest, externalId: string): string {
+  return deriveProviderRequestId(
+    [
+      "transfer_batch_run",
+      authorized.scope.auth.organizationId,
+      authorized.projectId,
+      authorized.sourceWallet.id,
+    ],
+    externalId
+  );
+}
+
+/**
+ * Refuses (409, with the batch's id) a row found under a payout run's key
+ * unless it is this request's batch: sent by the same credential (a replay
+ * goes only to the original credential, ADR 0009) with the same body. Runs
+ * before anything is read from the chain or signed.
+ */
+function assertSamePayoutRun(
+  c: AppContext,
+  row: PaymentTransferBatchRow,
+  authorized: AuthorizedBatchRequest
+): void {
+  if (
+    row.initiated_by_key_id === authorized.scope.auth.id &&
+    row.idempotency_fingerprint !== null &&
+    idempotencyFingerprintMatches(c, row.idempotency_fingerprint)
+  ) {
+    return;
+  }
+  throw new AppError(
+    "TRANSFER_BATCH_RUN_EXISTS",
+    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}, and send its failed recipients again with POST /v1/payments/transfer-batches/{batchId}/retry. New recipients go in a new payout run with its own externalId.",
+    { batchId: row.id, externalId: row.external_id }
+  );
+}
+
+/**
+ * The batch insert lost on its key index: a concurrent attempt under this row
+ * key wrote the row first, either a takeover under the same Idempotency-Key or
+ * a send of the same payout run under another one. Answered from that row;
+ * nothing was sent. Null when no row holds the key, so the caller rethrows.
+ */
+async function answerLostBatchInsert(
+  c: AppContext,
+  authorized: AuthorizedBatchRequest,
+  idempotencyKey: string
+): Promise<Response | null> {
+  const replay = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+    organizationId: authorized.scope.auth.organizationId,
+    projectId: authorized.projectId,
+    idempotencyKey,
+  });
+  if (replay) {
+    assertSamePayoutRun(c, replay, authorized);
+    return markReplayed(
+      await respondToTransferBatchReplay(
+        c,
+        replay,
+        authorized.scope.auth.organizationId,
+        authorized.projectId
+      )
+    );
+  }
+  return null;
+}
+
+/**
+ * Settles a run's batch found under another request's key, as far as the chain
+ * allows: that request may still be sending, so only recipients whose
+ * attempt's lastValidBlockHeight the chain has passed are failed (nothing that
+ * attempt built can land). One block-height read; if the RPC can't answer,
+ * the batch is answered as it stands and the stranded-batch job settles it.
+ */
+async function settleExpiredRunAttempt(
+  c: AppContext,
+  run: PaymentTransferBatchRow
+): Promise<PaymentTransferBatchRow> {
+  let blockHeight: bigint;
+  try {
+    blockHeight = await withTransientRpcRetry(() =>
+      createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send()
+    );
+  } catch {
+    return run;
+  }
+  return getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
+    batchId: run.id,
+    organizationId: run.organization_id,
+    projectId: run.project_id,
+    error: "The batch request ended before this recipient's transfer was sent",
+    expiredBelowBlockHeight: blockHeight,
+  });
 }
 
 /**
@@ -76,61 +170,49 @@ export async function admitTransferBatchExecution(
 }
 
 /**
- * Answers a create-batch request from its row: after a takeover of a crashed
- * attempt, or once the shared record has expired. No RPC and no account state.
- * It runs only once the request that created the batch is presumed dead (the
- * key layer took the key over, or it expired), so recipients still pending
- * with no chunk transfer will never be sent: a chunk's transfer row and links
- * commit before its broadcast. They are failed, and the batch settles, before
- * it answers, instead of replaying a batch stuck in `processing` forever.
+ * Answers a create-batch request from its row, before admission, so a request
+ * that already ran is answered even if its wallet can no longer move money.
+ * No RPC and no account state, beyond one block-height read to settle a
+ * crashed attempt. Every batch is recorded under its payout run's key
+ * (HOO-2335), so the row is found whatever Idempotency-Key the request
+ * carries: after a takeover of a crashed attempt, once the shared record has
+ * expired, or for a resend of the run under a new key. That row may belong to
+ * a request still running under another key, so only recipients the chain
+ * proves that request can no longer send are failed (settleExpiredRunAttempt).
+ * It is this request's batch only for the same credential and body; any other
+ * is 409.
  */
 export async function findTransferBatchRecordReplay(
   c: AppContext,
-  input: MovementStepInput<AuthorizedBatchRequest>,
-  recordKey: string
+  input: MovementStepInput<AuthorizedBatchRequest>
 ): Promise<RecordAnswer | null> {
   const { authorized } = input;
+  // SAFETY: mounted after validateBody(createTransferBatchSchema).
+  const body = input.body as CreateTransferBatchInput;
   const organizationId = authorized.scope.auth.organizationId;
-  const row = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+  const run = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
     organizationId,
     projectId: authorized.projectId,
-    idempotencyKey: recordKey,
+    idempotencyKey: transferBatchRunKey(authorized, body.externalId),
   });
-  if (row === null || row.idempotency_fingerprint === null) return null;
-  if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
-    // Another request's row: the step refuses it (422) without touching it.
-    return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
-  }
-  const settled =
-    row.status === "processing"
-      ? await getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
-          batchId: row.id,
-          organizationId,
-          projectId: authorized.projectId,
-          error: "The batch request ended before this recipient's transfer was sent",
-        })
-      : row;
+  if (run === null || run.idempotency_fingerprint === null) return null;
+  assertSamePayoutRun(c, run, authorized);
+  const settled = run.status === "processing" ? await settleExpiredRunAttempt(c, run) : run;
   return {
-    fingerprint: settled.idempotency_fingerprint,
+    fingerprint: run.idempotency_fingerprint,
     respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
   };
 }
 
 /**
- * POST /transfer-batches — creates the batch aggregate, submits all chunks
- * concurrently, and responds without waiting for on-chain confirmation:
- * transfers come back processing and the pending-transfers job settles them.
- * A chunk whose execution throws is settled as failed recipients rather than
- * failing the request, so sibling submissions are never abandoned half-done.
- * That cleanup only touches recipients still unlinked (transfer_id null):
- * executeChunk creates its transfer row and links recipients in one
- * transaction, so a linked recipient implies a live transfer row that the
- * pending-transfers job settles via settleTransferBatch — unlinking it here
- * would orphan that transfer as permanently processing.
- * The final batch status comes from the locked repository recompute — never
- * from in-memory state — so a reconciliation run that settles chunks during
- * the request cannot be overwritten with a stale status.
- * Replays idempotently by Idempotency-Key + payload fingerprint.
+ * POST /transfer-batches — creates the batch aggregate with its recipients,
+ * then submits its chunks (runBatchChunks) without waiting for on-chain
+ * confirmation.
+ * Replays idempotently by Idempotency-Key + payload fingerprint. Every batch
+ * names its payout run (`externalId`) and is recorded under the run's key
+ * (transferBatchRunKey), so findTransferBatchRecordReplay answers a resend of
+ * the run under a new key, and the batch's key index lets one of two
+ * concurrent sends of the run win.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -141,59 +223,17 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(body, authorized);
-  // The credential-bound record key (ADR 0009), never the raw client key, and
-  // the key layer's fingerprint, which canonicalizes the batch body.
-  const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
+  // The row's key (the payout run's, never the raw client key) and the key
+  // layer's fingerprint, which canonicalizes the batch body.
+  const externalId = body.externalId;
+  const idempotencyKey = transferBatchRunKey(authorized, externalId);
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
-
-  const feePayment = createSponsorshipFeePayment<"payments">(
-    c.env,
-    resolveRequestSponsorshipScope(c),
-    "payments.transfer_batch",
-    { custodyWalletId: resolved.sourceWallet.id }
-  );
-  const [signer, feePayer, lifetime] = await Promise.all([
-    createOrgSignerForCustodyWallet<"payments">(
-      c.env,
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
-      resolved.sourceWallet.id,
-      "payments.transfer_batch"
-    ),
-    feePayment.getFeePayer(),
-    getRecentBlockhash(resolved.rpc, "confirmed"),
-  ]);
-  if (signer.address !== resolved.sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
-    recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
-  const sponsoredRent = await readSponsoredRentLimit({
-    groups,
-    tokenContext: resolved.tokenContext,
-    readConfiguration: () => feePayment.getSponsorshipConfiguration(),
-  });
-  const chunks = chunkInstructionGroups({
-    groups,
-    sourceSigner: signer,
-    feePayer,
-    lifetime,
-    sponsoredRent,
-    maxRecipientsPerTransaction:
-      body.options?.maxRecipientsPerTransaction === undefined
-        ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
-        : body.options.maxRecipientsPerTransaction,
-  });
-
+  const prepared = await prepareBatchChunks(c, resolved, body.options?.maxRecipientsPerTransaction);
+  const { chunks } = prepared;
   // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
   const solMovement = solBatchMovement(resolved, chunks);
   if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
 
-  const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];
   try {
@@ -203,7 +243,7 @@ export async function createTransferBatch(
       batch: {
         organizationId: resolved.scope.auth.organizationId,
         projectId: resolved.projectId,
-        externalId: body.externalId === undefined ? null : body.externalId,
+        externalId,
         sourceCustodyWalletId: resolved.sourceWallet.id,
         sourceWalletId: resolved.sourceWallet.walletId,
         sourceAddress: resolved.sourceAddress,
@@ -227,6 +267,8 @@ export async function createTransferBatch(
         amount: recipient.amount,
         status: "pending",
         error: null,
+        attemptLastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
+        attemptId: prepared.attemptId,
       })),
     });
     batch = created.batch;
@@ -234,80 +276,20 @@ export async function createTransferBatch(
     // The batch row exists under the key: any later answer is stored for its retries.
     markIdempotencyCommitted(c);
   } catch (error) {
-    if (idempotencyKey && isPostgresUniqueViolation(error)) {
-      // A concurrent attempt under this key (a takeover) wrote the row first.
-      const replay = await batchRepository.findTransferBatchByIdempotency({
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        idempotencyKey,
-      });
-      if (replay) {
-        if (
-          replay.idempotency_fingerprint === null ||
-          !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
-        ) {
-          // Another request's row: refused unstored, so that request's own retry
-          // is still answered from it.
-          markIdempotencyRecordMismatch(c);
-          throw new AppError("IDEMPOTENCY_KEY_REUSED");
-        }
-        return respondToTransferBatchReplay(
-          c,
-          replay,
-          resolved.scope.auth.organizationId,
-          resolved.projectId
-        );
-      }
-    }
-    throw error;
+    const answered =
+      idempotencyKey && isPostgresUniqueViolation(error)
+        ? await answerLostBatchInsert(c, authorized, idempotencyKey)
+        : null;
+    if (answered === null) throw error;
+    return answered;
   }
-  const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
-    resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
-  );
-
-  const outcomes = await Promise.allSettled(
-    chunks.map((chunk) =>
-      executeChunk({
-        c,
-        resolved,
-        chunk,
-        recipientsByIndex,
-        feePayment,
-        lastValidBlockHeight: lifetime.lastValidBlockHeight,
-        preflight: body.options?.preflight !== false,
-      })
-    )
-  );
-  for (const [position, outcome] of outcomes.entries()) {
-    if (outcome.status === "rejected") {
-      const unlinkedIndexes = chunks[position].recipientIndexes.filter((index) => {
-        const row = recipientsByIndex.get(index);
-        if (!row) {
-          throw internalError("Transfer batch recipient row is missing");
-        }
-        return row.transfer_id === null;
-      });
-      if (unlinkedIndexes.length === 0) {
-        continue;
-      }
-      const updates = await updateRecipientRows({
-        repository: getPaymentTransferBatchesRepository(c),
-        recipientsByIndex,
-        recipientIndexes: unlinkedIndexes,
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        transferId: null,
-        status: "failed",
-        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
-      });
-      applyRecipientRowUpdates(recipientsByIndex, updates);
-    }
-  }
-
-  const finalBatch = await batchRepository.recomputeTransferBatchStatus({
+  const finalBatch = await runBatchChunks({
+    c,
+    resolved,
     batchId: batch.id,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
+    prepared,
+    recipientRows,
+    preflight: body.options?.preflight !== false,
   });
 
   return success(

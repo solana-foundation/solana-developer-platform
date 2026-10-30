@@ -248,7 +248,9 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`).",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). " +
+      "An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. " +
+      "To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -260,6 +262,30 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Transfer batch created",
+        content: jsonContent(transferBatchResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches/{batchId}/retry",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
+    summary: "Retry a transfer batch's failed recipients",
+    operationId: "retryPaymentTransferBatch",
+    description:
+      "Sends the batch's `failed` recipients again, from the same source wallet with the batch's options, and no other recipient. A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. " +
+      "Takes no body and requires an Idempotency-Key: a retry with the same key sends nothing again: while its response is stored, it returns that saved response, and after a server error or once the response has expired, the batch as it stands. Read the batch's current state with `GET /v1/payments/transfer-batches/{batchId}`, and use a new key for each retry you mean to send. Any credential that may send from the batch's wallet can retry it. Each recipient is paid the address the batch recorded for it. Returns 409, sending nothing: `TRANSFER_BATCH_NOTHING_TO_RETRY` when the batch has no failed recipients (while it is `processing`, its unsent recipients become `failed` only once its request can no longer send them), `TRANSFER_BATCH_RETRY_CLAIMED` when a concurrent retry claimed them first, and `TRANSFER_BATCH_DESTINATION_CHANGED` (`details.recipientIds`) when a failed recipient's counterparty account has changed its address since (send that recipient in a new batch). A native SOL retry is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, as create is, when a failed recipient would still be paid less than the rent-exempt minimum at an address with no account; its recipients stay `failed`. Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: movementKeyHeaders,
+      params: paymentTransferBatchIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Failed recipients resent",
         content: jsonContent(transferBatchResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),

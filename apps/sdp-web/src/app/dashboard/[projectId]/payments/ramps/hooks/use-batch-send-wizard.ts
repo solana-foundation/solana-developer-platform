@@ -27,6 +27,8 @@ import {
   type CreateTransferBatchResult,
   estimateTransferBatch,
   fetchBatchRecipients,
+  fetchTransferBatch,
+  TransferBatchRequestError,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import";
 import {
@@ -37,11 +39,13 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -103,6 +107,47 @@ export interface UseBatchSendWizardProps {
   issuedTokenSymbolsByMint: Record<string, string>;
   cluster: SolanaCluster;
   onExit: () => void;
+}
+
+/** Copy for the retry refusals the API names (HOO-2343); each sent nothing. */
+const RETRY_REFUSAL_COPY = {
+  TRANSFER_BATCH_RETRY_CLAIMED: {
+    title: "DashboardPayments.batchSend.retryAlreadyClaimed",
+    description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
+  },
+  TRANSFER_BATCH_NOTHING_TO_RETRY: {
+    title: "DashboardPayments.batchSend.nothingToRetry",
+    description: "DashboardPayments.batchSend.nothingToRetryDescription",
+  },
+  TRANSFER_BATCH_DESTINATION_CHANGED: {
+    title: "DashboardPayments.batchSend.retryDestinationChanged",
+    description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
+  },
+} as const satisfies Record<string, { title: MessageKey; description: MessageKey }>;
+
+type RetryRefusalCode = keyof typeof RETRY_REFUSAL_COPY;
+
+function isRetryRefusalCode(code: string | null): code is RetryRefusalCode {
+  return code !== null && Object.hasOwn(RETRY_REFUSAL_COPY, code);
+}
+
+/**
+ * What a failed retry request tells the user. A refusal the API names sent
+ * nothing, so it is said in our words; anything else shows its own message.
+ *
+ * @param failure - The caught value, narrowed: the API's refusal, another
+ *   error, or null for anything that is not an Error.
+ */
+function retryFailureCopy(
+  failure: TransferBatchRequestError | Error | null,
+  t: (key: MessageKey) => string
+): { title: string; description: string } {
+  if (failure instanceof TransferBatchRequestError && isRetryRefusalCode(failure.code)) {
+    const refusal = RETRY_REFUSAL_COPY[failure.code];
+    return { title: t(refusal.title), description: t(refusal.description) };
+  }
+  const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
+  return { title: fallback, description: failure === null ? fallback : failure.message };
 }
 
 /**
@@ -306,6 +351,7 @@ export function useBatchSendWizard({
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -443,7 +489,8 @@ export function useBatchSendWizard({
 
   // Canonical form, not the order the recipients were assembled in: the API
   // fingerprints recipients IN ORDER, so a retry that reorders the same set
-  // has to send the same bytes or it is refused as a key conflict.
+  // has to send the same bytes or it is refused as a key conflict. A blank
+  // Reference is named at send time, durably (sendTransferBatchUnderKey).
   const request = useMemo(
     () =>
       canonicalTransferBatchRequest({
@@ -554,6 +601,18 @@ export function useBatchSendWizard({
         });
       }
     } catch (error) {
+      // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
+      if (
+        error instanceof TransferBatchRequestError &&
+        error.code === "TRANSFER_BATCH_RUN_EXISTS"
+      ) {
+        toast.error(t("DashboardPayments.batchSend.referenceInUse"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.referenceInUseDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
       toast.error(t("DashboardPayments.batchSend.resultFailed"), {
         id: toastId,
         description:
@@ -562,6 +621,56 @@ export function useBatchSendWizard({
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // The send answers before its chunks settle, so the batch is read until it
+  // is final: a recipient that fails later still offers Retry.
+  const { data: liveBatch, mutate: setLiveBatch } = useSWR(
+    batchResult ? paymentsQueryKeys.transferBatch({ batchId: batchResult.batch.id }) : null,
+    ([, batchId]) => fetchTransferBatch(batchId, t),
+    {
+      revalidateOnFocus: false,
+      refreshInterval: (latest) =>
+        isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
+          ? MOVEMENT_POLL_INTERVAL_MS
+          : 0,
+    }
+  );
+  const currentBatch = liveBatch ?? batchResult;
+  const failedRecipientIds =
+    currentBatch?.recipients
+      .filter((recipient) => recipient.status === "failed")
+      .map((recipient) => recipient.id) ?? [];
+  const failedRecipientCount = failedRecipientIds.length;
+
+  // Sends only the recipients the API still finds failed (HOO-2343); the rest
+  // of the batch is never sent again.
+  const retryFailedRecipients = async () => {
+    if (currentBatch === null || failedRecipientCount === 0 || retrying) {
+      return;
+    }
+    setRetrying(true);
+    const toastId = toast.loading(t("DashboardPayments.batchSend.retryingFailedRecipients"), {
+      position: "bottom-right",
+    });
+    try {
+      const result = await retryTransferBatchUnderKey(currentBatch.batch.id, failedRecipientIds, t);
+      setBatchResult(result);
+      await setLiveBatch(result, { revalidate: false });
+      toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
+        id: toastId,
+        description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
+        position: "bottom-right",
+      });
+    } catch (error) {
+      const { title, description } = retryFailureCopy(error instanceof Error ? error : null, t);
+      toast.error(title, { id: toastId, description, position: "bottom-right" });
+      // The API may have taken the retry even though its answer was lost: read
+      // the batch again, so a resend in flight resumes the poll.
+      void setLiveBatch();
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -639,7 +748,10 @@ export function useBatchSendWizard({
     sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
-    batchResult,
+    batchResult: currentBatch,
+    failedRecipientCount,
+    retrying,
+    retryFailedRecipients,
     handlePrimary,
     handleSecondary,
     handleBack,
