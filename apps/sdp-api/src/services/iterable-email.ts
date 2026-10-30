@@ -15,7 +15,8 @@ const iterableEmailConfigSchema = z.object({
     .string()
     .trim()
     .pipe(z.url({ protocol: /^https?$/ })),
-  apiKey: z.string().trim().min(1),
+  // Iterable keys are 32 characters; a short value, like a deployment's `placeholder`, is unset.
+  apiKey: z.string().trim().min(20),
   campaignId: z
     .string()
     .trim()

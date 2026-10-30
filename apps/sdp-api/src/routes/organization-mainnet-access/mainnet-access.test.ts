@@ -19,6 +19,7 @@ const PATH = `/v1/organizations/${ORGANIZATION_ID}/mainnet-access`;
 const MEMBER_USER = { id: "usr_mainnet_member", email: "member@example.com" };
 const ITERABLE_API_URL = "https://api.iterable.com";
 const ITERABLE_SEND_URL = `${ITERABLE_API_URL}/api/email/target`;
+const ITERABLE_TEST_KEY = "0123456789abcdef0123456789abcdef";
 const SUBMISSION = { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true };
 
 let adminToken: string;
@@ -132,7 +133,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     await seedTestDatabase(env);
     await seedOrganization();
     env.ITERABLE_API_URL = ITERABLE_API_URL;
-    env.ITERABLE_API_KEY = "iterable_test";
+    env.ITERABLE_API_KEY = ITERABLE_TEST_KEY;
     env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
     env.MAINNET_ACCESS_EMAIL_TO = "mainnet@example.org";
     const realFetch = globalThis.fetch;
@@ -209,7 +210,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
     const [email, ...others] = sentEmails();
     expect(others).toHaveLength(0);
-    expect(email?.headers["api-key"]).toBe("iterable_test");
+    expect(email?.headers["api-key"]).toBe(ITERABLE_TEST_KEY);
     expect(email?.body).toMatchObject({
       campaignId: 4242,
       recipientEmail: "mainnet@example.org",
@@ -338,6 +339,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     ["no Iterable API URL", "ITERABLE_API_URL", undefined],
     ["no campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", undefined],
     ["a placeholder campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", "placeholder"],
+    ["a placeholder API key", "ITERABLE_API_KEY", "placeholder"],
   ] as const)(
     "reads unavailable and refuses before recording anything with %s",
     async (_, key, value) => {
