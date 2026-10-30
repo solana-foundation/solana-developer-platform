@@ -78,13 +78,13 @@ describe("StartSection markup", () => {
     expect(door?.textContent).toContain(getMessages("en").Homepage.start.doorNote);
   });
 
-  it("opens the waitlist in a new tab as the sandbox, without the devnet note, while signup is closed", async () => {
+  it("opens the waitlist in a new tab under its own label, without the devnet note, while signup is closed", async () => {
     const doc = await renderSection(waitlistLinks);
     const door = doc.querySelector("a");
     expect(door?.getAttribute("href")).toBe("https://waitlist.example/form");
     expect(door?.getAttribute("target")).toBe("_blank");
     expect(door?.getAttribute("rel")).toBe("noreferrer");
-    expect(door?.textContent).toBe("Open the sandbox");
+    expect(door?.textContent).toBe(waitlistLinks.signup.label);
   });
 
   it("starts with its loops paused", async () => {

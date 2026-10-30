@@ -79,15 +79,19 @@ describe("HomepageNav", () => {
     expect(signup.getAttribute("target")).toBeNull();
   });
 
-  it("opens the waitlist in a new tab while signup is closed", async () => {
+  it("opens the waitlist in a new tab from the account action and the platform panel while signup is closed", async () => {
     await renderNav(waitlistLinks);
 
-    const signup = within(screen.getByRole("banner")).getByRole("link", {
-      name: "Join the waitlist",
-    });
-    expect(signup.getAttribute("href")).toBe("https://example.com/waitlist");
-    expect(signup.getAttribute("target")).toBe("_blank");
-    expect(signup.getAttribute("rel")).toBe("noreferrer");
+    const banner = screen.getByRole("banner");
+    const platform = within(banner).getByRole("region", { name: t("Homepage.nav.platform.label") });
+    const waitlist = within(banner).getAllByRole("link", { name: "Join the waitlist" });
+    expect(waitlist).toHaveLength(2);
+    expect(waitlist.filter((link) => platform.contains(link))).toHaveLength(1);
+    for (const signup of waitlist) {
+      expect(signup.getAttribute("href")).toBe("https://example.com/waitlist");
+      expect(signup.getAttribute("target")).toBe("_blank");
+      expect(signup.getAttribute("rel")).toBe("noreferrer");
+    }
   });
 
   it("shows only the dashboard link to a signed-in visitor", async () => {
@@ -125,6 +129,7 @@ describe("HomepageNav", () => {
       "#network",
       "/sign-up",
     ]);
+    expect(screen.getByRole("link", { name: t("Homepage.nav.platform.sandbox") })).toBeTruthy();
     expect(hrefs("homepage-nav-builders").slice(0, 2)).toEqual(["#builders", "#stack"]);
     const docs = hrefs("homepage-nav-docs");
     expect(docs.slice(0, 3)).toEqual([openLinks.docs, openLinks.openapi, openLinks.llms]);
