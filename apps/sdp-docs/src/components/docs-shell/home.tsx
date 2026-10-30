@@ -38,6 +38,7 @@ const RAMP_PARTNERS = {
   moonpay: { name: "MoonPay", logo: "moonpay" },
   stripe: { name: "Stripe", logo: "stripe" },
 } as const satisfies Record<RampProviderId, Partner>;
+const PUBLISHED_RAMP_PROVIDERS = new Set(publicSurface.rampProviders);
 
 const RPC_PARTNERS = {
   default: null,
@@ -136,7 +137,7 @@ export function DocsHome() {
     ? COMPLIANCE_PROVIDERS.map((provider) => COMPLIANCE_PARTNERS[provider])
     : [];
   const rampPartners = RAMP_PROVIDERS.filter((provider) =>
-    publicSurface.rampProviders.includes(provider)
+    PUBLISHED_RAMP_PROVIDERS.has(provider)
   ).map((provider) => RAMP_PARTNERS[provider]);
   const rpcPartners = ORGANIZATION_RPC_PROVIDERS.flatMap((provider) => {
     const partner = RPC_PARTNERS[provider];
