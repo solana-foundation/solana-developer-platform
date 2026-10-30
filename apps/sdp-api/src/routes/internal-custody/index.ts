@@ -102,7 +102,7 @@ internalCustody.get("/connections", requireAction("wallets.configure"), async (c
       label: row.credential_label,
       status: row.connection_status,
       isRuntimeExecutionAllowed:
-        isCustodyConnectionRuntimeAvailable(c.env, row.provider, row) &&
+        isCustodyConnectionRuntimeAvailable(row.provider, row) &&
         isCustodyProviderEntitled(availability, row.provider),
       createdAt: row.created_at,
       activatedAt: row.activated_at,

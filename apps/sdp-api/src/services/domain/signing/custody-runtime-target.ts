@@ -268,18 +268,16 @@ interface CreatedConnectionWalletRow {
  * a reserved provider account, and its credential is active. No wallet of the
  * connection is privileged; each wallet adds only its own status on top.
  *
- * @param env - Process environment naming the release channel.
  * @param provider - The connection's custody provider.
  * @param row - The connection's lifecycle and credential facts.
  * @returns True when the connection's wallets may execute.
  */
 export function isCustodyConnectionRuntimeAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   provider: CustodyProvider,
   row: CustodyConnectionRuntimeAvailabilityFacts
 ): boolean {
   return (
-    isCustodyProviderAvailable(env, provider, "byok") &&
+    isCustodyProviderAvailable(provider, "byok") &&
     row.connection_status === "active" &&
     row.last_check_status === "success" &&
     row.credential_status === "active" &&
@@ -1201,7 +1199,7 @@ export class CustodyRuntimeTargets {
     custodyWalletId?: string
   ): void {
     const mode: CustodyMode = target.kind === "config" ? "managed" : "byok";
-    if (isCustodyProviderAvailable(this.env, target.provider, mode)) {
+    if (isCustodyProviderAvailable(target.provider, mode)) {
       return;
     }
     this.logUnavailable(target, "not_in_release_channel", custodyWalletId);
@@ -1342,7 +1340,7 @@ export class CustodyRuntimeTargets {
       provider,
       isRuntimeExecutionAllowed:
         managedUseAllowed &&
-        isCustodyProviderAvailable(this.env, provider, "managed") &&
+        isCustodyProviderAvailable(provider, "managed") &&
         isCustodyProviderEntitled(availability, provider),
       walletId: row.wallet_id,
       publicKey: row.wallet_public_key,
@@ -1374,7 +1372,7 @@ export class CustodyRuntimeTargets {
   }
 
   private isConnectionRuntimeAvailable(row: ConnectionOwnerRow): boolean {
-    return isCustodyConnectionRuntimeAvailable(this.env, this.parseProvider(row.provider), row);
+    return isCustodyConnectionRuntimeAvailable(this.parseProvider(row.provider), row);
   }
 
   private parseProvider(provider: string): CustodyProvider {

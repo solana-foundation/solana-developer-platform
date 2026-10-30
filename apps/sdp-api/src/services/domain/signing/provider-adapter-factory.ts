@@ -212,7 +212,7 @@ export async function createAdapterFromEncryptedConfig(
   record: SigningConfigRecord,
   cipher: CustodyCipher = createCustodyCipher(env)
 ): Promise<SigningPort> {
-  assertCustodyProviderAvailable(env, record.provider, "managed");
+  assertCustodyProviderAvailable(record.provider, "managed");
   // Checked before parsing, which can decrypt: a stored local key must never be
   // loaded in a managed deployment, whatever row exists.
   if (record.provider === "local") {
@@ -245,7 +245,7 @@ export function createPrivyAdapterFromCredential(
   env: Env,
   input: PrivyCredentialAdapterInput
 ): SigningPort {
-  assertCustodyProviderAvailable(env, "privy", "byok");
+  assertCustodyProviderAvailable("privy", "byok");
   if (!input.appId || !input.appSecret || !input.walletId) {
     throw new SigningError("Privy credential or wallet is unavailable", "PROVIDER_NOT_CONFIGURED");
   }
@@ -274,7 +274,7 @@ export function createFireblocksAdapterFromCredential(
     requestDelayMs?: number;
   }
 ): SigningPort {
-  assertCustodyProviderAvailable(env, "fireblocks", "byok");
+  assertCustodyProviderAvailable("fireblocks", "byok");
   if (
     !input.apiKey ||
     !input.apiSecretPem ||

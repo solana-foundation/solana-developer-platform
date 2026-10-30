@@ -123,7 +123,7 @@ export function assertRequiredEnv(env: Env): void {
   parseDatabaseEnv(env);
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);
-  assertSdpReleaseChannelConfigured(env);
+  assertSdpReleaseChannelConfigured();
   // Stage and prod run ENVIRONMENT=production on Cloud Run, where Kora admits only IAM
   // invokers; dev, local and self-hosted reach Kora without an identity token.
   assertKoraConfigured(env, {

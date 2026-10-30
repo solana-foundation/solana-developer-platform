@@ -50,12 +50,7 @@ export async function paymentRequestScope(
   const project = await new ProjectService(getDb(c.env)).getProject(projectId);
   if (
     !project ||
-    !isModuleAvailableForEnvironment(
-      c.env,
-      "payments",
-      project.environment,
-      c.get("rampProviderMaturity")
-    )
+    !isModuleAvailableForEnvironment("payments", project.environment, c.get("rampProviderMaturity"))
   ) {
     throw notFound("Payment request");
   }

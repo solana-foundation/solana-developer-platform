@@ -207,7 +207,6 @@ export function startCron(deps: CronDeps): CronHandle | null {
         (definition.effect !== "starts" ||
           environment === null ||
           isModuleAvailableForEnvironment(
-            deps.env,
             definition.module,
             environment,
             SDP_RAMP_PROVIDER_MATURITY

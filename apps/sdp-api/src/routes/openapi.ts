@@ -1,8 +1,9 @@
+import { deploymentReleaseChannel } from "@/lib/feature-flags";
 /**
  * OpenAPI Spec Route
  */
 
-import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
@@ -59,7 +60,7 @@ function hasMatchingEtag(ifNoneMatch: string | undefined, documentOpaqueTag: str
 }
 
 openapi.get("/", publicRoute("public OpenAPI document"), (c) => {
-  const document = servedDocument(resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL));
+  const document = servedDocument(deploymentReleaseChannel());
   c.header("Cache-Control", OPENAPI_CACHE_CONTROL);
   c.header("ETag", document.etag);
 

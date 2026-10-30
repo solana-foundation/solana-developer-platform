@@ -563,15 +563,15 @@ export async function getProviderAvailability(
       custody: buildAvailabilityEntries(
         resolved.providers.custody,
         configured.custody,
-        (provider) => CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode))
+        (provider) => CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(provider, mode))
       ),
       compliance: buildAvailabilityEntries(
         resolved.providers.compliance,
         configured.compliance,
-        () => isModuleAvailable(env, "compliance", options.rampProviderMaturity)
+        () => isModuleAvailable("compliance", options.rampProviderMaturity)
       ),
       ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps, (provider) =>
-        isRampProviderAvailable(env, provider, options.rampProviderMaturity)
+        isRampProviderAvailable(provider, options.rampProviderMaturity)
       ),
       earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
         isEarnEnabled(env)
@@ -663,16 +663,11 @@ export function custodyProviderNotInReleaseChannel(
 /**
  * Refuses a (custody provider, mode) pair the deployment's release channel leaves out.
  *
- * @param env - Process environment naming the release channel.
  * @param provider - The custody provider.
  * @param mode - The custody mode the provider is used in.
  */
-export function assertCustodyProviderAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
-  provider: CustodyProvider,
-  mode: CustodyMode
-): void {
-  if (!isCustodyProviderAvailable(env, provider, mode)) {
+export function assertCustodyProviderAvailable(provider: CustodyProvider, mode: CustodyMode): void {
+  if (!isCustodyProviderAvailable(provider, mode)) {
     throw custodyProviderNotInReleaseChannel(provider, mode);
   }
 }
@@ -834,7 +829,6 @@ async function loadProjectProviderFacts(
  * credential setup, which the channel check already implies (the catalog types
  * every `BYOK_CUSTODY_PROVIDERS` entry as self-service).
  *
- * @param env - Process environment naming the release channel.
  * @param facts - The project's environment and its organization's provider access.
  * @param request - The pair being set up and the project it is for.
  * @param request.organizationId - The organization that owns the project.
@@ -844,7 +838,6 @@ async function loadProjectProviderFacts(
  * @returns Admitted, or the refusal carrying the first failed check's 403.
  */
 function decideCustodySetup(
-  env: Env,
   facts: ProjectProviderFacts,
   request: CustodySetupRequest
 ): CustodySetupAdmission {
@@ -855,7 +848,7 @@ function decideCustodySetup(
     environment: facts.environment,
     error,
   });
-  if (!isCustodyProviderAvailable(env, provider, mode)) {
+  if (!isCustodyProviderAvailable(provider, mode)) {
     return refuse(custodyProviderNotInReleaseChannel(provider, mode));
   }
   if (!isCustodyModeAllowedInEnvironment(facts.environment, mode)) {
@@ -1063,7 +1056,7 @@ function decideProjectProvider(
 ): ProjectProviderDecision {
   switch (request.family) {
     case "custody": {
-      const admission = decideCustodySetup(env, facts, {
+      const admission = decideCustodySetup(facts, {
         ...facts.scope,
         provider: request.provider,
         mode: request.mode,
@@ -1086,7 +1079,7 @@ function decideProjectProvider(
     }
     case "ramps":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isRampProviderAvailable(env, request.provider, rampProviderMaturity),
+        inReleaseChannel: isRampProviderAvailable(request.provider, rampProviderMaturity),
         offered: isRampProviderSurfaced(request.provider, facts.environment),
         entry: facts.availability.providers.ramps[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
@@ -1094,7 +1087,6 @@ function decideProjectProvider(
     case "compliance":
       return decideStagedProvider(facts, request, {
         inReleaseChannel: isModuleAvailableForEnvironment(
-          env,
           "compliance",
           facts.environment,
           rampProviderMaturity
@@ -1108,7 +1100,7 @@ function decideProjectProvider(
       return decideStagedProvider(facts, request, {
         inReleaseChannel:
           isEarnEnabled(env) &&
-          isModuleAvailableForEnvironment(env, "earn", facts.environment, rampProviderMaturity),
+          isModuleAvailableForEnvironment("earn", facts.environment, rampProviderMaturity),
         offered: isEarnRequestOffered(request),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
@@ -1374,7 +1366,7 @@ export async function admitByokCustodySetup(
   provider: CustodyProvider
 ): Promise<CustodySetupAdmission> {
   const facts = await loadProjectProviderFacts(env, db, scope);
-  return decideCustodySetup(env, facts, { ...facts.scope, provider, mode: "byok" });
+  return decideCustodySetup(facts, { ...facts.scope, provider, mode: "byok" });
 }
 
 /**

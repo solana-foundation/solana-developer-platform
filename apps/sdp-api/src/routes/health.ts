@@ -1,9 +1,9 @@
+import { deploymentReleaseChannel } from "@/lib/feature-flags";
 /**
  * Health Check Route
  */
 
 import { EGRESS_READINESS_SERVES_TRAFFIC } from "@sdp/types/health";
-import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { getDb } from "@/db/client";
 import { publicRoute } from "@/middleware/require-action";
@@ -22,7 +22,7 @@ health.get("/", publicRoute("health check"), async (c) => {
     version: c.env.API_VERSION,
     environment: c.env.ENVIRONMENT,
     // Lets the dashboard confirm it runs the same release channel as this API.
-    releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
+    releaseChannel: deploymentReleaseChannel(),
   };
 
   return c.json(health);

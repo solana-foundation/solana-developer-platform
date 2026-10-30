@@ -12,6 +12,7 @@ import {
   SDP_RAMP_PROVIDER_MATURITY,
   type SdpModule,
   type SdpRampProviderMaturity,
+  type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Env } from "@/types/env";
@@ -23,40 +24,43 @@ function isTruthyFlag(value: string | undefined): boolean {
 }
 
 /**
+ * This deployment's release channel, from `SDP_RELEASE_CHANNEL`. A deployment constant, read
+ * where each decision is made rather than passed in; throws when unset or unknown.
+ *
+ * @returns The deployment's release channel.
+ */
+export function deploymentReleaseChannel(): SdpReleaseChannel {
+  return resolveSdpReleaseChannel(process.env.SDP_RELEASE_CHANNEL);
+}
+
+/**
  * Whether the deployment's release channel (`SDP_RELEASE_CHANNEL`, see `@sdp/types` release channels)
  * includes `module`. A release channel only caps: every flag below still has to be on,
  * and none of them can bring back a module the release channel leaves out.
  */
 export function isModuleAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   module: SdpModule,
   rampProviderMaturity: SdpRampProviderMaturity
 ): boolean {
-  return isModuleInReleaseChannel(
-    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
-    module,
-    rampProviderMaturity
-  );
+  return isModuleInReleaseChannel(deploymentReleaseChannel(), module, rampProviderMaturity);
 }
 
 /**
  * Whether the deployment's release channel runs `module` for projects in `environment`
  * (`SDP_MODULE_MATURITY` is per environment).
  *
- * @param env - Process environment naming the release channel.
  * @param module - The module the request belongs to.
  * @param environment - The project's environment.
  * @param rampProviderMaturity - `SDP_RAMP_PROVIDER_MATURITY`; tests pass their own table.
  * @returns True when the channel runs the module for that environment.
  */
 export function isModuleAvailableForEnvironment(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   module: SdpModule,
   environment: SdpEnvironment,
   rampProviderMaturity: SdpRampProviderMaturity
 ): boolean {
   return isModuleInReleaseChannelForEnvironment(
-    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
+    deploymentReleaseChannel(),
     module,
     environment,
     rampProviderMaturity
@@ -69,34 +73,20 @@ export function isModuleAvailableForEnvironment(
  * `@sdp/types/release-channels` constants, so tests override them by mocking
  * that module.
  *
- * @param env - Process environment naming the release channel.
  * @param provider - The custody provider.
  * @param mode - The custody mode the provider is used in.
  * @returns True when the (provider, mode) pair is in the release channel.
  */
-export function isCustodyProviderAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
-  provider: CustodyProvider,
-  mode: CustodyMode
-): boolean {
-  return isCustodyProviderInReleaseChannel(
-    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
-    provider,
-    mode
-  );
+export function isCustodyProviderAvailable(provider: CustodyProvider, mode: CustodyMode): boolean {
+  return isCustodyProviderInReleaseChannel(deploymentReleaseChannel(), provider, mode);
 }
 
 /** Whether the deployment's release channel includes ramp `provider` (see `SDP_RAMP_PROVIDER_MATURITY`). */
 export function isRampProviderAvailable(
-  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
   provider: RampProviderId,
   rampProviderMaturity: SdpRampProviderMaturity
 ): boolean {
-  return isRampProviderInReleaseChannel(
-    resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL),
-    provider,
-    rampProviderMaturity
-  );
+  return isRampProviderInReleaseChannel(deploymentReleaseChannel(), provider, rampProviderMaturity);
 }
 
 /**
@@ -104,17 +94,14 @@ export function isRampProviderAvailable(
  * or a typo fails at startup instead of shipping every module. It does not read
  * `ENVIRONMENT`, so a job with a missing or wrong `ENVIRONMENT` is checked too.
  */
-export function assertSdpReleaseChannelConfigured(env: Pick<Env, "SDP_RELEASE_CHANNEL">): void {
-  resolveSdpReleaseChannel(env.SDP_RELEASE_CHANNEL);
+export function assertSdpReleaseChannelConfigured(): void {
+  deploymentReleaseChannel();
 }
 
 export function isAssetProfilesEnabled(
-  env: Pick<
-    Env,
-    "SDP_FLAG_ASSET_PROFILES" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE" | "SDP_RELEASE_CHANNEL"
-  >
+  env: Pick<Env, "SDP_FLAG_ASSET_PROFILES" | "ENVIRONMENT" | "SDP_DEPLOYMENT_MODE">
 ): boolean {
-  if (!isModuleAvailable(env, "issuance", SDP_RAMP_PROVIDER_MATURITY)) {
+  if (!isModuleAvailable("issuance", SDP_RAMP_PROVIDER_MATURITY)) {
     return false;
   }
   // Managed SDP rolls out the UI through Vercel's `asset-profiles` flag. Keep
@@ -128,50 +115,41 @@ export function isAssetProfilesEnabled(
   return env.ENVIRONMENT === "development" || isTruthyFlag(env.SDP_FLAG_ASSET_PROFILES);
 }
 
-export function isPrivateChannelsEnabled(
-  env: Pick<Env, "PRIVATE_CHANNELS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
+export function isPrivateChannelsEnabled(env: Pick<Env, "PRIVATE_CHANNELS_ENABLED">): boolean {
   return (
-    isModuleAvailable(env, "private_channels", SDP_RAMP_PROVIDER_MATURITY) &&
+    isModuleAvailable("private_channels", SDP_RAMP_PROVIDER_MATURITY) &&
     isTruthyFlag(env.PRIVATE_CHANNELS_ENABLED)
   );
 }
 
-export function isHeliusRingsEnabled(
-  env: Pick<Env, "HELIUS_RINGS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
+export function isHeliusRingsEnabled(env: Pick<Env, "HELIUS_RINGS_ENABLED">): boolean {
   return (
-    isModuleAvailable(env, "helius_rings", SDP_RAMP_PROVIDER_MATURITY) &&
+    isModuleAvailable("helius_rings", SDP_RAMP_PROVIDER_MATURITY) &&
     isTruthyFlag(env.HELIUS_RINGS_ENABLED)
   );
 }
 
-export function isMarketsEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
+export function isMarketsEnabled(env: Pick<Env, "MARKETS_ENABLED">): boolean {
   return (
-    isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_MATURITY) &&
-    isTruthyFlag(env.MARKETS_ENABLED)
+    isModuleAvailable("markets", SDP_RAMP_PROVIDER_MATURITY) && isTruthyFlag(env.MARKETS_ENABLED)
   );
 }
 
 // Earn is a sub-module of Markets, so the parent flag gates it: clearing
 // MARKETS_ENABLED disables every Markets API surface in one move. Callers must
 // not add a second markets check — this hierarchy is the single source of truth.
-export function isEarnEnabled(
-  env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED" | "SDP_RELEASE_CHANNEL">
-): boolean {
+export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">): boolean {
   return (
     isMarketsEnabled(env) &&
-    isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY) &&
+    isModuleAvailable("earn", SDP_RAMP_PROVIDER_MATURITY) &&
     isTruthyFlag(env.EARN_ENABLED)
   );
 }
 
 // DvP is the other Markets sub-module. It has no flag of its own on the API, so
 // Markets plus the release channel decide it.
-export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED" | "SDP_RELEASE_CHANNEL">): boolean {
-  return isMarketsEnabled(env) && isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_MATURITY);
+export function isDvpEnabled(env: Pick<Env, "MARKETS_ENABLED">): boolean {
+  return isMarketsEnabled(env) && isModuleAvailable("dvp", SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**

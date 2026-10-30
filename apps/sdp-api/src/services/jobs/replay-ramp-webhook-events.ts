@@ -249,7 +249,7 @@ export async function replayRampWebhookEvents(
     100
   );
   const excludedProviders = RAMP_PROVIDERS.filter(
-    (provider) => !isRampProviderAvailable(env, provider, rampProviderMaturity)
+    (provider) => !isRampProviderAvailable(provider, rampProviderMaturity)
   );
   if (excludedProviders.length === RAMP_PROVIDERS.length) {
     return 0;

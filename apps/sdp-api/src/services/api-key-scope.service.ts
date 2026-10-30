@@ -7,7 +7,6 @@ import {
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isModuleInReleaseChannelForEnvironment,
-  resolveSdpReleaseChannel,
   type SdpRampProviderMaturity,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
@@ -15,6 +14,7 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { AppError, badRequest } from "@/lib/errors";
+import { deploymentReleaseChannel } from "@/lib/feature-flags";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ApiKeySigningWalletScope } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
@@ -59,7 +59,7 @@ export interface ApiKeyGrantChannel {
 /** The request's deployment channel and project environment, read where the grants are decided. */
 export function requestApiKeyGrantChannel(c: Context<{ Bindings: Env }>): ApiKeyGrantChannel {
   return {
-    releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
+    releaseChannel: deploymentReleaseChannel(),
     environment: resolveSdpEnvironment(c),
     rampProviderMaturity: c.get("rampProviderMaturity"),
   };

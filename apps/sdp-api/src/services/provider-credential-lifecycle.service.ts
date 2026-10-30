@@ -1082,7 +1082,7 @@ async function requireChannelScopedCredential(
   credentialId: string
 ): Promise<LifecycleCredentialRow> {
   const credential = await requireScopedLifecycleCredential(context, credentialId);
-  assertCustodyProviderAvailable(context.c.env, credential.provider, "byok");
+  assertCustodyProviderAvailable(credential.provider, "byok");
   return credential;
 }
 

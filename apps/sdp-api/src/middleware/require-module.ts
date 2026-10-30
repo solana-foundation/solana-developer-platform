@@ -25,7 +25,7 @@ export function isRampProviderInChannel(
   c: ReleaseChannelContext,
   provider: RampProviderId
 ): boolean {
-  return isRampProviderAvailable(c.env, provider, rampProviderMaturity(c));
+  return isRampProviderAvailable(provider, rampProviderMaturity(c));
 }
 
 /** Refuses a request that names a ramp provider the release channel leaves out. */
@@ -43,12 +43,7 @@ export function assertRampProviderInChannel(
  * environment. Only after `projectContextMiddleware`, which sets the environment.
  */
 export function isModuleInChannel(c: ReleaseChannelContext, module: SdpModule): boolean {
-  return isModuleAvailableForEnvironment(
-    c.env,
-    module,
-    resolveSdpEnvironment(c),
-    rampProviderMaturity(c)
-  );
+  return isModuleAvailableForEnvironment(module, resolveSdpEnvironment(c), rampProviderMaturity(c));
 }
 
 /** Refuses a request that names a module the release channel leaves out for its project. */
@@ -84,7 +79,7 @@ export function assertTransferRampProviderInChannel(
  */
 export function requireModule(module: SdpModule) {
   return async (c: ReleaseChannelContext, next: Next) => {
-    if (!isModuleAvailable(c.env, module, rampProviderMaturity(c))) {
+    if (!isModuleAvailable(module, rampProviderMaturity(c))) {
       throw forbidden(`The ${module} module is not available in this release channel.`);
     }
     await next();

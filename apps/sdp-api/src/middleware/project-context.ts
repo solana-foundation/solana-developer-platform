@@ -64,7 +64,6 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
       routeModule !== undefined &&
       routeModule !== "core" &&
       !isModuleAvailableForEnvironment(
-        c.env,
         routeModule,
         scope.environment,
         c.get("rampProviderMaturity")

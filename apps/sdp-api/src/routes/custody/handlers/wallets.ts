@@ -646,16 +646,11 @@ export const getWalletById = async (c: AppContext) => {
  * leaves out, for read paths that answer from the wallet row and build no adapter.
  * A Connection wallet is BYOK custody, a Config wallet Managed.
  *
- * @param c - Request context carrying the release channel.
  * @param wallet - The operational wallet about to be answered from.
  * @throws 403 when the pair is outside the release channel.
  */
-function assertWalletInReleaseChannel(c: AppContext, wallet: CustodyRuntimeWalletProjection): void {
-  assertCustodyProviderAvailable(
-    c.env,
-    wallet.provider,
-    wallet.custodyConnectionId ? "byok" : "managed"
-  );
+function assertWalletInReleaseChannel(wallet: CustodyRuntimeWalletProjection): void {
+  assertCustodyProviderAvailable(wallet.provider, wallet.custodyConnectionId ? "byok" : "managed");
 }
 
 export const getPublicKey = async (c: AppContext) => {
@@ -682,7 +677,7 @@ export const getPublicKey = async (c: AppContext) => {
       throw new AppError("NOT_FOUND", "Wallet not found");
     }
     if (wallet.custodyConnectionId) {
-      assertWalletInReleaseChannel(c, wallet);
+      assertWalletInReleaseChannel(wallet);
       return success(c, { publicKey: wallet.publicKey });
     }
     const publicKey = await signingService.getPublicKey(

@@ -1,6 +1,7 @@
 import { renderLlmsTxt } from "@sdp/api-catalog/ai-discovery";
-import { resolveSdpReleaseChannel, type SdpReleaseChannel } from "@sdp/types/release-channels";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { Hono } from "hono";
+import { deploymentReleaseChannel } from "@/lib/feature-flags";
 import { publicRoute } from "@/middleware/require-action";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { Env } from "@/types/env";
@@ -18,7 +19,7 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
 const bodies = new Map<SdpReleaseChannel, string>();
 
 llms.get("/", publicRoute("AI discovery resource"), (c) => {
-  const releaseChannel = resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL);
+  const releaseChannel = deploymentReleaseChannel();
   let body = bodies.get(releaseChannel);
   if (body === undefined) {
     body = renderBody(releaseChannel);

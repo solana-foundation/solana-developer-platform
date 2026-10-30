@@ -1,5 +1,6 @@
 import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL } from "@sdp/types/site";
 import { Hono } from "hono";
+import { deploymentReleaseChannel } from "@/lib/feature-flags";
 import { publicRoute } from "@/middleware/require-action";
 import type { Env } from "@/types/env";
 
@@ -37,7 +38,7 @@ const html = `<!doctype html>
 
 docs.get("/", publicRoute("API reference page"), (c) => {
   if (
-    c.env.SDP_RELEASE_CHANNEL === "stable" &&
+    deploymentReleaseChannel() === "stable" &&
     new URL(c.req.url).host === new URL(DEFAULT_SDP_API_URL).host
   ) {
     return c.redirect(`${DEFAULT_SDP_DOCS_URL}/reference/api`, 308);

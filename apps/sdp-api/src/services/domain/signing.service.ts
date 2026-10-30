@@ -273,7 +273,7 @@ export class SigningService {
    */
   private async assertManagedConfigUsable(config: SigningConfigRecord): Promise<void> {
     const { organizationId, projectId, provider } = config;
-    assertCustodyProviderAvailable(this.env, provider, "managed");
+    assertCustodyProviderAvailable(provider, "managed");
     await assertManagedCustodyUseAllowed(getDb(this.env), { organizationId, projectId, provider });
     try {
       await assertCustodyProviderEnabled(this.env, getDb(this.env), organizationId, provider);
