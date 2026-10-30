@@ -28239,6 +28239,10 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         Recurring payment status.
 
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+
       - **`metadataUri`** · `string | null` · required
 
         Optional plan metadata URI.
@@ -28404,6 +28408,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -28639,6 +28644,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+
       - **`metadataUri`** · `string | null` · required
 
         Optional plan metadata URI.
@@ -28765,6 +28774,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments",
         "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
         "authorizationSignature": "example",
         "status": "active",
+        "pausedReason": null,
         "metadataUri": "example",
         "createdBy": "example",
         "createdAt": "2025-01-01T00:00:00.000Z",
@@ -29010,6 +29020,10 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
         Recurring payment status.
 
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+
       - **`metadataUri`** · `string | null` · required
 
         Optional plan metadata URI.
@@ -29178,6 +29192,7 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -29407,6 +29422,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+
       - **`metadataUri`** · `string | null` · required
 
         Optional plan metadata URI.
@@ -29526,6 +29545,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -29723,6 +29743,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+
       - **`metadataUri`** · `string | null` · required
 
         Optional plan metadata URI.
@@ -29856,6 +29880,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -29961,11 +29986,11 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
 ### Cancel recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-recurring-payment
 
-> Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction.
+> Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction.
 
 `POST /v1/payments/recurring-payments/{id}/cancel`
 
-A collection already in processing may still settle independently.
+A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles before the approval is revoked: the revoke waits for it, and the background sweep revokes the approval once it has settled.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.manage` action.
 
@@ -30090,6 +30115,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
 
         Recurring payment status.
+
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -30224,6 +30253,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -30458,6 +30488,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
 
         Recurring payment status.
+
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -30970,6 +31004,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -31169,9 +31204,11 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
 ### Resume recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-recurring-payment
 
-> Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.
+> Resumes a paused SDP-custody recurring payment.
 
 `POST /v1/payments/recurring-payments/{id}/resume`
+
+SDP pauses a recurring payment when a due period fails 5 times, or at once when the custody provider's policy refuses to sign a collection. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -31296,6 +31333,10 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
 
         Recurring payment status.
+
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -31430,6 +31471,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
       "authorizationSignature": "example",
       "status": "active",
+      "pausedReason": null,
       "metadataUri": "example",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
@@ -34857,7 +34899,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 `POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume`
 
-The transaction must still be signed and submitted by the client.
+The transaction must still be signed and submitted by the client. A subscription that belongs to a recurring payment answers 409: a recurring payment's cancel is final.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -35031,6 +35073,10 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 
   Same fields as `400`.
 
+- **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
 
   Same fields as `400`.
@@ -35155,6 +35201,18 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
 }
 ```
 
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
 ```json tab="500"
 {
   "error": {
@@ -35176,7 +35234,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection`
 
-The transaction must still be signed and submitted by the collector/fee-payer flow.
+The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment answers 409: SDP collects those through the recurring payment.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -35464,6 +35522,10 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 
   Same fields as `400`.
 
+- **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
 
   Same fields as `400`.
@@ -35608,6 +35670,18 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
   "error": {
     "code": "NOT_FOUND",
     "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
   },
   "meta": {
     "requestId": "req_example"
