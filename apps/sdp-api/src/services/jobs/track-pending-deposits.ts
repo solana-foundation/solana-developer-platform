@@ -1,4 +1,3 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background Job: Track Pending Private Channel Deposits
  *
@@ -22,6 +21,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
  * worker can't regress state.
  */
 
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import type {

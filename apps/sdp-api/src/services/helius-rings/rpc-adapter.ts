@@ -65,7 +65,6 @@ export async function submitRingsOuterTransaction(
     throw new RingsAdapterError(classified.failureCode, classified.message, {
       retryable: classified.retryable,
       cause: error,
-      sensitiveValues: [],
       // A connection URL can carry its key. Sanitize the exact endpoint while
       // retaining its origin for diagnostics.
       sensitiveUrls: resolvedRpcUrl ? [resolvedRpcUrl] : [],

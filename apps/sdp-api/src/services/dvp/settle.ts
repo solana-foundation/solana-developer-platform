@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Settling and cancelling a DvP trade.
  *
@@ -6,6 +5,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types/dvp";
 import {

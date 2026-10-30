@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /** Moving one side of a trade into escrow, with Kora sponsoring the custody wallet's transfer. */
 
 import {
@@ -8,6 +7,7 @@ import {
   SwapDvpVerificationError,
   verifySwapDvpAccount,
 } from "@sdp/dvp";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";

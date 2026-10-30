@@ -141,6 +141,17 @@ export function createRpcFromTransport(
 
 export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;
 
+/**
+ * Hand an SDP client to Mosaic SDK code, the one place its RPC type is bridged.
+ *
+ * @param rpc - The client to hand over.
+ * @returns The same client, typed for the SDK.
+ */
+export function toSdkRpc<TSdkRpc>(rpc: SolanaRpc): SolanaRpcSdkBridge<TSdkRpc> {
+  // SAFETY: Mosaic SDK publishes Solana Kit v5 RPC types; the runtime client shape is identical.
+  return rpc as unknown as SolanaRpcSdkBridge<TSdkRpc>;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Blockhash Operations
 // ═══════════════════════════════════════════════════════════════════════════

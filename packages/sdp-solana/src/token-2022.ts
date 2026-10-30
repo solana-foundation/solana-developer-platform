@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Token-2022 Service
  *
@@ -11,6 +10,7 @@ import {
   type SolanaRpc,
   type SolanaRpcSdkBridge,
   simulateTransaction,
+  toSdkRpc,
 } from "@sdp/rpc/solana";
 import {
   type Address,
@@ -82,10 +82,12 @@ export interface BurnResult {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class Token2022Service {
+  private rpc: SolanaRpcSdkBridge<MosaicSdkRpc>;
   private signer: TransactionSigner;
   private feePayment?: SponsoredSubmitter;
 
-  constructor(signer: TransactionSigner, feePayment?: SponsoredSubmitter) {
+  constructor(rpc: SolanaRpc, signer: TransactionSigner, feePayment?: SponsoredSubmitter) {
+    this.rpc = toSdkRpc<MosaicSdkRpc>(rpc);
     this.signer = signer;
     this.feePayment = feePayment;
   }
@@ -156,7 +158,7 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
-    const rpc = createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc>;
+    const rpc = this.rpc;
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
     const normalizedSource =
@@ -192,7 +194,7 @@ export class Token2022Service {
     options: Omit<BurnOptions, "authority"> & { authority: Address },
     requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
-    const rpc = createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc>;
+    const rpc = this.rpc;
     const authority = createNoopSigner(options.authority);
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);

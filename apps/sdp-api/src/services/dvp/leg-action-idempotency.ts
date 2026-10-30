@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Idempotency-Key handling for one DvP action: funding or reclaiming a leg, or
  * the settle/cancel that closes a trade (PRO-1993).
@@ -25,6 +24,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  */
 
 import { createHash } from "node:crypto";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {

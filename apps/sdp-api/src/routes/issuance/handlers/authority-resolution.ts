@@ -1,6 +1,6 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpcSdkBridge } from "@sdp/rpc/solana";
+import { toSdkRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { MovementOf } from "@sdp/types/movements";
 import type { TokenTransaction, TokenTransactionType } from "@sdp/types/tokens";
@@ -31,9 +31,7 @@ export interface ResolvedIssuanceWallet {
 /** Shared live list authority for both signer selection and execution. */
 export async function resolveAllowlistAuthority(listAddress: string): Promise<string> {
   const { authority } = await getListConfig({
-    rpc: createClusterRpc() as unknown as SolanaRpcSdkBridge<
-      Parameters<typeof getListConfig>[0]["rpc"]
-    >,
+    rpc: toSdkRpc<Parameters<typeof getListConfig>[0]["rpc"]>(createClusterRpc()),
     listConfig: assertValidAddress(listAddress, "ablListAddress"),
   });
   return authority;
@@ -42,7 +40,7 @@ export async function resolveAllowlistAuthority(listAddress: string): Promise<st
 /** Resolve the live Token-2022 pausable authority used for pause/unpause signing. */
 export async function resolvePauseAuthority(mintAddress: string): Promise<string | null> {
   const token = await inspectToken(
-    createClusterRpc() as unknown as SolanaRpcSdkBridge<Parameters<typeof inspectToken>[0]>,
+    toSdkRpc<Parameters<typeof inspectToken>[0]>(createClusterRpc()),
     assertValidAddress(mintAddress, "mintAddress")
   );
   return token.authorities.pausableAuthority ?? null;
@@ -228,9 +226,7 @@ export async function resolveFreezeOperationAuthority(token: TokenRecord): Promi
   try {
     const mint = assertValidAddress(token.mintAddress, "mintAddress");
     const mintConfig = await getTokenAclMintConfig(
-      createClusterRpc() as unknown as SolanaRpcSdkBridge<
-        Parameters<typeof getTokenAclMintConfig>[0]
-      >,
+      toSdkRpc<Parameters<typeof getTokenAclMintConfig>[0]>(createClusterRpc()),
       mint
     );
     if (mintConfig.exists) {

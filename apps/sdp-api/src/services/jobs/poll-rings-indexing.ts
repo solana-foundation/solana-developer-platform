@@ -1,4 +1,3 @@
-import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background job: settle rings operations that have already been broadcast.
  *
@@ -17,6 +16,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
  * Ships dormant: its Cron Definition is enabled only when the Helius Rings flag is on.
  */
 
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db/client";
 import type { HeliusRingsOperationRow } from "@/db/repositories/helius-rings-operation.repository";
 import { createHeliusRingsOperationRepository } from "@/db/repositories/repository-factory";

@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Reading a single trade's chain state on demand, outside the sweep.
  *
@@ -14,6 +13,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  * making a late deposit recoverable.
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction } from "@sdp/rpc/solana";
 import type { DvpTradeStatus } from "@sdp/types/dvp";
 import type { Signature } from "@solana/kit";

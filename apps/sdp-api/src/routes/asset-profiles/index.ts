@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
+import { requireDevnetCluster } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import { createTokenWithAssetProfileSchema } from "@/routes/issuance/schemas";
 import type { Env } from "@/types/env";
@@ -20,6 +21,7 @@ export const assetProfiles = new Hono<{ Bindings: Env }>();
 
 assetProfiles.use("*", unifiedAuthMiddleware());
 assetProfiles.use("*", projectContextMiddleware());
+assetProfiles.use("*", requireDevnetCluster("issuance"));
 
 assetProfiles.get("/field-options", requireAction("issuance.read"), getAssetProfileFieldOptions);
 assetProfiles.get("/", requireAction("issuance.read"), listAssetProfiles);

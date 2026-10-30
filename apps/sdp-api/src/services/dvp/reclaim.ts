@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Pulling a funded leg back out of an open trade, to the party that funded it.
  *
@@ -11,6 +10,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  */
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {

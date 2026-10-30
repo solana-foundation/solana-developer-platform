@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Creating a DvP trade.
  *
@@ -26,6 +25,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  */
 
 import { findDvpNonceTombstonePda, findSwapDvpPda, getCreateDvpInstruction } from "@sdp/dvp";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {

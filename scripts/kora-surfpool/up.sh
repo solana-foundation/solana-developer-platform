@@ -298,7 +298,6 @@ write_runtime_env() {
     echo "SURFPOOL_REMOTE_RPC_URL=$(shell_quote "${SURFPOOL_REMOTE_RPC_URL:-}")"
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
-    echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
     write_cluster_pool_env
     # Sponsorship prices and settles on the lane cluster's Kora upstream: point it at Surfpool,
     # and blank the other cluster's so nothing inherits a real endpoint from Doppler.
@@ -497,7 +496,6 @@ Local Kora-on-Surfpool is ready.
 Use these environment overrides with Doppler-backed commands:
   export SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
   export SOLANA_RPC_CI_PREFERRED_PROVIDER=default
-  export SOLANA_RPC_DEFAULT_PROVIDER=default
   export ${KORA_SURFPOOL_ENV_PREFIX}_URL=${KORA_SURFPOOL_KORA_URL}
   export RUN_INTEGRATION_TESTS=true
 

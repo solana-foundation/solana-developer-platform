@@ -1,5 +1,3 @@
-import { createPrivateChannelLocalRpc } from "@sdp/private-channels/gateway";
-import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background Job: Track Pending Private Channel Withdrawals
  *
@@ -32,6 +30,8 @@ import { currentClusterScope } from "@sdp/rpc/scope";
  * memo/withdrawId on the release tx would make it exact.
  */
 
+import { createPrivateChannelLocalRpc } from "@sdp/private-channels/gateway";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   getSignatureStatuses,
   getSignaturesForAddress,
@@ -57,6 +57,7 @@ import {
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
+import { createPrivateChannelGatewayTransport } from "@/services/private-channels/egress";
 import { knownMintToken } from "@/services/private-channels/mint";
 import {
   loadProjectRpcClient,
@@ -120,7 +121,10 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createPrivateChannelLocalRpc(instance.gateway_url);
+      rpc = createPrivateChannelLocalRpc(instance.gateway_url, {
+        transportFactory: (headers) =>
+          createPrivateChannelGatewayTransport(env, instance.gateway_url, headers),
+      });
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;

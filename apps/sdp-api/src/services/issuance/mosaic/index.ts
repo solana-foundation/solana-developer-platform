@@ -6,6 +6,7 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import type { MovementOf } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
@@ -50,7 +51,7 @@ export function createMosaicService(
           custodyWalletId: fee.custodyWalletId,
         })
       : undefined;
-  return new MosaicService(env, signer, sponsor, {
+  return new MosaicService(env, createClusterRpc(), signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.
     transactionFailedError: transactionFailed,

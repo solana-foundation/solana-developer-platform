@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Mosaic Service
  *
@@ -16,7 +15,9 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import {
   type ConfirmTransactionOptions,
   confirmTransaction,
+  type SolanaRpc,
   type SolanaRpcSdkBridge,
+  toSdkRpc,
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
@@ -32,9 +33,7 @@ import {
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   pipe,
-  type Rpc,
   type Signature,
-  type SolanaRpcApi,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
@@ -160,12 +159,13 @@ export class MosaicService {
   private env: MosaicIssuanceEnv;
   private signer: TransactionSigner;
   private feePayment?: SponsoredSubmitter;
-  private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
+  private rpc: SolanaRpcSdkBridge<MosaicSdkRpc>;
   private transactionFailedError: (message: string) => Error;
   private invalidArgumentError: (message: string) => Error;
 
   constructor(
     env: MosaicIssuanceEnv,
+    rpc: SolanaRpc,
     signer: TransactionSigner,
     feePayment?: SponsoredSubmitter,
     options?: MosaicServiceOptions
@@ -173,9 +173,7 @@ export class MosaicService {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
-    this.rpc =
-      createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc> as unknown as Rpc<SolanaRpcApi> &
-        MosaicSdkRpc;
+    this.rpc = toSdkRpc<MosaicSdkRpc>(rpc);
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
     this.invalidArgumentError = options?.invalidArgumentError ?? ((message) => new Error(message));

@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { address } from "@solana/kit";
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
@@ -20,7 +20,7 @@ type AppContext = Context<{ Bindings: Env }>;
  */
 async function fetchTokenSupplyBaseUnits(mintAddress: string): Promise<string> {
   const { value } = await createClusterRpc()
-    .getTokenSupply(address(mintAddress), { commitment: "confirmed" })
+    .getTokenSupply(assertValidAddress(mintAddress, "mintAddress"), { commitment: "confirmed" })
     .send();
   return value.amount;
 }

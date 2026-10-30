@@ -5,6 +5,7 @@
  * fee payment provider integration (Kora for gasless transactions).
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { Token2022Service } from "@sdp/solana/token-2022";
 import type { MovementOf } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
@@ -42,5 +43,5 @@ export function createToken2022Service(
       })
     : undefined;
 
-  return new Token2022Service(signer, feePayment);
+  return new Token2022Service(createClusterRpc(), signer, feePayment);
 }
