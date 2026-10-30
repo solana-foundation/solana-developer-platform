@@ -60,6 +60,37 @@ The dashboard's **Embedded Yield → Integrate** page generates a complete serve
 
 Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
 
+## WisdomTree customer verification (internal, pre-launch)
+
+The backend Moderator onboarding flow uses an existing project-scoped
+counterparty as the customer. All endpoints start with
+`onboarding/wisdomtree`; reads take `earn.read` and writes take
+`earn.execute` plus `Idempotency-Key`.
+
+| Step | Endpoint |
+| --- | --- |
+| Read the live KYC/KYB form | `GET /v1/earn/onboarding/wisdomtree/forms/{entityType}` (`individual` or `business`) |
+| Create KYC or save/submit KYB | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Upload one business document | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/documents` |
+| Read verification/corrections | `GET /v1/earn/onboarding/wisdomtree/{counterpartyId}` |
+| Answer one business correction | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/corrections/{reasonId}` |
+| Register an active child customer's Solana wallet | `POST /v1/earn/onboarding/wisdomtree/{counterpartyId}/wallets` |
+
+Submit `{ application, documents? }` using the latest form's template and the
+applicant's own agreement answers. Business intent is explicit (`draft` or
+`submit`); individual KYC submits immediately and is US-only. Document uploads
+accept base64 PDF/JPEG/PNG up to 20 MiB decoded and return SDP document IDs;
+map those IDs under `documents` using the form's submission keys. Provider
+GUIDs and blob paths cannot be supplied by callers.
+
+A business's returned child organization is durably linked to the counterparty.
+A retail person's GUID is separate and never turns the moderator into a child.
+Only an `active`, still-assigned business child can register wallets on this
+rail. Submission is not approval. After answering corrections, submit the same
+business again. Unknown create outcomes require operator reconciliation; do
+not create a second application. This backend workflow does not enable
+WisdomTree surfacing or production deposits.
+
 ## 1. Pick a strategy
 
 `GET /v1/earn/strategies` returns the catalogue, ranked by deposit size, with the live APY your UI can show. All a build needs from a row is its `id`; the cluster comes from your key's environment and the deposit token from the strategy itself.

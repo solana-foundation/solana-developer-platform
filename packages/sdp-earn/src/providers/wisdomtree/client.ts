@@ -46,6 +46,10 @@ import {
  */
 export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositEligibilityProvider {
   readonly provider = "wisdomtree" as const;
+  readonly depositEligibilityCustomerScope = {
+    required: true,
+    ineligibleReason: WISDOMTREE_DEPOSIT_INELIGIBLE_REASON,
+  } as const;
   readonly declaredSupport: EarnDeclaredStrategySupport = {
     sourceKinds: ["rwa"],
     depositTokens: ["USDC"],
@@ -124,8 +128,8 @@ export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositE
    * WisdomTree's admission gate, asked API-side before money moves — see
    * `EarnDepositEligibilityProvider` for why. The catalogue reference is first
    * resolved through SDP's curated registry, then Connect must report both an
-   * approved wallet and a tradable matching exchange code in the authenticated
-   * direct/omnibus organization's context. Every valid negative result uses
+   * approved wallet and a tradable matching exchange code in the mapped
+   * customer child's context (or direct context for standalone tooling). Every valid negative result uses
    * the same reason so the build route cannot enumerate KYC or
    * product-entitlement state.
    */
@@ -143,6 +147,7 @@ export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositE
     return checkWisdomTreeDepositEligibility(ctx, {
       address: input.owner,
       exchangeCode: fund.exchangeCode,
+      customer: input.customer,
     });
   }
 }

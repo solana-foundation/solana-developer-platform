@@ -56,7 +56,7 @@ function serializeProviderBody(body: unknown): BodyInit | undefined {
   if (typeof body === "string") {
     return body;
   }
-  if (body instanceof URLSearchParams) {
+  if (body instanceof URLSearchParams || body instanceof FormData) {
     return body;
   }
   return JSON.stringify(body);
@@ -114,12 +114,16 @@ export async function providerFetch<TBody = never>(
   // would otherwise hang exactly as long as no timeout at all.
   const signal = init.timeoutMs === undefined ? undefined : AbortSignal.timeout(init.timeoutMs);
 
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type") && !(init.body instanceof FormData))
+    headers.set("Content-Type", "application/json");
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
   let response: Response;
   let raw: string;
   try {
     response = await fetch(url, {
       method: init.method,
-      headers: { "Content-Type": "application/json", Accept: "application/json", ...init.headers },
+      headers: Object.fromEntries(headers),
       body: serializeProviderBody(init.body),
       signal,
     });

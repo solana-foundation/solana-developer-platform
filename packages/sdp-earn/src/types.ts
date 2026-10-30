@@ -1028,6 +1028,8 @@ export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdra
 }
 
 export interface EarnDepositEligibilityInput {
+  /** API-resolved customer identity, never supplied directly by an API caller. */
+  customer?: { moderatorReference: string; customerReference: string };
   /** The strategy's `providerReference` (for WisdomTree, the fund's mint). */
   providerReference: string;
   /** The wallet whose deposit would settle — the address the provider must have verified. */
@@ -1059,6 +1061,7 @@ export interface EarnDepositEligibility {
  * every permissionless vault.
  */
 export interface EarnDepositEligibilityProvider extends EarnVaultProvider {
+  readonly depositEligibilityCustomerScope?: { required: true; ineligibleReason: string };
   checkDepositEligibility(
     ctx: EarnRuntimeContext,
     input: EarnDepositEligibilityInput
