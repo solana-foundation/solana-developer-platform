@@ -13,7 +13,11 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  * - Decimal-aware amount conversion for minting
  */
 
-import { type ConfirmTransactionOptions, confirmTransaction, toSdkRpc } from "@sdp/rpc/solana";
+import {
+  type ConfirmTransactionOptions,
+  confirmTransaction,
+  type SolanaRpcSdkBridge,
+} from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import {
@@ -169,8 +173,9 @@ export class MosaicService {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
-    this.rpc = toSdkRpc<MosaicSdkRpc>(createClusterRpc()) as unknown as Rpc<SolanaRpcApi> &
-      MosaicSdkRpc;
+    this.rpc =
+      createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc> as unknown as Rpc<SolanaRpcApi> &
+        MosaicSdkRpc;
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
     this.invalidArgumentError = options?.invalidArgumentError ?? ((message) => new Error(message));

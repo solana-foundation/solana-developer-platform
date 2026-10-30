@@ -12,7 +12,7 @@
  */
 
 import {
-  createEndpointRpc,
+  createRpc,
   createRpcFromTransport,
   getAccountInfo,
   type RpcRequestHeaders,
@@ -51,7 +51,7 @@ export function createChannelGatewayRpc(
   if (options?.transportFactory) {
     return createRpcFromTransport(options.transportFactory(options.headers ?? {}));
   }
-  return createEndpointRpc(gatewayUrl, { headers: options?.headers });
+  return createRpc(gatewayUrl, { headers: options?.headers });
 }
 
 /** A channel token-account balance as reported by the gateway. */

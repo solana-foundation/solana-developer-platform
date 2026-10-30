@@ -43,7 +43,7 @@ keep-alive socket the server closed as it was reused.
   `getRecentPrioritizationFees`), unknown or provider-specific methods,
   batches, aborted requests, and a body that died after the headers
   ("terminated"). `socket-retry.test.ts` pins each.
-- The managed pool and `createEndpointRpc` wrap every transport they build, and `contextAwareRpcFetch` is
+- The managed pool and `createRpc` wrap every transport they build, and `contextAwareRpcFetch` is
   `withRpcReadContextFetch(fetchWithReadSocketRetry)`. Both helpers are
   exported from `@sdp/rpc/read-context` and `@sdp/rpc/solana`.
 

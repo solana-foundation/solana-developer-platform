@@ -1,8 +1,7 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk/error-bridge";
-// biome-ignore lint/style/noRestrictedImports: Rings sends only through the scope's Helius endpoint
-import { createClusterHeliusRpc } from "@sdp/rpc/factory";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import {
-  createEndpointRpc,
+  createRpc,
   createRpcFromTransport,
   getSignatureStatuses,
   type SolanaRpc,
@@ -33,7 +32,7 @@ export interface SubmitRingsOuterTransactionInput {
   signedTxBase64: string;
   /** Persisted Rings connection URL. Legacy callers may omit it. */
   rpcUrl?: string;
-  /** Test seam; production uses the scope's Helius endpoint. */
+  /** Test seam; production uses the scope's cluster pool. */
   rpc?: SolanaRpc;
 }
 
@@ -52,10 +51,10 @@ export async function submitRingsOuterTransaction(
     // endpoints legitimately resolve to loopback.
     rpc =
       input.env.ENVIRONMENT === "development"
-        ? createEndpointRpc(input.rpcUrl)
+        ? createRpc(input.rpcUrl)
         : createRpcFromTransport(createCustomerRpcTransport(input.rpcUrl));
   } else {
-    rpc = createClusterHeliusRpc();
+    rpc = createClusterRpc();
   }
   const signedBytes = getBase64Codec().encode(input.signedTxBase64);
 
@@ -152,7 +151,7 @@ function readDiagnosticLogs(error: unknown): readonly string[] {
  */
 export async function readRingsBlockHeight(rpc?: SolanaRpc): Promise<string | null> {
   try {
-    return (await (rpc ?? createClusterHeliusRpc()).getBlockHeight().send()).toString();
+    return (await (rpc ?? createClusterRpc()).getBlockHeight().send()).toString();
   } catch {
     // Not knowing the height means this tick cannot judge expiry — a reason to
     // leave operations alone, not to abandon the rest of the sweep.
@@ -177,7 +176,7 @@ export async function readRingsSignatureStatus(input: {
   rpc?: SolanaRpc;
 }): Promise<RingsSignatureOutcome | null> {
   try {
-    const rpc = input.rpc ?? createClusterHeliusRpc();
+    const rpc = input.rpc ?? createClusterRpc();
     const [status] = await getSignatureStatuses(rpc, [input.signature as Signature], {
       searchTransactionHistory: true,
     });

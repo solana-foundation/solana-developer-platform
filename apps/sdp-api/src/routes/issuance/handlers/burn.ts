@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { toSdkRpc } from "@sdp/rpc/solana";
+import type { SolanaRpcSdkBridge } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/addresses";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
@@ -77,7 +77,7 @@ async function resolveValidatedBurnSource(
   amountBaseUnits: bigint,
   tokenSymbol: string
 ): Promise<Address> {
-  const rpc = toSdkRpc<MosaicSdkRpc>(createClusterRpc());
+  const rpc = createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc>;
 
   let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;
   try {

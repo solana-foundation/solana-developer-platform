@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { toSdkRpc } from "@sdp/rpc/solana";
+import type { SolanaRpcSdkBridge } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types/tokens";
 import type { Address } from "@solana/addresses";
@@ -177,7 +177,7 @@ async function resolveFreezeTarget(
   mintAddress: Address,
   accessControlMode: TokenAccessControlMode
 ): Promise<{ tokenAccount: Address }> {
-  const rpc = toSdkRpc<MosaicSdkRpc>(createClusterRpc());
+  const rpc = createClusterRpc() as unknown as SolanaRpcSdkBridge<MosaicSdkRpc>;
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
 
   if (!resolved.isInitialized) {

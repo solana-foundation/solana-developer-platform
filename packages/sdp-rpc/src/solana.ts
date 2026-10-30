@@ -57,7 +57,7 @@ export type RpcRequestHeaders = NonNullable<
   Parameters<typeof createDefaultRpcTransport>[0]["headers"]
 >;
 
-export interface EndpointRpcOptions {
+export interface RpcClientOptions {
   headers?: RpcRequestHeaders;
   /**
    * Per-request transport deadline. A stalled HTTP request (socket open, no
@@ -109,23 +109,19 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
 }
 
 /**
- * A client for one explicit endpoint that is not a managed pool: a Private Channels gateway or
- * Rings' Helius endpoint. Every transport takes the dead-socket re-send and the request deadline.
- * Cluster RPC goes through `createClusterRpc()` from `@sdp/rpc/factory` instead.
+ * A client for one explicit endpoint outside the managed pool: a Private Channels gateway or a
+ * Rings tenant connection. Cluster RPC goes through `createClusterRpc()` from `@sdp/rpc/factory`.
  *
- * @param endpointUrl - The complete endpoint URL, key included.
+ * @param endpointUrl - The complete endpoint URL.
  * @param options - Transport behaviour for the endpoint.
  * @param options.headers - Headers sent with every request.
  * @param options.requestTimeoutMs - Per-request deadline; defaults to `DEFAULT_RPC_REQUEST_TIMEOUT_MS`.
  * @param options.wrapTransport - Caller-owned middleware applied below the deadline.
  * @returns The endpoint's RPC client.
  */
-export function createEndpointRpc(
-  endpointUrl: string,
-  options: EndpointRpcOptions = {}
-): SolanaRpc {
+export function createRpc(endpointUrl: string, options?: RpcClientOptions): SolanaRpc {
   const transport = withReadSocketRetry(
-    options.headers && Object.keys(options.headers).length > 0
+    options?.headers && Object.keys(options.headers).length > 0
       ? createDefaultRpcTransport({ headers: options.headers, url: endpointUrl })
       : createDefaultRpcTransport({ url: endpointUrl })
   );
@@ -135,7 +131,7 @@ export function createEndpointRpc(
 /** Build the standard SDP Solana client around a caller-owned egress transport. */
 export function createRpcFromTransport(
   transport: RpcTransport,
-  options: Pick<EndpointRpcOptions, "requestTimeoutMs" | "wrapTransport"> = {}
+  options: Pick<RpcClientOptions, "requestTimeoutMs" | "wrapTransport"> = {}
 ): SolanaRpc {
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
   return createSolanaRpcFromTransport(
@@ -144,17 +140,6 @@ export function createRpcFromTransport(
 }
 
 export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;
-
-/**
- * Hand an SDP client to Mosaic SDK code. The SDK still publishes Solana Kit v5 RPC types; the
- * runtime client shape is compatible, so the cross-version cast stays at this boundary.
- *
- * @param rpc - The client to hand over.
- * @returns The same client, typed for the SDK.
- */
-export function toSdkRpc<TSdkRpc>(rpc: SolanaRpc): SolanaRpcSdkBridge<TSdkRpc> {
-  return rpc as unknown as SolanaRpcSdkBridge<TSdkRpc>;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Blockhash Operations

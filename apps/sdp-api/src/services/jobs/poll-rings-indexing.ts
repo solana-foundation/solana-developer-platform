@@ -116,7 +116,7 @@ export async function pollRingsIndexing(
 
   // Both chain reads judge tenant operations — expiry escalation and
   // manual-reconciliation outcomes — so they must come from the
-  // platform-trusted Helius endpoint (the scope's, the readers' default), never
+  // platform-trusted cluster pool (the readers' default), never
   // from a tenant-owned connection. Tenant endpoints serve only the
   // operations pinned to them.
   const readSignatureStatus = dependencies.readSignatureStatus ?? readRingsSignatureStatus;
