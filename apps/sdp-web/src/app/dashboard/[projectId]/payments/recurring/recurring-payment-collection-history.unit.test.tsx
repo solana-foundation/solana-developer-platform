@@ -13,10 +13,21 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const MINT_BEFORE_EDIT = "MintBeforeEdit1111111111111111111111111111";
 const MINT_AFTER_EDIT = "MintAfterEdit11111111111111111111111111111";
-const TOKEN_LABELS: Record<string, string> = {
+const TOKEN_LABELS = {
   [MINT_BEFORE_EDIT]: "USDC",
   [MINT_AFTER_EDIT]: "PYUSD",
-};
+} as const satisfies Record<string, string>;
+
+function isLabelledMint(mint: string): mint is keyof typeof TOKEN_LABELS {
+  return Object.hasOwn(TOKEN_LABELS, mint);
+}
+
+function tokenLabelForMint(mint: string): string {
+  if (!isLabelledMint(mint)) {
+    throw new Error(`No token label for mint ${mint}`);
+  }
+  return TOKEN_LABELS[mint];
+}
 
 function collectionAttempt(
   id: string,
@@ -53,7 +64,7 @@ describe("RecurringPaymentRunHistory", () => {
             collectionAttempt("psca_after_edit", MINT_AFTER_EDIT, "25.5"),
             collectionAttempt("psca_before_edit", MINT_BEFORE_EDIT, "10"),
           ]}
-          tokenLabelForMint={(mint) => TOKEN_LABELS[mint]}
+          tokenLabelForMint={tokenLabelForMint}
           pendingActivation={false}
         />
       </I18nProvider>
