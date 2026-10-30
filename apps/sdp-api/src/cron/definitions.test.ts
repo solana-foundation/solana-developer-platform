@@ -35,7 +35,7 @@ describe("CRON_DEFINITIONS", () => {
     expect(disabledExits).toEqual(["track-pending-withdrawals"]);
   });
 
-  it("runs the Earn reconcilers and the metrics refresh once per Environment", () => {
+  it("runs the chain-reading Earn, Private Channels and Rings jobs once per Environment", () => {
     const scopeByName = new Map(
       CRON_DEFINITIONS.map((definition) => [definition.name, definition.scope])
     );
@@ -45,8 +45,11 @@ describe("CRON_DEFINITIONS", () => {
         "reconcile-earn-vault-movements",
         "detect-orphaned-earn-split-swaps",
         "refresh-earn-metrics",
+        "track-pending-withdrawals",
+        "track-pending-deposits",
+        "poll-rings-indexing",
       ].map((name) => scopeByName.get(name))
-    ).toEqual(["cluster", "cluster", "cluster"]);
+    ).toEqual(["cluster", "cluster", "cluster", "cluster", "cluster", "cluster"]);
   });
 
   it("runs the payment request hot lane every 30 seconds and its sweep and expiry every minute", () => {

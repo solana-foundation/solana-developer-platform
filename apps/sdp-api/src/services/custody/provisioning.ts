@@ -31,6 +31,7 @@ import {
   listFireblocksVaults as listFireblocksVaultsInCustody,
 } from "@sdp/custody/provisioning/fireblocks-vaults";
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { PrivyCredentialAuthentication } from "@/services/custody/privy-credential";
 import type { Env } from "@/types/env";
 
@@ -173,7 +174,7 @@ export async function provisionUtilaWallet(
       network:
         options.network ??
         env.UTILA_NETWORK ??
-        (env.SOLANA_NETWORK === "mainnet-beta"
+        (currentClusterScope().cluster === "mainnet-beta"
           ? "networks/solana-mainnet"
           : "networks/solana-devnet"),
       apiBaseUrl: env.UTILA_API_BASE_URL,

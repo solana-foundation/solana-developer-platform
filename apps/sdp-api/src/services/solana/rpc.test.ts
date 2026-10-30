@@ -6,7 +6,6 @@ import {
   sendAndConfirmTransaction,
 } from "@sdp/rpc/solana";
 import { isTransientRpcError } from "@sdp/rpc/transient";
-import type { RpcEnv } from "@sdp/rpc/types";
 import { getBase64Codec, type Signature } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { signedRingsTransaction } from "@/test/fixtures/rings-transactions";
@@ -180,8 +179,8 @@ describe("confirmTransaction transient poll tolerance", () => {
   });
 });
 
-describe("createRpc request timeout", () => {
-  const TEST_ENV = { SOLANA_RPC_URL: "http://127.0.0.1:1" } as RpcEnv;
+describe("createRpc", () => {
+  const TEST_URL = "http://127.0.0.1:1";
 
   /**
    * Fake fetch that behaves like a stalled server: the socket stays open and
@@ -199,9 +198,26 @@ describe("createRpc request timeout", () => {
     vi.unstubAllGlobals();
   });
 
+  it("sends to its endpoint with the caller's headers", async () => {
+    const endpointUrl = "https://gateway.example.test/rpc";
+    const fetchSpy = vi.fn(async (_url: string, init: RequestInit) =>
+      Response.json({ jsonrpc: "2.0", id: JSON.parse(String(init.body)).id, result: 7 })
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    const rpc = createRpc(endpointUrl, { headers: { authorization: "Bearer synthetic-token" } });
+
+    expect(await rpc.getSlot().send()).toBe(7n);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      endpointUrl,
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer synthetic-token" }),
+      })
+    );
+  });
+
   it("rejects a stalled request with a transient-classified SOLANA_RPC_ERROR", async () => {
     vi.stubGlobal("fetch", stallingFetch());
-    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 25 });
+    const rpc = createRpc(TEST_URL, { requestTimeoutMs: 25 });
 
     const error = await captureRejection(rpc.getSlot().send());
 
@@ -214,7 +230,7 @@ describe("createRpc request timeout", () => {
 
   it("defers to a caller-supplied abortSignal instead of imposing its own deadline", async () => {
     vi.stubGlobal("fetch", stallingFetch());
-    const rpc = createRpc(TEST_ENV, { requestTimeoutMs: 60_000 });
+    const rpc = createRpc(TEST_URL, { requestTimeoutMs: 60_000 });
 
     const error = await captureRejection(
       rpc.getSlot().send({ abortSignal: AbortSignal.timeout(25) })

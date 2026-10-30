@@ -8,29 +8,29 @@ SDP is an enterprise development platform. Local development is intended for con
 
 The public REST API is organized around these areas:
 
-| Area | Purpose |
-| --- | --- |
-| Health | Service status |
-| API keys | API key creation, scoping, and lifecycle |
-| Wallets | Wallet creation and management |
-| Projects | Project-level organization |
-| Issuance | Token creation and token operations |
-| Payments | SOL and token payment flows |
-| Compliance | Address and transaction screening |
+| Area       | Purpose                                  |
+| ---------- | ---------------------------------------- |
+| Health     | Service status                           |
+| API keys   | API key creation, scoping, and lifecycle |
+| Wallets    | Wallet creation and management           |
+| Projects   | Project-level organization               |
+| Issuance   | Token creation and token operations      |
+| Payments   | SOL and token payment flows              |
+| Compliance | Address and transaction screening        |
 
 The OpenAPI source in `apps/sdp-api/src/openapi` is the source of truth for the public API. Generated API docs should be regenerated with the owning scripts instead of edited by hand.
 
 ## Repository Map
 
-| Path | Purpose |
-| --- | --- |
-| `apps/sdp-api` | Node.js API, OpenAPI source, route handlers, and Postgres/Redis integrations |
-| `apps/sdp-web` | Dashboard application |
-| `apps/sdp-docs` | Public documentation site and generated API reference |
-| `packages/sdp-types` | Shared runtime types and product constants |
-| `packages/sdp-api-integration` | Maintainer-oriented integration tests |
-| `infra/postgres` | Local Postgres setup |
-| `docs/ops` | Operator and maintainer notes |
+| Path                           | Purpose                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `apps/sdp-api`                 | Node.js API, OpenAPI source, route handlers, and Postgres/Redis integrations |
+| `apps/sdp-web`                 | Dashboard application                                                        |
+| `apps/sdp-docs`                | Public documentation site and generated API reference                        |
+| `packages/sdp-types`           | Shared runtime types and product constants                                   |
+| `packages/sdp-api-integration` | Maintainer-oriented integration tests                                        |
+| `infra/postgres`               | Local Postgres setup                                                         |
+| `docs/ops`                     | Operator and maintainer notes                                                |
 
 ## Local Setup
 
@@ -49,7 +49,7 @@ cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 For basic devnet development, set:
 
 ```bash
-SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://api.devnet.solana.com
 ```
 
 Start the local Postgres and Redis services, then the apps:
@@ -64,24 +64,24 @@ To work on Earn (Treasury and Embedded Yield), also set `MARKETS_ENABLED=true` a
 
 Useful local URLs:
 
-| Service | URL |
-| --- | --- |
-| API | http://localhost:8787 |
-| API docs | http://localhost:8787/docs |
+| Service                                        | URL                          |
+| ---------------------------------------------- | ---------------------------- |
+| API                                            | http://localhost:8787        |
+| API docs                                       | http://localhost:8787/docs   |
 | Cron worker (logs under `@sdp/api:dev:worker`) | http://localhost:8789/health |
-| Dashboard | http://localhost:3000 |
+| Dashboard                                      | http://localhost:3000        |
 
 ## Provider-Backed Features
 
 Some features need external vendor credentials and may not work in a clean local checkout:
 
-| Feature | Typical dependency |
-| --- | --- |
-| Dashboard authentication | Clerk |
+| Feature                   | Typical dependency                                         |
+| ------------------------- | ---------------------------------------------------------- |
+| Dashboard authentication  | Clerk                                                      |
 | Managed custody providers | Privy, Coinbase CDP, Turnkey, Fireblocks, Para, or similar |
-| Compliance screening | TRM, Chainalysis, Elliptic, Range, or similar |
-| Fiat ramps | MoonPay, Stripe, or similar |
-| Integration tests | Provider credentials and devnet infrastructure |
+| Compliance screening      | TRM, Chainalysis, Elliptic, Range, or similar              |
+| Fiat ramps                | MoonPay, Stripe, or similar                                |
+| Integration tests         | Provider credentials and devnet infrastructure             |
 
 Keep real credentials in local environment files or the team secret manager. Do not commit secrets or provider-issued tokens.
 

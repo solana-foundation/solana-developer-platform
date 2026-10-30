@@ -143,13 +143,3 @@ export interface TokenTabProps {
   state: TokenLifecycle;
   canManageTokenAdmin: boolean;
 }
-
-/** A transaction on explorer.solana.com, on the cluster the dashboard runs against. */
-export function transactionExplorerHref(signature: string): string {
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
-  const query =
-    cluster === "mainnet-beta" || cluster === "mainnet"
-      ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
-  return `https://explorer.solana.com/tx/${signature}${query}`;
-}

@@ -1,6 +1,7 @@
 import { HeliusRingsError, RINGS_IDENTITY_MISMATCH } from "@sdp/helius-rings/errors";
 import type { BuildOperationInput } from "@sdp/helius-rings/port";
 import type { PrivateOperationInput } from "@sdp/helius-rings/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import {
   AccountRole,
   type Address,
@@ -92,11 +93,13 @@ async function failSigned(id: string, state: string): Promise<void> {
 }
 
 function service(deps: HeliusRingsServiceDependencies = {}) {
-  return createHeliusRingsService(env, tenant, {
-    gateway: new UnconfiguredRingsGateway(),
-    resolveConnectionId: async () => TEST_CONNECTION_ID,
-    ...deps,
-  });
+  return runInClusterScope({ projectId: tenant.projectId, environment: "sandbox" }, () =>
+    createHeliusRingsService(env, tenant, {
+      gateway: new UnconfiguredRingsGateway(),
+      resolveConnectionId: async () => TEST_CONNECTION_ID,
+      ...deps,
+    })
+  );
 }
 
 function deferred<T>() {
@@ -317,10 +320,12 @@ describe("HeliusRingsService", () => {
   });
 
   describe("devnet guard", () => {
-    it("refuses to construct outside devnet", () => {
+    it("refuses to construct in a mainnet-beta scope", () => {
       expect(() =>
-        createHeliusRingsService({ ...env, SOLANA_NETWORK: "mainnet-beta" }, tenant)
-      ).toThrow(AppError);
+        runInClusterScope({ projectId: tenant.projectId, environment: "production" }, () =>
+          createHeliusRingsService(env, tenant)
+        )
+      ).toThrow(expect.objectContaining({ code: "SERVICE_UNAVAILABLE" }));
     });
   });
 

@@ -33,13 +33,13 @@ test("invisible required field is not validated", () => {
 });
 
 test("a select value outside its options reports an error", () => {
-  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "testnet" });
-  assert.match(errors.SOLANA_NETWORK ?? "", /must be one of: devnet, mainnet-beta/);
+  const errors = validateValues({ ...defaultValues(), ENVIRONMENT: "staging" });
+  assert.match(errors.ENVIRONMENT ?? "", /must be one of: production, development/);
 });
 
 test("a valid select value has no error", () => {
-  const errors = validateValues({ ...defaultValues(), SOLANA_NETWORK: "mainnet-beta" });
-  assert.equal(errors.SOLANA_NETWORK, undefined);
+  const errors = validateValues({ ...defaultValues(), ENVIRONMENT: "development" });
+  assert.equal(errors.ENVIRONMENT, undefined);
 });
 
 test("managed signing with native fees requires a fee payer key", () => {

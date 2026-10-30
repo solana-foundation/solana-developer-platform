@@ -7,7 +7,8 @@ import {
   SwapDvpVerificationError,
   verifySwapDvpAccount,
 } from "@sdp/dvp";
-import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
@@ -191,7 +192,7 @@ async function executeDvpFunding(
 
   const { side, mint, tokenProgram, escrow, amount } = plan.leg;
 
-  const rpc = createRpc(env);
+  const rpc = createClusterRpc();
 
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a

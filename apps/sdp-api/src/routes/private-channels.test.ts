@@ -8,6 +8,7 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -118,6 +119,8 @@ function successProbe() {
 }
 
 describe("Private Channels routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     originalPrivateChannelsEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";

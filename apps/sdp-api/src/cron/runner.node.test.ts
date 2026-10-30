@@ -21,7 +21,6 @@ import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
-import { ringsIndexingCron } from "./rings-indexing";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
 import { assertCronConfig, CRON_DEFINITIONS, type CronHandle, startCron } from "./runner";
 
@@ -229,16 +228,16 @@ describe("startCron", () => {
   });
 
   it("logs only disabled for a definition whose enabled decision was false, deciding it once", async () => {
-    vi.mocked(ringsIndexingCron.enabled).mockReturnValue(false);
+    vi.mocked(earnCatalogueSyncCron.enabled).mockReturnValue(false);
     const worker = await startWorker();
 
-    expect(fire(worker, ringsIndexingCron.name, null)).toEqual([]);
-    expect(fire(worker, ringsIndexingCron.name, null)).toEqual([]);
+    expect(fire(worker, earnCatalogueSyncCron.name, null)).toEqual([]);
+    expect(fire(worker, earnCatalogueSyncCron.name, null)).toEqual([]);
 
-    const disabled = ["info", slotEvent(ringsIndexingCron.name, null, "disabled")];
-    expect(runEvents(ringsIndexingCron.name, null)).toEqual([disabled, disabled]);
-    expect(ringsIndexingCron.run).not.toHaveBeenCalled();
-    expect(ringsIndexingCron.enabled).toHaveBeenCalledExactlyOnceWith(env);
+    const disabled = ["info", slotEvent(earnCatalogueSyncCron.name, null, "disabled")];
+    expect(runEvents(earnCatalogueSyncCron.name, null)).toEqual([disabled, disabled]);
+    expect(earnCatalogueSyncCron.run).not.toHaveBeenCalled();
+    expect(earnCatalogueSyncCron.enabled).toHaveBeenCalledExactlyOnceWith(env);
   });
 
   it("skips a slot while the same registration's run is in flight, and runs the next slot once it settles", async () => {

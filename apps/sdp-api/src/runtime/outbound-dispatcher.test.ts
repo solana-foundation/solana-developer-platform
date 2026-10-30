@@ -208,7 +208,7 @@ describe("outbound dispatcher", () => {
       if (installed) dispatchers.push(installed);
       try {
         expect(getGlobalDispatcher()).toBe(installed);
-        const rpc = createRpc({}, { rpcUrl: server.url });
+        const rpc = createRpc(server.url);
         // Distinct reads: kit coalesces identical requests made together.
         const reads = Array.from({ length: BURST }, (_, lane) =>
           rpc.getBlockTime(BigInt(lane) as Slot).send()

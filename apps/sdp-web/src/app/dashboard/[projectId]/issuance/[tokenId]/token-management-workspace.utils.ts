@@ -540,19 +540,6 @@ function formatValue(value: string | null | undefined, t: Translate): string {
   return `${value.slice(0, 6)}...${value.slice(-6)}`;
 }
 
-export function getExplorerHref(mintAddress: string | null): string | null {
-  if (!mintAddress) {
-    return null;
-  }
-
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
-  const clusterQuery =
-    cluster === "mainnet-beta" || cluster === "mainnet"
-      ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
-  return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
-}
-
 export async function executeActionRequest(
   input: ActionExecutionInput,
   t: Translate

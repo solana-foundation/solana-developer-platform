@@ -161,26 +161,6 @@ export const FIELDS: EnvField[] = [
 
   // Solana RPC
   {
-    key: "SOLANA_NETWORK",
-    section: "rpc",
-    kind: "select",
-    label: "Network",
-    defaultValue: "devnet",
-    options: [
-      { value: "devnet", label: "devnet" },
-      { value: "mainnet-beta", label: "mainnet-beta" },
-    ],
-  },
-  {
-    key: "SOLANA_RPC_URL",
-    section: "rpc",
-    kind: "url",
-    label: "RPC URL",
-    defaultValue: "https://api.devnet.solana.com",
-    required: true,
-    pattern: /^https:\/\//,
-  },
-  {
     key: "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
     section: "rpc",
     kind: "url",
@@ -197,13 +177,6 @@ export const FIELDS: EnvField[] = [
     label: "Mainnet RPC URL",
     pattern: /^https:\/\//,
     help: "Production projects read and send on mainnet through this endpoint; unset refuses them.",
-  },
-  {
-    key: "SOLANA_RPC_HELIUS_API_KEY",
-    section: "rpc",
-    kind: "password",
-    label: "Helius API key",
-    visibleWhen: (v) => v.SOLANA_RPC_URL?.includes("helius") ?? false,
   },
 
   // Clerk
@@ -532,7 +505,7 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Kora URL",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora" && v.SOLANA_NETWORK === "devnet",
+    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora",
   },
   {
     key: "KORA_DEVNET_CLOUD_RUN_AUDIENCE",
@@ -540,7 +513,7 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Private Kora Cloud Run audience",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora" && v.SOLANA_NETWORK === "devnet",
+    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora",
     help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
   },
   {
@@ -549,7 +522,8 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Kora URL",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora" && v.SOLANA_NETWORK === "mainnet-beta",
+    visibleWhen: (v) =>
+      v.FEE_PAYMENT_PROVIDER === "kora" && Boolean(v.SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL),
   },
   {
     key: "KORA_MAINNET_CLOUD_RUN_AUDIENCE",
@@ -557,7 +531,8 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Private Kora Cloud Run audience",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora" && v.SOLANA_NETWORK === "mainnet-beta",
+    visibleWhen: (v) =>
+      v.FEE_PAYMENT_PROVIDER === "kora" && Boolean(v.SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL),
     help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
   },
 
@@ -657,13 +632,6 @@ export const FIELDS: EnvField[] = [
     kind: "url",
     label: "Public docs URL",
     defaultValue: "http://localhost:3001",
-  },
-  {
-    key: "NEXT_PUBLIC_SOLANA_NETWORK",
-    section: "advanced",
-    kind: "text",
-    label: "Public Solana network",
-    derive: (v) => v.SOLANA_NETWORK ?? "devnet",
   },
   {
     key: "TRUST_PROXY_HEADERS",
