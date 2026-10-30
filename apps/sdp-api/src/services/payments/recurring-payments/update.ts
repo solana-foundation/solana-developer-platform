@@ -52,6 +52,7 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import type { SubscriptionAuthorityRevokeFence } from "@/db/repositories/subscription-authority-revocations.repository";
 import {
   AppError,
   badRequest,
@@ -95,7 +96,6 @@ import {
   requireUpdatedPlan,
   requireUpdatedSubscription,
   resolveRecurringPaymentTokenMint,
-  type SubscriptionAuthorityRevokeFence,
   type SubscriptionStep,
   savedStepSend,
   sendSubscriptionInstructions,

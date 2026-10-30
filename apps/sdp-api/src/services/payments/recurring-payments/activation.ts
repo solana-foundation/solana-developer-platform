@@ -37,6 +37,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories/repository-factory";
+import type { SubscriptionAuthorityRevokeFence } from "@/db/repositories/subscription-authority-revocations.repository";
 import { AppError, badRequest, conflict, internalError } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -68,7 +69,6 @@ import {
   refuseWhileSubscriptionAuthorityRevokes,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
-  type SubscriptionAuthorityRevokeFence,
   type SubscriptionStep,
   savedStepSend,
   sendSubscriptionInstructions,
