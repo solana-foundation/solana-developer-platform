@@ -454,8 +454,7 @@ export interface ResumedStepLogContext {
     | "authorize_subscription"
     | "update_plan"
     | "cancel_old_subscription"
-    | "cancel"
-    | "resume";
+    | "cancel";
 }
 
 /**

@@ -84,7 +84,7 @@ export const createOrgSignerForCustodyWalletMock: MockInstance<
 
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
-const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
+export const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
   subscriptionsProgram,
   "fetchMaybeSubscriptionAuthority"
 );

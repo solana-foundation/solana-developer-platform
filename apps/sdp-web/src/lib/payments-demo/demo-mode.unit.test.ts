@@ -555,7 +555,7 @@ describe("requests and schedules", () => {
     expect(created.body.data.publicToken).toMatch(/^demo_pt_/);
   });
 
-  it("creates, activates, collects, cancels and resumes a schedule", async () => {
+  it("creates, activates, collects and cancels a schedule for good", async () => {
     const created = await call("POST", "/v1/payments/recurring-payments", {
       sourceCustodyWalletId: "demo_cwlt_payroll",
       counterpartyId: "demo_cpty_kai",
@@ -586,7 +586,7 @@ describe("requests and schedules", () => {
     });
     expect(updated.body.data.recurringPayment.amount).toBe("45");
     expect((await run("cancel")).body.data.recurringPayment.status).toBe("canceled");
-    expect((await run("resume")).body.data.recurringPayment.status).toBe("active");
+    expect((await run("resume")).status).toBe(409);
   });
 });
 

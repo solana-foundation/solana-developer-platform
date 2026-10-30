@@ -10,6 +10,7 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttempt,
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  RECURRING_PAYMENT_PAUSE_REASONS,
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
@@ -109,6 +110,7 @@ const recurringPaymentSchema = z.object({
   subscriptionAuthorityAddress: z.string().nullable(),
   authorizationSignature: z.string().nullable(),
   status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+  pausedReason: z.enum(RECURRING_PAYMENT_PAUSE_REASONS).nullable(),
   metadataUri: z.string().nullable(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),

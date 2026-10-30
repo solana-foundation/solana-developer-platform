@@ -17,18 +17,16 @@ import {
 import { env } from "#env-impl";
 
 /**
- * HOO-2210 on a local Surfpool fork: a wallet's per-mint delegation to the Subscriptions program
- * outlives cancel (a canceled subscription stays resumable until its period ends), and the
- * revoke-subscription-authorities cron takes it back once every schedule on it has ended,
- * signing with no API key, so revoking the key that set the schedules up never strands it.
+ * HOO-2210 and HOO-2339 on a local Surfpool fork: a wallet's per-mint delegation to the
+ * Subscriptions program stays while any schedule on it lives, and the cancel that ends the last one
+ * takes it back at once, signing with no API key, so revoking the key that set the schedules up
+ * never strands it.
  */
 
 const { getDb, readSubscriptionDelegation, revokeIdleSubscriptionAuthorities } = apiTestSupport;
 
 const USDC = address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address);
 const PERIOD_HOURS = 1;
-/** Past one period plus the cron's one-hour margin. */
-const IDLE_BACKDATE_MS = 3 * 60 * 60 * 1000;
 const TEST_TIMEOUT_MS = 600_000;
 
 const api = requestWithApiKey();
@@ -163,27 +161,11 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
     return id;
   }
 
-  /** Moves the schedules' and their subscriptions' last change past their period, as time would. */
-  async function letPeriodsEnd(ids: string[]): Promise<void> {
-    const longAgo = new Date(Date.now() - IDLE_BACKDATE_MS).toISOString();
-    await getDb(env).execute(
-      "UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ANY(?::text[])",
-      [longAgo, ids]
-    );
-    await getDb(env).execute(
-      `UPDATE payment_subscriptions s
-          SET updated_at = ?, canceled_at = CASE WHEN s.canceled_at IS NULL THEN NULL ELSE ? END
-         FROM payment_recurring_payments rp
-        WHERE rp.id = ANY(?::text[]) AND s.id = rp.subscription_id`,
-      [longAgo, longAgo, ids]
-    );
-  }
-
-  it("revokes the delegation only once every schedule on it has ended, without the key that set them up", {
+  it("keeps the delegation while another schedule on it lives, and the last cancel revokes it without the key that set them up", {
     timeout: TEST_TIMEOUT_MS,
   }, async () => {
     const keyManager = await requestAsOrganizationAdmin();
-    const keyName = `HOO-2210 schedules ${Date.now()}`;
+    const keyName = `HOO-2339 schedules ${Date.now()}`;
     const created = await postJson(
       keyManager,
       `/v1/projects/${TEST_PROJECT.id}/api-keys`,
@@ -205,23 +187,9 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
       delegate: authority,
     });
 
-    // One schedule ends; the other still collects through the same delegation.
     await scheduleCall(scheduler, `/v1/payments/recurring-payments/${first}/cancel`);
-    await letPeriodsEnd([first]);
-    expect(await revokeIdleSubscriptionAuthorities(env, new Date())).toMatchObject({ revoked: 0 });
     expect((await readSubscriptionDelegation(walletAddress, USDC)).delegate).toBe(authority);
 
-    // Both canceled, but the second is inside its period: it can still be resumed.
-    await scheduleCall(scheduler, `/v1/payments/recurring-payments/${second}/cancel`);
-    expect(await revokeIdleSubscriptionAuthorities(env, new Date())).toMatchObject({ revoked: 0 });
-    const resumed = await scheduleCall(
-      scheduler,
-      `/v1/payments/recurring-payments/${second}/resume`
-    );
-    expect(resumed.status).toBe("active");
-    await scheduleCall(scheduler, `/v1/payments/recurring-payments/${second}/cancel`);
-
-    // The key that created, activated and resumed both is revoked before the cleanup runs.
     const revokeKey = await keyManager(`/v1/api-keys/${key.id}`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -229,24 +197,19 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
     });
     expect(revokeKey.status).toBe(200);
 
-    await letPeriodsEnd([first, second]);
-    expect(await revokeIdleSubscriptionAuthorities(env, new Date())).toMatchObject({
-      revoked: 1,
-      failed: 0,
-    });
+    await scheduleCall(api, `/v1/payments/recurring-payments/${second}/cancel`);
     expect(await readSubscriptionDelegation(walletAddress, USDC)).toEqual({
       authority,
       authorityOpen: false,
       delegate: null,
     });
-    const [revocation] = await getDb(env).queryMany<{ status: string; signature: string | null }>(
-      `SELECT status, signature FROM payment_subscription_authority_revocations
-        WHERE organization_id = ? AND subscription_authority_address = ?`,
-      [TEST_ORG.id, authority]
-    );
-    expect(revocation).toMatchObject({ status: "confirmed", signature: expect.any(String) });
-
-    // Nothing left to do: the next run neither revokes nor retries.
+    expect(
+      await getDb(env).queryMany<{ status: string; signature: string | null }>(
+        `SELECT status, signature FROM payment_subscription_authority_revocations
+          WHERE organization_id = ? AND subscription_authority_address = ?`,
+        [TEST_ORG.id, authority]
+      )
+    ).toEqual([{ status: "confirmed", signature: expect.any(String) }]);
     expect(await revokeIdleSubscriptionAuthorities(env, new Date())).toEqual({
       revoked: 0,
       recovered: 0,
@@ -254,7 +217,6 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
       skipped: 0,
     });
 
-    // A new schedule on the same wallet and mint sets the delegation up again.
     const third = await activeSchedule(api);
     expect((await readSubscriptionDelegation(walletAddress, USDC)).delegate).toBe(authority);
     await scheduleCall(api, `/v1/payments/recurring-payments/${third}/cancel`);

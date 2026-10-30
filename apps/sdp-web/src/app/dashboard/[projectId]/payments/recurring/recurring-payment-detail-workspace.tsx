@@ -1,10 +1,13 @@
 "use client";
 
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentStatus,
-  PaymentSubscriptionCollectionAttempt,
+import {
+  assertNever,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentStatus,
+  type PaymentSubscriptionCollectionAttempt,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
@@ -156,10 +159,8 @@ function footerActionIds(
       return ["activate", "cancel"];
     case "active":
       return dueNow ? ["collect", "cancel"] : ["cancel"];
-    case "canceled":
-      // Only a schedule that ran on chain has a subscription to resume; one canceled before
-      // activation has to be created again.
-      return recurringPayment.subscriptionId ? ["resume"] : [];
+    case "paused":
+      return ["resume", "cancel"];
     default:
       return [];
   }
@@ -289,16 +290,35 @@ function walletBand({
   return null;
 }
 
+/** Why SDP paused the schedule, in the words for its reason. */
+function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): string {
+  switch (reason) {
+    case "custody_policy_refused":
+      return t("DashboardPayments.recurring.statePausedPolicyRefusedBody");
+    case "failed_attempts":
+      return t("DashboardPayments.recurring.statePausedFailedAttemptsBody", {
+        count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+      });
+    case null:
+      return t("DashboardPayments.recurring.statePausedBody");
+    default:
+      return assertNever(reason);
+  }
+}
+
 /** Otherwise the status itself, in the design's words for it. */
 function statusBand({
   recurringPayment,
   lastRunFailed,
+  lastRunError,
   scheduleLabel,
   locale,
   t,
 }: {
   recurringPayment: PaymentRecurringPayment;
   lastRunFailed: boolean;
+  /** The last failed run's error while paused, shown under the pause reason; null when none. */
+  lastRunError: string | null;
   scheduleLabel: string;
   locale: string;
   t: Translate;
@@ -328,7 +348,20 @@ function statusBand({
       };
     }
     case "paused":
-      return { tone: "warn", state, body: t("DashboardPayments.recurring.statePausedBody") };
+      return {
+        tone: "warn",
+        state,
+        body: (
+          <>
+            {pausedBody(recurringPayment.pausedReason, t)}
+            {lastRunError === null ? null : (
+              <span className="mt-1 block text-secondary">
+                {t("DashboardPayments.recurring.statePausedLastRunError", { error: lastRunError })}
+              </span>
+            )}
+          </>
+        ),
+      };
     case "canceled":
       return {
         tone: "neutral",
@@ -340,7 +373,7 @@ function statusBand({
     case "expired":
       return { tone: "neutral", state, body: t("DashboardPayments.recurring.stateExpiredBody") };
     default:
-      // Activating, updating, canceling, resuming: the network has the schedule.
+      // Activating, updating, canceling: the network has the schedule.
       return { tone: "info", state, body: t("DashboardPayments.recurring.stateWorkingBody") };
   }
 }
@@ -452,7 +485,9 @@ function SchedulePlan({
         </RecordLine>
       )}
       <RecordLine label={t("DashboardPayments.recurring.ifRunFails")}>
-        {t("DashboardPayments.recurring.staysActive")}
+        {t("DashboardPayments.recurring.pausesAfterFailures", {
+          count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+        })}
       </RecordLine>
     </dl>
   );
@@ -711,8 +746,12 @@ export function RecurringPaymentDetailWorkspace({
     counterparty: counterpartyLabel,
   });
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
-  const lastRunFailed =
-    status === "active" && latestAttempt(collectionAttempts)?.status === "failed";
+  const lastRun = latestAttempt(collectionAttempts);
+  const lastRunFailed = status === "active" && lastRun?.status === "failed";
+  const lastRunError =
+    status === "paused" && lastRun?.status === "failed" && lastRun.error !== null
+      ? lastRun.error
+      : null;
   // Every footer action (collect, pause, resume, cancel) changes the schedule.
   const actions = canWrite
     ? footerActions({
@@ -769,7 +808,7 @@ export function RecurringPaymentDetailWorkspace({
           t,
         })
       : null) ??
-    statusBand({ recurringPayment, lastRunFailed, scheduleLabel, locale, t });
+    statusBand({ recurringPayment, lastRunFailed, lastRunError, scheduleLabel, locale, t });
   const canEdit = canWrite && isEditable && !controlsDisabled && !editing;
 
   return (

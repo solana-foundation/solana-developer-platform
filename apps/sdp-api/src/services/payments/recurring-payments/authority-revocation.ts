@@ -38,17 +38,21 @@ import {
 } from "./shared";
 
 /**
- * Revoking a wallet's per-mint Subscriptions authority once nothing needs it (HOO-2210).
+ * Revoking a wallet's per-mint Subscriptions authority once nothing needs it (HOO-2210, HOO-2339).
  *
  * Activation approves the authority PDA as the SPL delegate on the wallet's token account for
- * u64::MAX. Cancel leaves it, because a canceled subscription stays resumable until the end of its
- * billing period and resume needs the same authority. Once every subscription and recurring
- * payment on an authority has ended and that period is over, this revokes the delegate and closes
- * the PDA, refunding its rent to whoever paid it.
+ * u64::MAX. A recurring payment's cancel is terminal, so the cancel revokes the authority itself
+ * when it was the last use of it ({@link revokeSubscriptionAuthorityAfterCancel}). The sweep revokes
+ * everything else once every subscription and recurring payment on an authority has ended (a
+ * standalone subscription after its billing period, since its subscriber can still resume it), and
+ * finishes any revoke a cancel left. A revoke closes the PDA, refunding its rent to whoever paid it.
  *
- * The revoke is an exit (`recurring.revoke_authority`), signed with no money principal: no API key
- * or member is asked, so revoking the key that set a schedule up never stops its cleanup, and an
- * organization's status never refuses it (ADR 0002).
+ * The revoke is an exit (`recurring.revoke_authority`); an organization's status never refuses it
+ * (ADR 0002). The sweep signs it with no money principal, so no API key or member is asked and
+ * revoking the key that set a schedule up never stops its cleanup. The inline revoke after a cancel
+ * inherits the request's principal and is admitted as an exit through `decidePrincipal`: the
+ * credential must still be live and hold the wallet in its scope, and a refusal leaves the revoke
+ * `failed` for the sweep.
  */
 
 const MOVEMENT = "recurring.revoke_authority";
@@ -161,6 +165,37 @@ export async function revokeIdleSubscriptionAuthorities(
   }
 
   return result;
+}
+
+/**
+ * Revokes the authority a recurring payment used, right after its cancel commits, when nothing else
+ * needs it (HOO-2339). It claims the revoke exactly as the sweep does, under the wallet's lock and
+ * the same idle predicate, so another live schedule on the authority, a revoke already holding it,
+ * or a sweep run that claimed it first leaves it alone. A revoke it cannot finish stays on its row,
+ * `processing` or `failed`, for the sweep; nothing here fails the cancel that already committed.
+ *
+ * @param env - Runtime environment for signer, sponsor and repository construction.
+ * @param authority - The canceled payment's authority and the custody wallet that signs its revoke.
+ * @returns Revoked, failed or pending (the sweep finishes it), or skipped (still needed, or held).
+ */
+export async function revokeSubscriptionAuthorityAfterCancel(
+  env: Env,
+  authority: RevocableSubscriptionAuthority
+): Promise<RevocationOutcome | "skipped"> {
+  const now = new Date();
+  const windows = {
+    idleBefore: now.toISOString(),
+    retryFailedBefore: new Date(now.getTime() - FAILED_RETRY_AFTER_MS).toISOString(),
+  };
+  const repo = createPostgresSubscriptionAuthorityRevocationsRepository(getDb(env));
+  return isolated(authority.subscription_authority_address, async () => {
+    const claimed = await claimCandidate(env, authority, windows);
+    return claimed
+      ? settleRevocation(createClusterSubscriptionAuthorityChain(env), repo, claimed, {
+          resumed: false,
+        })
+      : ("skipped" as const);
+  });
 }
 
 /**

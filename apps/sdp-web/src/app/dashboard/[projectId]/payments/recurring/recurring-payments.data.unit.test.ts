@@ -39,6 +39,7 @@ const responseEnvelope = {
       subscriptionAuthorityAddress: null,
       authorizationSignature: null,
       status: "pending_activation",
+      pausedReason: null,
       metadataUri: null,
       createdBy: null,
       createdAt: "2026-09-15T00:00:00.000Z",

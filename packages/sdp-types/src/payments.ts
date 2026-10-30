@@ -21,6 +21,8 @@ export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
   maxBatchSize: 100,
   retryAfterMinutes: 30,
   staleAfterMs: 15 * 60 * 1000,
+  /** Failed attempts at one due period, since the last resume, that pause the schedule (HOO-2340). */
+  maxFailedAttemptsBeforePause: 5,
 } as const satisfies Record<string, number>;
 
 export function assertNever(value: never): never {
@@ -842,6 +844,24 @@ export const PAYMENT_RECURRING_PAYMENT_STATUSES = [
   "expired",
 ] as const;
 export type PaymentRecurringPaymentStatus = (typeof PAYMENT_RECURRING_PAYMENT_STATUSES)[number];
+/**
+ * Every status but `paused`. A `paused` row carries a pause reason (migration 0184), so only the
+ * pause, resume, cancel claim and cancel release writes move a row into or out of it; the generic
+ * writers take these.
+ */
+export type UnpausedRecurringPaymentStatus = Exclude<PaymentRecurringPaymentStatus, "paused">;
+
+/**
+ * Why SDP paused a recurring payment (HOO-2340): the custody provider's policy refused to sign a
+ * collection, or one due period failed
+ * {@link RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Migration 0184
+ * checks the column against these and keeps it set exactly while the row is `paused`.
+ */
+export const RECURRING_PAYMENT_PAUSE_REASONS = [
+  "custody_policy_refused",
+  "failed_attempts",
+] as const;
+export type RecurringPaymentPauseReason = (typeof RECURRING_PAYMENT_PAUSE_REASONS)[number];
 
 export const PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
@@ -917,17 +937,18 @@ export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 /**
- * A recurring payment that collects, or will once its activation, update or
- * resume in flight finishes, or once a cancel in flight fails back to active:
+ * A recurring payment that collects, or will once resumed from a pause or once
+ * its activation or update in flight finishes, or once a cancel in flight fails
+ * back:
  * revoke-and-cancel must see all of them, or one mid-way would become active
  * after the revoke that was meant to stop it.
  */
 export const LIVE_RECURRING_PAYMENT_STATUSES = [
   ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "paused",
   "activating",
   "updating",
   "canceling",
-  "resuming",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(
   status: PaymentRecurringPaymentStatus
@@ -972,9 +993,26 @@ export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * A collection attempt in these has not settled, so it may still pull funds through its
+ * subscription's authority: nothing revokes that authority under it (HOO-2339).
+ */
+export const IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES = [
+  "pending",
+  "processing",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
 export const FAILED_COLLECTION_ATTEMPT_STATUSES = [
   "failed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * The statuses a collection failure's write settles an attempt from, by its outcome: `confirmed`
+ * when the attempt's transfer turned out to have landed, else `failed`. Each outcome also rewrites
+ * itself, as a recovery re-settling the same attempt does.
+ */
+export const COLLECTION_ATTEMPT_STATUSES_SETTLING_TO = {
+  confirmed: ["pending", "processing", "confirmed"],
+  failed: ["pending", "processing", "failed"],
+} as const satisfies Record<string, readonly PaymentSubscriptionCollectionAttemptStatus[]>;
 export const COLLECTION_ATTEMPT_INITIAL_STATUSES = [
   "processing",
   "failed",
@@ -1009,14 +1047,19 @@ export const SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES = [
   "processing",
 ] as const satisfies readonly SubscriptionAuthorityRevocationStatus[];
 /**
- * A recurring payment in these no longer needs its authority once its last
- * billing period is over; every other status does, or may again.
+ * A recurring payment in these no longer needs its authority, at once: a
+ * cancel is terminal (HOO-2339) and nothing resumes an expired schedule. Every
+ * other status needs it, or may again; `paused` keeps it for its resume.
  */
 export const RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY = [
   "canceled",
   "expired",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
-/** A subscription in these no longer needs its authority once its last billing period is over. */
+/**
+ * A subscription in these no longer needs its authority: a recurring payment's at once, a
+ * standalone one once its last billing period is over, since its subscriber can still resume it
+ * until then.
+ */
 export const PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY = [
   "canceled",
   "expired",
@@ -1036,20 +1079,27 @@ export const PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION = [
 export const RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY = [
   "activating",
   "updating",
-  "resuming",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isInFlightRecurringPaymentAttemptStatus(
   status: PaymentRecurringPaymentAttemptStatus
 ): boolean {
   return IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES.some((candidate) => candidate === status);
 }
-export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
-  "canceling",
-  "resuming",
-] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/**
+ * The status a cancel holds a schedule in while its on-chain cancel is in
+ * flight. It is the only lifecycle operation with one: resume is a database
+ * transition (HOO-2340), so nothing writes `resuming`, which stays in
+ * {@link PAYMENT_RECURRING_PAYMENT_STATUSES} only until a migration drops it
+ * from the table's CHECK.
+ */
+export const RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS =
+  "canceling" as const satisfies PaymentRecurringPaymentStatus;
+export function isCancelingRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return status === RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS;
+}
 export const RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON = [
   "activating",
-  ...RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export const RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION = [
   "active",
@@ -1065,17 +1115,56 @@ export function hasRecoverableRecurringPaymentCollection(
     (candidate) => candidate === status
   );
 }
+/**
+ * A cancel is terminal (HOO-2339): nothing claims `canceled`, so a canceled
+ * schedule never collects or resumes again. Cancel claims a running or paused
+ * schedule and holds it in {@link RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS}
+ * while its on-chain cancel lands. Resume only brings back a schedule SDP
+ * paused (HOO-2340), whose delegation is still on chain, so it is a database
+ * transition with no processing status.
+ */
 export const RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS = {
-  cancel: { processingStatus: "canceling", claimableStatus: "active", finalStatus: "canceled" },
-  resume: { processingStatus: "resuming", claimableStatus: "canceled", finalStatus: "active" },
+  cancel: { claimableStatuses: ["active", "paused"], finalStatus: "canceled" },
+  resume: { claimableStatuses: ["paused"], finalStatus: "active" },
 } as const satisfies Record<
   PaymentRecurringPaymentLifecycleOperation,
   {
-    processingStatus: PaymentRecurringPaymentStatus;
-    claimableStatus: PaymentRecurringPaymentStatus;
+    claimableStatuses: readonly PaymentRecurringPaymentStatus[];
     finalStatus: PaymentRecurringPaymentStatus;
   }
 >;
+
+/** A status a lifecycle operation claims from. */
+export type RecurringPaymentLifecycleClaimableStatus =
+  (typeof RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS)[PaymentRecurringPaymentLifecycleOperation]["claimableStatuses"][number];
+
+/** Whether `operation` may claim a recurring payment in `status`. */
+export function isRecurringPaymentLifecycleClaimableStatus(
+  operation: PaymentRecurringPaymentLifecycleOperation,
+  status: PaymentRecurringPaymentStatus
+): status is RecurringPaymentLifecycleClaimableStatus {
+  const claimable: readonly PaymentRecurringPaymentStatus[] =
+    RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation].claimableStatuses;
+  return claimable.some((candidate) => candidate === status);
+}
+
+/**
+ * The subscription statuses a recurring payment's cancel proceeds from: `active` before its
+ * on-chain cancel, and `canceled` when a retried cancel finds it already landed.
+ */
+export const PAYMENT_SUBSCRIPTION_STATUSES_CANCELABLE_BY_RECURRING_PAYMENT = [
+  "active",
+  "canceled",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+
+/** Whether a recurring payment's cancel may proceed with its subscription in `status`. */
+export function isSubscriptionCancelableByRecurringPayment(
+  status: PaymentSubscriptionStatus
+): boolean {
+  return PAYMENT_SUBSCRIPTION_STATUSES_CANCELABLE_BY_RECURRING_PAYMENT.some(
+    (candidate) => candidate === status
+  );
+}
 
 export const RECURRING_PAYMENT_ACTIVATION_TRANSITION = {
   processingStatus: "activating",
@@ -1148,17 +1237,6 @@ export function isMoneyMovementInFlight(status: MoneyMovementStatus): boolean {
 
 export function isCanceledRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
   return status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
-}
-
-export function recurringPaymentInFlightLifecycleOperation(
-  status: PaymentRecurringPaymentStatus
-): PaymentRecurringPaymentLifecycleOperation | null {
-  for (const operation of PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS) {
-    if (status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation].processingStatus) {
-      return operation;
-    }
-  }
-  return null;
 }
 
 export interface PaymentSubscriptionPlan {
@@ -1246,6 +1324,8 @@ export interface PaymentRecurringPayment {
   subscriptionAuthorityAddress: string | null;
   authorizationSignature: string | null;
   status: PaymentRecurringPaymentStatus;
+  /** Why SDP paused it; set exactly while `status` is `paused`. */
+  pausedReason: RecurringPaymentPauseReason | null;
   metadataUri: string | null;
   createdBy: string | null;
   createdAt: string;
