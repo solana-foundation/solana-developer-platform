@@ -113,7 +113,7 @@ export function capDashboardFlagsToEnvironment(
     payments: flags.payments && inEnvironment("payments"),
     privateChannels: flags.privateChannels && inEnvironment("private_channels"),
     ramps: flags.ramps && inEnvironment("ramps"),
-    // Earn (and Markets, its parent) stays visible: its withdrawals stay open when it is
-    // demoted for an environment (`allowExits`), so their screens must stay reachable.
+    earn: flags.earn && inEnvironment("earn"),
+    markets: flags.markets && inEnvironment("markets"),
   };
 }

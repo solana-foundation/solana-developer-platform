@@ -12,19 +12,18 @@ const PROJECT_HEADER = "x-project-id";
 
 export interface ProjectContextOptions {
   /**
-   * Requests that stay open for money already deployed (Earn withdrawals and reads,
-   * ADR 0002) when the project would otherwise be refused: a production project
-   * whose organization lost the production entitlement, or a project whose
-   * environment the release channel no longer runs the route's module for. Never
-   * for anything that starts new exposure.
+   * Requests that may act on a production project after the organization lost
+   * the production entitlement. Only for exits that must stay open for money
+   * already deployed (Earn withdrawals and reads, ADR 0002); never for anything
+   * that starts new exposure.
    *
    * The entitlement is `enableProductionProject` in the organization's Clerk
    * `private_metadata.sdp`, synced into `organizations.settings` by
-   * `provider-availability.service.ts`. Turning it off, like demoting a module for
-   * one environment, is a management decision, not something the product does;
-   * this keeps funds already in the project withdrawable if that ever happens.
+   * `provider-availability.service.ts`. Turning it off is a management
+   * decision, not something the product does; this keeps funds already in a
+   * production project withdrawable if that ever happens.
    */
-  allowExits?: (c: Context<{ Bindings: Env }>) => boolean | Promise<boolean>;
+  allowUnentitledProduction?: (c: Context<{ Bindings: Env }>) => boolean | Promise<boolean>;
   /**
    * Take the project from this path parameter instead of the `x-project-id`
    * header, for routes that address a project in their URL (`/v1/projects/:projectId`).
@@ -55,7 +54,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
     if (
       scope.environment === "production" &&
       !isProductionEntitled(c) &&
-      !(await options.allowExits?.(c))
+      !(await options.allowUnentitledProduction?.(c))
     ) {
       throw productionNotEnabled();
     }
@@ -69,8 +68,7 @@ export function projectContextMiddleware(options: ProjectContextOptions = {}) {
         routeModule,
         scope.environment,
         c.get("rampProviderMaturity")
-      ) &&
-      !(await options.allowExits?.(c))
+      )
     ) {
       throw forbidden(
         `The ${routeModule} module is not available for ${scope.environment} projects in this release channel.`
