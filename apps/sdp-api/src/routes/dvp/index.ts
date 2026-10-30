@@ -5,7 +5,6 @@ import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
-import { requireDevnetCluster } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -38,7 +37,6 @@ async function requireDvpFeature(c: Context<{ Bindings: Env }>, next: Next) {
 dvp.use("*", requireDvpFeature);
 dvp.use("*", unifiedAuthMiddleware());
 dvp.use("*", projectContextMiddleware());
-dvp.use("*", requireDevnetCluster("dvp"));
 
 // Each route declares one action. Trade reads are project-scoped; a key's
 // wallet scope applies when SDP signs a funding, payer or settlement

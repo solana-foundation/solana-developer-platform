@@ -1,5 +1,4 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
-import { currentClusterScope } from "@sdp/rpc/scope";
 import { isRampTransferType, type PaymentTransferType } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { SdpModule, SdpRampProviderMaturity } from "@sdp/types/release-channels";
@@ -73,23 +72,6 @@ export function assertTransferRampProviderInChannel(
 export function requireModule(module: SdpModule) {
   return async (c: ReleaseChannelContext, next: Next) => {
     assertModuleInChannel(c, module);
-    await next();
-  };
-}
-
-/**
- * Refuses every request whose project runs on a cluster other than devnet, for a module whose
- * programs and flows exist only on devnet. Mount it after `projectContextMiddleware`, which opens
- * the cluster scope it reads.
- *
- * @param module - The devnet-only module the router serves.
- * @returns Middleware that answers 403 outside a devnet cluster scope.
- */
-export function requireDevnetCluster(module: SdpModule) {
-  return async (_c: ReleaseChannelContext, next: Next) => {
-    if (currentClusterScope().cluster !== "devnet") {
-      throw forbidden(`The ${module} module is only available on devnet projects.`);
-    }
     await next();
   };
 }
