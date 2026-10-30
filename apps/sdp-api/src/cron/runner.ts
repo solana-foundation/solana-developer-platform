@@ -146,32 +146,6 @@ function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvi
 }
 
 /**
- * Whether a registration may start new money movement in its Environment: a `starts`
- * definition only where the release channel runs its module for that Environment. Other
- * definitions settle or record money already in flight, so they run everywhere.
- *
- * @param definition - The definition being registered.
- * @param environment - The registration's Environment, or `null` for a global one.
- * @param env - Process environment naming the release channel.
- * @returns True unless a `starts` definition's module is out of the channel for the Environment.
- */
-function startsInEnvironment(
-  definition: CronDefinition,
-  environment: SdpEnvironment | null,
-  env: Env
-): boolean {
-  if (definition.effect !== "starts" || environment === null) {
-    return true;
-  }
-  return isModuleAvailableForEnvironment(
-    env,
-    definition.module,
-    environment,
-    SDP_RAMP_PROVIDER_MATURITY
-  );
-}
-
-/**
  * Run one slot of a definition's work under the system database identity (reconciliation is
  * cross-tenant, and row-level security denies an undeclared workload) and, for a `cluster`
  * registration, inside that Environment's cluster scope. Logs the slot's outcome and rethrows
@@ -226,8 +200,18 @@ export function startCron(deps: CronDeps): CronHandle | null {
   for (const definition of CRON_DEFINITIONS) {
     for (const environment of registrationEnvironments(definition)) {
       const registration: CronRegistration = { cron: definition.name, environment };
+      // A `starts` definition moves no new money in an Environment the release channel does not
+      // run its module for; finishing and observing definitions run everywhere.
       const enabled =
-        definition.enabled(deps.env) && startsInEnvironment(definition, environment, deps.env);
+        definition.enabled(deps.env) &&
+        (definition.effect !== "starts" ||
+          environment === null ||
+          isModuleAvailableForEnvironment(
+            deps.env,
+            definition.module,
+            environment,
+            SDP_RAMP_PROVIDER_MATURITY
+          ));
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.
       let inFlight: symbol | null = null;

@@ -1,5 +1,10 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
+import {
+  isModuleInReleaseChannelForEnvironment,
+  SDP_RAMP_PROVIDER_MATURITY,
+  type SdpModule,
+  type SdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import {
   assetProfiles,
   dvp,
@@ -13,7 +18,6 @@ import {
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
-  isModuleInEnvironmentReleaseChannel,
 } from "@/flags/release-channel";
 import { isRampsEnabled } from "./ramps";
 
@@ -100,8 +104,14 @@ export function capDashboardFlagsToEnvironment(
   flags: DashboardFlags,
   environment: SdpEnvironment
 ): DashboardFlags {
+  const releaseChannel = deploymentReleaseChannel();
   const inEnvironment = (module: SdpModule) =>
-    isModuleInEnvironmentReleaseChannel(module, environment);
+    isModuleInReleaseChannelForEnvironment(
+      releaseChannel,
+      module,
+      environment,
+      SDP_RAMP_PROVIDER_MATURITY
+    );
   return {
     ...flags,
     assetProfiles: flags.assetProfiles && inEnvironment("issuance"),

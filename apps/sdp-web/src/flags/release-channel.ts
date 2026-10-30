@@ -1,8 +1,6 @@
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
-  isModuleInReleaseChannelForEnvironment,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
@@ -44,27 +42,6 @@ export function deploymentReleaseChannel(): SdpReleaseChannel {
  */
 export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
   return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_MATURITY);
-}
-
-/**
- * Whether this deployment runs `module` for Projects in `environment`, the same check the
- * API's project context makes. Unlike a module's dashboard flag it ignores per-user
- * Vercel targeting.
- *
- * @param module - The module a screen belongs to.
- * @param environment - The Project's environment.
- * @returns True when the release channel runs the module for that environment.
- */
-export function isModuleInEnvironmentReleaseChannel(
-  module: SdpModule,
-  environment: SdpEnvironment
-): boolean {
-  return isModuleInReleaseChannelForEnvironment(
-    deploymentReleaseChannel(),
-    module,
-    environment,
-    SDP_RAMP_PROVIDER_MATURITY
-  );
 }
 
 /**
