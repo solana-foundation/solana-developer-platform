@@ -60,7 +60,7 @@ function PartnerRow({ label, partners }: { label: string; partners: readonly Par
         {partners.map((partner) => (
           <li key={partner.logo} className="launch-home-partner-logo">
             <Image
-              src={`/images/partners/${partner.logo}.svg`}
+              src={`/docs/images/partners/${partner.logo}.svg`}
               alt={partner.name}
               width={132}
               height={32}

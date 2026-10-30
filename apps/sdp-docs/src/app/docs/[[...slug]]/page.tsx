@@ -3,6 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
+import { z } from "zod";
 import { type BreadcrumbItem, DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { PageActions } from "@/components/docs-shell/page-actions";
@@ -38,6 +39,8 @@ type ResolvedPage = {
   pageSlug: string[];
 };
 
+const breadcrumbMetadataSchema = z.object({ breadcrumbParent: z.string().optional() });
+
 function resolvePage(slug?: string[]): ResolvedPage | null {
   if (!slug || slug.length === 0) {
     const rootPage = source.getPage([]);
@@ -69,7 +72,7 @@ function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
   let current = page;
 
   while (!topLevelUrls.has(current.url)) {
-    const override = (current.data as DocsData).breadcrumbParent;
+    const { breadcrumbParent: override } = breadcrumbMetadataSchema.parse(current.data);
     const segments = current.url
       .replace(/^\/docs\/?/, "")
       .split("/")

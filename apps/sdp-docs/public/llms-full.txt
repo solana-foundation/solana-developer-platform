@@ -48,7 +48,7 @@ The capabilities below reflect what this deployment publishes.
 ---
 
 ### Get started
-Source: https://platform.solana.com/docs/index
+Source: https://platform.solana.com/docs
 
 > Build on Solana with a project-scoped dashboard and REST API.
 
