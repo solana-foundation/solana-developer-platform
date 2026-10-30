@@ -218,6 +218,119 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     expect(selected.rows).toHaveLength(1);
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
   });
+
+  it("links only recipients still unsent, and claims failed ones all or nothing", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_batch_claim",
+      counterpartyAccountId: "cpa_batch_claim",
+      walletAddress: "Dest111",
+    });
+    const recipient = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      externalId: null,
+      counterpartyId: "cpty_batch_claim",
+      counterpartyAccountId: "cpa_batch_claim",
+      destinationAddress: "Dest111",
+      amount: "1",
+      status: "pending" as const,
+      error: null,
+      attemptId: "attempt-create",
+    };
+    const { batch, recipients } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "claim-key" },
+      recipients: [recipient, recipient],
+    });
+    const [first, second] = recipients.map((row) => row.id);
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    await repo.updateTransferRecipientsStatus({
+      ...scope,
+      recipientIds: [first],
+      transferId: null,
+      status: "failed",
+      error: "rejected",
+    });
+
+    // Another attempt's chunk cannot link this attempt's recipients.
+    expect(
+      await repo.updateTransferRecipientsStatus({
+        ...scope,
+        recipientIds: [second],
+        transferId: null,
+        status: "processing",
+        error: null,
+        requireUnsentFor: { attemptId: "attempt-other" },
+      })
+    ).toEqual([]);
+    // A failed recipient is not unsent, so a chunk cannot link it.
+    expect(
+      await repo.updateTransferRecipientsStatus({
+        ...scope,
+        recipientIds: [first, second],
+        transferId: null,
+        status: "processing",
+        error: null,
+        requireUnsentFor: { attemptId: "attempt-create" },
+      })
+    ).toMatchObject([{ id: second }]);
+
+    let claims = 0;
+    const claim = (recipientIds: string[]) =>
+      repo.claimFailedTransferRecipients({
+        ...scope,
+        batchId: batch.id,
+        recipientIds,
+        addedTransactionCount: 1,
+        attemptLastValidBlockHeight: 1_000n,
+        attemptId: `attempt-retry-${claims}`,
+        retry: {
+          idempotencyKey: `retry-record-key-${++claims}`,
+          idempotencyFingerprint: "retry-fingerprint",
+          initiatedByKeyId: null,
+        },
+      });
+    // The second recipient is processing, so a claim naming it takes neither.
+    expect(await claim([first, second])).toBeNull();
+    const claimed = await claim([first]);
+    expect(claimed?.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
+    expect(claimed?.batch.transaction_count).toBe(2);
+    expect(await claim([first])).toBeNull();
+    // Only the claim that took its recipients recorded a retry.
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        batchId: batch.id,
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
+    for (const lost of ["retry-record-key-1", "retry-record-key-3"]) {
+      expect(
+        await repo.findTransferBatchRetryByIdempotency({
+          ...scope,
+          batchId: batch.id,
+          idempotencyKey: lost,
+        })
+      ).toBeNull();
+    }
+    // Scoped by its batch: another batch's id finds nothing and leaves the row as it was.
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        batchId: "tbatch_other",
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toBeNull();
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        batchId: batch.id,
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
+  });
 });
 
 describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres)", () => {
@@ -339,6 +452,10 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
       .prepare("UPDATE payment_transfer_batches SET created_at = ?")
       .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .run();
+    await getDb(env)
+      .prepare("UPDATE payment_transfer_recipients SET updated_at = ?")
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+      .run();
   });
 
   it.each(SDP_ENVIRONMENTS)(
@@ -346,7 +463,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
     async (environment) => {
       const stranded = await repo.listStrandedTransferBatches({
         environment,
-        createdBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        attemptedBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
         limit: 50,
       });
 

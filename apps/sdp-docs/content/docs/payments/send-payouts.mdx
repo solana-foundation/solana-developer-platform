@@ -79,13 +79,24 @@ if (response.ok) {
 
 ### Recovering from a partial failure
 
-A batch that ends `partially_failed` paid some recipients and not others. To finish the run:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
 
-1. Read the batch with `GET /v1/payments/transfer-batches/{batchId}`.
-2. Collect the recipients whose `status` is `failed`. They were not paid.
-3. Send only those recipients in a new batch, with a new `externalId` (for example `payroll_2026-05-14_retry_1`) and a new `Idempotency-Key`.
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
+  -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: 8b2e4f1c-7d3a-4e9b-a6c5-1f0d9e8c7b6a"
+```
 
-Never resend a recipient whose status is still `pending` or `processing`: its transfer may still land. Poll the batch until it settles, then resend whatever ended `failed`.
+The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+
+- Use a new `Idempotency-Key` for each retry you mean to send. The same key never sends again, including after a timeout or a server error, so resend a lost answer under the same key. It returns the saved response while that is stored, which can still show recipients `processing`: read the batch with `GET /v1/payments/transfer-batches/{batchId}` for its current state. If recipients fail again later, a retry under that old key sends nothing.
+- Any API key that may send from the batch's wallet can retry it, not only the one that created it.
+- A batch with nothing `failed` returns `409 TRANSFER_BATCH_NOTHING_TO_RETRY`, and a retry that loses to a concurrent one returns `409 TRANSFER_BATCH_RETRY_CLAIMED`. Nothing is sent. While a batch is `processing`, a recipient its request never sent becomes `failed` only once that request can no longer send it, so retry after the batch settles.
+- A failed recipient whose counterparty account changed its address since the batch was sent is not paid either address: the retry returns `409 TRANSFER_BATCH_DESTINATION_CHANGED` naming it in `error.details.recipientIds`, and nothing is sent. Send that recipient in a new batch.
+- A native SOL recipient paid less than the rent-exempt minimum at an address with no account fails again for the same reason, so the retry is refused with `409 AMOUNT_BELOW_RENT_MINIMUM` and that recipient stays `failed`. Send it in a new batch with a larger amount.
+- Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.
+
+Never resend the whole batch under a new `Idempotency-Key` to finish it: that pays the recipients who already succeeded again.
 
 ### The SOL rent-exempt minimum
 

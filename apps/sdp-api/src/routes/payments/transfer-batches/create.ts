@@ -1,4 +1,5 @@
-import { getRecentBlockhash } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -6,7 +7,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError, badRequest, internalError } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -24,26 +25,15 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentStart } from "@/routes/payments/wallets";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  createSponsorshipFeePayment,
-  resolveRequestSponsorshipScope,
-} from "@/services/sponsorship.service";
-import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
   resolveBatchMovement,
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
+import { prepareBatchChunks, runBatchChunks } from "./run";
 import type { createTransferBatchSchema } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
-import { readSponsoredRentLimit } from "./sponsored-rent";
-import {
-  buildInstructionGroups,
-  chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-} from "./transaction";
 import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
@@ -94,7 +84,7 @@ function assertSamePayoutRun(
   }
   throw new AppError(
     "TRANSFER_BATCH_RUN_EXISTS",
-    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}. New recipients go in a new payout run with its own externalId.",
+    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}, and send its failed recipients again with POST /v1/payments/transfer-batches/{batchId}/retry. New recipients go in a new payout run with its own externalId.",
     { batchId: row.id, externalId: row.external_id }
   );
 }
@@ -130,6 +120,34 @@ async function answerLostBatchInsert(
 }
 
 /**
+ * Settles a run's batch found under another request's key, as far as the chain
+ * allows: that request may still be sending, so only recipients whose
+ * attempt's lastValidBlockHeight the chain has passed are failed (nothing that
+ * attempt built can land). One block-height read; if the RPC can't answer,
+ * the batch is answered as it stands and the stranded-batch job settles it.
+ */
+async function settleExpiredRunAttempt(
+  c: AppContext,
+  run: PaymentTransferBatchRow
+): Promise<PaymentTransferBatchRow> {
+  let blockHeight: bigint;
+  try {
+    blockHeight = await withTransientRpcRetry(() =>
+      createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send()
+    );
+  } catch {
+    return run;
+  }
+  return getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
+    batchId: run.id,
+    organizationId: run.organization_id,
+    projectId: run.project_id,
+    error: "The batch request ended before this recipient's transfer was sent",
+    expiredBelowBlockHeight: blockHeight,
+  });
+}
+
+/**
  * The create-batch access check (HOO-1918, ADR 0009): source wallet access,
  * read fresh, and every named counterparty account in the project. A replay
  * passes exactly these checks.
@@ -154,13 +172,15 @@ export async function admitTransferBatchExecution(
 /**
  * Answers a create-batch request from its row, before admission, so a request
  * that already ran is answered even if its wallet can no longer move money.
- * No RPC and no account state. Every batch is recorded under its payout run's
- * key (HOO-2335), so the row is found whatever Idempotency-Key the request
+ * No RPC and no account state, beyond one block-height read to settle a
+ * crashed attempt. Every batch is recorded under its payout run's key
+ * (HOO-2335), so the row is found whatever Idempotency-Key the request
  * carries: after a takeover of a crashed attempt, once the shared record has
  * expired, or for a resend of the run under a new key. That row may belong to
- * a request still running under another key, so it is answered as it stands
- * and never settled here; the stranded-batch job settles a crashed one. It is
- * this request's batch only for the same credential and body; any other is 409.
+ * a request still running under another key, so only recipients the chain
+ * proves that request can no longer send are failed (settleExpiredRunAttempt).
+ * It is this request's batch only for the same credential and body; any other
+ * is 409.
  */
 export async function findTransferBatchRecordReplay(
   c: AppContext,
@@ -177,30 +197,22 @@ export async function findTransferBatchRecordReplay(
   });
   if (run === null || run.idempotency_fingerprint === null) return null;
   assertSamePayoutRun(c, run, authorized);
+  const settled = run.status === "processing" ? await settleExpiredRunAttempt(c, run) : run;
   return {
     fingerprint: run.idempotency_fingerprint,
-    respond: () => respondToTransferBatchReplay(c, run, organizationId, authorized.projectId),
+    respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
   };
 }
 
 /**
- * POST /transfer-batches — creates the batch aggregate, submits all chunks
- * concurrently, and responds without waiting for on-chain confirmation:
- * transfers come back processing and the pending-transfers job settles them.
- * A chunk whose execution throws is settled as failed recipients rather than
- * failing the request, so sibling submissions are never abandoned half-done.
- * That cleanup only touches recipients still unlinked (transfer_id null):
- * executeChunk creates its transfer row and links recipients in one
- * transaction, so a linked recipient implies a live transfer row that the
- * pending-transfers job settles via settleTransferBatch — unlinking it here
- * would orphan that transfer as permanently processing.
- * The final batch status comes from the locked repository recompute — never
- * from in-memory state — so a reconciliation run that settles chunks during
- * the request cannot be overwritten with a stale status.
+ * POST /transfer-batches — creates the batch aggregate with its recipients,
+ * then submits its chunks (runBatchChunks) without waiting for on-chain
+ * confirmation.
  * Replays idempotently by Idempotency-Key + payload fingerprint. Every batch
- * is recorded under its payout run's key (transferBatchRunKey), so
- * findTransferBatchRecordReplay answers a resend of the run under a new key,
- * and the batch's key index lets one of two concurrent sends of the run win.
+ * names its payout run (`externalId`) and is recorded under the run's key
+ * (transferBatchRunKey), so findTransferBatchRecordReplay answers a resend of
+ * the run under a new key, and the batch's key index lets one of two
+ * concurrent sends of the run win.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -216,55 +228,12 @@ export async function createTransferBatch(
   const externalId = body.externalId;
   const idempotencyKey = transferBatchRunKey(authorized, externalId);
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
-
-  const feePayment = createSponsorshipFeePayment<"payments">(
-    c.env,
-    resolveRequestSponsorshipScope(c),
-    "payments.transfer_batch",
-    { custodyWalletId: resolved.sourceWallet.id }
-  );
-  const [signer, feePayer, lifetime] = await Promise.all([
-    createOrgSignerForCustodyWallet<"payments">(
-      c.env,
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
-      resolved.sourceWallet.id,
-      "payments.transfer_batch"
-    ),
-    feePayment.getFeePayer(),
-    getRecentBlockhash(resolved.rpc, "confirmed"),
-  ]);
-  if (signer.address !== resolved.sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
-    recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
-  const sponsoredRent = await readSponsoredRentLimit({
-    groups,
-    tokenContext: resolved.tokenContext,
-    readConfiguration: () => feePayment.getSponsorshipConfiguration(),
-  });
-  const chunks = chunkInstructionGroups({
-    groups,
-    sourceSigner: signer,
-    feePayer,
-    lifetime,
-    sponsoredRent,
-    maxRecipientsPerTransaction:
-      body.options?.maxRecipientsPerTransaction === undefined
-        ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
-        : body.options.maxRecipientsPerTransaction,
-  });
-
+  const prepared = await prepareBatchChunks(c, resolved, body.options?.maxRecipientsPerTransaction);
+  const { chunks } = prepared;
   // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
   const solMovement = solBatchMovement(resolved, chunks);
   if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
 
-  const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];
   try {
@@ -298,6 +267,8 @@ export async function createTransferBatch(
         amount: recipient.amount,
         status: "pending",
         error: null,
+        attemptLastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
+        attemptId: prepared.attemptId,
       })),
     });
     batch = created.batch;
@@ -312,53 +283,13 @@ export async function createTransferBatch(
     if (answered === null) throw error;
     return answered;
   }
-  const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
-    resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
-  );
-
-  const outcomes = await Promise.allSettled(
-    chunks.map((chunk) =>
-      executeChunk({
-        c,
-        resolved,
-        chunk,
-        recipientsByIndex,
-        feePayment,
-        lastValidBlockHeight: lifetime.lastValidBlockHeight,
-        preflight: body.options?.preflight !== false,
-      })
-    )
-  );
-  for (const [position, outcome] of outcomes.entries()) {
-    if (outcome.status === "rejected") {
-      const unlinkedIndexes = chunks[position].recipientIndexes.filter((index) => {
-        const row = recipientsByIndex.get(index);
-        if (!row) {
-          throw internalError("Transfer batch recipient row is missing");
-        }
-        return row.transfer_id === null;
-      });
-      if (unlinkedIndexes.length === 0) {
-        continue;
-      }
-      const updates = await updateRecipientRows({
-        repository: getPaymentTransferBatchesRepository(c),
-        recipientsByIndex,
-        recipientIndexes: unlinkedIndexes,
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        transferId: null,
-        status: "failed",
-        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
-      });
-      applyRecipientRowUpdates(recipientsByIndex, updates);
-    }
-  }
-
-  const finalBatch = await batchRepository.recomputeTransferBatchStatus({
+  const finalBatch = await runBatchChunks({
+    c,
+    resolved,
     batchId: batch.id,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
+    prepared,
+    recipientRows,
+    preflight: body.options?.preflight !== false,
   });
 
   return success(

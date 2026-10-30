@@ -613,12 +613,24 @@ export const PAYMENT_TRANSFER_BATCH_STATUSES = [
 ] as const;
 export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES)[number];
 
+/**
+ * A batch that paid some recipients and failed others (HOO-2343, APE-462).
+ * Sending it again would pay the paid ones twice; its failed recipients are
+ * finished with a retry instead.
+ */
+export function isPartiallyFailedTransferBatchStatus(status: MoneyMovementStatus): boolean {
+  return status === "partially_failed";
+}
+
+export const PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "failed",
+  "archived",
+] as const;
 export type PaymentTransferBatchRecipientStatus =
-  | "pending"
-  | "processing"
-  | "confirmed"
-  | "failed"
-  | "archived";
+  (typeof PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES)[number];
 
 export interface PaymentTransferBatchRecipientRequest {
   externalId?: string;

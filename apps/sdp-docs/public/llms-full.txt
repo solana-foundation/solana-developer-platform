@@ -249,6 +249,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 - `POST /v1/payments/transfers`
 - `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfer-batches/{batchId}/retry`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
 - `POST /v1/payments/recurring-payments/{id}/activate`
@@ -328,7 +329,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | --- | --- |
 | Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
-| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A transfer batch answers as it stands: recipients its original never sent turn `failed` once no request can still send them, and were never paid. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
+| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again with `POST /v1/payments/transfer-batches/{batchId}/retry`. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
@@ -2741,13 +2742,24 @@ if (response.ok) {
 
 ### Recovering from a partial failure
 
-A batch that ends `partially_failed` paid some recipients and not others. To finish the run:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
 
-1. Read the batch with `GET /v1/payments/transfer-batches/{batchId}`.
-2. Collect the recipients whose `status` is `failed`. They were not paid.
-3. Send only those recipients in a new batch, with a new `externalId` (for example `payroll_2026-05-14_retry_1`) and a new `Idempotency-Key`.
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
+  -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: 8b2e4f1c-7d3a-4e9b-a6c5-1f0d9e8c7b6a"
+```
 
-Never resend a recipient whose status is still `pending` or `processing`: its transfer may still land. Poll the batch until it settles, then resend whatever ended `failed`.
+The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+
+- Use a new `Idempotency-Key` for each retry you mean to send. The same key never sends again, including after a timeout or a server error, so resend a lost answer under the same key. It returns the saved response while that is stored, which can still show recipients `processing`: read the batch with `GET /v1/payments/transfer-batches/{batchId}` for its current state. If recipients fail again later, a retry under that old key sends nothing.
+- Any API key that may send from the batch's wallet can retry it, not only the one that created it.
+- A batch with nothing `failed` returns `409 TRANSFER_BATCH_NOTHING_TO_RETRY`, and a retry that loses to a concurrent one returns `409 TRANSFER_BATCH_RETRY_CLAIMED`. Nothing is sent. While a batch is `processing`, a recipient its request never sent becomes `failed` only once that request can no longer send it, so retry after the batch settles.
+- A failed recipient whose counterparty account changed its address since the batch was sent is not paid either address: the retry returns `409 TRANSFER_BATCH_DESTINATION_CHANGED` naming it in `error.details.recipientIds`, and nothing is sent. Send that recipient in a new batch.
+- A native SOL recipient paid less than the rent-exempt minimum at an address with no account fails again for the same reason, so the retry is refused with `409 AMOUNT_BELOW_RENT_MINIMUM` and that recipient stays `failed`. Send it in a new batch with a larger amount.
+- Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.
+
+Never resend the whole batch under a new `Idempotency-Key` to finish it: that pays the recipients who already succeeded again.
 
 ### The SOL rent-exempt minimum
 
@@ -5386,7 +5398,7 @@ Source: https://platform.solana.com/docs/reference/api
 
 Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
 
-Browse 109 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
+Browse 110 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
 
 ## Health
 
@@ -5472,6 +5484,7 @@ Browse 109 endpoints across 8 API families. Select an operation to see its param
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
+| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/recurring-payments` | [Create recurring payment](/docs/reference/api/payments/create-payment-recurring-payment.md) |
 | `GET` | `/v1/payments/recurring-payments` | [List recurring payments](/docs/reference/api/payments/list-payment-recurring-payments.md) |
@@ -22702,6 +22715,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
+| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
 
 ## Recurring payments
@@ -25585,7 +25599,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfer-batches`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To recover from a partial failure, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and send only its `failed` recipients in a new batch, with a new `externalId` and a new Idempotency-Key. Never resend a recipient still `pending` or `processing`: its transfer may still land.
+Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
 
@@ -26670,6 +26684,717 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches",
   "error": {
     "code": "CONFLICT",
     "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+### Retry a transfer batch's failed recipients
+Source: https://platform.solana.com/docs/reference/api/payments/retry-payment-transfer-batch
+
+> Sends the batch's failed recipients again, from the same source wallet with the batch's options, and no other recipient.
+
+`POST /v1/payments/transfer-batches/{batchId}/retry`
+
+A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. Takes no body and requires an Idempotency-Key: a retry with the same key sends nothing again: while its response is stored, it returns that saved response, and after a server error or once the response has expired, the batch as it stands. Read the batch's current state with `GET /v1/payments/transfer-batches/{batchId}`, and use a new key for each retry you mean to send. Any credential that may send from the batch's wallet can retry it. Each recipient is paid the address the batch recorded for it. Returns 409, sending nothing: `TRANSFER_BATCH_NOTHING_TO_RETRY` when the batch has no failed recipients (while it is `processing`, its unsent recipients become `failed` only once its request can no longer send them), `TRANSFER_BATCH_RETRY_CLAIMED` when a concurrent retry claimed them first, and `TRANSFER_BATCH_DESTINATION_CHANGED` (`details.recipientIds`) when a failed recipient's counterparty account has changed its address since (send that recipient in a new batch). A native SOL retry is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, as create is, when a failed recipient would still be paid less than the rent-exempt minimum at an address with no account; its recipients stay `failed`. Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
+
+## Path parameters
+
+- **`batchId`** · `string` · required · min length 1 · example `xbatch_example`
+
+  Transfer batch identifier.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+- **`Idempotency-Key`** · `string` · required · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Required: a request without one returns 400 `IDEMPOTENCY_KEY_REQUIRED`. 1-255 printable ASCII characters; send a UUID per logical operation and reuse it on every retry. Within 24 hours, a retry with the same key and the same request returns the stored status and body with the response header `Idempotent-Replayed: true`. Keys are scoped to the credential: within 24 hours, the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`; after that, the same key from a different credential runs as a new request. A rotated API key is a new credential, so after any rotation read the resource with GET to see whether the original request ran, and never resend a money request under the new credential without checking first. A key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A 400, 401, 403, 409 or 429 refusal is not stored, so the same key runs again once the cause is fixed. Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. A replay is a snapshot of the original response: read the current state with GET instead of sending the request again. If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), then takes over and is answered from the record it wrote. Once the request has written its record, any answer below 500 is stored: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. A 5xx is not stored: a same-key retry runs again and is answered from the record. To try again after a failure, send the request with a new key. After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.
+
+## Responses
+
+- **`200`** Failed recipients resent
+
+  - **`data`** · `object` · required
+
+    Transfer batch response payload.
+
+    - **`batch`** · `object` · required
+
+      Transfer batch details.
+
+      - **`id`** · `string` · required · example `xbatch_example`
+
+        Transfer batch identifier.
+
+      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
+
+        Organization identifier.
+
+      - **`projectId`** · `string` · required · min length 1 · example `prj_example`
+
+        Project identifier for the transfer batch.
+
+      - **`externalId`** · `string | null` · required · example `payroll_2026_06_30`
+
+        Caller-provided batch correlation ID.
+
+      - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
+
+        Exact source SDP Wallet ID, or null for unresolved legacy batches.
+
+      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+        Source Provider wallet ID retained as evidence.
+
+      - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Source custody wallet address.
+
+      - **`token`** · `string` · required · example `SOL`
+
+        Token symbol or mint address.
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
+
+        Transfer batch status.
+
+      - **`totalAmount`** · `string | null` · required · example `1000.00`
+
+        Total requested batch amount in UI units, when computed.
+
+      - **`recipientCount`** · `integer` · required · example `20`
+
+        Number of recipient rows in the batch.
+
+      - **`transactionCount`** · `integer` · required · example `1`
+
+        Number of Solana transaction chunks for the batch.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`recipients`** · `object[]`
+
+      Recipient rows for the batch, included on detail responses.
+
+      - **`id`** · `string` · required
+
+        Transfer batch recipient identifier.
+
+      - **`batchId`** · `string` · required
+
+        Parent transfer batch identifier.
+
+      - **`transferId`** · `string | null` · required · min length 1 · example `xfr_example`
+
+        Payment transfer chunk that settled this recipient, once assigned.
+
+      - **`externalId`** · `string | null` · required · example `payroll_row_001`
+
+        Caller-provided recipient correlation ID.
+
+      - **`counterpartyId`** · `string` · required · example `cpty_example`
+
+        Counterparty identifier for the recipient.
+
+      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+
+        Counterparty account identifier for the recipient.
+
+      - **`destination`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Resolved Solana destination address.
+
+      - **`amount`** · `string` · required · example `100.00`
+
+        Token amount in UI units (decimal string).
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `archived` · example `pending`
+
+        Transfer batch recipient status.
+
+      - **`error`** · `string | null` · required
+
+        Recipient-level failure reason, when available.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        ISO 8601 timestamp.
+
+    - **`transfers`** · `object[]`
+
+      Payment transfer chunk records associated with this batch.
+
+      - **`fireblocks`** · `object`
+
+        Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.
+
+        - **`transactionId`** · `string | null` · required
+
+        - **`status`** · `string` · required
+
+        - **`subStatus`** · `string | null` · required
+
+      - **`id`** · `string` · required · min length 1 · example `xfr_example`
+
+        Transfer identifier (SDP record ID, not the on-chain signature).
+
+      - **`organizationId`** · `string` · required · min length 1 · example `org_example`
+
+        Organization identifier.
+
+      - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
+
+        Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
+
+      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+        Provider wallet ID retained as evidence; not an execution selector.
+
+      - **`projectId`** · `string` · min length 1 · example `prj_example`
+
+        Project identifier for the transfer.
+
+      - **`type`** · `string` · required · one of `transfer`, `transfer_batch`, `onramp`, `offramp` · example `transfer`
+
+        Transfer type.
+
+      - **`kind`** · `string` · required · one of `pay`, `confidential_pay`, `batch_pay`, `recurring_pay`, `deposit`, `request_deposit`, `onramp`, `offramp`
+
+        Dashboard transaction kind derived from the transfer type and originating Payments resource.
+
+      - **`direction`** · `string` · required · one of `inbound`, `outbound` · example `outbound`
+
+        Transfer direction.
+
+      - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `finalized`, `failed`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired` · example `confirmed`
+
+        Transfer status.
+
+      - **`signature`** · `string | null` · required · example `sig_example`
+
+        Solana transaction signature (tx id/hash).
+
+      - **`serializedTx`** · `string | null` · required · min length 1 · example `base64_tx_example`
+
+        Base64-encoded transaction payload, if available. Always null for transfer batch chunks, whose signed bytes stay server-side.
+
+      - **`slot`** · `integer | null` · required · example `123456`
+
+        Slot number, if confirmed.
+
+      - **`blockTime`** · `string | null` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        Block time, if confirmed.
+
+      - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+
+      - **`fee`** · `integer | null` · required · example `5000`
+
+        Transaction fee in lamports.
+
+      - **`error`** · `string | null` · required · example `Signature failed`
+
+        Error message if the transaction failed.
+
+      - **`initiatedBy`** · `object`
+
+        Initiator that triggered the transfer.
+
+        - **`type`** · `string` · required · one of `api_key`, `user`, `system` · example `api_key`
+
+          Initiator type.
+
+        - **`id`** · `string`
+
+          Initiator identifier if applicable.
+
+        - **`display`** · `string`
+
+          Human-friendly label for the initiator.
+
+      - **`source`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Source wallet address.
+
+      - **`destination`** · `string` · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        Destination wallet address.
+
+      - **`memo`** · `string` · max length 256
+
+        Optional memo for the transfer.
+
+      - **`rampsMemo`** · `object` · required
+
+        Free-form key-value memo for offchain reconciliation of ramp transfers. At most 20 entries.
+
+        - **`*`** · `string` · min length 1 · max length 256
+
+      - **`token`** · `string`
+
+        Token symbol or mint address.
+
+      - **`amount`** · `string` · example `100.00`
+
+        Token amount in UI units (decimal string).
+
+      - **`provider`** · `string` · one of `moonpay`, `stripe`, `hercle`, `mural`, `moneygram`, `lightspark`, `coinbase`, `bvnk` · example `moonpay`
+
+        Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.
+
+      - **`counterpartyId`** · `string` · example `cpty_example`
+
+        Counterparty tied to the transfer record, when available.
+
+      - **`counterpartyDisplayName`** · `string` · example `Acme Studio`
+
+        Current display name of the counterparty tied to the transfer.
+
+      - **`providerReference`** · `string` · example `ramp_quote_example`
+
+        Provider quote or transaction reference used for ramp correlation.
+
+      - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
+
+        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+
+      - **`fiatCurrency`** · `string` · example `USD`
+
+        Fiat currency for the ramp leg.
+
+      - **`fiatAmount`** · `string` · example `100.00`
+
+        Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.
+
+      - **`settlement`** · `object`
+
+        Provider-reported ramp settlement economics for live providers.
+
+        - **`provider`** · `string` · required · always `moonpay`
+
+        - **`status`** · `string` · required · one of `completed`, `failed`
+
+        - **`transactionId`** · `string` · required
+
+          MoonPay transaction id.
+
+        - **`baseCurrencyCode`** · `string` · required
+
+          Fiat currency paid.
+
+        - **`baseCurrencyAmount`** · `number` · required
+
+          Fiat amount paid.
+
+        - **`quoteCurrencyCode`** · `string` · required
+
+          Crypto currency purchased.
+
+        - **`quoteCurrencyAmount`** · `number` · required
+
+          Crypto amount purchased.
+
+        - **`feeAmount`** · `number` · required
+
+          Provider fee.
+
+        - **`extraFeeAmount`** · `number` · required
+
+          Extra provider fee.
+
+        - **`networkFeeAmount`** · `number` · required
+
+          Network fee.
+
+        - **`areFeesIncluded`** · `boolean` · required
+
+          Whether the fees are included in the paid amount.
+
+        - **`usdRate`** · `number` · required
+
+          USD exchange rate.
+
+        - **`cryptoTransactionId`** · `string`
+
+          On-chain transaction id.
+
+        - **`failureReason`** · `string`
+
+          Provider failure reason.
+
+      - **`fiatPayout`** · `object`
+
+        What the provider reports paying out once it settles an off-ramp sale. Provider-reported: SDP cannot verify a bank payout.
+
+        - **`amount`** · `string` · required · example `20.82`
+
+          Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices the sale at receipt.
+
+        - **`currency`** · `string` · required · example `USD`
+
+          ISO currency of the payout, as the provider reports it.
+
+        - **`reportedAt`** · `string` · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+          When the provider reported the payout.
+
+      - **`deliveryMismatch`** · `object`
+
+        Present while SDP holds a provider-settled ramp in `settling` because the chain contradicts the provider's delivery. A new provider report clears it.
+
+        - **`reason`** · `string` · required · one of `provider_report_mismatch`, `transaction_failed`, `predates_transfer`, `not_delivered`, `amount_mismatch`, `transaction_not_found` · example `amount_mismatch`
+
+          Why the chain contradicts the provider: `provider_report_mismatch` (its report contradicts SDP's record), `transaction_failed`, `predates_transfer` (the transaction landed before the transfer), `not_delivered` (nothing of the quoted asset reached the quoted wallet), `amount_mismatch`, or `transaction_not_found` (no finalized transaction an hour after the report; SDP keeps checking, and a later delivery completes the transfer).
+
+        - **`checkedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+          When SDP's delivery check reached this verdict.
+
+        - **`reportedAmount`** · `string` · example `20`
+
+          What the provider reported delivering, in display units.
+
+        - **`observedAmount`** · `string` · example `0.5`
+
+          What the chain shows the quoted wallet received, in display units.
+
+      - **`risk`** · `object`
+
+        Optional risk evaluation for the transfer.
+
+        - **`provider`** · `string` · required · example `trm`
+
+          Risk scoring provider.
+
+        - **`score`** · `string` · required · example `0.12`
+
+          Provider-specific risk score.
+
+        - **`level`** · `string` · required · one of `low`, `medium`, `high`, `unknown` · example `low`
+
+          Risk level classification.
+
+        - **`evaluatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+          Timestamp when risk was evaluated.
+
+      - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+        Creation timestamp.
+
+      - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-02T00:00:00.000Z`
+
+        Last update timestamp.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `transfer_batches.execute` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`422`** Unprocessable Entity
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID()
+  }
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_example/retry",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "batch": {
+      "id": "xbatch_example",
+      "organizationId": "org_example",
+      "projectId": "prj_example",
+      "externalId": "payroll_2026_06_30",
+      "sourceCustodyWalletId": "cwlt_example",
+      "sourceProviderWalletId": "privy_wallet_123",
+      "sourceAddress": "So11111111111111111111111111111111111111112",
+      "token": "SOL",
+      "status": "processing",
+      "totalAmount": "1000.00",
+      "recipientCount": 20,
+      "transactionCount": 1,
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "recipients": [
+      {
+        "id": "_example",
+        "batchId": "batch_example",
+        "transferId": "xfr_example",
+        "externalId": "payroll_row_001",
+        "counterpartyId": "cpty_example",
+        "counterpartyAccountId": "cpa_example",
+        "destination": "So11111111111111111111111111111111111111112",
+        "amount": "100.00",
+        "status": "pending",
+        "error": "example",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "transfers": [
+      {
+        "fireblocks": {
+          "transactionId": "transaction_example",
+          "status": "example",
+          "subStatus": "example"
+        },
+        "id": "xfr_example",
+        "organizationId": "org_example",
+        "custodyWalletId": "cwlt_example",
+        "providerWalletId": "privy_wallet_123",
+        "projectId": "prj_example",
+        "type": "transfer",
+        "kind": "pay",
+        "direction": "outbound",
+        "status": "confirmed",
+        "signature": "sig_example",
+        "serializedTx": "base64_tx_example",
+        "slot": 123456,
+        "blockTime": "2025-01-01T00:00:00.000Z",
+        "confirmedAt": "2025-01-01T00:00:00.000Z",
+        "fee": 5000,
+        "error": "Signature failed",
+        "initiatedBy": {
+          "type": "api_key"
+        },
+        "source": "So11111111111111111111111111111111111111112",
+        "destination": "So11111111111111111111111111111111111111112",
+        "rampsMemo": {
+          "invoice": "INV-123",
+          "po": "PO-9"
+        },
+        "amount": "100.00",
+        "provider": "moonpay",
+        "counterpartyId": "cpty_example",
+        "counterpartyDisplayName": "Acme Studio",
+        "providerReference": "ramp_quote_example",
+        "deliveryMode": "session_widget",
+        "fiatCurrency": "USD",
+        "fiatAmount": "100.00",
+        "settlement": {
+          "provider": "moonpay",
+          "status": "completed",
+          "transactionId": "transaction_example",
+          "baseCurrencyCode": "example",
+          "baseCurrencyAmount": 1,
+          "quoteCurrencyCode": "example",
+          "quoteCurrencyAmount": 1,
+          "feeAmount": 1,
+          "extraFeeAmount": 1,
+          "networkFeeAmount": 1,
+          "areFeesIncluded": false,
+          "usdRate": 1
+        },
+        "fiatPayout": {
+          "amount": "20.82",
+          "currency": "USD",
+          "reportedAt": "2025-01-02T00:00:00.000Z"
+        },
+        "deliveryMismatch": {
+          "reason": "amount_mismatch",
+          "checkedAt": "2025-01-02T00:00:00.000Z",
+          "reportedAmount": "20",
+          "observedAmount": "0.5"
+        },
+        "risk": {
+          "provider": "trm",
+          "score": "0.12",
+          "level": "low",
+          "evaluatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-02T00:00:00.000Z"
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: transfer_batches.execute",
+    "details": {
+      "action": "transfer_batches.execute"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="422"
+{
+  "error": {
+    "code": "IDEMPOTENCY_KEY_REUSED",
+    "message": "This Idempotency-Key was already used for a different request"
   },
   "meta": {
     "requestId": "req_example"

@@ -48,6 +48,7 @@ import {
   type CallerIdempotencyKey,
   dashboardRequest,
   dashboardRequestUnderOwnKey,
+  MOVEMENT_READ_PATHS,
 } from "@/lib/dashboard-fetch";
 import { apiErrorCode } from "@/lib/idempotency";
 import {
@@ -663,6 +664,43 @@ export async function createTransferBatch(
     },
     idempotencyKey
   );
+  return readTransferBatchAnswer(response, t);
+}
+
+/**
+ * Sends a batch's failed recipients again (HOO-2343). The API sends only the
+ * recipients that are failed when it runs, so a retry never pays a recipient
+ * twice. The key is transport metadata, as for {@link createTransferBatch}.
+ */
+export async function retryTransferBatch(
+  batchId: string,
+  t: Translate,
+  idempotencyKey: CallerIdempotencyKey
+): Promise<CreateTransferBatchResult> {
+  const response = await dashboardRequestUnderOwnKey(
+    `/api/dashboard/payments/transfers/batch/${encodeURIComponent(batchId)}/retry`,
+    { method: "POST" },
+    idempotencyKey
+  );
+  return readTransferBatchAnswer(response, t);
+}
+
+/** Reads a batch as it stands now: its recipients settle after the send answers. */
+export async function fetchTransferBatch(
+  batchId: string,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const response = await dashboardRequest(MOVEMENT_READ_PATHS.batch(batchId), {
+    method: "GET",
+    cache: "no-store",
+  });
+  return readTransferBatchAnswer(response, t);
+}
+
+async function readTransferBatchAnswer(
+  response: Response,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
   if (!response.ok) {
     const text = await readRefusalText(
       response,

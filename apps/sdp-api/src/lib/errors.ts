@@ -60,6 +60,10 @@ export type ErrorCode =
   | "AMOUNT_BELOW_RENT_MINIMUM"
   // A batch's externalId names a payout run another batch already sent (HOO-2335)
   | "TRANSFER_BATCH_RUN_EXISTS"
+  // A transfer batch retry that sends nothing (HOO-2343)
+  | "TRANSFER_BATCH_NOTHING_TO_RETRY"
+  | "TRANSFER_BATCH_RETRY_CLAIMED"
+  | "TRANSFER_BATCH_DESTINATION_CHANGED"
   // A recipient token account whose rent exceeds the sponsor's per-transaction cap (HOO-2024)
   | "SPONSORED_RENT_OVER_CAP"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
@@ -132,6 +136,10 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   AMOUNT_BELOW_RENT_MINIMUM: 409,
   // 409, never stored: the existing batch is in details.batchId.
   TRANSFER_BATCH_RUN_EXISTS: 409,
+  // 409, never stored: each retry refusal sends nothing.
+  TRANSFER_BATCH_NOTHING_TO_RETRY: 409,
+  TRANSFER_BATCH_RETRY_CLAIMED: 409,
+  TRANSFER_BATCH_DESTINATION_CHANGED: 409,
   SPONSORED_RENT_OVER_CAP: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
@@ -197,6 +205,11 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
   TRANSFER_BATCH_RUN_EXISTS:
     "A different transfer batch with this externalId already exists for this source wallet",
+  TRANSFER_BATCH_NOTHING_TO_RETRY: "This transfer batch has no failed recipients to retry",
+  TRANSFER_BATCH_RETRY_CLAIMED:
+    "Another retry of this transfer batch claimed its failed recipients first",
+  TRANSFER_BATCH_DESTINATION_CHANGED:
+    "A failed recipient's counterparty account changed its address since the batch was sent",
   SPONSORED_RENT_OVER_CAP:
     "A recipient's token account would cost more rent than the sponsor funds in one transaction",
   // Idempotency-Key (HOO-1918)

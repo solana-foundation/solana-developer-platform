@@ -131,6 +131,28 @@ live batches when this shipped, so there is no older row keyed any other way. Th
 only callers who send the same value on every attempt at a run, which is why the docs say to
 derive it from the caller's own data and never generate it at random.
 
+A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-2343), not a resend.
+It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them
+back to `pending` with no transfer under the batch lock, all or nothing, so a concurrent retry gets
+409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
+another writer failed or claimed first rolls the chunk back before it is sent. The claim writes a
+`payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
+0192), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
+5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.
+It pays the address each recipient recorded, and refuses (409) if the account now holds another. The row also
+records the failed chunk transfers the claim unlinked, so batch responses keep listing every chunk
+`transactionCount` counts.
+Unsent recipients age by their own last write, not the batch's: the stranded-batch job and the
+create takeover fail only recipients no live request can still be sending, so a retry's fresh claim
+on an old batch is left to it. Each recipient also records the lastValidBlockHeight of the attempt
+that wrote or claimed it (every chunk of an attempt shares one blockhash and is never re-signed).
+Once the chain passes it, nothing that attempt built can land, so the job fails it in minutes, and
+a resend of a run found under another request's key settles it the same way (one block-height
+read; the hour remains the fallback). The chunk link's compare-and-swap is what makes any of this
+safe: a recipient is linked before broadcast or failed, never both. Each attempt also owns the recipients it
+wrote or claimed (`attempt_id`), and a chunk links or fails only its own attempt's: an older attempt
+that finishes late never takes or fails a recipient a newer retry has claimed.
+
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Every step saves its signature and its blockhash's
