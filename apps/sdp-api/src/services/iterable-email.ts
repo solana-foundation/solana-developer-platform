@@ -36,22 +36,31 @@ export interface IterableEmail {
   replyTo?: string;
 }
 
-const HTML_ESCAPES: Record<string, string> = {
+const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",
   '"': "&quot;",
   "'": "&#39;",
-};
+} as const satisfies Record<string, string>;
+
+type HtmlEscaped = keyof typeof HTML_ESCAPES;
+
+function isHtmlEscaped(character: string): character is HtmlEscaped {
+  return Object.hasOwn(HTML_ESCAPES, character);
+}
+
+function escapeHtmlCharacter(character: string): string {
+  if (!isHtmlEscaped(character)) throw new Error(`No HTML escape for ${JSON.stringify(character)}`);
+  return HTML_ESCAPES[character];
+}
 
 /**
  * The HTML part of a plain-text body: every character HTML reads escaped, line breaks kept as
  * `<br>`. The template renders it raw (`{{{bodyHtml}}}`), so this escape is the only one.
  */
 export function plainTextToHtml(text: string): string {
-  return text
-    .replace(/[&<>"']/g, (character) => HTML_ESCAPES[character] ?? character)
-    .replace(/\r?\n/g, "<br>\n");
+  return text.replace(/[&<>"']/g, escapeHtmlCharacter).replace(/\r?\n/g, "<br>\n");
 }
 
 /**
