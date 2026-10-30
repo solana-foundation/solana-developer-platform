@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  programWithdrawalRequestFingerprint,
+  withdrawalRequestSignature,
+} from "./earn-program-withdraw-tracking";
+import {
   floorUsdToCents,
   isPositiveUsdAmount,
   laneCeilingFromErrorBody,
   liquidityWriteWins,
-  withdrawalRequestSignature,
 } from "./earn-withdraw-modal";
 
 describe("exact USD amount checks", () => {
@@ -45,6 +48,56 @@ describe("withdrawalRequestSignature", () => {
     expect(withdrawalRequestSignature(base[0], "12.500", base[2], base[3])).toBe(signature);
     // Only a VALUE change may mint a new key.
     expect(withdrawalRequestSignature(base[0], "12.5001", base[2], base[3])).not.toBe(signature);
+  });
+});
+
+describe("programWithdrawalRequestFingerprint", () => {
+  const input = {
+    projectId: "prj_1",
+    programId: "earn_program_1",
+    amountUsd: "12.50",
+    token: "usdc" as const,
+    destinationAddress: "11111111111111111111111111111111",
+  };
+
+  it("is one fingerprint for one intended withdrawal, in every re-spelling", () => {
+    const fingerprint = programWithdrawalRequestFingerprint(input);
+    // The reload/retry case the durable store exists for: the same form,
+    // re-entered after a page load, must find the held key.
+    expect(programWithdrawalRequestFingerprint({ ...input, amountUsd: "12.5" })).toBe(fingerprint);
+    expect(programWithdrawalRequestFingerprint({ ...input, amountUsd: "012.500" })).toBe(
+      fingerprint
+    );
+  });
+
+  it("changes whenever any identity input changes", () => {
+    const fingerprint = programWithdrawalRequestFingerprint(input);
+    expect(programWithdrawalRequestFingerprint({ ...input, projectId: "prj_2" })).not.toBe(
+      fingerprint
+    );
+    expect(programWithdrawalRequestFingerprint({ ...input, programId: "earn_program_2" })).not.toBe(
+      fingerprint
+    );
+    expect(programWithdrawalRequestFingerprint({ ...input, amountUsd: "13.00" })).not.toBe(
+      fingerprint
+    );
+    expect(programWithdrawalRequestFingerprint({ ...input, token: "usdt" as const })).not.toBe(
+      fingerprint
+    );
+    expect(
+      programWithdrawalRequestFingerprint({
+        ...input,
+        destinationAddress: "22222222222222222222222222222222",
+      })
+    ).not.toBe(fingerprint);
+  });
+
+  it("still discriminates before the project resolves", () => {
+    // `null` only before a project resolves; it must never fold into a
+    // resolved project's fingerprint (or another null one's).
+    const unresolved = programWithdrawalRequestFingerprint({ ...input, projectId: null });
+    expect(programWithdrawalRequestFingerprint(input)).not.toBe(unresolved);
+    expect(programWithdrawalRequestFingerprint({ ...input, projectId: null })).toBe(unresolved);
   });
 });
 

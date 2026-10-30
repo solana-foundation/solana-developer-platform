@@ -108,13 +108,18 @@ open registry string, so a copy of either list here would need revising every ti
 one grows — and the API already answers an unknown value with an empty page, which
 is the honest result.
 
-`proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+`proxyToSdpApi` forwards the caller's `Idempotency-Key` on every mutation it
+proxies (HOO-1918's `withForwardedIdempotencyKey`) and passes back
+`Idempotent-Replayed` and `Retry-After`; nothing else from the inbound header
+bag is copied — auth, project scope and tracing stay server-owned. Every
+value-moving Earn client sends its key as that header alone
+(`createEarnVaultDeposit`, `createEarnVaultWithdrawal`, `createEarnWithdrawal`):
+the API refuses a program withdrawal that names BOTH a body `requestId` and
+the header, and `dashboard-fetch` keys every mutation it proxies, so a body id
+would always arrive beside the header and refuse the payout. The program
+withdrawal's key lives in `earn-program-withdraw-tracking.ts` — a durable
+store keyed on the withdrawal's signature, the modal's ref-bound requestId
+being the double-payout risk it replaced.
 
 ## Routes
 
@@ -426,7 +431,8 @@ nothing else; the program create still sends the body `requestId` form.
 `createEarnVaultWithdrawal`, `useEarnVaultDepositOutcome`,
 `useEarnVaultWithdrawalOutcome`, `isEarnVaultDepositInFlight`,
 `isEarnVaultWithdrawalInFlight`, `earn-vault-deposit-tracking.ts`,
-`earn-vault-withdraw-tracking.ts`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
+`earn-vault-withdraw-tracking.ts`, `earn-program-withdraw-tracking.ts`,
+`createEarnWithdrawal`, `EarnWithdrawModal`, `EarnVaultDepositModal`,
 `EarnVaultWithdrawModal`, `EarnVaultDepositOutcomeTracker` and
 `EarnVaultWithdrawalOutcomeTracker` have **no caller inside this module**. That is a module boundary, not an oversight: this module is the Earn
 Program page (select a strategy → integrate the API), and the

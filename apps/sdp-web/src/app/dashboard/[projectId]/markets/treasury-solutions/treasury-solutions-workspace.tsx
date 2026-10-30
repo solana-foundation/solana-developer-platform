@@ -739,6 +739,7 @@ export function TreasurySolutionsWorkspace({
             addWithdrawalWatches([{ programId: withdrawProgram.id, withdrawalRef }]);
             refreshPrograms();
           }}
+          projectId={selectedProjectId}
           provider={withdrawProgram.provider}
           programId={withdrawProgram.id}
         />

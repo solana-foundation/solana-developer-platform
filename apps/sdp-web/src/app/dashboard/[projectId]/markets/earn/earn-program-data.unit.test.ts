@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -692,6 +693,52 @@ describe("createEarnVaultDeposit", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  it("sends idempotency only as a header and allowlists the JSON body", async () => {
+    const withdrawal = {
+      withdrawalRef: "wref_1",
+      status: "processing",
+      destinationAddress: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      createdAt: TIMESTAMP,
+    } as const;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: { withdrawal } }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    // An untyped caller must not be able to revive the legacy body
+    // `requestId`: beside the header the API sent, it is exactly the
+    // two-sources request the program withdrawal route refuses with a 400.
+    const untypedInput = {
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+      requestId: "must-not-be-forwarded",
+    } as Parameters<typeof createEarnWithdrawal>[1] & { requestId: string };
+
+    const result = await createEarnWithdrawal("program_1", untypedInput, "withdraw-key");
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: { data: { withdrawal } },
+    });
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(headers.get("Idempotency-Key")).toBe("withdraw-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+    });
+    expect(String(options?.body)).not.toContain("requestId");
   });
 });
 

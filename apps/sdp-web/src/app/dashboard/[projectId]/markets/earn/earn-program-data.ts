@@ -1750,16 +1750,33 @@ export function previewEarnWithdrawal(
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
   destinationAddress: string;
 }
 
-export function createEarnWithdrawal(
+/**
+ * The custodial payout. Same body-rebuild rule as `createEarnVaultDeposit`:
+ * the caller cannot smuggle fields — the legacy body `requestId` among them —
+ * into a value-moving request. The idempotency key travels as the
+ * `Idempotency-Key` header ALONE: the API refuses a withdrawal that names both
+ * a body `requestId` and the header (it cannot tell which source a caller's
+ * retry keeps stable), and the dashboard keys every mutation it proxies, so a
+ * body id would always arrive beside the header and refuse the payout.
+ */
+export async function createEarnWithdrawal(
   programId: string,
-  input: EarnWithdrawalCreateInput
+  input: EarnWithdrawalCreateInput,
+  idempotencyKey: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  const body: EarnWithdrawalCreateInput = {
+    amountUsd: input.amountUsd,
+    token: input.token,
+    destinationAddress: input.destinationAddress,
+  };
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+  });
 }
 
 function fetchEarnWithdrawal(

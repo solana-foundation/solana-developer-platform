@@ -4,6 +4,11 @@ import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import {
+  programWithdrawalIdempotencyKeyStore,
+  programWithdrawalRequestFingerprint,
+  resetProgramWithdrawalTrackingStateForTests,
+} from "./earn-program-withdraw-tracking";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -28,6 +33,17 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => ({
 
 const DESTINATION = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 
+/** The fingerprint the modal claims a submit's key under, for the form below. */
+function withdrawalFingerprint(): string {
+  return programWithdrawalRequestFingerprint({
+    projectId: "prj_test_sandbox",
+    programId: "earn_program_1",
+    amountUsd: "12.50",
+    token: "usdc",
+    destinationAddress: DESTINATION,
+  });
+}
+
 function withdrawal(status: EarnPortfolioWithdrawal["status"]): EarnPortfolioWithdrawal {
   return {
     withdrawalRef: "wref_1",
@@ -42,6 +58,7 @@ function renderModal() {
   render(
     <EnglishTestI18n>
       <EarnWithdrawModal
+        projectId="prj_test_sandbox"
         programId="earn_program_1"
         provider="upshift"
         onClose={vi.fn()}
@@ -74,7 +91,13 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The durable key store outlives a mounted component AND a jsdom test:
+  // held keys from one spec must never answer another's submits.
+  resetProgramWithdrawalTrackingStateForTests();
+  window.sessionStorage.clear();
+});
 
 describe("EarnWithdrawModal submit lock", () => {
   /**
@@ -123,6 +146,21 @@ describe("EarnWithdrawModal submit lock", () => {
     // One intended withdrawal, one request: the second entry died on the ref.
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(1);
 
+    // The key is the submit's third argument (the caller's durable id, sent as
+    // the Idempotency-Key header — never a body requestId): a UUID, claimed
+    // for this fingerprint.
+    const [firstProgramId, firstInput, firstKey] = mocks.createEarnWithdrawal.mock.calls[0] ?? [];
+    expect(firstProgramId).toBe("earn_program_1");
+    expect(firstInput).toEqual({
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: DESTINATION,
+    });
+    expect(firstKey).toMatch(/^[0-9a-f-]{36}$/);
+    // The claim is durable and keyed to THIS intent: an unanswered submit
+    // leaves the key kept for its fingerprint (a reload would find it).
+    expect(programWithdrawalIdempotencyKeyStore.has(withdrawalFingerprint())).toBe(true);
+
     resolveCreate({ ok: false, error: "upstream unavailable", status: 500, body: null });
     expect(await screen.findByRole("alert")).toBeTruthy();
 
@@ -131,5 +169,13 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+
+    // The 500 answered nothing, so the retry carried the SAME key: the API
+    // replays the first attempt under it instead of paying a second time.
+    const [, , retryKey] = mocks.createEarnWithdrawal.mock.calls[1] ?? [];
+    expect(retryKey).toBe(firstKey);
+    // The accepted answer retires the key: the next submit of this form is a
+    // NEW withdrawal, with a fresh key.
+    expect(programWithdrawalIdempotencyKeyStore.has(withdrawalFingerprint())).toBe(false);
   });
 });
