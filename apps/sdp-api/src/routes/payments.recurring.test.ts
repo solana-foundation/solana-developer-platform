@@ -3372,6 +3372,8 @@ describe("Payments routes — recurring", () => {
           )
           .run();
         sendsAtRevoke = sendTransactionMock.mock.calls.length;
+        // SAFETY: activation reads only `exists` and `data.initId` from the authority, as in the
+        // shared fixture in test/helpers/payments-routes.ts.
         return authority === "missing"
           ? noAccount
           : ({
