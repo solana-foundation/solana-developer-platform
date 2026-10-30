@@ -27,7 +27,6 @@ How SDP sends email through Iterable, where each environment's settings live, ho
 ### Deploy a change to dev
 
 Merging to `main` deploys stage, not dev. Two paths reach dev:
-
 1. **From a pull request:** add the `deploy-dev` label. `deploy-dev-on-label.yml` deploys the PR head and redeploys on every later push while the label stays on; remove the label when you are done so the next PR can take dev.
 2. **From `main`:** run the `Deploy sdp-api to Cloud Run (dev)` workflow by hand (`gh workflow run deploy-sdp-api-gcp.yml --ref main`).
 
@@ -55,32 +54,32 @@ Then verify `https://api-dev.solana.com/health` and the affected API behavior. D
 
 ### Hosted API targets
 
-| Environment | GCP project | Service | Worker service | Trigger |
-| --- | --- | --- | --- | --- |
-| Dev | `solana-developer-platform-dev` | `sdp-dev-api-public` | `sdp-dev-worker` | Push to `main`, or manual dispatch |
-| Production | `solana-developer-platform` | `sdp-prod-api-public` | `sdp-prod-worker` | Push to `main` with `CONTINUOUS_PROD_DEPLOY=true`, an approved `Apply pending migrations to prod` run, manual dispatch of an existing SHA image from `main`, or `Roll back sdp-api prod to the previous build` |
+| Environment | GCP project                     | Service               | Worker service    | Trigger                                                                                                                                                                                                        |
+| ----------- | ------------------------------- | --------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dev         | `solana-developer-platform-dev` | `sdp-dev-api-public`  | `sdp-dev-worker`  | Push to `main`, or manual dispatch                                                                                                                                                                             |
+| Production  | `solana-developer-platform`     | `sdp-prod-api-public` | `sdp-prod-worker` | Push to `main` with `CONTINUOUS_PROD_DEPLOY=true`, an approved `Apply pending migrations to prod` run, manual dispatch of an existing SHA image from `main`, or `Roll back sdp-api prod to the previous build` |
 
 The migration jobs are `sdp-dev-api-public-migrate` and `sdp-prod-api-public-migrate`.
 
 ### Doppler configs
 
-| Config | Purpose |
-| --- | --- |
-| `dev` | Team development and personal-config source |
-| `dev_ci` | Secret-aware GitHub Actions jobs |
-| `stg` | Preview/staging web and docs configuration |
-| `prd` | Production web/docs configuration and operator access |
+| Config   | Purpose                                               |
+| -------- | ----------------------------------------------------- |
+| `dev`    | Team development and personal-config source           |
+| `dev_ci` | Secret-aware GitHub Actions jobs                      |
+| `stg`    | Preview/staging web and docs configuration            |
+| `prd`    | Production web/docs configuration and operator access |
 
 Cloud Run image deployment does not fetch Doppler. The API service and jobs receive runtime configuration from GCP-managed service/job configuration and secret references.
 
 ### Required GitHub configuration
 
-| Name | Kind | Purpose |
-| --- | --- | --- |
-| `DEPLOY_WIF_PROVIDER` | Variable | Google Workload Identity provider used by Cloud Run deploy workflows |
-| `DEPLOY_SA` | Variable | Google service account used by Cloud Run deploy workflows |
-| `DOPPLER_CI_IDENTITY_ID` | Variable | Doppler service-account identity for OIDC access to `dev_ci` in secret-aware CI |
-| `RELEASE_APP_ID` | Repository secret | GitHub App used by release automation and the ramp-rails refresh PR |
+| Name                      | Kind              | Purpose                                                                         |
+| ------------------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `DEPLOY_WIF_PROVIDER`     | Variable          | Google Workload Identity provider used by Cloud Run deploy workflows            |
+| `DEPLOY_SA`               | Variable          | Google service account used by Cloud Run deploy workflows                       |
+| `DOPPLER_CI_IDENTITY_ID`  | Variable          | Doppler service-account identity for OIDC access to `dev_ci` in secret-aware CI |
+| `RELEASE_APP_ID`          | Repository secret | GitHub App used by release automation and the ramp-rails refresh PR             |
 | `RELEASE_APP_PRIVATE_KEY` | Repository secret | GitHub App private key used by release automation and the ramp-rails refresh PR |
 
 The production deploy job uses the `production` GitHub environment. The generated release pull request is the release approval gate.
