@@ -131,7 +131,7 @@ async function deliverOne(
   db: DatabaseExecutor,
   delivery: z.infer<typeof claimedDeliverySchema>,
   claimId: string,
-  context: { now: Date; dashboardOrigin: string }
+  context: { clock: () => Date; dashboardOrigin: string }
 ): Promise<DeliveryOutcome> {
   const target = await deliveryTarget(db, delivery);
   const turnedOff = target.alert_emails === "false" && target.kind !== "alert_emails_changed";
@@ -162,7 +162,7 @@ async function deliverOne(
     await settle(db, delivery, claimId, {
       set: "status = 'pending', claimed_until = ?, last_error = ?",
       values: [
-        new Date(context.now.getTime() + retryInMs).toISOString(),
+        new Date(context.clock().getTime() + retryInMs).toISOString(),
         (error instanceof Error ? error.message : String(error)).slice(0, 500),
       ],
     });
@@ -192,16 +192,20 @@ async function deliverOne(
 
 /**
  * Abandons what can no longer be sent usefully, then claims and sends due deliveries one at a
- * time, up to a batch.
+ * time, up to a batch. The clock is read at each claim and each failure, not once per run: a
+ * slow batch would otherwise hand out leases that have already lapsed and retry deadlines
+ * already past.
  *
+ * @param clock - The time now; tests pass a fixed or stepping clock.
  * @returns How many were sent, failed (to be retried), suppressed, and abandoned.
  */
 export async function deliverAdminAlerts(
   env: Env,
-  now: Date = new Date()
+  clock: () => Date = () => new Date()
 ): Promise<{ sent: number; failed: number; suppressed: number; abandoned: number }> {
   const dashboardOrigin = new URL(dashboardUrlSchema.parse(env.FRONTEND_URL)).origin;
   const db = getDb(env);
+  const now = clock();
   const nowIso = now.toISOString();
 
   const abandoned = await db.execute(
@@ -227,9 +231,9 @@ export async function deliverAdminAlerts(
   const outcomes = { sent: 0, failed: 0, suppressed: 0 };
   for (let index = 0; index < ADMIN_ALERT_DELIVERY_BATCH; index += 1) {
     const claimId = crypto.randomUUID();
-    const delivery = await claimNext(db, now, claimId);
+    const delivery = await claimNext(db, clock(), claimId);
     if (!delivery) break;
-    const outcome = await deliverOne(env, db, delivery, claimId, { now, dashboardOrigin });
+    const outcome = await deliverOne(env, db, delivery, claimId, { clock, dashboardOrigin });
     outcomes[outcome] += 1;
   }
   return { ...outcomes, abandoned };

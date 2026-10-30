@@ -63,7 +63,7 @@ async function runWorker(now = new Date()) {
   return asWorker(async () => {
     await enqueueConfigAlerts(env, now);
     await enqueueMoneyAlerts(env, now);
-    return deliverAdminAlerts(env, now);
+    return deliverAdminAlerts(env, () => now);
   });
 }
 
@@ -478,6 +478,30 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(email?.bodyHtml).not.toContain("<b>");
     });
 
+    it("reads the clock at each send, so a slow batch still backs off its failures", async () => {
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      await asWorker(() => enqueueConfigAlerts(env));
+      iterable.mockImplementation(async () => new Response("down", { status: 500 }));
+      // Each read of the clock is 20 seconds after the last, as in a run whose sends are slow.
+      const start = Date.now();
+      const step = 20_000;
+      let reads = 0;
+      const clock = () => new Date(start + step * reads++);
+      expect(await asWorker(() => deliverAdminAlerts(env, clock))).toMatchObject({ failed: 2 });
+
+      const retries = await asWorker(() =>
+        getDb(env).queryMany<{ claimed_until: string }>(
+          "SELECT claimed_until FROM admin_alert_deliveries ORDER BY claimed_until"
+        )
+      );
+      // Read 0 abandons; then claim (1), fail (2), claim (3), fail (4): each retry is a minute
+      // after its own failure, not after the run's start. Read 5 finds nothing due yet.
+      expect(retries.map((row) => row.claimed_until)).toEqual([
+        new Date(start + 2 * step + 60_000).toISOString(),
+        new Date(start + 4 * step + 60_000).toISOString(),
+      ]);
+    });
+
     it("does not send a queued alert once alert emails are turned off", async () => {
       await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
       await asWorker(() => enqueueConfigAlerts(env));
@@ -514,7 +538,8 @@ describe("admin alert emails (HOO-2299)", () => {
       await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
       await runWorker();
       await runWorker();
-      await asWorker(() => deliverAdminAlerts(env, new Date(Date.now() + 2 * 60 * 60_000)));
+      const later = new Date(Date.now() + 2 * 60 * 60_000);
+      await asWorker(() => deliverAdminAlerts(env, () => later));
       expect(sentEmails()).toHaveLength(2);
     });
 
