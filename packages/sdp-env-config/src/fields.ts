@@ -235,6 +235,16 @@ export const FIELDS: EnvField[] = [
     help: "https://<slug>.clerk.accounts.dev for dev instances",
   },
   {
+    key: "FRONTEND_URL",
+    section: "clerk",
+    kind: "url",
+    label: "Dashboard URL",
+    required: true,
+    pattern: /^https?:\/\//,
+    defaultValue: "http://localhost:3000",
+    help: "The URL the browser loads the dashboard from; in production the API accepts only Clerk sessions issued to this origin",
+  },
+  {
     key: "CLERK_WEBHOOK_SECRET",
     section: "clerk",
     kind: "password",

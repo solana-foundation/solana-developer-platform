@@ -35,6 +35,7 @@ These must be set or the stack will refuse to start:
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the web app. |
 | `CLERK_SECRET_KEY` | Clerk secret key for the API. |
 | `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |
+| `FRONTEND_URL` | The dashboard URL the browser loads. With `ENVIRONMENT=production`, the API accepts only Clerk sessions issued to this origin. |
 | `SOLANA_RPC_URL` | Solana RPC endpoint the API calls. |
 | `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` | Devnet endpoint Sandbox projects read and send through. |
 | `SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL` | Mainnet endpoint Production projects read and send through; unset refuses them. |

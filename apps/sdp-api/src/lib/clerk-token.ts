@@ -168,6 +168,10 @@ function resolveClerkConfig(env: Env) {
   };
 }
 
+// A non-web scheme serializes its origin as "null", which is also the Origin a
+// browser sends from a sandboxed iframe or a data: page.
+const dashboardUrlSchema = z.url({ protocol: /^https?$/ });
+
 /**
  * The dashboard origin a production session token must name in `azp`, so a
  * token minted by any other page on the Clerk instance's domain is refused.
@@ -178,11 +182,13 @@ function resolveClerkAuthorizedParty(env: Env): string | null {
   if (env.ENVIRONMENT !== "production") {
     return null;
   }
-  const frontendUrl = env.FRONTEND_URL?.trim();
-  if (!frontendUrl || !URL.canParse(frontendUrl)) {
-    throw internalError("FRONTEND_URL must be the dashboard URL for Clerk auth in production");
+  const frontendUrl = dashboardUrlSchema.safeParse(env.FRONTEND_URL?.trim());
+  if (!frontendUrl.success) {
+    throw internalError(
+      "FRONTEND_URL must be the dashboard's http(s) URL for Clerk auth in production"
+    );
   }
-  return new URL(frontendUrl).origin;
+  return new URL(frontendUrl.data).origin;
 }
 
 /** Fails boot on Clerk configuration every session token would be refused under. */
