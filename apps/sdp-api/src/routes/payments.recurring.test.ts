@@ -2969,13 +2969,13 @@ describe("Payments routes — recurring", () => {
         getDb(env)
       );
     const tenant = { recurringPaymentId, organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
-    const dueAt = required(
-      required(await repo.getRecurringPaymentById(tenant)).next_collection_due_at
-    );
+    const paused = required(await repo.getRecurringPaymentById(tenant));
+    const dueAt = required(paused.next_collection_due_at);
     const updatedAt = new Date().toISOString();
     required(
       await repo.resumePausedRecurringPayment({
         ...tenant,
+        expectedUpdatedAt: paused.updated_at,
         currentCollectionDueAt: dueAt,
         nextCollectionDueAt: dueAt,
         activatedBy: { apiKeyId: TEST_API_KEY.id, userId: null },
@@ -2987,18 +2987,29 @@ describe("Payments routes — recurring", () => {
 
   it.each([
     {
+      operation: "cancel",
       read: "active",
       interleave: (id: string) => pauseRecurringPayment(id),
       after: "failed_attempts",
+      message: "Recurring payment changed before it could be canceled",
     },
     {
+      operation: "cancel",
       read: "paused",
       interleave: (id: string) => resumeAndPauseFor(id, "custody_policy_refused"),
       after: "custody_policy_refused",
+      message: "Recurring payment changed before it could be canceled",
+    },
+    {
+      operation: "resume",
+      read: "paused",
+      interleave: (id: string) => resumeAndPauseFor(id, "custody_policy_refused"),
+      after: "custody_policy_refused",
+      message: "Recurring payment changed before it could be resumed",
     },
   ] as const)(
-    "refuses a cancel whose $read schedule changed between its read and its claim, keeping the change",
-    async ({ read, interleave, after }) => {
+    "refuses a $operation whose $read schedule changed between its read and its claim, keeping the change",
+    async ({ operation, read, interleave, after, message }) => {
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
       if (read === "paused") {
         await pauseRecurringPayment(activated.id);
@@ -3009,18 +3020,15 @@ describe("Payments routes — recurring", () => {
       onTestFinished(() => admission.mockRestore());
       const sendsBefore = sendTransactionMock.mock.calls.length;
 
-      const cancelRes = await app.request(
-        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      const res = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/${operation}`,
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
         env
       );
 
-      expect(cancelRes.status).toBe(409);
-      expect(await cancelRes.json()).toEqual({
-        error: {
-          code: "CONFLICT",
-          message: "Recurring payment changed before it could be canceled",
-        },
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: { code: "CONFLICT", message },
         meta: { requestId: expect.stringMatching(/^req_/) },
       });
       expect(
