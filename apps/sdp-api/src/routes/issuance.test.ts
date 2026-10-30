@@ -2958,23 +2958,24 @@ describe("Issuance Routes", () => {
       expect(res.status).toBe(404);
     });
 
-    it("refuses a production project's key before any handler", async () => {
-      const res = await app.request(
-        `/v1/issuance/tokens/${tokenId}`,
-        {
-          headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` },
-        },
-        env
-      );
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual({
-        error: {
-          code: "FORBIDDEN",
-          message: "The issuance module is only available on devnet projects.",
-        },
-        meta: { requestId: expect.any(String) },
-      });
-    });
+    it.each(["/v1/issuance/tokens/tok_production_gate", "/v1/issuance/asset-profiles"])(
+      "refuses a production project's key on %s before any handler",
+      async (path) => {
+        const res = await app.request(
+          path,
+          { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
+          env
+        );
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual({
+          error: {
+            code: "FORBIDDEN",
+            message: "The issuance module is only available on devnet projects.",
+          },
+          meta: { requestId: expect.any(String) },
+        });
+      }
+    );
   });
 
   describe("PATCH /v1/issuance/tokens/:tokenId", () => {

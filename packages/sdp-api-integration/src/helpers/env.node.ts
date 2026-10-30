@@ -1,15 +1,21 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
+import { z } from "zod";
 
 const { getDb } = apiTestSupport;
 
-/** The harness's own test chain, set by the CI scripts; the API never reads these. */
-interface TestChainEnv {
-  SOLANA_RPC_URL?: string;
-  SOLANA_NETWORK?: string;
-}
+/**
+ * The harness's own test chain, set by the CI scripts; the API never reads these.
+ * `vitest.config.ts` defaults `SOLANA_NETWORK` to devnet.
+ */
+const testChainEnvSchema = z.object({
+  SOLANA_RPC_URL: z.url().optional(),
+  SOLANA_NETWORK: z.enum(SOLANA_CLUSTERS),
+});
 
-function readEnvFromProcess(): ApiTestEnv & TestChainEnv {
+const testChainEnv = testChainEnvSchema.parse(process.env);
+
+function readEnvFromProcess(): ApiTestEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
   proc.DATABASE_URL = proc.TEST_DATABASE_URL;
   if (proc.SDP_INTEGRATION_CUSTODY_PROVIDER === "local" && !proc.SDP_DEPLOYMENT_MODE) {
@@ -22,7 +28,7 @@ function readEnvFromProcess(): ApiTestEnv & TestChainEnv {
   if (!proc.PUBLIC_API_ORIGIN) {
     proc.PUBLIC_API_ORIGIN = "http://localhost:8787";
   }
-  return proc as unknown as ApiTestEnv & TestChainEnv;
+  return proc as unknown as ApiTestEnv;
 }
 
 const providedEnv = readEnvFromProcess();
@@ -33,25 +39,12 @@ if (!providedEnv.DATABASE_URL) {
 
 export const env = {
   ...providedEnv,
+  ...testChainEnv,
   db: getDb(providedEnv),
 };
 
-/**
- * The cluster the test chain stands in for: `SOLANA_NETWORK`, which `vitest.config.ts` defaults to
- * devnet.
- *
- * @returns The run's cluster.
- * @throws When `SOLANA_NETWORK` names no cluster.
- */
-function readTestChainCluster(): SolanaCluster {
-  const network = providedEnv.SOLANA_NETWORK;
-  if (network !== "devnet" && network !== "mainnet-beta") {
-    throw new Error(`SOLANA_NETWORK must be devnet or mainnet-beta, got ${network}`);
-  }
-  return network;
-}
-
-export const testChainCluster = readTestChainCluster();
+/** The cluster the test chain stands in for. */
+export const testChainCluster = testChainEnv.SOLANA_NETWORK;
 
 /**
  * The test chain's RPC URL, for suites that cannot run without one.
@@ -60,7 +53,7 @@ export const testChainCluster = readTestChainCluster();
  * @throws When `SOLANA_RPC_URL` is unset.
  */
 export function requireTestChainRpcUrl(): string {
-  const rpcUrl = providedEnv.SOLANA_RPC_URL;
+  const rpcUrl = testChainEnv.SOLANA_RPC_URL;
   if (!rpcUrl) {
     throw new Error("SOLANA_RPC_URL is required for the test chain.");
   }

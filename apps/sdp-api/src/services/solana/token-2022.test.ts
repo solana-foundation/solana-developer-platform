@@ -1,4 +1,3 @@
-import * as RpcFactory from "@sdp/rpc/factory";
 import * as RpcModule from "@sdp/rpc/solana";
 import { type SponsoredSubmitter, Token2022Service } from "@sdp/solana/token-2022";
 import * as Kit from "@solana/kit";
@@ -26,7 +25,7 @@ describe("Token2022Service burn", () => {
       config: { skipPreflight: boolean; encoding: "base64"; maxRetries?: bigint }
     ) => { send: typeof send }
   >(() => ({ send }));
-  const rpc = { sendTransaction } as unknown as ReturnType<typeof RpcFactory.createClusterRpc>;
+  const rpc = { sendTransaction } as unknown as RpcModule.SolanaRpc;
 
   beforeEach(async () => {
     authority = await Kit.generateKeyPairSigner();
@@ -39,7 +38,6 @@ describe("Token2022Service burn", () => {
     };
     // Keep real Kit compilation/signing and stub only the RPC boundary and
     // Mosaic's network-dependent mint/account lookup.
-    vi.spyOn(RpcFactory, "createClusterRpc").mockReturnValue(rpc);
     vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({
       signature,
       slot: 42n,
@@ -87,7 +85,7 @@ describe("Token2022Service burn", () => {
   });
 
   it.each(["wallet", "token account"])("burns from the authority's %s", async (source) => {
-    const service = new Token2022Service(authority);
+    const service = new Token2022Service(rpc, authority);
     await expect(
       service.burn({
         mint,
@@ -107,7 +105,7 @@ describe("Token2022Service burn", () => {
   });
 
   it("rejects unrelated sources before building or submitting a burn", async () => {
-    const service = new Token2022Service(authority, feePayment);
+    const service = new Token2022Service(rpc, authority, feePayment);
     const invalid = { mint, source: sponsor, amount: 1.25 };
     await expect(service.burn({ ...invalid, authority })).rejects.toThrow("Burn source must be");
     await expect(service.prepareBurn({ ...invalid, authority: authority.address })).rejects.toThrow(
@@ -119,7 +117,7 @@ describe("Token2022Service burn", () => {
   });
 
   it("submits the authority-signed burn through the sponsor on the burn's RPC and lifetime", async () => {
-    const service = new Token2022Service(authority, feePayment);
+    const service = new Token2022Service(rpc, authority, feePayment);
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
     ).resolves.toEqual({ signature, slot: 42n });
@@ -143,7 +141,11 @@ describe("Token2022Service burn", () => {
       confirmationStatus: "confirmed",
       err: { InstructionError: [0, { Custom: 6000n }] },
     });
-    const service = new Token2022Service(authority, mode === "sponsored" ? feePayment : undefined);
+    const service = new Token2022Service(
+      rpc,
+      authority,
+      mode === "sponsored" ? feePayment : undefined
+    );
 
     await expect(
       service.burn({ mint, source: authority.address, amount: 1.25, authority })
@@ -155,7 +157,7 @@ describe("Token2022Service burn", () => {
   it.each([false, true])("prepares unsigned burns with simulation=%s", async (simulate) => {
     const simulation = { success: true, logs: [], unitsConsumed: 123n, error: null };
     vi.spyOn(RpcModule, "simulateTransaction").mockResolvedValue(simulation);
-    const service = new Token2022Service(authority, feePayment);
+    const service = new Token2022Service(rpc, authority, feePayment);
     const prepared = await service.prepareBurn(
       { mint, source: tokenAccount, amount: 1.25, authority: authority.address },
       simulate

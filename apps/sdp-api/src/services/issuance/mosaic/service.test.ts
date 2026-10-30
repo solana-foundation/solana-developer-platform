@@ -11,7 +11,6 @@
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
-import * as RpcFactory from "@sdp/rpc/factory";
 import * as RpcModule from "@sdp/rpc/solana";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
@@ -103,10 +102,6 @@ function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateT
 
 const clusterRpc = RpcModule.createRpc("https://solana-rpc.mock.invalid");
 
-beforeEach(() => {
-  vi.spyOn(RpcFactory, "createClusterRpc").mockReturnValue(clusterRpc);
-});
-
 describe("MosaicService.createToken — Kora sponsorship", () => {
   let signer: TransactionSigner;
   let koraAddress: Address;
@@ -120,6 +115,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      clusterRpc,
       signer,
       fee.submitter,
       // Mirror the createMosaicService factory wiring so on-chain failures
@@ -297,6 +293,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const ownFeePayer = await Kit.generateKeyPairSigner();
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        clusterRpc,
         signer
       );
       vi.spyOn(
@@ -368,6 +365,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     it("submits a custody-signed mint through the sponsor on the service's RPC after onBeforeSubmit", async () => {
       const sponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        clusterRpc,
         signer,
         fee.submitter,
         { transactionFailedError: transactionFailed }
@@ -449,11 +447,9 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const sendTransaction = vi.fn().mockReturnValue({
         send: vi.fn().mockResolvedValue(directSignature),
       });
-      vi.spyOn(RpcFactory, "createClusterRpc").mockReturnValue({
-        sendTransaction,
-      } as unknown as ReturnType<typeof RpcFactory.createClusterRpc>);
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        { sendTransaction } as unknown as RpcModule.SolanaRpc,
         signer,
         undefined,
         // Mirror the createMosaicService factory wiring so on-chain failures
@@ -586,6 +582,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      clusterRpc,
       signer,
       fee.submitter,
       {

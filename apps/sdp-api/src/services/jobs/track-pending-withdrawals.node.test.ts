@@ -175,7 +175,9 @@ describe("trackPendingWithdrawals", () => {
 
     await trackInSandbox();
 
-    expect(createPrivateChannelLocalRpc).toHaveBeenCalledWith("http://gw-live");
+    expect(createPrivateChannelLocalRpc).toHaveBeenCalledWith("http://gw-live", {
+      transportFactory: expect.any(Function),
+    });
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
     );
