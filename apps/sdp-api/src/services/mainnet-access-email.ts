@@ -51,10 +51,7 @@ function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): stri
     `Jurisdiction (self-declared): ${request.countryName} (${request.countryCode})`,
     `Terms and Conditions: version ${request.termsVersion}, accepted with the request`,
     "",
-    "Before approving, run `pnpm -C apps/sdp-api mainnet-access status` for this organization and",
-    `check it still shows this request (requested at ${request.requestedAt}), since an operator may have`,
-    "reset it after this email. To approve, set enableProductionProject in the",
-    "organization's Clerk private metadata.",
+    "To approve, set enableProductionProject in the organization's Clerk private metadata.",
   ].join("\n");
 }
 
