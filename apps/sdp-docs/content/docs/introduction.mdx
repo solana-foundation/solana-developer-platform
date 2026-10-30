@@ -60,12 +60,51 @@ Provision signing wallets through integrated custody providers, so your team nev
 
 SDP exposes unified endpoints for onchain transfers, recurring payments, and batch transfers.
 
+Save one [idempotency key](/docs/developing-with-sdp/idempotency#choosing-a-key)
+per operation. Retry with the same key, body, and API credential; use a new key
+for a new operation. Batch `externalId` values are correlation labels.
+
 <Tabs items={["Recurring Payments", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
-<ApiExample operation="create-payment-recurring-payment" />
+```bash title="Terminal"
+RECURRING_IDEMPOTENCY_KEY="recurring-subscriber-42"
+
+curl -X POST https://api.solana.com/v1/payments/recurring-payments \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $RECURRING_IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceCustodyWalletId": "cwlt_example",
+    "counterpartyId": "cpty_example",
+    "counterpartyAccountId": "cpa_example",
+    "token": "USDC",
+    "amount": "25.00",
+    "periodHours": 720
+  }'
+```
 </Tab>
 <Tab value="Batch Transfers">
-<ApiExample operation="create-payment-transfer-batch" />
+```bash title="Terminal"
+PAYROLL_IDEMPOTENCY_KEY="payroll-run-001"
+
+curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $PAYROLL_IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "payroll_run_001",
+    "sourceCustodyWalletId": "cwlt_example",
+    "token": "USDC",
+    "recipients": [
+      {
+        "externalId": "payroll_row_001",
+        "counterpartyId": "cpty_example",
+        "counterpartyAccountId": "cpa_example",
+        "amount": "25.00"
+      }
+    ]
+  }'
+```
 </Tab>
 </Tabs>
 
