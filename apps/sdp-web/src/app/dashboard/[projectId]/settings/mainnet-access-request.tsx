@@ -9,7 +9,7 @@ import { Modal } from "@sdp/ui/modal";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { CheckCircle2Icon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, type UIEvent, useCallback, useState, useTransition } from "react";
+import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { SDP_TERMS_DOCUMENT } from "@/lib/sdp-terms";
@@ -89,10 +89,10 @@ function MainnetAccessRequestModal({
 
   // A failed submit may still have recorded the request (its email did not go out), so the
   // card behind the dialog is refreshed after any attempt, not only a sent one.
-  const [attempted, setAttempted] = useState(false);
+  const attempted = useRef(false);
   const close = () => {
     onClose();
-    if (attempted) router.refresh();
+    if (attempted.current) router.refresh();
   };
 
   const steps = [t("Shared.mainnetAccess.stepJurisdiction"), t("Shared.mainnetAccess.stepTerms")];
@@ -111,7 +111,7 @@ function MainnetAccessRequestModal({
         countryCode: country.data.countryCode,
         termsVersion,
       });
-      setAttempted(true);
+      attempted.current = true;
       if (result.ok) {
         setStep("sent");
       } else {
