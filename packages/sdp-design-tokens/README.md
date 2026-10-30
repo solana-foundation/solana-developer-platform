@@ -7,12 +7,12 @@ Storybook can read the same files without Tailwind.
 
 ## Files
 
-| File | What it holds |
-| -- | -- |
-| `src/tokens.css` | The values. Light values on `:root`, dark values on `:root.dark`. |
-| `src/theme.css` | Tailwind v4 `@theme inline` mappings (`bg-surface`, `text-body`, `rounded-control`, `max-w-page`, …) and the `refresh:` variant. |
-| `src/index.ts` | The refresh-theme attribute (`refreshThemeProps`) and the scale names for `tailwind-merge` (`tailwindThemeScales`). |
-| `src/assets/fonts/` | The refresh design's faces: Season Sans (Regular, Medium) and Geist Mono (variable, Latin subset), as woff2. |
+| File                | What it holds                                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `src/tokens.css`    | The values. Light values on `:root`, dark values on `:root.dark`.                                                                |
+| `src/theme.css`     | Tailwind v4 `@theme inline` mappings (`bg-surface`, `text-body`, `rounded-control`, `max-w-page`, …) and the `refresh:` variant. |
+| `src/index.ts`      | The refresh-theme attribute (`refreshThemeProps`) and the scale names for `tailwind-merge` (`tailwindThemeScales`).              |
+| `src/assets/fonts/` | The refresh design's faces: Season Sans (Regular, Medium) and Geist Mono (variable, Latin subset), as woff2.                     |
 
 ## Layers
 
@@ -53,7 +53,7 @@ app-wide, in light and dark:
 ```tsx
 import { refreshThemeProps } from "@sdp/design-tokens";
 
-<section {...refreshThemeProps}>…</section>
+<section {...refreshThemeProps}>…</section>;
 ```
 
 Content portaled out of that element (modals, menus, popovers) leaves the scope, so it has to
@@ -70,7 +70,7 @@ When a component needs different styling inside a refresh surface, use the varia
 than a second component:
 
 ```tsx
-<div className="rounded-lg bg-fill-subtle refresh:rounded-card refresh:bg-transparent" />
+<div className="rounded-lg bg-fill-subtle refresh:rounded-card refresh:bg-transparent" />;
 ```
 
 In custom CSS and arbitrary values, read the palette names (`var(--amber-tx)`,
@@ -88,6 +88,11 @@ files in `src/assets/fonts` and exposes them under those names. In Next.js, load
 on `:root`. Without either, the stack falls back to the installed family name, then the system
 stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`, and
 sdp-docs the same way in `apps/sdp-docs/src/app/layout.tsx`.
+
+The fonts are third-party and not under this repository's MIT licence. Season Sans is a
+proprietary Displaay face licensed to the Solana Foundation for SDP only. Don't copy it or
+reuse it elsewhere. See [`LICENSE-SeasonSans.txt`](src/assets/fonts/LICENSE-SeasonSans.txt).
+Geist Mono is SIL OFL 1.1. See [`LICENSE-GeistMono.txt`](src/assets/fonts/LICENSE-GeistMono.txt).
 
 ### Page column
 
@@ -127,7 +132,6 @@ const twMerge = extendTailwindMerge({
 ## Storybook
 
 The package is laid out so a Storybook can document it without new plumbing:
-
 - Swatch and scale stories can read live values with
   `getComputedStyle(element).getPropertyValue(name)`. Light, dark and refresh then come from the
   same stories, by toggling `.dark` and `refreshThemeProps` on the story root. A typed list of

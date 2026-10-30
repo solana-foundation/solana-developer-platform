@@ -88,6 +88,12 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
+      {
+        // public/ files are served with max-age=0 by default. The homepage
+        // logos are unhashed but rarely change, so a week is a safe TTL.
+        source: "/homepage/logos/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=604800" }],
+      },
     ];
   },
 };

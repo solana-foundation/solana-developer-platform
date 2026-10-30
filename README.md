@@ -28,7 +28,6 @@ The supported public API areas are health, API keys, wallets, projects, issuance
 ## Local Development
 
 Prerequisites:
-
 - Node.js 24+
 - pnpm 10.16+
 - Git
@@ -57,7 +56,6 @@ pnpm dev
 ```
 
 Useful local URLs:
-
 - API: http://localhost:8787
 - API docs: http://localhost:8787/docs
 - Cron worker (logs under `@sdp/api:dev:worker`): http://localhost:8789/health
@@ -94,6 +92,13 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md), and 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+The MIT License does not cover the third-party fonts in
+[`packages/sdp-design-tokens/src/assets/fonts/`](packages/sdp-design-tokens/src/assets/fonts/).
+Season Sans is a proprietary Displaay face licensed to the Solana Foundation for SDP only, and
+you may not copy or reuse it
+([notice](packages/sdp-design-tokens/src/assets/fonts/LICENSE-SeasonSans.txt)). Geist Mono
+is under the [SIL Open Font License 1.1](packages/sdp-design-tokens/src/assets/fonts/LICENSE-GeistMono.txt).
 
 ## Security
 
