@@ -12,7 +12,7 @@ const PANEL_FILMS = FILMS.filter((film) => PANEL_FILM_IDS.includes(film.id));
 export async function HomepageNav({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
   const sandbox: NavLink = {
-    label: t("Homepage.nav.platform.sandbox"),
+    label: links.signup.external ? links.signup.label : t("Homepage.nav.platform.sandbox"),
     href: links.signup.href,
     external: links.signup.external,
   };
