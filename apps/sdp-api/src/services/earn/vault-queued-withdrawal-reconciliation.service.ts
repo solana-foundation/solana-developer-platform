@@ -15,6 +15,7 @@ import {
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, type Signature, type Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
@@ -93,7 +94,7 @@ interface RawHistoryRpc {
     config: {
       commitment: "finalized";
       encoding: "json";
-      maxSupportedTransactionVersion: 0;
+      maxSupportedTransactionVersion: typeof MAX_SUPPORTED_TRANSACTION_VERSION;
     }
   ): { send(): Promise<RawTransactionResponse | null> };
   getSignaturesForAddress(
@@ -713,7 +714,7 @@ async function transactionObservation(
     .getTransaction(signature as Signature, {
       commitment: "finalized",
       encoding: "json",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     .send();
   if (!transaction || transaction.meta?.err) return null;

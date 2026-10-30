@@ -1,6 +1,6 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import { address } from "@solana/kit";
 import { type DatabaseClient as AppDb, getDb } from "@/db/client";
 import {
@@ -26,7 +26,7 @@ import type { VaultFeeMode } from "./vault-sponsorship";
 const VAULT_OPERATION_MOVEMENTS = {
   deposit: "earn.deposit",
   withdrawal: "earn.withdraw",
-} as const satisfies Record<"deposit" | "withdrawal", MovementId>;
+} as const satisfies Record<"deposit" | "withdrawal", MovementOf<"earn">>;
 
 /**
  * Vault programs' own words for "your floor was too high", as Anchor writes
@@ -173,7 +173,7 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
   let signed: SignedVaultTransaction;
   try {
     const signer = await input.deadline.run(`Resolving the vault ${operation} signer`, () =>
-      createOrgSignerForCustodyWallet(
+      createOrgSignerForCustodyWallet<"earn">(
         env,
         input.organizationId,
         input.projectId,

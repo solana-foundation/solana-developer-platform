@@ -947,7 +947,7 @@ async function runMetadataScheduleUpdate(input: {
     }
 
     const planPda = assertValidAddress(input.claimed.plan_pda, "planPda");
-    const sourceSigner = await createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1492,7 +1492,7 @@ async function runReplacementUpdate(input: {
     clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
   });
 
-  const sourceSigner = await createOrgSignerForCustodyWallet(
+  const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
     input.env,
     input.organizationId,
     input.projectId,
@@ -1702,7 +1702,7 @@ async function runReplacementUpdate(input: {
       subscriptionAuthorityAddress,
       { commitment: "confirmed" }
     );
-    const feePayment = createSponsorshipFeePayment(
+    const feePayment = createSponsorshipFeePayment<"recurring_payments">(
       input.env,
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
@@ -1815,7 +1815,7 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
-    const oldSourceSigner = await createOrgSignerForCustodyWallet(
+    const oldSourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,

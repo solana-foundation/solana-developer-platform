@@ -1887,7 +1887,7 @@ export async function collectRecurringPayment(input: {
       "destinationAddress"
     );
     const mint = assertValidAddress(input.recurringPayment.token, "token");
-    const sourceSigner = await createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1928,7 +1928,7 @@ export async function collectRecurringPayment(input: {
       source: sourceTokenAccount.tokenAccount,
       tokenProgram,
     });
-    const feePayment = createSponsorshipFeePayment(
+    const feePayment = createSponsorshipFeePayment<"recurring_payments">(
       input.env,
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,

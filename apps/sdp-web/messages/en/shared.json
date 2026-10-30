@@ -206,6 +206,7 @@
     "noRequestBody": "This endpoint does not require a JSON request body.",
     "status": "Status:",
     "runRequest": "Run request",
+    "run": "Run",
     "reset": "Reset",
     "retry": "Retry",
     "copyCode": "Copy Code",
