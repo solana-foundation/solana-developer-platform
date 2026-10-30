@@ -12,11 +12,14 @@ import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
-  IDEMPOTENT_REPLAYED_HEADER,
   idempotencyFingerprintMatches,
   markIdempotencyCommitted,
 } from "@/middleware/idempotency";
-import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
+import {
+  type MovementStepInput,
+  markReplayed,
+  type RecordAnswer,
+} from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentStart } from "@/routes/payments/wallets";
@@ -114,18 +117,14 @@ async function answerLostBatchInsert(
   });
   if (replay) {
     assertSamePayoutRun(c, replay, authorized);
-    // The batch already existed: marked as a replay, as replayFromRecord
-    // marks one, so the client retires its key on it.
-    const answered = await respondToTransferBatchReplay(
-      c,
-      replay,
-      authorized.scope.auth.organizationId,
-      authorized.projectId
+    return markReplayed(
+      await respondToTransferBatchReplay(
+        c,
+        replay,
+        authorized.scope.auth.organizationId,
+        authorized.projectId
+      )
     );
-    // Copied, so the header lands on whatever Response the answer built.
-    const replayed = new Response(answered.body, answered);
-    replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
-    return replayed;
   }
   return null;
 }
