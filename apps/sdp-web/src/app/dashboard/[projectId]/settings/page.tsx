@@ -5,6 +5,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { requestMemberRole } from "@/lib/sdp-api";
 import { LeaveOrganizationCard } from "./leave-organization-card";
+import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 
@@ -16,8 +17,8 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * Organization settings: the quick start for API key managers, and the members
- * and API-key IP allowlist sections for organization writers.
+ * Organization settings: the quick start for API key managers, and the members,
+ * mainnet access and API-key IP allowlist sections for organization admins.
  *
  * @param props - The route props.
  * @param props.searchParams - The query, carrying the members page.
@@ -50,6 +51,7 @@ export default async function SettingsPage({
       {dashboardAccess.capabilities.canManageOrgSettings ? (
         <MembersSection page={membersPage} />
       ) : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? <MainnetAccessSection /> : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
       {/* Admins cannot leave; another admin removes them. */}
       {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}

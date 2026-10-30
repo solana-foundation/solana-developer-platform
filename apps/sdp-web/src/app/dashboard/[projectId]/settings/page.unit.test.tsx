@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
 import { LeaveOrganizationCard } from "./leave-organization-card";
+import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import SettingsPage from "./page";
@@ -31,7 +32,10 @@ describe("settings page", () => {
   });
 
   it.each<[OrganizationRole, ReactElement["type"][]]>([
-    ["admin", [DashboardQuickStart, MembersSection, OrganizationAccessSection]],
+    [
+      "admin",
+      [DashboardQuickStart, MembersSection, MainnetAccessSection, OrganizationAccessSection],
+    ],
     ["member", [LeaveOrganizationCard]],
   ])("renders the sections SDP's %s role holds", async (role, sections) => {
     vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue(role);
