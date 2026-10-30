@@ -31,11 +31,13 @@ const ALL_ON = {
 } as const satisfies DashboardFlags;
 
 describe("capDashboardFlagsToEnvironment", () => {
-  it("turns off a module the channel leaves out for the Project's environment and keeps Earn reachable", () => {
+  it("turns off each module the channel leaves out for the Project's environment", () => {
     expect(capDashboardFlagsToEnvironment(ALL_ON, "production")).toEqual({
       ...ALL_ON,
       assetProfiles: false,
+      earn: false,
       issuance: false,
+      markets: false,
     });
     expect(capDashboardFlagsToEnvironment(ALL_ON, "sandbox")).toEqual(ALL_ON);
   });
