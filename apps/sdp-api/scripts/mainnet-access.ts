@@ -11,33 +11,23 @@
  *     --operator <you> --reason <why> --ticket <HOO-…>
  */
 import { parseArgs } from "node:util";
-import { COUNTRY_CODES } from "@sdp/types/countries";
 import { z } from "zod";
 import { closeDatabasePools, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
-import { correctMainnetAccess, readMainnetAccessRow } from "@/services/mainnet-access.service";
+import {
+  correctMainnetAccess,
+  mainnetAccessCorrectionSchema,
+  readMainnetAccessRow,
+} from "@/services/mainnet-access.service";
 
-const organizationId = z.string().trim().min(1);
-const audit = {
-  operator: z.string().trim().min(1).max(128),
-  reason: z.string().trim().min(1).max(500),
-  ticket: z.string().trim().min(1).max(128),
-};
-
-const argsSchema = z.discriminatedUnion("command", [
-  z.strictObject({ command: z.literal("status"), "organization-id": organizationId }),
-  z.strictObject({
-    command: z.literal("set-country"),
-    "organization-id": organizationId,
-    country: z.string().trim().toUpperCase().pipe(z.enum(COUNTRY_CODES)),
-    ...audit,
-  }),
-  z.strictObject({ command: z.literal("reset"), "organization-id": organizationId, ...audit }),
+const commandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("status"), organizationId: z.string().trim().min(1) }),
+  ...mainnetAccessCorrectionSchema.options,
 ]);
 
-function parseCommandLine(): z.infer<typeof argsSchema> {
+function parseCommandLine(): z.infer<typeof commandSchema> {
   const { positionals, values } = parseArgs({
     args: process.argv.slice(2),
     allowPositionals: true,
@@ -53,38 +43,26 @@ function parseCommandLine(): z.infer<typeof argsSchema> {
   if (positionals.length !== 1) {
     throw new Error("Usage: mainnet-access <status|set-country|reset> [flags]");
   }
-  const parsed = argsSchema.safeParse({ command: positionals[0], ...values });
+  const input = {
+    operation: positionals[0],
+    organizationId: values["organization-id"],
+    countryCode: values.country,
+    operator: values.operator,
+    reason: values.reason,
+    ticket: values.ticket,
+  };
+  const parsed = commandSchema.safeParse(input);
   if (!parsed.success) throw new Error(z.prettifyError(parsed.error));
   return parsed.data;
 }
 
 async function main(): Promise<void> {
-  const args = parseCommandLine();
+  const command = parseCommandLine();
   const env = getProcessEnv();
-  if (args.command === "status") {
-    const row = await readMainnetAccessRow(getDb(env), args["organization-id"]);
-    console.log(JSON.stringify(row, null, 2));
-    return;
-  }
-  const result = await correctMainnetAccess(
-    env,
-    args.command === "set-country"
-      ? {
-          operation: "set-country",
-          organizationId: args["organization-id"],
-          countryCode: args.country,
-          operator: args.operator,
-          reason: args.reason,
-          ticket: args.ticket,
-        }
-      : {
-          operation: "reset",
-          organizationId: args["organization-id"],
-          operator: args.operator,
-          reason: args.reason,
-          ticket: args.ticket,
-        }
-  );
+  const result =
+    command.operation === "status"
+      ? await readMainnetAccessRow(getDb(env), command.organizationId)
+      : await correctMainnetAccess(env, command);
   console.log(JSON.stringify(result, null, 2));
 }
 

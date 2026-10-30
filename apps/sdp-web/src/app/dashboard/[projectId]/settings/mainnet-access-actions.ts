@@ -23,6 +23,11 @@ const mainnetAccessSchema = z.object({
   contactEmail: z.string().nullable(),
 }) satisfies z.ZodType<MainnetAccess>;
 
+const requestInputSchema = z.object({
+  countryCode: z.enum(COUNTRY_CODES),
+  termsVersion: z.string().min(1).max(64),
+});
+
 const organizationNameSchema = z.object({ name: z.string() });
 
 export type MainnetAccessLoad =
@@ -65,6 +70,9 @@ export async function requestMainnetAccessAction(input: {
   countryCode: CountryCode;
   termsVersion: string;
 }): Promise<RequestMainnetAccessResult> {
+  // A server action's arguments arrive from the browser, whatever their type says.
+  const parsed = requestInputSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: z.prettifyError(parsed.error) };
   try {
     const client = await createOrgSdpApiClient();
     const organizationId = await resolveOrganizationId(client);
@@ -72,8 +80,8 @@ export async function requestMainnetAccessAction(input: {
       await client.fetch<unknown>(mainnetAccessPath(organizationId), {
         method: "POST",
         body: JSON.stringify({
-          countryCode: input.countryCode,
-          termsVersion: input.termsVersion,
+          countryCode: parsed.data.countryCode,
+          termsVersion: parsed.data.termsVersion,
           acceptTerms: true,
         }),
       })

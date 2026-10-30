@@ -4,8 +4,9 @@
  * emails its alias. Approval is not here: an operator sets `enableProductionProject` in Clerk, the
  * webhook syncs it into the organization's settings, and `state` reads `approved` from that alone.
  */
-import { type CountryCode, countryByCode } from "@sdp/types/countries";
+import { COUNTRY_CODES, countryByCode } from "@sdp/types/countries";
 import { type MainnetAccess, type MainnetAccessState, SDP_TERMS } from "@sdp/types/mainnet-access";
+import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import {
   type MainnetAccessClaim,
@@ -121,15 +122,24 @@ export async function notifyMainnetAccessRequest(
   return notified;
 }
 
-interface CorrectionAudit {
-  operator: string;
-  reason: string;
-  ticket: string;
-}
+const correctionFields = {
+  organizationId: z.string().trim().min(1),
+  operator: z.string().trim().min(1).max(128),
+  reason: z.string().trim().min(1).max(500),
+  ticket: z.string().trim().min(1).max(128),
+};
 
 /** `set-country` corrects the declared jurisdiction; `reset` clears the request entirely. */
-export type MainnetAccessCorrection = { organizationId: string } & CorrectionAudit &
-  ({ operation: "set-country"; countryCode: CountryCode } | { operation: "reset" });
+export const mainnetAccessCorrectionSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("set-country"),
+    countryCode: z.string().trim().toUpperCase().pipe(z.enum(COUNTRY_CODES)),
+    ...correctionFields,
+  }),
+  z.object({ operation: z.literal("reset"), ...correctionFields }),
+]);
+
+export type MainnetAccessCorrection = z.infer<typeof mainnetAccessCorrectionSchema>;
 
 /**
  * The operator's correction of a request, when an organization writes to the alias about a
