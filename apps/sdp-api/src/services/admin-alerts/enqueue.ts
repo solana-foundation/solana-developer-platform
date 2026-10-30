@@ -121,6 +121,25 @@ function parseAuditMetadata(row: AuditRow): AuditMetadata | null {
   return null;
 }
 
+/** An organization update's alerts: the entitlement, or the settings it changed. */
+function organizationAlerts(metadata: AuditMetadata): ConfigAlert[] {
+  if (metadata.event === "production_entitlement_changed") {
+    return [{ kind: "mainnet_entitlement_changed", projectId: null, enabled: metadata.enabled }];
+  }
+  const alerts: ConfigAlert[] = [];
+  if (metadata.settings && "allowedIpAddresses" in metadata.settings) {
+    alerts.push({ kind: "ip_allowlist_changed", projectId: null });
+  }
+  if (metadata.settings?.alertEmails !== undefined) {
+    alerts.push({
+      kind: "alert_emails_changed",
+      projectId: null,
+      enabled: metadata.settings.alertEmails,
+    });
+  }
+  return alerts;
+}
+
 /**
  * The alerts one audit entry raises; most raise none. An organization update can raise two (an
  * allowlist and the alert-email setting in one request). Entries of critical operations count
@@ -184,25 +203,8 @@ export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
         : [];
     case "delete:custody_wallet":
       return [{ kind: "custody_wallet_removed", projectId, subject: metadata.provider ?? null }];
-    case "update:organization": {
-      if (metadata.event === "production_entitlement_changed") {
-        return [
-          { kind: "mainnet_entitlement_changed", projectId: null, enabled: metadata.enabled },
-        ];
-      }
-      const alerts: ConfigAlert[] = [];
-      if (metadata.settings && "allowedIpAddresses" in metadata.settings) {
-        alerts.push({ kind: "ip_allowlist_changed", projectId: null });
-      }
-      if (metadata.settings?.alertEmails !== undefined) {
-        alerts.push({
-          kind: "alert_emails_changed",
-          projectId: null,
-          enabled: metadata.settings.alertEmails,
-        });
-      }
-      return alerts;
-    }
+    case "update:organization":
+      return organizationAlerts(metadata);
     default:
       return [];
   }
