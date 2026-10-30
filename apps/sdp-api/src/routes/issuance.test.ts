@@ -3250,7 +3250,6 @@ describe("Issuance Routes", () => {
         expect(body.data.token.imageUrl).toBe("https://example.com/token.png");
 
         expect(resolveCurrentAuthoritySpy).toHaveBeenCalledWith(
-          env,
           expect.anything(),
           expect.objectContaining({ id: activeTokenId }),
           "metadata"
@@ -8594,11 +8593,7 @@ describe("Issuance Routes", () => {
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
-      const ensureRpcUrl = () => {};
-
       it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm",
           mintAddress: null,
@@ -8702,8 +8697,6 @@ describe("Issuance Routes", () => {
       });
 
       it("still returns 200 with the token active when post-deploy bookkeeping fails", async () => {
-        ensureRpcUrl();
-
         // The mint is live on-chain and setTokenDeployed has flipped the token to
         // active; a failure writing the audit/transaction row afterward must not
         // 500, or a retry would hit the `status !== "pending"` guard and 400
@@ -8787,8 +8780,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the confirmed tx did not create the supplied mint", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_unrelated_tx",
           mintAddress: null,
@@ -8861,8 +8852,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the mint authority differs from the server-derived custody address", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_wrong_authority",
           mintAddress: null,
@@ -8934,8 +8923,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_not_indexed",
           mintAddress: null,
@@ -9000,8 +8987,6 @@ describe("Issuance Routes", () => {
       });
 
       it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_abl",
           mintAddress: null,
@@ -9090,8 +9075,6 @@ describe("Issuance Routes", () => {
       });
 
       it("pins the signing wallet from prepareDeploy so confirmDeploy can't diverge", async () => {
-        ensureRpcUrl();
-
         await seedIssuanceActivityWallet("wallet_custom_pin", TEST_SOLANA_ADDRESSES.wallet2);
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_wallet_pin",
@@ -9205,8 +9188,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the create tx is not confirmed on-chain", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_unconfirmed",
           mintAddress: null,
@@ -9274,8 +9255,6 @@ describe("Issuance Routes", () => {
       // both reach the commit — the atomic pending→deploying claim serializes
       // them, and the loser gets a 409 instead of overwriting the winner's mint.
       it("returns 409 when a concurrent deployment already holds the claim", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_claim_race",
           mintAddress: null,
@@ -9314,8 +9293,6 @@ describe("Issuance Routes", () => {
       });
 
       it("releases the claim after a failed verification so a retry can re-claim", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_release",
           mintAddress: null,
@@ -9368,8 +9345,6 @@ describe("Issuance Routes", () => {
       // authority, so verifying against the stale (freezable) snapshot would
       // wrongly 400. The claim snapshot must win.
       it("verifies and records against the claimed snapshot, not the pre-claim read", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_stale_snapshot",
           signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,

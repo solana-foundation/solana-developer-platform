@@ -29,6 +29,7 @@ import { type AppError, conflict, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { buildFundedDvpTradeRow, DVP_TEST_AUTHORITY, DVP_TEST_USER_B } from "@/test/fixtures/dvp";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import type { DvpSettlementWallet } from "./settlement-wallet";
@@ -47,7 +48,6 @@ const getRecentBlockhash = vi.hoisted(() =>
 );
 
 const confirmTransaction = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
 const hasLiveClaim = vi.hoisted(() => vi.fn());
 /**
  * The trade's close lock, as the row holds it. A compare-and-set in one step,
@@ -92,11 +92,8 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
 vi.mock("./read-chain", () => ({ readDvpAccounts }));
-vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
-  createClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-}));
-vi.mock("@sdp/rpc/solana", () => ({
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   confirmTransaction,
   getRecentBlockhash,
   sendTransaction,
@@ -118,7 +115,9 @@ function closeDvpTrade(
   settlement: CloseArgs[3],
   recordAttempt: CloseArgs[4] = async () => {}
 ) {
-  return closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt);
+  return inSandboxScope(() =>
+    closeDvpTradeWithRecorder(c, trade, action, settlement, recordAttempt)
+  );
 }
 
 let SETTLEMENT_AUTHORITY = DVP_TEST_AUTHORITY;
@@ -156,6 +155,8 @@ function preflightError(): SolanaError {
 }
 
 describe("closeDvpTrade", () => {
+  const clusterRpc = installClusterRpcStub();
+
   let authority: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let settlement: DvpSettlementWallet;
@@ -175,7 +176,7 @@ describe("closeDvpTrade", () => {
       getSponsorshipConfiguration: vi.fn(),
     });
     closeLocks.clear();
-    getBlockHeight.mockResolvedValue(50n);
+    clusterRpc.answer("getBlockHeight", 50);
     hasLiveClaim.mockResolvedValue(false);
     confirmTransaction.mockResolvedValue({ confirmationStatus: "confirmed", err: null, slot: 1n });
     // The settlement window is judged by the cluster clock read with the escrows.

@@ -32,6 +32,7 @@ import {
   createTestSponsor,
   DVP_TEST_T22,
 } from "@/test/fixtures/dvp";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -80,11 +81,8 @@ vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeToken,
 }));
-vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
-  createClusterRpc: () => ({}),
-}));
-vi.mock("@sdp/rpc/solana", () => ({
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
@@ -92,7 +90,11 @@ vi.mock("@sdp/rpc/solana", () => ({
   sendTransaction,
 }));
 
-const { fundDvpTradeLeg } = await import("./fund");
+const { fundDvpTradeLeg: fundUnscoped } = await import("./fund");
+
+function fundDvpTradeLeg(...args: Parameters<typeof fundUnscoped>) {
+  return inSandboxScope(() => fundUnscoped(...args));
+}
 
 const _T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
@@ -114,6 +116,8 @@ const FUNDER_A = {
 const context = { env } as never;
 
 describe("fundDvpTradeLeg", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     sponsor = await createTestSponsor();

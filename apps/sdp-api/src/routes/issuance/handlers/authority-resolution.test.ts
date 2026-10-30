@@ -3,23 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaSigner from "@/services/solana/signer";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
+import * as authorityResolution from "./authority-resolution";
 import {
   createLegacyResolvedAuthoritySigner,
   createResolvedAuthoritySigner,
   getInitialPermanentDelegateAuthority,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
-  resolveCurrentAuthorityForRole,
   resolveDirectIssuanceReplay,
-  resolveFreezeOperationAuthority,
   resolveIssuanceWallet,
-  resolveMetadataAuthority,
-  resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 
 const { fetchMaybeMintMock, getTokenAclMintConfigMock } = vi.hoisted(() => ({
@@ -30,11 +28,6 @@ const { fetchMaybeMintMock, getTokenAclMintConfigMock } = vi.hoisted(() => ({
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint: fetchMaybeMintMock,
-}));
-
-vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
-  createClusterRpc: () => ({}),
 }));
 
 vi.mock("@solana/token-acl-sdk", async (importOriginal) => ({
@@ -228,7 +221,22 @@ function createDecodedMint(input: {
   };
 }
 
+const resolveCurrentAuthorityForRole = (
+  ...args: Parameters<typeof authorityResolution.resolveCurrentAuthorityForRole>
+) => inSandboxScope(() => authorityResolution.resolveCurrentAuthorityForRole(...args));
+const resolveFreezeOperationAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolveFreezeOperationAuthority>
+) => inSandboxScope(() => authorityResolution.resolveFreezeOperationAuthority(...args));
+const resolveMetadataAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolveMetadataAuthority>
+) => inSandboxScope(() => authorityResolution.resolveMetadataAuthority(...args));
+const resolvePermanentDelegateAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolvePermanentDelegateAuthority>
+) => inSandboxScope(() => authorityResolution.resolvePermanentDelegateAuthority(...args));
+
 describe("authority-resolution", () => {
+  installClusterRpcStub();
+
   beforeEach(() => {
     vi.clearAllMocks();
     getTokenAclMintConfigMock.mockResolvedValue({ exists: false });

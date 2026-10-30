@@ -1,4 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   createKeyPairFromPrivateKeyBytes,
   getAddressFromPublicKey,
@@ -201,7 +202,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-complete",
     });
     expect(operation.state).toBe("indexing");
@@ -224,7 +225,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-timeout",
     });
     expect(operation.state).toBe("indexing");
@@ -255,7 +256,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-timeout-landed",
     });
     expect(operation.state).toBe("indexing");
@@ -282,7 +283,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-stranded",
     });
     expect(operation.state).toBe("indexing");
@@ -322,7 +323,7 @@ describe("pollRingsIndexing", () => {
       const operation = await serviceWith(gateway).prepareOperation({
         walletId,
         opType,
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        asset: { mint: SOL_MINT, amountRaw: "1000" },
         ...(opType === "withdraw" ? { to: OWNER } : {}),
         clientNonce: nonce,
       });
@@ -546,7 +547,7 @@ describe("pollRingsIndexing", () => {
         const operation = await serviceWith(gateway).prepareOperation({
           walletId,
           opType: "shield",
-          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+          asset: { mint: SOL_MINT, amountRaw: "1000" },
           clientNonce: nonce,
         });
 
@@ -667,7 +668,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-mainnet-scope",
     });
     gateway.recordSubmission(OUTER_TX.signature);
