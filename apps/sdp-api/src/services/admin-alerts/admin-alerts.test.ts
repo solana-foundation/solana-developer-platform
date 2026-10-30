@@ -192,7 +192,7 @@ describe("admin alert emails (HOO-2299)", () => {
     await seedOrganization();
     await resetCursors(windowStart);
     env.ITERABLE_API_URL = "https://api.iterable.com";
-    env.ITERABLE_API_KEY = "iterable_test";
+    env.ITERABLE_API_KEY = "0123456789abcdef0123456789abcdef";
     env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
     env.FRONTEND_URL = DASHBOARD;
     const realFetch = globalThis.fetch;
@@ -523,6 +523,7 @@ describe("admin alert emails (HOO-2299)", () => {
   describe("where email is not configured (dev, stage)", () => {
     it.each([
       ["no Iterable key", { ITERABLE_API_KEY: undefined }],
+      ["a placeholder Iterable key", { ITERABLE_API_KEY: "placeholder" }],
       ["a placeholder campaign id", { ITERABLE_TRANSACTIONAL_CAMPAIGN_ID: "placeholder" }],
       ["a placeholder Iterable URL", { ITERABLE_API_URL: "placeholder" }],
       ["no dashboard URL", { FRONTEND_URL: undefined }],
