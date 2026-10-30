@@ -45,17 +45,3 @@ export const env = {
 
 /** The cluster the test chain stands in for. */
 export const testChainCluster = testChainEnv.KORA_SURFPOOL_CLUSTER;
-
-/**
- * The test chain's RPC URL, for suites that cannot run without one.
- *
- * @returns `SOLANA_RPC_URL`.
- * @throws When `SOLANA_RPC_URL` is unset.
- */
-export function requireTestChainRpcUrl(): string {
-  const rpcUrl = testChainEnv.SOLANA_RPC_URL;
-  if (!rpcUrl) {
-    throw new Error("SOLANA_RPC_URL is required for the test chain.");
-  }
-  return rpcUrl;
-}
