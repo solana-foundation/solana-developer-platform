@@ -7,6 +7,7 @@ import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
+import { isEarnExitOrRead } from "@/routes/earn/exits";
 import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PROJECT } from "@/test/fixtures/tokens";
@@ -21,7 +22,7 @@ import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
-import { projectContextMiddleware } from "./project-context";
+import { type ProjectContextOptions, projectContextMiddleware } from "./project-context";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
@@ -40,6 +41,10 @@ function probe(c: Context<{ Bindings: Env }>) {
 }
 
 function buildApp() {
+  return buildAppWithOptions({});
+}
+
+function buildAppWithOptions(options: ProjectContextOptions) {
   const app = new Hono<{ Bindings: Env }>();
   app.use("*", async (c, next) => {
     c.set("rampProviderMaturity", SDP_RAMP_PROVIDER_MATURITY);
@@ -47,9 +52,10 @@ function buildApp() {
   });
   app.use("*", kvStoreMiddleware());
   app.use("*", unifiedAuthMiddleware());
-  app.use("*", projectContextMiddleware());
+  app.use("*", projectContextMiddleware(options));
   app.get("/probe", probe);
   app.get("/v1/payments/probe", probe);
+  app.on(["GET", "POST"], "/v1/earn/*", probe);
   app.get("/scope", (c) => c.json(currentClusterScope()));
   app.onError((error, c) => {
     if (error instanceof AppError) {
@@ -332,6 +338,43 @@ describe("projectContextMiddleware", () => {
       expect(await sandbox.json()).toEqual({
         projectId: TEST_PROJECT.id,
         projectEnvironment: "sandbox",
+      });
+    });
+
+    it("keeps Earn exits and reads open for a project whose environment the channel no longer runs Earn for", async () => {
+      providerMaturity.moduleEnvironmentMaturityOverride = {
+        module: "earn",
+        environment: "production",
+        stage: "experimental",
+      };
+      await setOrganizationSettings(entitled);
+      const betaDeployment: Env = { ...env, SDP_RELEASE_CHANNEL: "beta" };
+      const app = buildAppWithOptions({
+        allowExits: (c) => isEarnExitOrRead(c.req.method, c.req.path),
+      });
+      const headers = actor.headers(PRODUCTION_PROJECT_ID);
+
+      const read = await app.request("/v1/earn/vault-positions", { headers }, betaDeployment);
+      expect(read.status).toBe(200);
+      const exit = await app.request(
+        "/v1/earn/vault-withdrawals",
+        { method: "POST", headers },
+        betaDeployment
+      );
+      expect(exit.status).toBe(200);
+
+      const deposit = await app.request(
+        "/v1/earn/vault-deposits",
+        { method: "POST", headers },
+        betaDeployment
+      );
+      expect(deposit.status).toBe(403);
+      expect(await deposit.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message:
+            "The earn module is not available for production projects in this release channel.",
+        },
       });
     });
 
