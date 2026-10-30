@@ -1,7 +1,8 @@
 /**
  * Email through Iterable, which the Foundation sends its email with. Every SDP email goes through
- * one triggered campaign whose template only passes our fields through (`{{subject}}`, `{{body}}`,
- * `{{replyTo}}`), so what a reader sees is written and reviewed in this repository, not in Iterable.
+ * one triggered campaign whose template only passes our fields through: `{{subject}}`,
+ * `{{{bodyHtml}}}` for the HTML part, `{{{body}}}` for the plain-text part and `{{replyTo}}`. What a
+ * reader sees is written and reviewed in this repository, not in Iterable.
  */
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
@@ -30,9 +31,27 @@ export type IterableEmailConfig = z.infer<typeof iterableEmailConfigSchema>;
 export interface IterableEmail {
   to: string;
   subject: string;
-  /** Plain text: the template renders it escaped, so customer-supplied fields need no escaping. */
+  /** Plain text, customer-supplied fields included; the HTML part is escaped from it here. */
   body: string;
   replyTo?: string;
+}
+
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/**
+ * The HTML part of a plain-text body: every character HTML reads escaped, line breaks kept as
+ * `<br>`. The template renders it raw (`{{{bodyHtml}}}`), so this escape is the only one.
+ */
+export function plainTextToHtml(text: string): string {
+  return text
+    .replace(/[&<>"']/g, (character) => HTML_ESCAPES[character] ?? character)
+    .replace(/\r?\n/g, "<br>\n");
 }
 
 /**
@@ -68,7 +87,12 @@ export async function sendIterableEmail(env: Env, email: IterableEmail): Promise
       body: JSON.stringify({
         campaignId: config.campaignId,
         recipientEmail: email.to,
-        dataFields: { subject: email.subject, body: email.body, replyTo: email.replyTo },
+        dataFields: {
+          subject: email.subject,
+          body: email.body,
+          bodyHtml: plainTextToHtml(email.body),
+          replyTo: email.replyTo,
+        },
       }),
       timeoutMs: 10_000,
       maxBytes: 16_384,
