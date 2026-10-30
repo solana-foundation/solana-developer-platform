@@ -94,3 +94,81 @@ export async function sendMainnetAccessRequestEmail(
     replyTo: request.requester.email ?? undefined,
   });
 }
+
+export interface MainnetAccessCorrectionEmail {
+  /** The request as it stood before the correction, as its request email described it. */
+  request: MainnetAccessRequestEmail;
+  correction:
+    | { operation: "set-country"; countryCode: CountryCode; countryName: string }
+    | { operation: "reset" };
+  operator: string;
+  reason: string;
+  ticket: string;
+}
+
+/**
+ * The follow-up to a request email that is now out of date: an operator corrected the request's
+ * jurisdiction or reset it. It lands in the same inbox, so whoever would approve from the earlier
+ * email sees it first.
+ */
+export function mainnetAccessCorrectionEmailContent(
+  email: MainnetAccessCorrectionEmail
+): EmailContent {
+  const { request, correction } = email;
+  const requestedAt = `${REQUESTED_AT_FORMAT.format(new Date(request.requestedAt))} UTC`;
+  const reset = correction.operation === "reset";
+  return {
+    preheader: reset
+      ? `${request.organizationName}'s mainnet access request was reset. Don't approve from the earlier email.`
+      : `${request.organizationName}'s jurisdiction was corrected. The earlier email is out of date.`,
+    heading: reset ? "Mainnet access request reset" : "Mainnet access request corrected",
+    summary: reset
+      ? `The request ${request.organizationName} sent on ${requestedAt} no longer stands. Don't approve the organization from the earlier email; a new request sends a new one.`
+      : `An operator corrected the jurisdiction on the request ${request.organizationName} sent on ${requestedAt}. Review the request with the corrected jurisdiction before approving.`,
+    details: [
+      { label: "Organization", value: request.organizationName },
+      { label: "Organization ID", value: request.organizationId },
+      { label: "Requested at", value: requestedAt },
+      {
+        label: reset ? "Jurisdiction" : "Previous jurisdiction",
+        value: `${request.countryName} (${request.countryCode}), self-declared`,
+      },
+      ...(correction.operation === "set-country"
+        ? [
+            {
+              label: "Corrected jurisdiction",
+              value: `${correction.countryName} (${correction.countryCode})`,
+            },
+          ]
+        : []),
+      { label: "Terms", value: `Version ${request.termsVersion}` },
+      { label: "Changed by", value: email.operator },
+      { label: "Reason", value: email.reason },
+      { label: "Ticket", value: email.ticket },
+    ],
+    note: reset
+      ? "The organization's request is cleared, so it can ask again."
+      : "The request is otherwise unchanged and still awaits approval in Clerk.",
+  };
+}
+
+/**
+ * Tells the operator address that an earlier request email is out of date.
+ *
+ * @throws PROVIDER_UNAVAILABLE when Iterable does not accept it; SERVICE_UNAVAILABLE when unconfigured.
+ */
+export async function sendMainnetAccessCorrectionEmail(
+  env: Env,
+  email: MainnetAccessCorrectionEmail
+): Promise<void> {
+  const config = mainnetAccessEmailConfig(env);
+  if (!config) {
+    throw serviceUnavailable("Mainnet access emails are not configured on this deployment");
+  }
+  const what = email.correction.operation === "reset" ? "reset" : "corrected";
+  await sendIterableEmail(env, {
+    to: config.to,
+    subject: `Mainnet access request ${what}: ${email.request.organizationName}`,
+    content: mainnetAccessCorrectionEmailContent(email),
+  });
+}

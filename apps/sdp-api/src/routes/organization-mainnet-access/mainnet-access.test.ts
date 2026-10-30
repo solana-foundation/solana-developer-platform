@@ -457,7 +457,61 @@ describe("Organization mainnet access (HOO-2427)", () => {
       });
       expect((await (await get()).json()).data.state).toBe("not_requested");
       expect((await post({ ...SUBMISSION, countryCode: "US" })).status).toBe(201);
-      expect(sentEmails()).toHaveLength(2);
+      expect(sentEmails().map((email) => email.fields.subject)).toEqual([
+        `Mainnet access request: ${TEST_ORG.name}`,
+        `Mainnet access request reset: ${TEST_ORG.name}`,
+        `Mainnet access request: ${TEST_ORG.name}`,
+      ]);
+    });
+
+    it("tells the operator address the earlier request email is out of date", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      await expect(
+        correctMainnetAccess(env, {
+          organizationId: ORGANIZATION_ID,
+          operation: "set-country",
+          countryCode: "GB",
+          ...operator,
+        })
+      ).resolves.toMatchObject({ operatorEmail: "sent", request: { country_code: "GB" } });
+      const correction = sentEmails().at(-1);
+      expect(correction?.body).toMatchObject({ recipientEmail: "mainnet@example.org" });
+      expect(correction?.fields.subject).toBe(`Mainnet access request corrected: ${TEST_ORG.name}`);
+      for (const line of [
+        "Previous jurisdiction: Singapore (SG), self-declared",
+        "Corrected jurisdiction: United Kingdom (GB)",
+        "Changed by: ops@example.org",
+        "Ticket: HOO-2427",
+      ]) {
+        expect(String(correction?.fields.body)).toContain(line);
+      }
+    });
+
+    it("corrects without email on a deployment that has none", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      env.SDP_OPERATOR_EMAIL = undefined;
+      await expect(
+        correctMainnetAccess(env, {
+          organizationId: ORGANIZATION_ID,
+          operation: "reset",
+          ...operator,
+        })
+      ).resolves.toEqual({ request: null, operatorEmail: "not_configured" });
+      expect(sentEmails()).toHaveLength(1);
+    });
+
+    it("keeps the correction and says so when the operator email fails", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      const restore = failIterable();
+      await expect(
+        correctMainnetAccess(env, {
+          organizationId: ORGANIZATION_ID,
+          operation: "reset",
+          ...operator,
+        })
+      ).rejects.toThrow("The reset is saved, but emailing the operator address failed");
+      restore();
+      expect(await storedRow()).toBeNull();
     });
 
     it("keeps who accepted which terms, and when, in the audit entry of a reset", async () => {
