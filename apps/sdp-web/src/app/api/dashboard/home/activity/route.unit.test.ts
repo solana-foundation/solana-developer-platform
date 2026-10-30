@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
 }));
 
-vi.mock("@/flags/project-modules", () => ({ issuance: mocks.issuance }));
+vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
 vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,

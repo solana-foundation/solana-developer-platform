@@ -12,6 +12,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -117,7 +118,7 @@ function wrapper({ children }: { children: ReactNode }) {
           ramps: true,
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
-        projects={[]}
+        projects={[SANDBOX_PROJECT]}
       >
         <PaymentsDemoProvider value={demoMode}>
           <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>

@@ -54,7 +54,10 @@ vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/sdp-api", () => sdpApi);
 vi.mock("@/lib/sdp-auth", () => sdpAuth);
-vi.mock("@/flags/dashboard", () => dashboardFlags);
+vi.mock("@/flags/dashboard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/flags/dashboard")>()),
+  getDashboardFlags: dashboardFlags.getDashboardFlags,
+}));
 vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStatus: async () => null }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   DashboardWorkspaceProvider: dashboardShell.DashboardWorkspaceProvider,

@@ -21,7 +21,6 @@ import {
   availableCustodyProviders,
   availableRampProviders,
 } from "@/lib/provider-availability";
-import * as sdpApi from "@/lib/sdp-api";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
@@ -79,13 +78,11 @@ function capabilityChips(markup: string): string[] {
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  vi.restoreAllMocks();
 });
 
 beforeEach(() => {
   resetRequestProject();
   setPageRequest(`${PROJECT_PATH}/integrations/privy`);
-  vi.spyOn(sdpApi, "requestProjectEnvironment").mockResolvedValue(SANDBOX_PROJECT.environment);
 });
 
 describe("IntegrationDetailView", () => {

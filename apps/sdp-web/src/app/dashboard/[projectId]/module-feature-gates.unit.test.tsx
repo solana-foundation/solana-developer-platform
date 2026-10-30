@@ -7,11 +7,11 @@ const flagMocks = vi.hoisted(() => ({
 }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
 const channelMocks = vi.hoisted(() => ({
-  isModuleInProjectReleaseChannel: vi.fn<(module: SdpModule) => Promise<boolean>>(),
+  isModuleInDeploymentReleaseChannel: vi.fn<(module: SdpModule) => boolean>(),
 }));
 
-vi.mock("@/flags/project-modules", () => flagMocks);
-vi.mock("@/flags/project-release-channel", () => channelMocks);
+vi.mock("@/flags", () => flagMocks);
+vi.mock("@/flags/release-channel", () => channelMocks);
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import CustodyLayout from "./custody/layout";
@@ -23,24 +23,24 @@ import WalletsLayout from "./wallets/layout";
 
 describe("dashboard module feature gates", () => {
   it("404s every Custody route when the release channel leaves Custody out", async () => {
-    channelMocks.isModuleInProjectReleaseChannel.mockImplementation(
-      async (module) => module !== "custody"
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "custody"
     );
 
     await expect(CustodyLayout({ children: <div>Custody</div> })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it("404s every Wallets alias route when the release channel leaves Custody out", async () => {
-    channelMocks.isModuleInProjectReleaseChannel.mockImplementation(
-      async (module) => module !== "custody"
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "custody"
     );
 
     await expect(WalletsLayout({ children: <div>Wallets</div> })).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it("404s the wallet-derived Tokens route when the release channel leaves Custody out", async () => {
-    channelMocks.isModuleInProjectReleaseChannel.mockImplementation(
-      async (module) => module !== "custody"
+    channelMocks.isModuleInDeploymentReleaseChannel.mockImplementation(
+      (module) => module !== "custody"
     );
 
     await expect(TokensLayout({ children: <div>Tokens</div> })).rejects.toThrow("NEXT_NOT_FOUND");

@@ -152,7 +152,6 @@ vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: ({ path }: { path: string }) => harness.request(path),
   getSelectedProjectId: async () => "demo_prj",
   createSdpApiClient: async () => harness.apiClient,
-  requestProjectEnvironment: async () => "sandbox",
 }));
 vi.mock("@/lib/request-tracing", () => ({
   createTimedTrace: () => harness.trace,

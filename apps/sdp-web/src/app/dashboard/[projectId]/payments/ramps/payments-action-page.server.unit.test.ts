@@ -31,7 +31,7 @@ vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
 vi.mock("@/flags/ramps", () => ({
   getEnabledRampProviders: mocks.getEnabledRampProviders,
 }));
-vi.mock("@/flags/project-modules", () => ({ privateChannels: mocks.privateChannels }));
+vi.mock("@/flags", () => ({ privateChannels: mocks.privateChannels }));
 vi.mock(
   "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data",
   () => ({

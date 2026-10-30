@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
@@ -91,7 +92,7 @@ function wrapper({ children }: { children: ReactNode }) {
           ramps: true,
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
-        projects={[]}
+        projects={[SANDBOX_PROJECT]}
       >
         {children}
       </DashboardWorkspaceProvider>
