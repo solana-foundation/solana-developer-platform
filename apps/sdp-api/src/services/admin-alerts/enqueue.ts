@@ -13,9 +13,11 @@
  * Each alert is written once per source (`source_key` is unique) with a delivery row per admin,
  * in the transaction that moves its cursor; `deliver.ts` sends them after that commits.
  */
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { buildInClause, parsePostgresJson } from "@/db/postgres-utils";
+import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import type {
   AdminAlertDetails,
@@ -56,8 +58,8 @@ interface ConfigAlert {
   /** The member the event is about, named in the email. */
   subjectUserId?: string;
   subject?: string | null;
-  previousRole?: string;
-  role?: string;
+  previousRole?: OrganizationRole;
+  role?: OrganizationRole;
   enabled?: boolean;
 }
 
@@ -68,8 +70,8 @@ const auditMetadataSchema = z
     action: z.string().optional(),
     projectId: z.string().optional(),
     userId: z.string().optional(),
-    role: z.string().optional(),
-    previousRole: z.string().optional(),
+    role: z.enum(ORGANIZATION_ROLES).optional(),
+    previousRole: z.enum(ORGANIZATION_ROLES).optional(),
     name: z.string().optional(),
     provider: z.string().nullable().optional(),
     enabled: z.boolean().optional(),
@@ -96,10 +98,26 @@ const ALERTING_AUDIT_ACTIONS = [
   "deactivate",
 ] as const;
 
-function parseAuditMetadata(raw: string | null): AuditMetadata {
-  if (!raw) return {};
-  const parsed = auditMetadataSchema.safeParse(parsePostgresJson<unknown>(raw));
-  return parsed.success ? parsed.data : {};
+/**
+ * An entry's metadata, or null when it is not what its writer is meant to record. That is logged
+ * as an error for the entry rather than thrown: the cursor has to move past it, or one bad entry
+ * would stop every organization's alerts.
+ */
+function parseAuditMetadata(row: AuditRow): AuditMetadata | null {
+  if (!row.metadata) return {};
+  const parsed = auditMetadataSchema.safeParse(parsePostgresJson<unknown>(row.metadata));
+  if (parsed.success) return parsed.data;
+  getLogger().error(
+    {
+      event: "sdp_admin_alert_audit_entry_unreadable",
+      ledgerSequence: row.ledger_sequence,
+      action: row.action,
+      resourceType: row.resource_type,
+      issues: parsed.error.issues,
+    },
+    "an audit entry's metadata does not parse, so it raised no admin alert"
+  );
+  return null;
 }
 
 /**
@@ -108,7 +126,8 @@ function parseAuditMetadata(raw: string | null): AuditMetadata {
  * only as their successful outcome, never as the intent that admitted them.
  */
 export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
-  const metadata = parseAuditMetadata(row.metadata);
+  const metadata = parseAuditMetadata(row);
+  if (!metadata) return [];
   const projectId = metadata.projectId ?? null;
   const key = `${row.action}:${row.resource_type}`;
   const outcome = metadata.auditPhase === "outcome";
@@ -216,6 +235,18 @@ async function organizationAlerting(db: DatabaseExecutor, organizationId: string
     : null;
 }
 
+/** The table whose row names the project of an entry's resource, for the resources that have one. */
+function projectOwnerTable(resourceType: string): "api_keys" | "custody_connections" | null {
+  switch (resourceType) {
+    case "api_key":
+      return "api_keys";
+    case "custody_connection":
+      return "custody_connections";
+    default:
+      return null;
+  }
+}
+
 /**
  * The project an entry is about when its metadata does not name it: an API key's or a custody
  * connection's own row says.
@@ -226,12 +257,7 @@ async function resolveProjectId(
   alert: ConfigAlert
 ): Promise<string | null> {
   if (alert.projectId || !row.resource_id) return alert.projectId;
-  const table =
-    row.resource_type === "api_key"
-      ? "api_keys"
-      : row.resource_type === "custody_connection"
-        ? "custody_connections"
-        : null;
+  const table = projectOwnerTable(row.resource_type);
   if (!table) return null;
   const owner = await db.queryOne<{ project_id: string | null }>(
     `SELECT project_id FROM ${table} WHERE id = ? AND organization_id = ?`,
@@ -366,9 +392,9 @@ async function writeConfigAlerts(tx: DatabaseExecutor, row: AuditRow): Promise<n
       subject: alert.subjectUserId
         ? await userLabel(tx, alert.subjectUserId)
         : (alert.subject ?? null),
-      ...(alert.previousRole !== undefined ? { previousRole: alert.previousRole } : {}),
-      ...(alert.role !== undefined ? { role: alert.role } : {}),
-      ...(alert.enabled !== undefined ? { enabled: alert.enabled } : {}),
+      previousRole: alert.previousRole,
+      role: alert.role,
+      enabled: alert.enabled,
     };
     const inserted = await insertAlert(
       tx,
@@ -440,7 +466,10 @@ interface MoneyCountRow {
 
 /**
  * Counts the window's movements per project and kind. A transfer's kind follows the dashboard's
- * (`unified_transactions`); batch chunks are left to the batch row.
+ * (`unified_transactions`); batch chunks are left to the batch row. A transfer that failed
+ * without a signature never reached the chain, and a failed batch none of whose chunks did moved
+ * nothing, so neither counts. A movement counts when it starts, not when it settles: the email
+ * is the early signal of a key moving money, and the dashboard shows how each one ended.
  */
 async function moneyCounts(
   db: DatabaseExecutor,
@@ -463,10 +492,15 @@ async function moneyCounts(
          FROM payment_transfers pt
         WHERE pt.created_at >= ? AND pt.created_at < ?
           AND pt.project_id IS NOT NULL AND pt.type <> 'transfer_batch'
+          AND NOT (pt.status = 'failed' AND pt.signature IS NULL)
        UNION ALL
        SELECT b.organization_id, b.project_id, 'batches' AS kind
          FROM payment_transfer_batches b
         WHERE b.created_at >= ? AND b.created_at < ?
+          AND NOT (b.status = 'failed' AND NOT EXISTS (
+                SELECT 1 FROM payment_transfer_recipients r
+                  JOIN payment_transfers chunk ON chunk.id = r.transfer_id
+                 WHERE r.batch_id = b.id AND chunk.signature IS NOT NULL))
      ) movements
      GROUP BY organization_id, project_id, kind`,
     [windowStart, windowEnd, windowStart, windowEnd]

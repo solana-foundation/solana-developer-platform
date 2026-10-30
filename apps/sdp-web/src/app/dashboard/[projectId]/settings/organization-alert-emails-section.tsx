@@ -1,6 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { loadOrganizationAlertEmails } from "./organization-access-actions";
+import {
+  loadOrganizationAlertEmails,
+  saveOrganizationAlertEmailsAction,
+} from "./organization-access-actions";
 import { OrganizationAlertEmailsSwitch } from "./organization-alert-emails-switch";
 
 /**
@@ -18,7 +21,10 @@ export async function OrganizationAlertEmailsSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         {alertEmails.ok ? (
-          <OrganizationAlertEmailsSwitch initialEnabled={alertEmails.enabled} />
+          <OrganizationAlertEmailsSwitch
+            initialEnabled={alertEmails.enabled}
+            save={saveOrganizationAlertEmailsAction}
+          />
         ) : (
           <p className="text-sm text-destructive" role="alert">
             {t("Shared.organizationAlertEmails.loadFailed", { error: alertEmails.error })}

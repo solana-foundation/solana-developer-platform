@@ -4,9 +4,16 @@ import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
-import { saveOrganizationAlertEmailsAction } from "./organization-access-actions";
+import type { saveOrganizationAlertEmailsAction } from "./organization-access-actions";
 
-export function OrganizationAlertEmailsSwitch({ initialEnabled }: { initialEnabled: boolean }) {
+/** The save is passed in by the server card, so tests hand it a stand-in through the same prop. */
+export function OrganizationAlertEmailsSwitch({
+  initialEnabled,
+  save: saveSetting,
+}: {
+  initialEnabled: boolean;
+  save: typeof saveOrganizationAlertEmailsAction;
+}) {
   const t = useTranslations();
   const [enabled, setEnabled] = useState(initialEnabled);
   // One key per intended value: a retried save repeats it, the other value gets a new one.
@@ -18,7 +25,7 @@ export function OrganizationAlertEmailsSwitch({ initialEnabled }: { initialEnabl
       if (pendingSave.current?.enabled !== next) {
         pendingSave.current = { enabled: next, key: crypto.randomUUID() };
       }
-      const result = await saveOrganizationAlertEmailsAction(next, pendingSave.current.key);
+      const result = await saveSetting(next, pendingSave.current.key);
       if (!result.ok) {
         toast.error(t("Shared.organizationAlertEmails.saveFailed", { error: result.error }));
         return;

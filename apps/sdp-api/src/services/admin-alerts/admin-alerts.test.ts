@@ -119,18 +119,20 @@ async function insertTransfer(input: {
   createdAt: string;
   type?: string;
   direction?: string;
+  status?: string;
 }) {
   await asWorker(() =>
     getDb(env).execute(
       `INSERT INTO payment_transfers (id, organization_id, project_id, wallet_id, source_address,
          destination_address, token, amount, type, direction, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'wal_1', 'src', 'dst', 'USDC', '1000000', ?, ?, 'processing', ?, ?)`,
+       VALUES (?, ?, ?, 'wal_1', 'src', 'dst', 'USDC', '1000000', ?, ?, ?, ?, ?)`,
       [
         input.id,
         ORGANIZATION_ID,
         input.projectId,
         input.type ?? "transfer",
         input.direction ?? "outbound",
+        input.status ?? "processing",
         input.createdAt,
         input.createdAt,
       ]
@@ -138,13 +140,18 @@ async function insertTransfer(input: {
   );
 }
 
-async function insertBatch(id: string, projectId: string, createdAt: string) {
+async function insertBatch(
+  id: string,
+  projectId: string,
+  createdAt: string,
+  status = "processing"
+) {
   await asWorker(() =>
     getDb(env).execute(
       `INSERT INTO payment_transfer_batches (id, organization_id, project_id, source_wallet_id,
          source_address, token, status, recipient_count, created_at, updated_at)
-       VALUES (?, ?, ?, 'cwlt_1', 'src', 'USDC', 'processing', 250, ?, ?)`,
-      [id, ORGANIZATION_ID, projectId, createdAt, createdAt]
+       VALUES (?, ?, ?, 'cwlt_1', 'src', 'USDC', ?, 250, ?, ?)`,
+      [id, ORGANIZATION_ID, projectId, status, createdAt, createdAt]
     )
   );
 }
@@ -179,6 +186,49 @@ async function insertCollectionAttempt(transferId: string, projectId: string, cr
     );
   });
 }
+
+/** One audit entry per configuration event, as its writer records it, and the subject it emails. */
+const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, string][] = [
+  [
+    "an invitation",
+    {
+      action: "invite",
+      resourceType: "invitation",
+      metadata: { email: "x@y.z", role: "admin" },
+    },
+    "[SDP] Member invited in Acme Pay",
+  ],
+  [
+    "a role change",
+    {
+      action: "update",
+      resourceType: "member",
+      resourceId: `mem_${MEMBER.id}`,
+      metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
+    },
+    "[SDP] Member role changed in Acme Pay",
+  ],
+  [
+    "a removal",
+    {
+      action: "delete",
+      resourceType: "member",
+      resourceId: `mem_${MEMBER.id}`,
+      metadata: { userId: MEMBER.id, left: false },
+    },
+    "[SDP] Member removed in Acme Pay",
+  ],
+  [
+    "a mainnet entitlement change",
+    {
+      action: "update",
+      resourceType: "organization",
+      resourceId: ORGANIZATION_ID,
+      metadata: { event: "production_entitlement_changed", enabled: false, source: "clerk" },
+    },
+    "[SDP] Mainnet disabled in Acme Pay",
+  ],
+];
 
 describe("admin alert emails (HOO-2299)", () => {
   // A window well in the past, aligned to the digest's windows.
@@ -297,48 +347,8 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(sentEmails()).toHaveLength(0);
     });
 
-    it.each([
-      [
-        "an invitation",
-        {
-          action: "invite",
-          resourceType: "invitation",
-          metadata: { email: "x@y.z", role: "admin" },
-        },
-        "[SDP] Member invited in Acme Pay",
-      ],
-      [
-        "a role change",
-        {
-          action: "update",
-          resourceType: "member",
-          resourceId: `mem_${MEMBER.id}`,
-          metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
-        },
-        "[SDP] Member role changed in Acme Pay",
-      ],
-      [
-        "a removal",
-        {
-          action: "delete",
-          resourceType: "member",
-          resourceId: `mem_${MEMBER.id}`,
-          metadata: { userId: MEMBER.id, left: false },
-        },
-        "[SDP] Member removed in Acme Pay",
-      ],
-      [
-        "a mainnet entitlement change",
-        {
-          action: "update",
-          resourceType: "organization",
-          resourceId: ORGANIZATION_ID,
-          metadata: { event: "production_entitlement_changed", enabled: false, source: "clerk" },
-        },
-        "[SDP] Mainnet disabled in Acme Pay",
-      ],
-    ] as const)("emails each admin once for %s", async (_, entry, subject) => {
-      await audit({ ...entry, status: "success" } as Omit<SystemAuditLogEntry, "organizationId">);
+    it.each(CONFIG_EVENTS)("emails each admin once for %s", async (_, entry, subject) => {
+      await audit({ ...entry, status: "success" });
       await runWorker();
       const emails = sentEmails();
       expect(emails).toHaveLength(2);
@@ -383,6 +393,38 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(email?.body).toContain("Organization: Acme <b>Pay</b> & Co");
       expect(email?.bodyHtml).toContain("Organization: Acme &lt;b&gt;Pay&lt;/b&gt; &amp; Co<br>");
       expect(email?.bodyHtml).not.toContain("<b>");
+    });
+
+    it("does not send a queued alert once alert emails are turned off", async () => {
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      await asWorker(() => enqueueConfigAlerts(env));
+      await asWorker(() =>
+        getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+          JSON.stringify({ enableProductionProject: true, alertEmails: false }),
+          ORGANIZATION_ID,
+        ])
+      );
+      expect(await asWorker(() => deliverAdminAlerts(env))).toMatchObject({
+        sent: 0,
+        suppressed: 2,
+      });
+      expect(sentEmails()).toHaveLength(0);
+    });
+
+    it("does not send a queued alert to someone who is no longer an admin", async () => {
+      await audit({ action: "invite", resourceType: "invitation", metadata: { role: "member" } });
+      await asWorker(() => enqueueConfigAlerts(env));
+      await asWorker(() =>
+        getDb(env).execute(
+          "UPDATE organization_members SET role = 'member' WHERE organization_id = ? AND user_id = ?",
+          [ORGANIZATION_ID, OTHER_ADMIN.id]
+        )
+      );
+      expect(await asWorker(() => deliverAdminAlerts(env))).toMatchObject({
+        sent: 1,
+        suppressed: 1,
+      });
+      expect(sentEmails().map((email) => email.to)).toEqual([TEST_USER.email]);
     });
 
     it("does not email an admin twice when a run repeats", async () => {
@@ -489,15 +531,27 @@ describe("admin alert emails (HOO-2299)", () => {
         [OTHER_ADMIN.email, TEST_USER.email].sort()
       );
       const [email] = emails;
-      expect(email?.subject).toBe("[SDP] Money moved in Acme Pay");
+      expect(email?.subject).toBe("[SDP] Money movement in Acme Pay");
       expect(email?.body).toContain(
-        "Money moved: 2 transfers, 1 batch payout, 1 recurring collection, 1 deposit."
+        "New money movement: 2 transfers, 1 batch payout, 1 recurring collection, 1 deposit."
       );
       expect(email?.body).toContain(
         `${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/payments/transactions`
       );
       expect(email?.body).not.toContain("1000000");
       expect(email?.body).not.toContain("dst");
+    });
+
+    it("does not count a payment that failed before reaching the chain", async () => {
+      await insertTransfer({
+        id: "ptx_failed",
+        projectId: PRODUCTION_PROJECT,
+        createdAt: inWindow,
+        status: "failed",
+      });
+      await insertBatch("pbat_failed", PRODUCTION_PROJECT, inWindow, "failed");
+      await runWorker(afterWindow);
+      expect(sentEmails()).toHaveLength(0);
     });
 
     it("writes the digest once, however many runs follow", async () => {
@@ -570,7 +624,7 @@ describe("admin alert emails (HOO-2299)", () => {
       await asWorker(() => deliverAdminAlerts(env));
       const emails = sentEmails();
       expect(emails).toHaveLength(2);
-      expect(emails[0]?.body).toContain("Money moved: 1 transfer.");
+      expect(emails[0]?.body).toContain("New money movement: 1 transfer.");
     });
   });
 
@@ -597,6 +651,8 @@ describe("admin alert emails (HOO-2299)", () => {
       occurredAt: "2026-10-30T10:15:00.000Z",
       dashboardOrigin: DASHBOARD,
     });
-    expect(email.body.split("\n")[0]).toBe("Money moved: 1 transfer, 2 recurring collections.");
+    expect(email.body.split("\n")[0]).toBe(
+      "New money movement: 1 transfer, 2 recurring collections."
+    );
   });
 });

@@ -1,33 +1,34 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-
-const mocks = vi.hoisted(() => ({
-  save: vi.fn(),
-  toast: { success: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock("./organization-access-actions", () => ({
-  saveOrganizationAlertEmailsAction: mocks.save,
-}));
-vi.mock("sonner", () => ({ toast: mocks.toast }));
-
+import type { saveOrganizationAlertEmailsAction } from "./organization-access-actions";
 import { OrganizationAlertEmailsSwitch } from "./organization-alert-emails-switch";
+
+const mocks = {
+  save: vi.fn<typeof saveOrganizationAlertEmailsAction>(),
+  toast: {
+    success: vi.spyOn(toast, "success"),
+    error: vi.spyOn(toast, "error"),
+  },
+};
 
 function renderSwitch(initialEnabled: boolean) {
   render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <OrganizationAlertEmailsSwitch initialEnabled={initialEnabled} />
+      <OrganizationAlertEmailsSwitch initialEnabled={initialEnabled} save={mocks.save} />
     </I18nProvider>
   );
   return screen.getByRole("switch", { name: "Send alert emails" });
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mocks.save.mockReset();
+  mocks.toast.success.mockClear();
+  mocks.toast.error.mockClear();
 });
 
 afterEach(() => {

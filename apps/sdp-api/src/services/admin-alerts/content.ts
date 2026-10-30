@@ -3,6 +3,7 @@
  * organization and project, who did it, and a dashboard link. It never carries an address, an
  * amount or a secret; the dashboard shows those to someone signed in.
  */
+import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 
 export const CONFIG_ALERT_KINDS = [
@@ -48,8 +49,8 @@ export const adminAlertDetailsSchema = z.object({
   actor: z.string().nullable(),
   /** What it was done to: the member, key or wallet, when the event names one. */
   subject: z.string().nullable(),
-  previousRole: z.string().optional(),
-  role: z.string().optional(),
+  previousRole: z.enum(ORGANIZATION_ROLES).optional(),
+  role: z.enum(ORGANIZATION_ROLES).optional(),
   enabled: z.boolean().optional(),
   counts: moneyMovementCountsSchema.optional(),
   windowStart: z.string().optional(),
@@ -63,24 +64,20 @@ export interface AdminAlertEmailContent {
   body: string;
 }
 
-const MONEY_COUNT_LABELS: Record<keyof MoneyMovementCounts, [string, string]> = {
-  transfers: ["transfer", "transfers"],
-  batches: ["batch payout", "batch payouts"],
-  recurringCollections: ["recurring collection", "recurring collections"],
-  paymentRequestSettlements: ["payment request settlement", "payment request settlements"],
-  deposits: ["deposit", "deposits"],
-  offramps: ["off-ramp", "off-ramps"],
-  onramps: ["on-ramp", "on-ramps"],
-};
-
-function plural(count: number, [one, many]: [string, string]): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
+/** Each count's label, in the order an email lists them. */
+const MONEY_COUNT_LABELS = [
+  ["transfers", "transfer", "transfers"],
+  ["batches", "batch payout", "batch payouts"],
+  ["recurringCollections", "recurring collection", "recurring collections"],
+  ["paymentRequestSettlements", "payment request settlement", "payment request settlements"],
+  ["deposits", "deposit", "deposits"],
+  ["offramps", "off-ramp", "off-ramps"],
+  ["onramps", "on-ramp", "on-ramps"],
+] as const satisfies readonly (readonly [keyof MoneyMovementCounts, string, string])[];
 
 function moneyMovementSummary(counts: MoneyMovementCounts): string {
-  return (Object.keys(MONEY_COUNT_LABELS) as (keyof MoneyMovementCounts)[])
-    .filter((key) => counts[key] > 0)
-    .map((key) => plural(counts[key], MONEY_COUNT_LABELS[key]))
+  return MONEY_COUNT_LABELS.filter(([key]) => counts[key] > 0)
+    .map(([key, one, many]) => `${counts[key]} ${counts[key] === 1 ? one : many}`)
     .join(", ");
 }
 
@@ -157,8 +154,8 @@ function describe(
     case "money_movement": {
       const summary = details.counts ? moneyMovementSummary(details.counts) : "";
       return {
-        headline: "Money moved",
-        sentence: `Money moved: ${summary || "see the dashboard"}.`,
+        headline: "Money movement",
+        sentence: `New money movement: ${summary || "see the dashboard"}.`,
       };
     }
     default: {
