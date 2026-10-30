@@ -401,7 +401,11 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
           WHERE environment = ? AND wallet_address = ?`,
         [environment, walletAddress]
       );
-      return Number(row?.revocations ?? 0);
+      // COUNT(*) always answers one row.
+      if (!row) {
+        throw new Error("Subscription authority revocation count returned no row");
+      }
+      return Number(row.revocations);
     },
 
     async hasRevocationHolding({ environment, walletAddress }) {
