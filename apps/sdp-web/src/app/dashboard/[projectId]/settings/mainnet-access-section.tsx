@@ -25,8 +25,8 @@ export async function MainnetAccessSection() {
     getRequestLocale(),
     loadMainnetAccess(),
   ]);
-  const formatDate = (iso: string) =>
-    new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(iso));
+  const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
+  const formatDate = (iso: string) => dateFormat.format(new Date(iso));
 
   return (
     <Card id="mainnet-access" className="scroll-mt-6">

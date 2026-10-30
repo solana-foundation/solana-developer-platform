@@ -112,16 +112,7 @@ function MainnetAccessRequestModal({
       ariaLabel={t("Shared.mainnetAccess.modalTitle")}
     >
       {step === "sent" ? (
-        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-          <CheckCircle2Icon aria-hidden className="size-8 text-success" />
-          <h2 className="text-lg font-medium text-primary">
-            {t("Shared.mainnetAccess.sentTitle")}
-          </h2>
-          <p className="max-w-sm text-sm text-secondary">{t("Shared.mainnetAccess.sentBody")}</p>
-          <Button type="button" className="mt-3" onClick={close}>
-            {t("Shared.mainnetAccess.done")}
-          </Button>
-        </div>
+        <SentPanel onDone={close} />
       ) : (
         <div className="flex flex-col gap-5 p-6">
           <div className="space-y-4 pr-8">
@@ -160,46 +151,84 @@ function MainnetAccessRequestModal({
             </p>
           ) : null}
 
-          <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
-            {step === "jurisdiction" ? (
-              <>
-                <Button type="button" variant="secondary" onClick={onClose}>
-                  {t("Shared.mainnetAccess.cancel")}
-                </Button>
-                <Button type="button" disabled={!countryCode} onClick={() => setStep("terms")}>
-                  {t("Shared.mainnetAccess.continue")}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={submitting}
-                  onClick={() => setStep("jurisdiction")}
-                >
-                  {t("Shared.mainnetAccess.back")}
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!accepted || submitting}
-                  onClick={submit}
-                  iconLeft={
-                    submitting ? (
-                      <Loader2Icon aria-hidden className="size-4 animate-spin" />
-                    ) : undefined
-                  }
-                >
-                  {submitting
-                    ? t("Shared.mainnetAccess.submitting")
-                    : t("Shared.mainnetAccess.submit")}
-                </Button>
-              </>
-            )}
-          </div>
+          <RequestFooter
+            step={step}
+            canContinue={countryCode !== null}
+            canSubmit={accepted}
+            submitting={submitting}
+            onCancel={onClose}
+            onContinue={() => setStep("terms")}
+            onBack={() => setStep("jurisdiction")}
+            onSubmit={submit}
+          />
         </div>
       )}
     </Modal>
+  );
+}
+
+function SentPanel({ onDone }: { onDone: () => void }) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+      <CheckCircle2Icon aria-hidden className="size-8 text-success" />
+      <h2 className="text-lg font-medium text-primary">{t("Shared.mainnetAccess.sentTitle")}</h2>
+      <p className="max-w-sm text-sm text-secondary">{t("Shared.mainnetAccess.sentBody")}</p>
+      <Button type="button" className="mt-3" onClick={onDone}>
+        {t("Shared.mainnetAccess.done")}
+      </Button>
+    </div>
+  );
+}
+
+function RequestFooter({
+  step,
+  canContinue,
+  canSubmit,
+  submitting,
+  onCancel,
+  onContinue,
+  onBack,
+  onSubmit,
+}: {
+  step: Exclude<Step, "sent">;
+  canContinue: boolean;
+  canSubmit: boolean;
+  submitting: boolean;
+  onCancel: () => void;
+  onContinue: () => void;
+  onBack: () => void;
+  onSubmit: () => void;
+}) {
+  const t = useTranslations();
+  if (step === "jurisdiction") {
+    return (
+      <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {t("Shared.mainnetAccess.cancel")}
+        </Button>
+        <Button type="button" disabled={!canContinue} onClick={onContinue}>
+          {t("Shared.mainnetAccess.continue")}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
+      <Button type="button" variant="secondary" disabled={submitting} onClick={onBack}>
+        {t("Shared.mainnetAccess.back")}
+      </Button>
+      <Button
+        type="button"
+        disabled={!canSubmit || submitting}
+        onClick={onSubmit}
+        iconLeft={
+          submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
+        }
+      >
+        {submitting ? t("Shared.mainnetAccess.submitting") : t("Shared.mainnetAccess.submit")}
+      </Button>
+    </div>
   );
 }
 
