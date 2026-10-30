@@ -45,6 +45,7 @@ import {
   isCustodyProviderAvailable,
   isEarnEnabled,
   isModuleAvailable,
+  isModuleAvailableForEnvironment,
   isRampProviderAvailable,
 } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
@@ -1092,7 +1093,12 @@ function decideProjectProvider(
       });
     case "compliance":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "compliance", rampProviderMaturity),
+        inReleaseChannel: isModuleAvailableForEnvironment(
+          env,
+          "compliance",
+          facts.environment,
+          rampProviderMaturity
+        ),
         // Compliance has no surfacing table: every compliance provider is offered.
         offered: true,
         entry: facts.availability.providers.compliance[request.provider],
@@ -1100,7 +1106,9 @@ function decideProjectProvider(
       });
     case "earn":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isEarnEnabled(env),
+        inReleaseChannel:
+          isEarnEnabled(env) &&
+          isModuleAvailableForEnvironment(env, "earn", facts.environment, rampProviderMaturity),
         offered: isEarnRequestOffered(request),
         entry: facts.availability.providers.earn[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),

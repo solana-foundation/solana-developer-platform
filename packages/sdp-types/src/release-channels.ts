@@ -51,7 +51,7 @@ export type SdpEnvironmentMaturity = Readonly<Record<SdpEnvironment, SdpReleaseC
  * environment's projects when that environment's maturity is at or above the channel's
  * level, so each channel contains the more mature ones by construction. Deployment-wide
  * readers (jobs, flags, the public surface) count a module in when either environment
- * is; `projectContextMiddleware({ module })` refuses a project whose environment is not.
+ * is; the API's project context refuses a project whose environment is not.
  * Promoting a module, or one environment of it, is a one-line change here.
  *
  * Three modules have no maturity of their own:
@@ -236,19 +236,8 @@ export function isModuleInReleaseChannelForEnvironment(
     return isModuleInReleaseChannel(releaseChannel, module, rampProviderMaturity);
   }
   if (module === "markets") {
-    return (
-      isModuleInReleaseChannelForEnvironment(
-        releaseChannel,
-        "earn",
-        environment,
-        rampProviderMaturity
-      ) ||
-      isModuleInReleaseChannelForEnvironment(
-        releaseChannel,
-        "dvp",
-        environment,
-        rampProviderMaturity
-      )
+    return (["earn", "dvp"] as const).some((marketsModule) =>
+      isMaturityInReleaseChannel(SDP_MODULE_MATURITY[marketsModule][environment], releaseChannel)
     );
   }
   return isMaturityInReleaseChannel(SDP_MODULE_MATURITY[module][environment], releaseChannel);

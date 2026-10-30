@@ -4,9 +4,9 @@ import {
   isApiKeyGrantableAction,
   organizationRoleMayPerform,
 } from "@sdp/types/actions";
-import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
 import {
-  isModuleInReleaseChannel,
+  isModuleInReleaseChannelForEnvironment,
   resolveSdpReleaseChannel,
   type SdpRampProviderMaturity,
   type SdpReleaseChannel,
@@ -15,6 +15,7 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { AppError, badRequest } from "@/lib/errors";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ApiKeySigningWalletScope } from "@/services/api-key.service";
 import type { Env } from "@/types/env";
 
@@ -45,24 +46,29 @@ export function assertGrantableApiKeyGrants(
   }
 }
 
-/** The deployment's release channel, which bounds the grants a key may be given. */
+/**
+ * The deployment's release channel and the key's project environment, which together bound
+ * the grants a key may be given.
+ */
 export interface ApiKeyGrantChannel {
   releaseChannel: SdpReleaseChannel;
+  environment: SdpEnvironment;
   rampProviderMaturity: SdpRampProviderMaturity;
 }
 
-/** The request's deployment channel, read where the grants are decided. */
+/** The request's deployment channel and project environment, read where the grants are decided. */
 export function requestApiKeyGrantChannel(c: Context<{ Bindings: Env }>): ApiKeyGrantChannel {
   return {
     releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
+    environment: resolveSdpEnvironment(c),
     rampProviderMaturity: c.get("rampProviderMaturity"),
   };
 }
 
 /**
  * A key may be given only actions whose module this deployment's release
- * channel runs, the same set the dashboard offers and the public OpenAPI
- * document's grant enum lists. Create and update refuse the rest with a 400
+ * channel runs for the key's project environment, the same set the dashboard
+ * offers. Create and update refuse the rest with a 400
  * naming them; a key that already stores one (granted before a channel
  * change) keeps it through rotation.
  */
@@ -73,7 +79,12 @@ export function assertApiKeyGrantsInReleaseChannel(
   const outside = requestedGrants.filter(
     (grant) =>
       !isActionInReleaseChannel(grant, (module) =>
-        isModuleInReleaseChannel(channel.releaseChannel, module, channel.rampProviderMaturity)
+        isModuleInReleaseChannelForEnvironment(
+          channel.releaseChannel,
+          module,
+          channel.environment,
+          channel.rampProviderMaturity
+        )
       )
   );
   if (outside.length > 0) {

@@ -3,8 +3,11 @@ import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-a
 import type { SdpModule } from "@sdp/types/release-channels";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
-import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
-import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import {
+  isModuleInEnvironmentReleaseChannel,
+  rampProvidersInReleaseChannel,
+} from "@/flags/release-channel";
+import { requestProjectEnvironment } from "@/lib/sdp-api";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
 export type IntegrationFeatureFlags = {
@@ -79,10 +82,10 @@ const CUSTODY_USE_CASE_MODULES = {
 export async function custodyUseCasesInProjectReleaseChannel(
   useCases: readonly CustodyProviderUseCase[]
 ): Promise<CustodyProviderUseCase[]> {
-  const inChannel = await Promise.all(
-    useCases.map((useCase) => isModuleInProjectReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase]))
+  const environment = await requestProjectEnvironment();
+  return useCases.filter((useCase) =>
+    isModuleInEnvironmentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase], environment)
   );
-  return useCases.filter((_, index) => inChannel[index]);
 }
 
 /** What the catalog will render, so its loading placeholder reserves exactly that. */

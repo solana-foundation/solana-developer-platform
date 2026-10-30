@@ -4,7 +4,12 @@ import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provide
 import type { SdpModule, SdpRampProviderMaturity } from "@sdp/types/release-channels";
 import type { Context, Next } from "hono";
 import { forbidden, internalError } from "@/lib/errors";
-import { isModuleAvailable, isRampProviderAvailable } from "@/lib/feature-flags";
+import {
+  isModuleAvailable,
+  isModuleAvailableForEnvironment,
+  isRampProviderAvailable,
+} from "@/lib/feature-flags";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { rampProviderSchema } from "@/routes/payments/ramps/schemas";
 import type { Env } from "@/types/env";
 
@@ -33,12 +38,20 @@ export function assertRampProviderInChannel(
   }
 }
 
-/** Whether the deployment's release channel includes `module`. */
+/**
+ * Whether the deployment's release channel runs `module` for the request's project
+ * environment. Only after `projectContextMiddleware`, which sets the environment.
+ */
 export function isModuleInChannel(c: ReleaseChannelContext, module: SdpModule): boolean {
-  return isModuleAvailable(c.env, module, rampProviderMaturity(c));
+  return isModuleAvailableForEnvironment(
+    c.env,
+    module,
+    resolveSdpEnvironment(c),
+    rampProviderMaturity(c)
+  );
 }
 
-/** Refuses a request that names a module the release channel leaves out. */
+/** Refuses a request that names a module the release channel leaves out for its project. */
 export function assertModuleInChannel(c: ReleaseChannelContext, module: SdpModule): void {
   if (!isModuleInChannel(c, module)) {
     throw forbidden(`The ${module} module is not available in this release channel.`);
@@ -71,7 +84,9 @@ export function assertTransferRampProviderInChannel(
  */
 export function requireModule(module: SdpModule) {
   return async (c: ReleaseChannelContext, next: Next) => {
-    assertModuleInChannel(c, module);
+    if (!isModuleAvailable(c.env, module, rampProviderMaturity(c))) {
+      throw forbidden(`The ${module} module is not available in this release channel.`);
+    }
     await next();
   };
 }

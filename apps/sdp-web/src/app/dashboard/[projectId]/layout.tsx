@@ -35,21 +35,15 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore, initialQuickStartStatus] =
-    await Promise.all([
-      params,
-      listSdpProjects(),
-      getSdpAuth(),
-      getDashboardFlags(),
-      cookies(),
-      loadQuickStartStatus(),
-    ]);
+  const [{ projectId }, projects, { orgId, userId }, cookieStore, initialQuickStartStatus] =
+    await Promise.all([params, listSdpProjects(), getSdpAuth(), cookies(), loadQuickStartStatus()]);
   if (projects.some((project) => project.id === projectId)) {
     if (!orgId || !userId) {
       throw new Error("The dashboard layout admits only signed-in members of an organization");
     }
     const dashboardCacheScope = { orgId, userId } satisfies DashboardCacheScope;
-    const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
+    const [memberRole, flags] = await Promise.all([requestMemberRole(), getDashboardFlags()]);
+    const dashboardAccess = resolveDashboardAccess(memberRole);
     return (
       <DashboardWorkspaceProvider
         key={getDashboardCacheScopeKey(dashboardCacheScope)}
