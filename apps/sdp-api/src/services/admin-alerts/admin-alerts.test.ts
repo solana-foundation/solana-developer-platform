@@ -564,6 +564,35 @@ describe("admin alert emails (HOO-2299)", () => {
       ]);
     });
 
+    it("leaves alert emails on when turning them off cannot be audited", async () => {
+      const constraint = "sdp_test_fail_organization_audit";
+      await getDb(env).execute(
+        `ALTER TABLE audit_logs ADD CONSTRAINT ${constraint}
+           CHECK (resource_type IS DISTINCT FROM 'organization') NOT VALID`
+      );
+      try {
+        const response = await app.request(
+          `/v1/organizations/${ORGANIZATION_ID}`,
+          {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: { alertEmails: false } }),
+          },
+          env
+        );
+        expect(response.status).toBe(500);
+      } finally {
+        await getDb(env).execute(`ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS ${constraint}`);
+      }
+      const stored = await asWorker(() =>
+        getDb(env).queryOne<{ alert_emails: string | null }>(
+          "SELECT settings::jsonb ->> 'alertEmails' AS alert_emails FROM organizations WHERE id = ?",
+          [ORGANIZATION_ID]
+        )
+      );
+      expect(stored?.alert_emails ?? null).toBeNull();
+    });
+
     it("refuses an API key changing the alert email setting", async () => {
       const response = await app.request(
         `/v1/organizations/${ORGANIZATION_ID}`,
