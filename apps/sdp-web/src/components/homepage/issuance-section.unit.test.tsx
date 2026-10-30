@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -37,6 +37,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("IssuanceSection", () => {
@@ -61,6 +62,14 @@ describe("IssuanceSection", () => {
 
     // The status loops forever, so it is not a live region.
     expect(markup).not.toContain("aria-live");
+  });
+
+  it("says coming soon and drops the sandbox link on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const markup = renderToStaticMarkup(<EnglishI18n>{await IssuanceSection()}</EnglishI18n>);
+    const doc = new DOMParser().parseFromString(markup, "text/html");
+    expect(within(doc.body).getByText("Coming soon")).toBeTruthy();
+    expect(doc.querySelector("a")).toBeNull();
   });
 });
 

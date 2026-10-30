@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -32,6 +32,8 @@ const copy: StackDrawingCopy = {
     nodes: "Nodes",
     wallets: "Wallets",
   },
+  comingSoonServices: [],
+  comingSoon: "Coming soon",
   products: { wallet: "Wallet", checkout: "Checkout", payroll: "Payroll", treasury: "Treasury" },
   received: RECEIVED_AMOUNTS.map((amount) => `Received ${amount.toFixed(2)} USDC`),
 };
@@ -46,6 +48,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("StackSection markup", () => {
@@ -88,6 +91,17 @@ describe("StackSection markup", () => {
     const names = [...lists[0].querySelectorAll("li")].map((li) => li.textContent);
     expect(names).toEqual(STACK_PARTNERS.map((partner) => partner.name));
     for (const img of lists[0].querySelectorAll("img")) expect(img.getAttribute("alt")).toBe("");
+  });
+
+  it("marks the compliance service coming soon on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const doc = new DOMParser().parseFromString(
+      renderToStaticMarkup(await StackSection()),
+      "text/html"
+    );
+    const drawing = within(doc.body);
+    expect(within(drawing.getByText("Compliance")).getByText("Coming soon")).toBeTruthy();
+    expect(within(drawing.getByText("Custody")).queryByText("Coming soon")).toBeNull();
   });
 });
 

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
+import { comingSoonHrefs } from "@/test/coming-soon";
 import type { HomepageLinks } from "./homepage-links";
 
 vi.mock("@/i18n/server", async () => {
@@ -24,6 +25,10 @@ const links: HomepageLinks = {
   openapi: "https://docs.example/docs/reference/api",
   llms: "https://docs.example/docs/ai/llms.txt",
 };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function renderFooter() {
   const html = renderToStaticMarkup(await HomepageFooter({ links }));
@@ -68,6 +73,16 @@ describe("HomepageFooter", () => {
       Partners: "#stack",
       Builders: "#builders",
     });
+  });
+
+  it("marks issuance, markets and privacy coming soon on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const doc = await renderFooter();
+    expect(comingSoonHrefs(doc.querySelectorAll("li a"))).toEqual([
+      "#issuance",
+      "#markets",
+      "#privacy",
+    ]);
   });
 
   it("names who provides the platform", async () => {

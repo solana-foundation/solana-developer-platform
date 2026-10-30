@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -49,6 +49,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("PrivacySection", () => {
@@ -68,6 +69,16 @@ describe("PrivacySection", () => {
     expect(link?.getAttribute("href")).toBe("/policies");
     expect(link?.hasAttribute("target")).toBe(false);
     expect(link?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("says coming soon and keeps the policies link on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const doc = new DOMParser().parseFromString(
+      renderToStaticMarkup(await PrivacySection()),
+      "text/html"
+    );
+    expect(within(doc.body).getByText("Coming soon")).toBeTruthy();
+    expect(doc.querySelector('a[href="/policies"]')).not.toBeNull();
   });
 });
 

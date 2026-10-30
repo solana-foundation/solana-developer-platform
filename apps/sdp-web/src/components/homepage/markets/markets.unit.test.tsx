@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -27,6 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("MarketsSection", () => {
@@ -49,6 +50,13 @@ describe("MarketsSection", () => {
     expect(link?.getAttribute("href")).toBe("/dashboard/markets");
     expect(link?.hasAttribute("target")).toBe(false);
     expect(link?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("says coming soon and drops the sandbox link on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const doc = await parse();
+    expect(within(doc.body).getByText("Coming soon")).toBeTruthy();
+    expect(doc.querySelector("a")).toBeNull();
   });
 
   it("gives the chart a text alternative and hides the drawing", async () => {

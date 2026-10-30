@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
+import { comingSoonHrefs } from "@/test/coming-soon";
 import { EnglishI18n } from "@/test/i18n";
 import { FILMS, filmUrl, SERIES_URL } from "./builders/films";
 import type { HomepageLinks } from "./homepage-links";
@@ -49,6 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   document.documentElement.style.overflow = "";
+  vi.unstubAllEnvs();
 });
 
 describe("HomepageNav", () => {
@@ -129,6 +131,15 @@ describe("HomepageNav", () => {
     const docs = hrefs("homepage-nav-docs");
     expect(docs.slice(0, 3)).toEqual([openLinks.docs, openLinks.openapi, openLinks.llms]);
     expect(docs).toContain("/sign-in");
+  });
+
+  it("marks issuance, markets and privacy coming soon in the panel and the phone menu on the stable channel", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const { container } = render(await HomepageNav({ links: openLinks }), { wrapper: EnglishI18n });
+    const soonIn = (id: string) => comingSoonHrefs(container.querySelectorAll(`#${id} a`));
+
+    expect(soonIn("homepage-nav-platform")).toEqual(["#issuance", "#markets", "#privacy"]);
+    expect(soonIn("homepage-mobile-menu")).toEqual(["#issuance", "#markets", "#privacy"]);
   });
 
   it("opens the builders' films in a new tab and says so", async () => {

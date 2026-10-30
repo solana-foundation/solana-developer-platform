@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { EnglishI18n } from "@/test/i18n";
@@ -17,6 +18,11 @@ vi.mock("@/i18n/server", async () => {
 
 import { PaymentKindProvider } from "./payments/payment-kind-context";
 import { PaymentsSection } from "./payments-section";
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.unstubAllEnvs();
+});
 
 async function renderPayments() {
   const container = document.createElement("div");
@@ -74,6 +80,18 @@ describe("PaymentsSection", () => {
     );
     // the list is a column on a wide screen, a grid or a strip on smaller ones: no one orientation
     expect(list?.hasAttribute("aria-orientation")).toBe(false);
+  });
+
+  it("marks the Deposit tab coming soon on the stable channel, which holds ramps back", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const view = await renderPayments();
+    document.body.replaceChildren(view);
+    const bench = within(view);
+
+    expect(bench.getByRole("tab", { name: /Coming soon/ })).toBe(
+      bench.getByRole("tab", { name: /^Deposit/ })
+    );
+    expect(bench.getByRole("tab", { name: "Pay" })).toBeTruthy();
   });
 
   it("offers a real pause button for the walk", async () => {
