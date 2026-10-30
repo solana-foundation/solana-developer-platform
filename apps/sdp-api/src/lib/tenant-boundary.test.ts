@@ -95,6 +95,9 @@ describe("tenant data-access boundary", () => {
       // BOLA guard: must see every organization's ledger rows to 404 a
       // foreign withdrawal ref before any provider call.
       "routes/earn/handlers/program.ts",
+      // Integration-test harness only: runs jobs under the system identity the
+      // cron runner gives them in production.
+      "test/integration-support.ts",
     ];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))

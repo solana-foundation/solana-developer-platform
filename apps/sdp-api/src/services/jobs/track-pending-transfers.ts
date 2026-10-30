@@ -35,7 +35,11 @@ import {
   type Slot,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
 } from "@solana/kit";
-import { TRANSFER_BATCH_ATTEMPT_LIFETIME_MS } from "@/db/repositories/payment-transfer-batches.repository";
+import {
+  TRANSFER_BATCH_ATTEMPT_LIFETIME_MS,
+  transferBatchChunkAuditIntentId,
+} from "@/db/repositories/payment-transfer-batches.repository";
+import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import type {
   ConfirmedTransferPollVerdict,
   PaymentsRepository,
@@ -51,6 +55,11 @@ import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import {
+  type AuditLogEntry,
+  createSystemAuditService,
+  criticalOutcomeEntry,
+} from "@/services/audit.service";
 import { refreshFireblocksTransfer } from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
 
@@ -170,19 +179,55 @@ async function updateTerminalTransfer(
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    return createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
-      transferId: transfer.id,
-      requireUnsigned: input.requireUnsigned,
-      organizationId: transfer.organization_id,
-      projectId: transfer.project_id,
-      transferStatus: input.status,
-      error: input.status === "failed" ? input.error : null,
-      slot: input.slot === undefined ? null : input.slot,
-      updatedAt: input.updatedAt,
-      requireUnstarted: input.requireUnstarted,
+    const projectId = transfer.project_id;
+    // The settle and the audit outcome it implies commit together: a ledger
+    // failure rolls the settle back, so the chunk stays processing and the next
+    // run settles and audits it again (APE-425).
+    return createSystemAuditService(env).logSystemWithin(async (tx) => {
+      const settled = await createPostgresPaymentTransferBatchesRepository(tx).settleTransferBatch({
+        transferId: transfer.id,
+        requireUnsigned: input.requireUnsigned,
+        organizationId: transfer.organization_id,
+        projectId,
+        transferStatus: input.status,
+        error: input.status === "failed" ? input.error : null,
+        slot: input.slot === undefined ? null : input.slot,
+        updatedAt: input.updatedAt,
+        requireUnstarted: input.requireUnstarted,
+      });
+      return { entry: settled ? chunkAuditOutcome(transfer, input) : null, result: settled };
     });
   }
   return (await repo.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+}
+
+/**
+ * The audit outcome that closes a settled batch chunk's intent with its chain
+ * verdict (APE-425). The request that sent the chunk wrote the intent under an
+ * id derived from the transfer, so the job needs no ledger lookup to close it.
+ */
+function chunkAuditOutcome(
+  transfer: PaymentTransferRow,
+  input: { status: TransferChainVerdictStatus; slot?: number | null; error?: string | null }
+): AuditLogEntry {
+  const metadata: Record<string, unknown> = {
+    batchTransferStatus: input.status,
+    signature: transfer.signature,
+    slot: input.slot === undefined || input.slot === null ? null : String(input.slot),
+  };
+  if (input.status === "failed") metadata.error = input.error;
+  return criticalOutcomeEntry(
+    {
+      id: transferBatchChunkAuditIntentId(transfer.id),
+      entry: {
+        organizationId: transfer.organization_id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+      },
+    },
+    { status: input.status === "failed" ? "failure" : "success", metadata }
+  );
 }
 
 /**
