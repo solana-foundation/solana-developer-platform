@@ -418,6 +418,17 @@ const auditRowSchema = z.object({
   metadata: z.string().transform((raw) => z.record(z.string(), z.unknown()).parse(JSON.parse(raw))),
 });
 
+/** A batch create response, as the chunk audit tests read it. */
+const chunkBatchResponseSchema = z.object({
+  data: z.object({
+    batch: z.object({ id: z.string(), status: z.string() }),
+    recipients: z.array(z.object({ id: z.string(), status: z.string() })),
+    transfers: z.array(
+      z.object({ id: z.string(), status: z.string(), signature: z.string().nullable() })
+    ),
+  }),
+});
+
 /** A chunk transfer's audit intent and outcome rows (APE-425); either may be missing. */
 async function readChunkAudit(transferId: string) {
   const intent = await getDb(env)
@@ -1557,13 +1568,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        batch: { id: string };
-        recipients: Array<{ id: string }>;
-        transfers: Array<{ id: string; status: string; signature: string | null }>;
-      };
-    };
+    const body = chunkBatchResponseSchema.parse(await response.json());
     expect(body.data.transfers).toMatchObject([
       { status: "processing", signature: persistedSignature },
     ]);
@@ -1692,13 +1697,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        batch: { id: string };
-        recipients: Array<{ status: string }>;
-        transfers: Array<{ id: string; status: string; signature: string | null }>;
-      };
-    };
+    const body = chunkBatchResponseSchema.parse(await response.json());
     expect(body.data.recipients).toMatchObject([{ status: "processing" }]);
     expect(body.data.transfers[0]).toMatchObject({ status: "processing" });
     expect(required(body.data.transfers[0]).signature).toBeTruthy();
@@ -1846,13 +1845,7 @@ describe("payment transfer batches", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data: {
-        batch: { status: string };
-        recipients: Array<{ status: string }>;
-        transfers: Array<{ id: string; status: string; signature: string | null }>;
-      };
-    };
+    const body = chunkBatchResponseSchema.parse(await response.json());
     expect(body.data.batch.status).toBe("failed");
     expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
