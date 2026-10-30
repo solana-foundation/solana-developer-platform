@@ -220,6 +220,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
       },
     });
     const text = String(email?.fields.body);
+    expect(email?.fields.bodyHtml).toContain(`Organization: ${TEST_ORG.name}<br>`);
     for (const field of [
       `Organization: ${TEST_ORG.name}`,
       `Organization id: ${ORGANIZATION_ID}`,
