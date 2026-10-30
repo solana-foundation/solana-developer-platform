@@ -42,7 +42,7 @@ describe("renderEmailHtml", () => {
     expect(html).toContain(">Open Clerk</a>");
   });
 
-  it.each(["javascript:alert(1)", "http://platform.example/dashboard"])(
+  it.each(["javascript:alert(1)", "http://platform.example/dashboard", "not a url"])(
     "refuses an action link to %s",
     (url) => {
       expect(() => renderEmailHtml({ ...CONTENT, action: { label: "Open", url } })).toThrow();
