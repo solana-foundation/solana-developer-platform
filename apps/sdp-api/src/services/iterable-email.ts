@@ -1,12 +1,13 @@
 /**
  * Email through Iterable, which the Foundation sends its email with. Every SDP email goes through
  * one triggered campaign whose template only passes our fields through: `{{subject}}`,
- * `{{{bodyHtml}}}` for the HTML part, `{{{body}}}` for the plain-text part and `{{replyTo}}`. What a
- * reader sees is written and reviewed in this repository, not in Iterable.
+ * `{{{bodyHtml}}}` as the whole HTML part, `{{{body}}}` as the plain-text part and `{{replyTo}}`.
+ * What a reader sees is laid out in `email-layout.ts` and reviewed here, not in Iterable.
  */
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
 import { fetchProviderJson } from "@/lib/provider-json";
+import { type EmailContent, renderEmailHtml, renderEmailText } from "@/services/email-layout";
 import type { Env } from "@/types/env";
 
 const iterableSendResponseSchema = z.object({ code: z.literal("Success") });
@@ -31,36 +32,9 @@ export type IterableEmailConfig = z.infer<typeof iterableEmailConfigSchema>;
 export interface IterableEmail {
   to: string;
   subject: string;
-  /** Plain text, customer-supplied fields included; the HTML part is escaped from it here. */
-  body: string;
+  /** Rendered into both parts by `email-layout.ts`; customer-supplied text is escaped there. */
+  content: EmailContent;
   replyTo?: string;
-}
-
-const HTML_ESCAPES = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-} as const satisfies Record<string, string>;
-
-type HtmlEscaped = keyof typeof HTML_ESCAPES;
-
-function isHtmlEscaped(character: string): character is HtmlEscaped {
-  return Object.hasOwn(HTML_ESCAPES, character);
-}
-
-function escapeHtmlCharacter(character: string): string {
-  if (!isHtmlEscaped(character)) throw new Error(`No HTML escape for ${JSON.stringify(character)}`);
-  return HTML_ESCAPES[character];
-}
-
-/**
- * The HTML part of a plain-text body: every character HTML reads escaped, line breaks kept as
- * `<br>`. The template renders it raw (`{{{bodyHtml}}}`), so this escape is the only one.
- */
-export function plainTextToHtml(text: string): string {
-  return text.replace(/[&<>"']/g, escapeHtmlCharacter).replace(/\r?\n/g, "<br>\n");
 }
 
 /**
@@ -98,8 +72,8 @@ export async function sendIterableEmail(env: Env, email: IterableEmail): Promise
         recipientEmail: email.to,
         dataFields: {
           subject: email.subject,
-          body: email.body,
-          bodyHtml: plainTextToHtml(email.body),
+          body: renderEmailText(email.content),
+          bodyHtml: renderEmailHtml(email.content),
           replyTo: email.replyTo,
         },
       }),

@@ -5,6 +5,7 @@
 import type { CountryCode } from "@sdp/types/countries";
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
+import type { EmailContent } from "@/services/email-layout";
 import {
   type IterableEmailConfig,
   iterableEmailConfig,
@@ -36,23 +37,40 @@ export function mainnetAccessEmailConfig(env: Env): (IterableEmailConfig & { to:
 }
 
 function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): string {
-  const who = [requester.name, requester.email].filter(Boolean).join(" ");
-  return who ? `${who} (${requester.userId})` : requester.userId;
+  if (requester.name && requester.email) return `${requester.name} (${requester.email})`;
+  return requester.name ?? requester.email ?? "Unknown";
 }
 
-function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): string {
-  return [
-    "An organization asked for SDP mainnet access.",
-    "",
-    `Organization: ${request.organizationName}`,
-    `Organization id: ${request.organizationId}`,
-    `Requested by: ${requesterLabel(request.requester)}`,
-    `Requested at: ${request.requestedAt}`,
-    `Jurisdiction (self-declared): ${request.countryName} (${request.countryCode})`,
-    `Terms and Conditions: version ${request.termsVersion}, accepted with the request`,
-    "",
-    "To approve, set enableProductionProject in the organization's Clerk private metadata.",
-  ].join("\n");
+const REQUESTED_AT_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+
+/** The email an operator reads: who asked, from where, under which terms, and how to approve. */
+export function mainnetAccessRequestEmailContent(request: MainnetAccessRequestEmail): EmailContent {
+  return {
+    preheader: `${request.organizationName} accepted the SDP terms and asked to use mainnet.`,
+    heading: "Mainnet access requested",
+    summary: `${request.organizationName} asked to use SDP on mainnet. Review the details below, then approve the organization in Clerk.`,
+    details: [
+      { label: "Organization", value: request.organizationName },
+      { label: "Organization ID", value: request.organizationId },
+      { label: "Requested by", value: requesterLabel(request.requester) },
+      { label: "Requester user ID", value: request.requester.userId },
+      {
+        label: "Requested at",
+        value: `${REQUESTED_AT_FORMAT.format(new Date(request.requestedAt))} UTC`,
+      },
+      {
+        label: "Jurisdiction",
+        value: `${request.countryName} (${request.countryCode}), self-declared`,
+      },
+      { label: "Terms", value: `Version ${request.termsVersion}, accepted with the request` },
+    ],
+    action: { label: "Open Clerk", url: "https://dashboard.clerk.com" },
+    note: "To approve, set enableProductionProject in the organization's Clerk private metadata.",
+  };
 }
 
 /**
@@ -72,7 +90,7 @@ export async function sendMainnetAccessRequestEmail(
   await sendIterableEmail(env, {
     to: config.to,
     subject: `Mainnet access request: ${request.organizationName}`,
-    body: mainnetAccessRequestEmailText(request),
+    content: mainnetAccessRequestEmailContent(request),
     replyTo: request.requester.email ?? undefined,
   });
 }
