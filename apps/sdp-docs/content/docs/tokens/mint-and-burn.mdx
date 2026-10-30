@@ -222,10 +222,7 @@ Reload the token detail page if the displayed supply value appears stale.
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="refresh-token-supply" />
 
 Safe to include in automated post-mint workflows.
 
