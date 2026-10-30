@@ -37,6 +37,19 @@ describe("server boot checks", () => {
     expect(() => assertRequiredEnv(withoutPepper)).toThrow(/API_KEY_PEPPER is required/);
   });
 
+  it("refuses to boot production Clerk auth without an http(s) dashboard URL", () => {
+    const clerkIssuer = "https://clerk.platform.example";
+    expect(() => assertRequiredEnv(makeEnv({ CLERK_ISSUER: clerkIssuer }))).toThrow(/FRONTEND_URL/);
+    expect(() =>
+      assertRequiredEnv(makeEnv({ CLERK_ISSUER: clerkIssuer, FRONTEND_URL: "file:///dashboard" }))
+    ).toThrow(/FRONTEND_URL/);
+    expect(() =>
+      assertRequiredEnv(
+        makeEnv({ CLERK_ISSUER: clerkIssuer, FRONTEND_URL: "https://platform.example" })
+      )
+    ).not.toThrow();
+  });
+
   it("refuses a DATABASE_PREPARED_STATEMENTS value other than on or off", () => {
     expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "off" }))).not.toThrow();
     expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "of" }))).toThrow(

@@ -33,6 +33,7 @@ CLERK_ISSUER=https://<your-instance>.clerk.accounts.dev
 CLERK_SECRET_KEY=sk_test_...
 CLERK_WEBHOOK_SECRET=whsec_...   # filled in step 4
 # CLERK_JWKS_URL=                # defaults to ${CLERK_ISSUER}/.well-known/jwks.json
+FRONTEND_URL=http://localhost:3000   # the dashboard's URL; with ENVIRONMENT=production, the only origin a session is accepted from
 ```
 
 `CLERK_ISSUER` is shown in the Clerk dashboard under **API Keys** (looks like `https://<slug>.clerk.accounts.dev` for dev instances or your custom domain in prod).
@@ -40,7 +41,6 @@ CLERK_WEBHOOK_SECRET=whsec_...   # filled in step 4
 ## 3. Customize the session token
 
 Clerk's default session token does not include `org_id`. Without the custom claims below, the API will reject every request because `clerk-token.ts` requires both `sub` and `org_id` claims. This step is mandatory. The dashboard forwards the session token itself as the API bearer token, so the claims live in the session token — there is no JWT template and no per-request token minting.
-
 1. Clerk dashboard → **Sessions** → **Customize session token**.
 2. **Claims** (paste this into the editor):
 
@@ -59,13 +59,13 @@ The `email` claim also feeds the dashboard's feature-flag targeting (`apps/sdp-w
 
 What each claim does:
 
-| Claim | Required? | Used by |
-|---|---|---|
-| `sub` | yes | User identity; checked in `clerk-token.ts` and threaded through every request as the actor |
-| `org_id` | yes | Organization scope; the request is rejected if missing |
-| `org_role` | recommended | Maps `"org:admin"` to admin, anything else to member (`clerk-role.ts`); without it everyone is a member |
-| `org_slug` | optional | Surfaced in some logs and audit events |
-| `email` | optional | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+| Claim      | Required?   | Used by                                                                                                                       |
+| ---------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `sub`      | yes         | User identity; checked in `clerk-token.ts` and threaded through every request as the actor                                    |
+| `org_id`   | yes         | Organization scope; the request is rejected if missing                                                                        |
+| `org_role` | recommended | Maps `"org:admin"` to admin, anything else to member (`clerk-role.ts`); without it everyone is a member                       |
+| `org_slug` | optional    | Surfaced in some logs and audit events                                                                                        |
+| `email`    | optional    | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
 
 When testing, sign in to Clerk's hosted UI with an **active organization selected**. Tokens minted without an active org omit `org_id` and the API rejects them.
 
@@ -74,7 +74,6 @@ When testing, sign in to Clerk's hosted UI with an **active organization selecte
 Clerk webhooks need a public HTTPS URL. The local API runs on `http://localhost:8787`. Use [ngrok](https://ngrok.com) with a reserved domain to tunnel the whole API — one stable URL serves every webhook consumer (Clerk plus each ramp provider) without re-registering endpoints between sessions.
 
 > **Why ngrok and not the Svix CLI?** Svix Play relays (`svix listen`) forward exactly one path per relay and mint a fresh URL per session unless pinned, so every provider registration goes stale the moment the relay target changes — untenable once more than one webhook consumer is involved. An ngrok reserved domain tunnels the full origin: every route under `/webhooks/*` is reachable at a URL that never changes. Signature verification happens in the API itself — the Clerk handler verifies the [Standard Webhooks](https://www.standardwebhooks.com/) signature via [`verifyWebhook` from `@clerk/backend`](https://clerk.com/docs/references/backend/verify-webhook), and each ramp provider's processor verifies its own scheme — so the tunnel needs no verification layer. (On paid ngrok plans you can additionally reject unsigned traffic at the edge with the [Traffic Policy `verify-webhook` action](https://ngrok.com/docs/traffic-policy/actions/verify-webhook/); the free plan does not include it, and it is defense-in-depth, not a requirement.)
-
 1. Install ngrok (`brew install ngrok`, or see [ngrok.com/download](https://ngrok.com/download)), then reserve a free stable domain at [dashboard.ngrok.com/domains](https://dashboard.ngrok.com/domains) and set it in `apps/sdp-api/.env.local`:
 
    ```bash
