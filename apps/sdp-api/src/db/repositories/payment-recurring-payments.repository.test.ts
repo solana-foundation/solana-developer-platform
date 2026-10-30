@@ -25,6 +25,67 @@ const TEST_SIBLING_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_sibling";
 const TEST_PROVIDER_WALLET_ID = "wallet_recurring_payments_repo_test";
 const TEST_SOURCE_ADDRESS = "Sender111111111111111111111111111111111";
 
+async function activateRecurringPaymentWithSubscription(input: {
+  recurringPaymentId: string;
+  projectId: string;
+  ownerWalletId: string;
+  counterpartyId: string;
+  token: string;
+  planId: string;
+  subscriptionId: string;
+  createdAt: string;
+  nextCollectionDueAt: string;
+}): Promise<void> {
+  const db = getDb(env);
+  const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(db);
+  await subscriptionsRepo.createPlan({
+    id: input.planId,
+    organizationId: TEST_ORG.id,
+    projectId: input.projectId,
+    ownerWalletId: input.ownerWalletId,
+    ownerAddress: TEST_SOURCE_ADDRESS,
+    token: input.token,
+    amount: "10.00",
+    periodHours: 24,
+    programPlanId: "1",
+    planPda: null,
+    destinationAddress: "Destination111111111111111111111111111111",
+    pullerWalletId: null,
+    pullerAddress: null,
+    metadataUri: null,
+    status: "active",
+    createdBy: TEST_USER.id,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  });
+  await subscriptionsRepo.createSubscription({
+    id: input.subscriptionId,
+    organizationId: TEST_ORG.id,
+    projectId: input.projectId,
+    planId: input.planId,
+    counterpartyId: input.counterpartyId,
+    subscriberAddress: TEST_SOURCE_ADDRESS,
+    subscriberTokenAccount: null,
+    subscriptionPda: null,
+    subscriptionAuthorityAddress: null,
+    authorizationSignature: null,
+    status: "active",
+    currentPeriodStartAt: input.createdAt,
+    nextCollectionDueAt: input.nextCollectionDueAt,
+    createdBy: TEST_USER.id,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  });
+  await db
+    .prepare(
+      `UPDATE payment_recurring_payments
+          SET status = 'active', plan_id = ?, subscription_id = ?, next_collection_due_at = ?
+        WHERE id = ?`
+    )
+    .bind(input.planId, input.subscriptionId, input.nextCollectionDueAt, input.recurringPaymentId)
+    .run();
+}
+
 describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   let repo: PaymentRecurringPaymentsRepository;
 
@@ -379,32 +440,36 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         idempotencyFingerprint: null,
       })
     );
-    await getDb(env)
-      // Paused, so the row needs no subscription or due date (an `active` one needs both).
-      .prepare(
-        "UPDATE payment_recurring_payments SET status = 'paused', paused_reason = 'failed_attempts' WHERE id = ?"
-      )
-      .bind(tenant.recurringPaymentId)
-      .run();
-    const claim = (claimedFrom: "paused" | null, updatedAt: string) =>
+    await activateRecurringPaymentWithSubscription({
+      recurringPaymentId: tenant.recurringPaymentId,
+      projectId: TEST_PROJECT_ID,
+      ownerWalletId: TEST_PROVIDER_WALLET_ID,
+      counterpartyId: counterparty.id,
+      token: "USDC",
+      planId: "psp_recurring_repo_cancel_claim",
+      subscriptionId: "psub_recurring_repo_cancel_claim",
+      createdAt: staleAt,
+      nextCollectionDueAt: "2026-06-30T12:00:00.000Z",
+    });
+    const claim = (claimedFrom: "active" | null, updatedAt: string) =>
       repo.claimRecurringPaymentCancel({
         ...tenant,
         claimedFrom,
-        pausedReason: claimedFrom === null ? null : "failed_attempts",
+        pausedReason: null,
         updatedAt,
         staleBefore: "2026-06-29T12:15:00.000Z",
       });
     const release = (claimedUpdatedAt: string) =>
       repo.releaseRecurringPaymentCancelClaim({
         ...tenant,
-        status: "paused",
-        pausedReason: "failed_attempts",
+        status: "active",
+        pausedReason: null,
         claimedUpdatedAt,
         updatedAt: "2026-06-29T12:30:00.000Z",
       });
 
-    const stale = required(await claim("paused", staleAt));
-    expect(await claim("paused", "2026-06-29T12:20:00.000Z")).toBeNull();
+    const stale = required(await claim("active", staleAt));
+    expect(await claim("active", "2026-06-29T12:20:00.000Z")).toBeNull();
     const takenOver = required(await claim(null, "2026-06-29T12:20:00.000Z"));
 
     expect(await release(stale.updated_at)).toBeNull();
@@ -412,10 +477,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       status: "canceling",
       updated_at: takenOver.updated_at,
     });
-    expect(await release(takenOver.updated_at)).toMatchObject({
-      status: "paused",
-      paused_reason: "failed_attempts",
-    });
+    expect(await release(takenOver.updated_at)).toMatchObject({ status: "active" });
   });
 });
 
@@ -476,13 +538,11 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
       publicKey: TEST_SOURCE_ADDRESS,
     });
     repo = createPostgresPaymentRecurringPaymentsRepository(db);
-    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(db);
     for (const environment of SDP_ENVIRONMENTS) {
       const projectId = PROJECT_ID_BY_ENVIRONMENT[environment];
       const sourceWallet = SOURCE_WALLET_BY_ENVIRONMENT[environment];
       const counterpartyId = `cpty_recurring_repo_job_${environment}`;
       const counterpartyAccountId = `cpa_recurring_repo_job_${environment}`;
-      const planId = `psp_recurring_repo_job_${environment}`;
       await seedProjectCryptoWalletCounterparty(db, {
         organizationId: TEST_ORG.id,
         projectId,
@@ -490,44 +550,6 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         counterpartyId,
         counterpartyAccountId,
         walletAddress: "Destination111111111111111111111111111111",
-      });
-      await subscriptionsRepo.createPlan({
-        id: planId,
-        organizationId: TEST_ORG.id,
-        projectId,
-        ownerWalletId: sourceWallet.walletId,
-        ownerAddress: TEST_SOURCE_ADDRESS,
-        token: usdcMint(environment),
-        amount: "10.00",
-        periodHours: 24,
-        programPlanId: "1",
-        planPda: null,
-        destinationAddress: "Destination111111111111111111111111111111",
-        pullerWalletId: null,
-        pullerAddress: null,
-        metadataUri: null,
-        status: "active",
-        createdBy: TEST_USER.id,
-        createdAt: STALE_AT,
-        updatedAt: STALE_AT,
-      });
-      await subscriptionsRepo.createSubscription({
-        id: subscriptionId(environment),
-        organizationId: TEST_ORG.id,
-        projectId,
-        planId,
-        counterpartyId,
-        subscriberAddress: TEST_SOURCE_ADDRESS,
-        subscriberTokenAccount: null,
-        subscriptionPda: null,
-        subscriptionAuthorityAddress: null,
-        authorizationSignature: null,
-        status: "active",
-        currentPeriodStartAt: STALE_AT,
-        nextCollectionDueAt: DUE_AT,
-        createdBy: TEST_USER.id,
-        createdAt: STALE_AT,
-        updatedAt: STALE_AT,
       });
       await repo.createRecurringPayment({
         id: recurringPaymentId(environment),
@@ -550,14 +572,17 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         idempotencyKey: null,
         idempotencyFingerprint: null,
       });
-      await db
-        .prepare(
-          `UPDATE payment_recurring_payments
-              SET status = 'active', plan_id = ?, subscription_id = ?, next_collection_due_at = ?
-            WHERE id = ?`
-        )
-        .bind(planId, subscriptionId(environment), DUE_AT, recurringPaymentId(environment))
-        .run();
+      await activateRecurringPaymentWithSubscription({
+        recurringPaymentId: recurringPaymentId(environment),
+        projectId,
+        ownerWalletId: sourceWallet.walletId,
+        counterpartyId,
+        token: usdcMint(environment),
+        planId: `psp_recurring_repo_job_${environment}`,
+        subscriptionId: subscriptionId(environment),
+        createdAt: STALE_AT,
+        nextCollectionDueAt: DUE_AT,
+      });
     }
   });
 
