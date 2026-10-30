@@ -19,7 +19,7 @@ organizationMainnetAccess.get(
   requireAction("organizations.manage"),
   getMainnetAccess
 );
-// Both writes may email the SDP alias through Resend, so they share one budget: a request needs
+// Both writes may email the SDP alias through Iterable, so they share one budget: a request needs
 // one email, a resend of an unsent one a few more.
 const sendQuota = meteredQuota({ name: "mainnet-access-request", actorMax: 5, orgMax: 10 });
 

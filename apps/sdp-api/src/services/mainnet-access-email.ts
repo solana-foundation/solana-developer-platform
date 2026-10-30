@@ -1,16 +1,18 @@
 /**
- * Tells the SDP alias an organization asked for mainnet (HOO-2427), through Resend's HTTP API,
- * the provider other Foundation apps on solana.com already send with. Approval stays manual:
- * the email only asks an operator to look.
+ * Tells the SDP alias an organization asked for mainnet (HOO-2427), through Iterable, which
+ * the Foundation sends its email with. Approval stays manual: the email only
+ * asks an operator to look.
+ *
+ * The campaign's template passes our text through (`{{subject}}`, `{{body}}`), so what the alias
+ * reads is written and reviewed here, not in Iterable.
  */
-import { createHash } from "node:crypto";
 import type { CountryCode } from "@sdp/types/countries";
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
 import { fetchProviderJson } from "@/lib/provider-json";
 import type { Env } from "@/types/env";
 
-const resendSendResponseSchema = z.object({ id: z.string().min(1) });
+const iterableSendResponseSchema = z.object({ code: z.literal("Success") });
 
 export interface MainnetAccessRequestEmail {
   organizationId: string;
@@ -23,17 +25,20 @@ export interface MainnetAccessRequestEmail {
 }
 
 /**
- * Where a request email goes and who sends it. Any key unset means the deployment cannot take
- * requests. `RESEND_API_URL` is Resend's API (`https://api.resend.com`), or a stub locally.
+ * Where a request email goes and which Iterable campaign sends it. Any key unset, or a campaign id
+ * that is not a positive integer, means the deployment cannot take requests. `ITERABLE_API_URL` is
+ * Iterable's API for the project's data center (`https://api.iterable.com`), or a stub locally.
  */
 export function mainnetAccessEmailConfig(
   env: Env
-): { apiUrl: string; apiKey: string; from: string; to: string } | null {
-  const apiUrl = env.RESEND_API_URL?.trim();
-  const apiKey = env.RESEND_API_KEY?.trim();
-  const from = env.MAINNET_ACCESS_EMAIL_FROM?.trim();
+): { apiUrl: string; apiKey: string; campaignId: number; to: string } | null {
+  const apiUrl = env.ITERABLE_API_URL?.trim();
+  const apiKey = env.ITERABLE_API_KEY?.trim();
+  const campaignId = Number(env.MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID?.trim());
   const to = env.MAINNET_ACCESS_EMAIL_TO?.trim();
-  return apiUrl && apiKey && from && to ? { apiUrl, apiKey, from, to } : null;
+  return apiUrl && apiKey && Number.isSafeInteger(campaignId) && campaignId > 0 && to
+    ? { apiUrl, apiKey, campaignId, to }
+    : null;
 }
 
 function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): string {
@@ -41,7 +46,7 @@ function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): stri
   return who ? `${who} (${requester.userId})` : requester.userId;
 }
 
-/** Plain text only: every field is customer-supplied, and text needs no escaping. */
+/** Plain text only: every field is customer-supplied, and the template escapes what it renders. */
 function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): string {
   return [
     "An organization asked for SDP mainnet access.",
@@ -58,12 +63,11 @@ function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): stri
 }
 
 /**
- * Sends the request email. Resend's Idempotency-Key makes a resend of the same request one email,
- * so a retry after a lost answer does not reach the alias twice. The key carries a hash of the
- * message: Resend refuses a key it has seen with another payload for 24 hours, and the message
- * changes when the organization is renamed or an operator corrects its country.
+ * Sends the request email. Iterable takes no idempotency key, so a send whose answer is lost and
+ * is then retried through `notify` can reach the alias twice; the alias is internal, and the
+ * second copy says the same thing.
  *
- * @throws PROVIDER_UNAVAILABLE when Resend does not accept it; SERVICE_UNAVAILABLE when unconfigured.
+ * @throws PROVIDER_UNAVAILABLE when Iterable does not accept it; SERVICE_UNAVAILABLE when unconfigured.
  */
 export async function sendMainnetAccessRequestEmail(
   env: Env,
@@ -73,33 +77,22 @@ export async function sendMainnetAccessRequestEmail(
   if (!config) {
     throw serviceUnavailable("Mainnet access requests are not available on this deployment");
   }
-  const message: {
-    from: string;
-    to: string[];
-    reply_to?: string;
-    subject: string;
-    text: string;
-  } = {
-    from: config.from,
-    to: [config.to],
-    subject: `Mainnet access request: ${request.organizationName}`,
-    text: mainnetAccessRequestEmailText(request),
-  };
-  if (request.requester.email) message.reply_to = request.requester.email;
-  const body = JSON.stringify(message);
-  const contentHash = createHash("sha256").update(body).digest("hex");
   await fetchProviderJson(
-    "Resend",
-    `${config.apiUrl.replace(/\/+$/, "")}/emails`,
-    resendSendResponseSchema,
+    "Iterable",
+    `${config.apiUrl.replace(/\/+$/, "")}/api/email/target`,
+    iterableSendResponseSchema,
     {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${config.apiKey}`,
-        "content-type": "application/json",
-        "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}/${contentHash}`,
-      },
-      body,
+      headers: { "api-key": config.apiKey, "content-type": "application/json" },
+      body: JSON.stringify({
+        campaignId: config.campaignId,
+        recipientEmail: config.to,
+        dataFields: {
+          subject: `Mainnet access request: ${request.organizationName}`,
+          body: mainnetAccessRequestEmailText(request),
+          replyTo: request.requester.email ?? undefined,
+        },
+      }),
       timeoutMs: 10_000,
       maxBytes: 16_384,
     }

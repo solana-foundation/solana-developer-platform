@@ -93,11 +93,12 @@ export interface Env extends ManagedRpcEnv {
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
 
-  // Mainnet access requests (HOO-2427): Resend sends the request email to the SDP alias
-  RESEND_API_KEY?: string;
-  /** https://api.resend.com on deployments; local development points it at a stub. */
-  RESEND_API_URL?: string;
-  MAINNET_ACCESS_EMAIL_FROM?: string;
+  // Mainnet access requests (HOO-2427): an Iterable campaign sends the request email to the SDP alias
+  ITERABLE_API_KEY?: string;
+  /** https://api.iterable.com on deployments; local development points it at a stub. */
+  ITERABLE_API_URL?: string;
+  /** The triggered campaign whose template passes `subject` and `body` through. */
+  MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID?: string;
   MAINNET_ACCESS_EMAIL_TO?: string;
 
   // Allowlist configuration

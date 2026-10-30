@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
@@ -18,13 +17,13 @@ import { clearKVStores } from "@/test/mocks/kv";
 const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 const PATH = `/v1/organizations/${ORGANIZATION_ID}/mainnet-access`;
 const MEMBER_USER = { id: "usr_mainnet_member", email: "member@example.com" };
-const RESEND_API_URL = "https://api.resend.com";
-const RESEND_URL = `${RESEND_API_URL}/emails`;
+const ITERABLE_API_URL = "https://api.iterable.com";
+const ITERABLE_SEND_URL = `${ITERABLE_API_URL}/api/email/target`;
 const SUBMISSION = { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true };
 
 let adminToken: string;
 let memberToken: string;
-let resend: MockInstance<typeof fetch>;
+let iterable: MockInstance<typeof fetch>;
 
 async function seedOrganization(): Promise<void> {
   const db = getDb(env);
@@ -85,14 +84,16 @@ function notify(authorization = `Bearer ${adminToken}`) {
   );
 }
 
-/** Fails Resend until the returned function restores it. */
-function failResend(): () => void {
-  const answer = resend.getMockImplementation();
-  if (!answer) throw new Error("the Resend stub is installed in beforeEach");
-  resend.mockImplementation(async (input, init) =>
-    String(input) === RESEND_URL ? new Response("down", { status: 500 }) : answer(input, init)
+/** Fails Iterable until the returned function restores it. */
+function failIterable(): () => void {
+  const answer = iterable.getMockImplementation();
+  if (!answer) throw new Error("the Iterable stub is installed in beforeEach");
+  iterable.mockImplementation(async (input, init) =>
+    String(input) === ITERABLE_SEND_URL
+      ? new Response("down", { status: 500 })
+      : answer(input, init)
   );
-  return () => resend.mockImplementation(answer);
+  return () => iterable.mockImplementation(answer);
 }
 
 /** The organization's request columns, or null while it has not asked. */
@@ -110,36 +111,45 @@ async function storedRow() {
   return row?.requested_at ? row : null;
 }
 
-function sentEmails(): Array<{ headers: Record<string, string>; body: Record<string, unknown> }> {
-  return resend.mock.calls
-    .filter(([url]) => String(url) === RESEND_URL)
-    .map(([, init]) => ({
-      headers: z.record(z.string(), z.string()).parse(init?.headers),
-      body: z.record(z.string(), z.unknown()).parse(JSON.parse(String(init?.body))),
-    }));
+const sentEmailSchema = z.object({ dataFields: z.record(z.string(), z.unknown()) }).loose();
+
+/** Each Iterable send: its headers, its body, and the `dataFields` the template renders. */
+function sentEmails() {
+  return iterable.mock.calls
+    .filter(([url]) => String(url) === ITERABLE_SEND_URL)
+    .map(([, init]) => {
+      const body = sentEmailSchema.parse(JSON.parse(String(init?.body)));
+      return {
+        headers: z.record(z.string(), z.string()).parse(init?.headers),
+        body,
+        fields: body.dataFields,
+      };
+    });
 }
 
 describe("Organization mainnet access (HOO-2427)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedOrganization();
-    env.RESEND_API_URL = RESEND_API_URL;
-    env.RESEND_API_KEY = "re_test";
-    env.MAINNET_ACCESS_EMAIL_FROM = "SDP <noreply@platform.solana.com>";
+    env.ITERABLE_API_URL = ITERABLE_API_URL;
+    env.ITERABLE_API_KEY = "iterable_test";
+    env.MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID = "4242";
     env.MAINNET_ACCESS_EMAIL_TO = "mainnet@example.org";
     const realFetch = globalThis.fetch;
-    resend = vi
+    iterable = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input, init) =>
-        String(input) === RESEND_URL ? Response.json({ id: "email_1" }) : realFetch(input, init)
+        String(input) === ITERABLE_SEND_URL
+          ? Response.json({ msg: "", code: "Success", params: null })
+          : realFetch(input, init)
       );
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    env.RESEND_API_URL = undefined;
-    env.RESEND_API_KEY = undefined;
-    env.MAINNET_ACCESS_EMAIL_FROM = undefined;
+    env.ITERABLE_API_URL = undefined;
+    env.ITERABLE_API_KEY = undefined;
+    env.MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID = undefined;
     env.MAINNET_ACCESS_EMAIL_TO = undefined;
     await clearKVStores(env);
   });
@@ -199,18 +209,16 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
     const [email, ...others] = sentEmails();
     expect(others).toHaveLength(0);
-    expect(email?.headers.authorization).toBe("Bearer re_test");
-    expect(email?.headers["idempotency-key"]).toBe(
-      `mainnet-access/${ORGANIZATION_ID}/${row?.requested_at}/${createHash("sha256")
-        .update(JSON.stringify(email?.body))
-        .digest("hex")}`
-    );
+    expect(email?.headers["api-key"]).toBe("iterable_test");
     expect(email?.body).toMatchObject({
-      from: "SDP <noreply@platform.solana.com>",
-      to: ["mainnet@example.org"],
-      reply_to: TEST_USER.email,
+      campaignId: 4242,
+      recipientEmail: "mainnet@example.org",
+      dataFields: {
+        subject: `Mainnet access request: ${TEST_ORG.name}`,
+        replyTo: TEST_USER.email,
+      },
     });
-    const text = String(email?.body.text);
+    const text = String(email?.fields.body);
     for (const field of [
       `Organization: ${TEST_ORG.name}`,
       `Organization id: ${ORGANIZATION_ID}`,
@@ -245,7 +253,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it("keeps a request whose email failed, for notify to send", async () => {
-    const restore = failResend();
+    const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
     expect((await storedRow())?.notified_at).toBeNull();
     expect((await (await get()).json()).data.request).toMatchObject({ notified: false });
@@ -258,13 +266,11 @@ describe("Organization mainnet access (HOO-2427)", () => {
       countryCode: "SG",
       request: { notified: true },
     });
-    const emails = sentEmails();
-    expect(emails).toHaveLength(2);
-    expect(emails[0]?.headers["idempotency-key"]).toBe(emails[1]?.headers["idempotency-key"]);
+    expect(sentEmails()).toHaveLength(2);
   });
 
-  it("keys a resend of changed content apart, so Resend does not refuse it", async () => {
-    const restore = failResend();
+  it("rebuilds the email on notify, so a renamed organization reads its new name", async () => {
+    const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
     await getDb(env)
       .prepare("UPDATE organizations SET name = ? WHERE id = ?")
@@ -273,13 +279,11 @@ describe("Organization mainnet access (HOO-2427)", () => {
     restore();
 
     expect((await notify()).status).toBe(200);
-    const [failed, sent] = sentEmails();
-    expect(sent?.body.subject).toBe("Mainnet access request: Renamed Org");
-    expect(sent?.headers["idempotency-key"]).not.toBe(failed?.headers["idempotency-key"]);
+    expect(sentEmails().at(-1)?.fields.subject).toBe("Mainnet access request: Renamed Org");
   });
 
   it("notifies an unsent request accepted under terms that have since changed", async () => {
-    const restore = failResend();
+    const restore = failIterable();
     expect((await post(SUBMISSION)).status).toBe(503);
     restore();
     // The acceptance on record predates the current terms, as after a terms update.
@@ -293,7 +297,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect((await sent.json()).data).toMatchObject({
       request: { termsVersion: "2026-09-previous", notified: true },
     });
-    expect(sentEmails().at(-1)?.body.text).toContain("version 2026-09-previous");
+    expect(sentEmails().at(-1)?.fields.body).toContain("version 2026-09-previous");
   });
 
   it("refuses to notify before a request, or once it was sent", async () => {
@@ -303,7 +307,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(sentEmails()).toHaveLength(1);
   });
 
-  it("meters submits and notifies together, since each may call Resend", async () => {
+  it("meters submits and notifies together, since each may call Iterable", async () => {
     const statuses = [(await post(SUBMISSION)).status, (await post(SUBMISSION)).status];
     for (let attempt = 0; attempt < 4; attempt += 1) statuses.push((await notify()).status);
     expect(statuses).toEqual([201, 409, 409, 409, 409, 429]);
@@ -320,7 +324,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
   it.each([
     ["no alias", "MAINNET_ACCESS_EMAIL_TO"],
-    ["no Resend API URL", "RESEND_API_URL"],
+    ["no Iterable API URL", "ITERABLE_API_URL"],
+    ["no campaign", "MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID"],
   ] as const)("reads unavailable and refuses before recording anything with %s", async (_, key) => {
     env[key] = undefined;
     expect((await (await get()).json()).data).toMatchObject({ available: false });
