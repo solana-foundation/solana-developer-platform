@@ -4,6 +4,11 @@ import { z } from "zod";
 // .github/workflows/incident-*.yml workflows). The job's command is pinned to
 // `node incident-ops.js`, so an execution can only choose among the tools and
 // actions allowlisted here — never an arbitrary command.
+const toolSchema = z.enum(["sponsorship-budget", "movement-control"]);
+type ToolName = z.infer<typeof toolSchema>;
+
+// `satisfies Record<ToolName, …>` binds this table to the schema in both
+// directions: a tool missing here or absent from the enum fails the build.
 const TOOL_ACTIONS = {
   "sponsorship-budget": {
     script: "sponsorship-budget",
@@ -13,11 +18,7 @@ const TOOL_ACTIONS = {
     script: "project-movement-control",
     action: z.enum(["status", "disable", "enable"]),
   },
-} as const satisfies Record<string, { script: string; action: z.ZodType<string> }>;
-
-const toolSchema = z.enum(
-  Object.keys(TOOL_ACTIONS) as [keyof typeof TOOL_ACTIONS, ...(keyof typeof TOOL_ACTIONS)[]]
-);
+} as const satisfies Record<ToolName, { script: string; action: z.ZodType<string> }>;
 
 async function main(): Promise<void> {
   const tool = toolSchema.safeParse(process.argv[2]);

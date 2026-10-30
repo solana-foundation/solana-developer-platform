@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { closeDatabasePools, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
@@ -37,19 +38,24 @@ function parseNetwork(): SponsorshipNetwork {
 // kill must stay dispatchable from memory in an emergency; resume (and set) are
 // deliberate writes that must lose to a newer stop, so they carry the version
 // read from `status` and the repository compare-and-swaps on it.
+const expectedVersionSchema = z
+  .string()
+  .regex(/^\d{1,9}$/)
+  .transform(Number);
+
 function parseExpectedVersion(command: "kill" | "resume" | "set"): number | undefined {
   const text = readArg("expected-version");
   if (command === "kill") {
     if (text !== undefined) throw new Error("kill does not accept --expected-version");
     return undefined;
   }
-  const expectedVersion = Number(text);
-  if (text === undefined || !Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+  const expectedVersion = expectedVersionSchema.safeParse(text);
+  if (!expectedVersion.success) {
     throw new Error(
       `${command} requires a non-negative integer --expected-version (the version shown by status; 0 if no policy exists)`
     );
   }
-  return expectedVersion;
+  return expectedVersion.data;
 }
 
 async function persistGlobalEnabled(enabled: boolean, expectedVersion: number | undefined) {
