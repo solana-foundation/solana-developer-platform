@@ -30,13 +30,21 @@ const requestInputSchema = z.object({
 
 const organizationNameSchema = z.object({ name: z.string() });
 
-export type MainnetAccessLoad =
-  | { ok: true; organizationName: string; access: MainnetAccess }
-  | { ok: false; error: string };
+const failureSchema = z.object({ ok: z.literal(false), error: z.string() });
 
-export type RequestMainnetAccessResult =
-  | { ok: true; access: MainnetAccess }
-  | { ok: false; error: string };
+const mainnetAccessLoadSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), organizationName: z.string(), access: mainnetAccessSchema }),
+  failureSchema,
+]);
+
+const requestMainnetAccessResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), access: mainnetAccessSchema }),
+  failureSchema,
+]);
+
+export type MainnetAccessLoad = z.infer<typeof mainnetAccessLoadSchema>;
+
+export type RequestMainnetAccessResult = z.infer<typeof requestMainnetAccessResultSchema>;
 
 function mainnetAccessPath(organizationId: string): string {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/mainnet-access`;

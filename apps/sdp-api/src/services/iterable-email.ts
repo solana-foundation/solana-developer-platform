@@ -10,11 +10,21 @@ import type { Env } from "@/types/env";
 
 const iterableSendResponseSchema = z.object({ code: z.literal("Success") });
 
-export interface IterableEmailConfig {
-  apiUrl: string;
-  apiKey: string;
-  campaignId: number;
-}
+const iterableEmailConfigSchema = z.object({
+  apiUrl: z
+    .string()
+    .trim()
+    .pipe(z.url({ protocol: /^https?$/ })),
+  apiKey: z.string().trim().min(1),
+  campaignId: z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d*$/)
+    .transform(Number)
+    .pipe(z.number().int().max(Number.MAX_SAFE_INTEGER)),
+});
+
+export type IterableEmailConfig = z.infer<typeof iterableEmailConfigSchema>;
 
 export interface IterableEmail {
   to: string;
@@ -25,17 +35,17 @@ export interface IterableEmail {
 }
 
 /**
- * Any key unset, or a campaign id that is not a positive integer, means this deployment sends no
- * email. `ITERABLE_API_URL` is Iterable's API for the project's data center
- * (`https://api.iterable.com`), or a stub locally.
+ * Any key unset or malformed (a URL that is not http(s), a campaign id that is not a positive
+ * integer) means this deployment sends no email. `ITERABLE_API_URL` is Iterable's API for the
+ * project's data center (`https://api.iterable.com`), or a stub locally.
  */
 export function iterableEmailConfig(env: Env): IterableEmailConfig | null {
-  const apiUrl = env.ITERABLE_API_URL?.trim();
-  const apiKey = env.ITERABLE_API_KEY?.trim();
-  const campaignId = Number(env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID?.trim());
-  return apiUrl && apiKey && Number.isSafeInteger(campaignId) && campaignId > 0
-    ? { apiUrl, apiKey, campaignId }
-    : null;
+  const parsed = iterableEmailConfigSchema.safeParse({
+    apiUrl: env.ITERABLE_API_URL,
+    apiKey: env.ITERABLE_API_KEY,
+    campaignId: env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID,
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 /**

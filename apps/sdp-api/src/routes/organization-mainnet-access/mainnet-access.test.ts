@@ -322,6 +322,15 @@ describe("Organization mainnet access (HOO-2427)", () => {
     ).rejects.toThrow(/organizations_mainnet_request_whole/);
   });
 
+  it("reads unavailable while the campaign id is not a positive integer", async () => {
+    for (const campaignId of ["abc", "0", "-1", "1.5"]) {
+      env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = campaignId;
+      expect((await (await get()).json()).data).toMatchObject({ available: false });
+    }
+    expect((await post(SUBMISSION)).status).toBe(503);
+    expect(await storedRow()).toBeNull();
+  });
+
   it.each([
     ["no alias", "MAINNET_ACCESS_EMAIL_TO"],
     ["no Iterable API URL", "ITERABLE_API_URL"],
