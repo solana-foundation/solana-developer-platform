@@ -223,6 +223,14 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
   });
 
   if (config.authorizedParty !== null && payload.azp !== config.authorizedParty) {
+    getLogger().warn(
+      {
+        event: "sdp_api_clerk_session_azp_refused",
+        azp: payload.azp ?? null,
+        clerk_user_id: payload.sub ?? null,
+      },
+      "Clerk session refused: not issued to the dashboard"
+    );
     throw new Error("Clerk session was not issued to the dashboard");
   }
 
