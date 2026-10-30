@@ -304,14 +304,7 @@ export function makeFig({
     );
   }
 
-  function planeText(
-    str: string,
-    x: number,
-    y: number,
-    z: number,
-    plane: Plane,
-    st: TextStyle
-  ) {
+  function planeText(str: string, x: number, y: number, z: number, plane: Plane, st: TextStyle) {
     const o = P(x, y, z);
     const font = st.font || MONO;
     const size = st.size || 10;
