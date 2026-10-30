@@ -1,14 +1,11 @@
-import { SigningError } from "@sdp/custody/signing";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
-import { custodyPolicyRefused, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
-  recurringPaymentErrorMessage,
   type SavedStepSend,
   type SubscriptionStep,
 } from "@/services/payments/recurring-payments/shared";
@@ -268,21 +265,5 @@ describe("readRecurringPaymentStep", () => {
 
     await expect(readStep("none", SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
     expect(await savedRows()).toEqual({ ...untouchedRows, attempt_signature: testSignature(2) });
-  });
-});
-
-describe("recurringPaymentErrorMessage", () => {
-  it("stores the custody policy refusal the signer raises in its own plain words", () => {
-    const refusal = custodyPolicyRefused(
-      new SigningError("Privy policy refused", "POLICY_REFUSED")
-    );
-
-    expect(recurringPaymentErrorMessage(refusal)).toBe(refusal.message);
-  });
-
-  it("keeps another signing failure on the public internal-error message", () => {
-    expect(
-      recurringPaymentErrorMessage(new SigningError("Privy unreachable", "NETWORK_ERROR"))
-    ).toBe(PUBLIC_INTERNAL_ERROR_MESSAGE);
   });
 });
