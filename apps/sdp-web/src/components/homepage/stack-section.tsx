@@ -24,7 +24,14 @@ export async function StackSection() {
       product: t("Homepage.stack.labels.product"),
     },
     aria: {
-      partners: t("Homepage.stack.aria.partners"),
+      partners:
+        comingSoonServices.length === 0
+          ? t("Homepage.stack.aria.partners")
+          : t("Homepage.stack.aria.partnersComingSoon", {
+              services: new Intl.ListFormat(locale, { type: "conjunction" }).format(
+                comingSoonServices.map((service) => t(`Homepage.stack.services.${service}`))
+              ),
+            }),
       sdp: t("Homepage.stack.aria.sdp"),
       product: t("Homepage.stack.aria.product"),
     },

@@ -78,6 +78,7 @@
       },
       "aria": {
         "partners": "Partner APIs: custody, compliance, ramps, nodes, wallets",
+        "partnersComingSoon": "Partner APIs: custody, compliance, ramps, nodes, wallets. Coming soon: {services}",
         "sdp": "SDP",
         "product": "Your product: a wallet, checkout, payroll, treasury"
       },
