@@ -35,7 +35,7 @@ const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
  * authority under an activation or update that claimed first. Before that work sends the setup
  * that creates an authority, or the subscribe that binds a schedule to one, it recounts, so it
  * never recreates or subscribes to an authority revoked after its claim. The attempt keeps its
- * first claim's fence (migration 0196), so recovering it later checks against that claim.
+ * first claim's fence (migration 0200), so recovering it later checks against that claim.
  */
 export interface SubscriptionAuthorityRevokeFence {
   wallets: readonly { walletAddress: string; environment: SdpEnvironment; revocations: number }[];

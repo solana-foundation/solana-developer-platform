@@ -200,7 +200,7 @@ function sentApprovals(): { delegate: string; amount: bigint }[] {
 
 /**
  * Sets a schedule's status as a crash would have left it, even one already canceled: the
- * tombstone trigger (migration 0195) lets a test database's transaction that asks rewind a cancel.
+ * tombstone trigger (migration 0199) lets a test database's transaction that asks rewind a cancel.
  */
 async function rewindRecurringPaymentStatus(
   recurringPaymentId: string,
@@ -5654,7 +5654,7 @@ describe("Payments routes — recurring", () => {
 
   /**
    * A recurring payment left `activating` by a claim that created its plan and then stopped, with
-   * its in-flight attempt keeping `revokeFence` (null: an attempt from before migration 0196).
+   * its in-flight attempt keeping `revokeFence` (null: an attempt from before migration 0200).
    */
   async function seedStaleActivationAfterPlan(
     revokeFence: SubscriptionAuthorityRevokeFence | null = null

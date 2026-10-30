@@ -227,7 +227,7 @@ export async function describeTokenApprovalAfterCancel(
     return undefined;
   }
   const repo = createPostgresSubscriptionAuthorityRevocationsRepository(getDb(env));
-  // A canceled row changes no more (migration 0195), so its updated_at is when the cancel landed.
+  // A canceled row changes no more (migration 0199), so its updated_at is when the cancel landed.
   if (
     await repo.hasConfirmedRevocationSince({
       environment: currentClusterScope().environment,

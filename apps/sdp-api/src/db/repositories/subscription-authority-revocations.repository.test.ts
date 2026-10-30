@@ -150,7 +150,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await getDb(env).execute(
       "UPDATE payment_recurring_payment_update_attempts SET status = 'failed' WHERE id = 'rpua_replacement'"
     );
-    // Reviving a canceled schedule is refused outside a test database (migration 0195).
+    // Reviving a canceled schedule is refused outside a test database (migration 0199).
     await getDb(env).transaction(async (tx) => {
       await tx.execute("SELECT set_config('sdp.test_rewind_canceled', 'on', true)", []);
       await tx.execute(
