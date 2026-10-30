@@ -10,13 +10,16 @@ import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import {
   type MainnetAccessClaim,
+  type MainnetAccessEmailContext,
   MainnetAccessRepository,
   type MainnetAccessRow,
 } from "@/db/repositories/mainnet-access.repository";
 import { conflict } from "@/lib/errors";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
+  type MainnetAccessRequestEmail,
   mainnetAccessEmailConfig,
+  sendMainnetAccessCorrectionEmail,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
 import type { Env } from "@/types/env";
@@ -101,9 +104,18 @@ export async function notifyMainnetAccessRequest(
   row: MainnetAccessRow
 ): Promise<MainnetAccessRow> {
   const repository = new MainnetAccessRepository(db);
-  const context = await repository.emailContext(row);
+  await sendMainnetAccessRequestEmail(env, requestEmail(row, await repository.emailContext(row)));
 
-  await sendMainnetAccessRequestEmail(env, {
+  const notified = await repository.markNotified(row);
+  if (!notified) throw conflict("The mainnet access request changed while it was being sent");
+  return notified;
+}
+
+function requestEmail(
+  row: MainnetAccessRow,
+  context: MainnetAccessEmailContext
+): MainnetAccessRequestEmail {
+  return {
     organizationId: row.organization_id,
     organizationName: context.organization_name,
     requester: {
@@ -115,11 +127,7 @@ export async function notifyMainnetAccessRequest(
     countryName: countryByCode(row.country_code).name,
     termsVersion: row.terms_version,
     requestedAt: row.requested_at,
-  });
-
-  const notified = await repository.markNotified(row);
-  if (!notified) throw conflict("The mainnet access request changed while it was being sent");
-  return notified;
+  };
 }
 
 const correctionFields = {
@@ -141,21 +149,32 @@ export const mainnetAccessCorrectionSchema = z.discriminatedUnion("operation", [
 
 export type MainnetAccessCorrection = z.infer<typeof mainnetAccessCorrectionSchema>;
 
+export interface MainnetAccessCorrectionResult {
+  /** The request after the change; null after a reset. */
+  request: MainnetAccessRow | null;
+  /** Whether the operator address was told; `not_configured` on a deployment without email. */
+  operatorEmail: "sent" | "not_configured";
+}
+
 /**
  * The operator's correction of a request, when an organization writes to the alias about a
  * wrong jurisdiction or asks to start over (`pnpm -C apps/sdp-api mainnet-access`). It never
- * grants mainnet: that stays Clerk's `enableProductionProject`. Audited with the change.
+ * grants mainnet: that stays Clerk's `enableProductionProject`. Audited with the change, then
+ * emailed to the operator address, because the request email sent earlier no longer describes the
+ * request and must not be approved from.
  *
- * @returns The row after the change; null after a reset.
+ * @throws When the change is saved but the operator email fails, saying so, so the operator can
+ *   tell the alias by hand.
  */
 export async function correctMainnetAccess(
   env: Env,
   input: MainnetAccessCorrection
-): Promise<MainnetAccessRow | null> {
-  return createSystemAuditService(env).logSystemWithin(async (db) => {
+): Promise<MainnetAccessCorrectionResult> {
+  const { request, earlier } = await createSystemAuditService(env).logSystemWithin(async (db) => {
     const repository = new MainnetAccessRepository(db);
     const before = await repository.get(input.organizationId, { forUpdate: true });
     if (!before) throw new Error("This organization has not requested mainnet access");
+    const context = await repository.emailContext(before);
 
     let after: MainnetAccessRow | null = null;
     const metadata: Record<string, unknown> = {
@@ -180,7 +199,7 @@ export async function correctMainnetAccess(
       await repository.reset(input.organizationId);
     }
     return {
-      result: after,
+      result: { request: after, earlier: requestEmail(before, context) },
       entry: {
         action: input.operation === "reset" ? ("delete" as const) : ("update" as const),
         resourceType: "organization" as const,
@@ -191,4 +210,28 @@ export async function correctMainnetAccess(
       },
     };
   });
+
+  if (!mainnetAccessEmailConfig(env)) return { request, operatorEmail: "not_configured" };
+  try {
+    await sendMainnetAccessCorrectionEmail(env, {
+      request: earlier,
+      correction:
+        input.operation === "set-country"
+          ? {
+              operation: "set-country",
+              countryCode: input.countryCode,
+              countryName: countryByCode(input.countryCode).name,
+            }
+          : { operation: "reset" },
+      operator: input.operator,
+      reason: input.reason,
+      ticket: input.ticket,
+    });
+  } catch (error) {
+    throw new Error(
+      `The ${input.operation} is saved, but emailing the operator address failed; tell it by hand.`,
+      { cause: error }
+    );
+  }
+  return { request, operatorEmail: "sent" };
 }
