@@ -23,7 +23,7 @@ on:
         options: [prod, stage]
         required: true
       action:
-        description: "status lists every policy; kill disables the global policy now; resume re-enables it (approval); set upserts one policy (approval)"
+        description: "status lists every policy; kill disables the global policy now; resume re-enables it (approval + expected_version); set upserts one policy (approval + expected_version)"
         type: choice
         options: [status, kill, resume, set]
         required: true
@@ -47,14 +47,11 @@ on:
         description: "set only: leave the policy enabled"
         type: boolean
         default: true
-      per_tx_lamports:
-        description: "set only: per-transaction lamports limit"
+      limits:
+        description: "set only: per-transaction,hourly,daily lamports limits, comma-separated"
         type: string
-      hourly_lamports:
-        description: "set only: hourly lamports limit"
-        type: string
-      daily_lamports:
-        description: "set only: daily lamports limit"
+      expected_version:
+        description: "resume/set only: policy version shown by status (0 if the policy does not exist yet), so a racing kill wins"
         type: string
 
 permissions:
@@ -83,9 +80,8 @@ jobs:
           SCOPE: ${{ inputs.scope }}
           SCOPE_ID: ${{ inputs.scope_id }}
           ENABLED: ${{ inputs.enabled }}
-          PER_TX_LAMPORTS: ${{ inputs.per_tx_lamports }}
-          HOURLY_LAMPORTS: ${{ inputs.hourly_lamports }}
-          DAILY_LAMPORTS: ${{ inputs.daily_lamports }}
+          LIMITS: ${{ inputs.limits }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
           OPERATOR: ${{ github.actor }}
         run: |
           set -euo pipefail
@@ -108,6 +104,14 @@ jobs:
               exit 1
             fi
           }
+          # resume and set carry the version read from status, so a kill that
+          # lands after dispatch (or during the approval wait) wins over them.
+          check_expected_version() {
+            if [[ ! "${EXPECTED_VERSION}" =~ ^[0-9]{1,9}$ ]]; then
+              echo "expected_version must be the non-negative integer version shown by status (0 if no policy exists)." >&2
+              exit 1
+            fi
+          }
           args=(sponsorship-budget "${ACTION}" --network "${NETWORK}")
           if [[ "${ACTION}" != "status" ]]; then
             check_text reason "${REASON}"
@@ -115,10 +119,20 @@ jobs:
           if [[ "${ACTION}" == "kill" || "${ACTION}" == "resume" ]]; then
             args+=(--operator "github:${OPERATOR}" --reason "${REASON}")
           fi
+          if [[ "${ACTION}" == "resume" ]]; then
+            check_expected_version
+            args+=(--expected-version "${EXPECTED_VERSION}")
+          fi
           if [[ "${ACTION}" == "set" ]]; then
-            check_lamports per_tx_lamports "${PER_TX_LAMPORTS}"
-            check_lamports hourly_lamports "${HOURLY_LAMPORTS}"
-            check_lamports daily_lamports "${DAILY_LAMPORTS}"
+            check_expected_version
+            IFS=',' read -r PER_TX_LAMPORTS HOURLY_LAMPORTS DAILY_LAMPORTS extra <<< "${LIMITS}"
+            if [[ -n "${extra:-}" ]]; then
+              echo "limits must be exactly three comma-separated lamports values." >&2
+              exit 1
+            fi
+            check_lamports per_tx_lamports "${PER_TX_LAMPORTS:-}"
+            check_lamports hourly_lamports "${HOURLY_LAMPORTS:-}"
+            check_lamports daily_lamports "${DAILY_LAMPORTS:-}"
             args+=(--scope "${SCOPE}")
             if [[ "${SCOPE}" != "global" ]]; then
               if [[ ! "${SCOPE_ID}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
@@ -134,6 +148,7 @@ jobs:
             args+=(--per-tx-lamports "${PER_TX_LAMPORTS}")
             args+=(--hourly-lamports "${HOURLY_LAMPORTS}")
             args+=(--daily-lamports "${DAILY_LAMPORTS}")
+            args+=(--expected-version "${EXPECTED_VERSION}")
             args+=(--operator "github:${OPERATOR}" --reason "${REASON}")
           fi
           joined="$(IFS='|'; echo "${args[*]}")"

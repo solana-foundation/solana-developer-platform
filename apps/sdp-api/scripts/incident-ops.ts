@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Fixed entrypoint for the sdp-<env>-incident-ops Cloud Run job (dispatched by the
 // .github/workflows/incident-*.yml workflows). The job's command is pinned to
 // `node incident-ops.js`, so an execution can only choose among the tools and
@@ -5,23 +7,23 @@
 const TOOL_ACTIONS = {
   "sponsorship-budget": {
     script: "sponsorship-budget",
-    actions: new Set(["status", "kill", "resume", "set"]),
+    action: z.enum(["status", "kill", "resume", "set"]),
   },
   "movement-control": {
     script: "project-movement-control",
-    actions: new Set(["status", "disable", "enable"]),
+    action: z.enum(["status", "disable", "enable"]),
   },
-} as const satisfies Record<string, { script: string; actions: ReadonlySet<string> }>;
+} as const satisfies Record<string, { script: string; action: z.ZodType<string> }>;
 
-function isTool(value: string): value is keyof typeof TOOL_ACTIONS {
-  return value in TOOL_ACTIONS;
-}
+const toolSchema = z.enum(
+  Object.keys(TOOL_ACTIONS) as [keyof typeof TOOL_ACTIONS, ...(keyof typeof TOOL_ACTIONS)[]]
+);
 
 async function main(): Promise<void> {
-  const tool = process.argv[2];
-  const action = process.argv[3];
-  const entry = tool !== undefined && isTool(tool) ? TOOL_ACTIONS[tool] : undefined;
-  if (!entry || action === undefined || !entry.actions.has(action)) {
+  const tool = toolSchema.safeParse(process.argv[2]);
+  const entry = tool.success ? TOOL_ACTIONS[tool.data] : undefined;
+  const action = entry?.action.safeParse(process.argv[3]);
+  if (!entry || !action?.success) {
     console.error(
       "Usage: incident-ops <sponsorship-budget|movement-control> <action> [flags]\n" +
         "  sponsorship-budget: status | kill | resume | set\n" +
