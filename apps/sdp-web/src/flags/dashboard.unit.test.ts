@@ -1,5 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { SdpModule } from "@sdp/types/release-channels";
+import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import { describe, expect, it, vi } from "vitest";
 import { capDashboardFlagsToEnvironment, type DashboardFlags } from "./dashboard";
 
@@ -8,10 +8,13 @@ const channel = vi.hoisted(() => {
   return { outOfProduction };
 });
 
-vi.mock("@/flags/release-channel", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/flags/release-channel")>()),
-  isModuleInEnvironmentReleaseChannel: (module: SdpModule, environment: SdpEnvironment) =>
-    environment !== "production" || !channel.outOfProduction.includes(module),
+vi.mock("@sdp/types/release-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/types/release-channels")>()),
+  isModuleInReleaseChannelForEnvironment: (
+    _releaseChannel: SdpReleaseChannel,
+    module: SdpModule,
+    environment: SdpEnvironment
+  ) => environment !== "production" || !channel.outOfProduction.includes(module),
 }));
 
 const ALL_ON = {
