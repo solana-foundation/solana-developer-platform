@@ -124,10 +124,10 @@ export async function resolveWalletFromParams(c: AppContext) {
     getDb(c.env),
     c.env,
     new Map()
-  ).findOperationalWallet({
+  ).findOperationalWalletById({
     organizationId: auth.organizationId,
     projectId: requireProjectId(c),
-    walletId,
+    custodyWalletId: walletId,
   });
   if (!wallet || !walletAccessAllows(auth.walletAccess, wallet.id)) {
     throw walletNotFound();

@@ -5,6 +5,7 @@ import {
   type CustodySetupRefusalReason,
 } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { verifyClerkJwt } from "@/lib/clerk-token";
@@ -136,18 +137,24 @@ async function seedEnvironmentApiKey(environment: SdpEnvironment): Promise<void>
   await seedApiKeyRow(env, keyHash, cachedApiKey(environment));
 }
 
-function initialize(environment: SdpEnvironment, provider: CustodyProvider): Promise<Response> {
+function initialize(
+  environment: SdpEnvironment,
+  provider: CustodyProvider,
+  key?: string
+): Promise<Response> {
+  const headers = new Headers({
+    Authorization: `Bearer ${clerkToken}`,
+    "Content-Type": "application/json",
+    "X-Project-ID": PROJECT_IDS[environment],
+  });
+  if (key !== undefined) headers.set("Idempotency-Key", key);
   return Promise.resolve(
     app.request(
       "/v1/wallets/initialize",
       {
         method: "POST",
         // Custody setup is `wallets.configure`, which no API key may hold.
-        headers: {
-          Authorization: `Bearer ${clerkToken}`,
-          "Content-Type": "application/json",
-          "X-Project-ID": PROJECT_IDS[environment],
-        },
+        headers,
         body: JSON.stringify({ provider }),
       },
       env
@@ -373,6 +380,57 @@ describe("Custody setup by project environment", () => {
     expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
     expect(await auditRows()).toEqual([]);
   });
+
+  it.each(["current", "legacy", "bodyless"] as const)(
+    "preserves a completed initialization snapshot and refuses only a missing internal ID (snapshot=%s)",
+    async (snapshotKind) => {
+      provisionPrivyWalletMock.mockResolvedValueOnce({
+        walletId: "initial_root",
+        address: "RootPublicKey",
+      });
+      const first = await initialize("sandbox", "privy", "retained-initialize");
+      expect(first.status).toBe(201);
+      const original = z
+        .looseObject({ data: z.looseObject({ custodyWalletId: z.string(), configId: z.string() }) })
+        .parse(await first.json());
+      expect(original).not.toHaveProperty("data.walletId");
+      expect(
+        await getDb(env).queryOne("SELECT id FROM custody_wallets WHERE custody_config_id = ?", [
+          original.data.configId,
+        ])
+      ).toEqual({ id: original.data.custodyWalletId });
+      const { custodyWalletId: _internalId, ...oldData } = original.data;
+      const snapshot = JSON.stringify({
+        ...original,
+        data:
+          snapshotKind === "legacy"
+            ? { ...oldData, walletId: "privy_initial_root" }
+            : { ...original.data, walletId: "privy_initial_root" },
+      });
+      await getDb(env).execute(
+        "UPDATE idempotency_keys SET response_body = ? WHERE idempotency_key = 'retained-initialize'",
+        [snapshotKind === "bodyless" ? null : snapshot]
+      );
+      const retained = await getDb(env).queryOne(
+        "SELECT * FROM idempotency_keys WHERE idempotency_key = 'retained-initialize'"
+      );
+      const rows = await custodyRows();
+      provisionPrivyWalletMock.mockClear();
+
+      const replay = await initialize("sandbox", "privy", "retained-initialize");
+      expect(replay.status).toBe(snapshotKind === "current" ? 201 : 409);
+      if (snapshotKind !== "current")
+        expect(await replay.json()).toMatchObject({ error: { code: "CONFLICT" } });
+      else expect(await replay.json()).toEqual(original);
+      expect(
+        await getDb(env).queryOne(
+          "SELECT * FROM idempotency_keys WHERE idempotency_key = 'retained-initialize'"
+        )
+      ).toEqual(retained);
+      expect(await custodyRows()).toEqual(rows);
+      expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("submits and completes BYOK Privy in a Production project", async () => {
     const connectionId = await submittedConnectionId(await submit("production", "gate-prod-byok"));

@@ -10,10 +10,10 @@ import {
   updateWalletSchema as updateWalletSchemaBase,
 } from "@/routes/custody/schemas";
 import {
+  custodyWalletIdParamSchema,
   isoDateTimeSchema,
   projectIdParamSchema,
   solanaAddressSchema,
-  walletIdParamSchema,
   withOpenApi,
 } from "./base";
 
@@ -24,8 +24,8 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record, and an API key may check only a wallet within its wallet scope.",
-  example: { walletId: "privy_wallet_123" },
+    "custodyWalletId is the required exact SDP Wallet ID to check. Provider references and wallet addresses are not accepted; an API key may check only a wallet within its wallet scope.",
+  example: { custodyWalletId: "cwlt_example" },
 });
 
 export const orgCustodyProviderSchema = z
@@ -90,9 +90,9 @@ export const deleteWalletRequestSchema = deleteWalletSchemaBase
       description: "Optional consistency assertion for the Provider of the wallet being deleted.",
       example: "anchorage",
     }),
-    walletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID to delete from its exact owning target.",
-      example: "anchorage_wallet_123",
+    custodyWalletId: custodyWalletIdParamSchema.openapi({
+      description: "Exact SDP Wallet ID to delete from its owning target.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Delete wallet request body." });
@@ -115,9 +115,9 @@ export const initializeSigningResponseSchema = z
     publicKey: solanaAddressSchema.openapi({
       description: "Public key of the provisioned root wallet.",
     }),
-    walletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID of the provisioned root wallet.",
-      example: "privy_wallet_123",
+    custodyWalletId: custodyWalletIdParamSchema.openapi({
+      description: "Exact SDP Wallet ID of the newly persisted or reused root wallet.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Wallet signing initialization result." });
@@ -142,7 +142,6 @@ const custodyWalletExample = {
   custodyConfigId: "cfg_example",
   provider: "privy",
   isRuntimeExecutionAllowed: true,
-  walletId: "privy_wallet_123",
   publicKey: "So11111111111111111111111111111111111111112",
   label: "Root Signing Wallet",
   purpose: "root",
@@ -151,7 +150,7 @@ const custodyWalletExample = {
 };
 
 const custodyWalletBaseSchema = z.object({
-  id: z.string().openapi({ description: "Wallet record ID.", example: "cw_example" }),
+  id: custodyWalletIdParamSchema,
   custodyConfigId: z.string().optional().openapi({
     description: "Owning custody configuration ID.",
     example: "cfg_example",
@@ -165,10 +164,6 @@ const custodyWalletBaseSchema = z.object({
     description:
       "Whether SDP currently permits attempting runtime execution through this wallet's owner. This is request-time admission, not Provider health or a success guarantee.",
     example: true,
-  }),
-  walletId: walletIdParamSchema.openapi({
-    description: "Provider wallet ID.",
-    example: "privy_wallet_123",
   }),
   publicKey: solanaAddressSchema,
   label: z.string().nullable().openapi({
@@ -343,9 +338,9 @@ export const custodyConfigsResponseSchema = z
 
 export const deleteWalletResponseSchema = z
   .object({
-    walletId: walletIdParamSchema.openapi({
-      description: "Wallet ID that was deleted.",
-      example: "anchorage_wallet_123",
+    custodyWalletId: custodyWalletIdParamSchema.openapi({
+      description: "Exact SDP Wallet ID that was deleted.",
+      example: "cwlt_example",
     }),
     deleted: z.literal(true).openapi({
       description: "Deletion confirmation flag.",
@@ -362,9 +357,9 @@ export const custodyPublicKeyResponseSchema = z
 
 export const signerCheckResponseSchema = z
   .object({
-    walletId: walletIdParamSchema.openapi({
-      description: "Resolved signing wallet ID.",
-      example: "privy_wallet_123",
+    custodyWalletId: custodyWalletIdParamSchema.openapi({
+      description: "Exact SDP Wallet ID used for the check.",
+      example: "cwlt_example",
     }),
     walletAddress: solanaAddressSchema.openapi({
       description: "Resolved signer address used for the check message.",

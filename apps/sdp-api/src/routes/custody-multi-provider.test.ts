@@ -1,8 +1,11 @@
+import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import type { CustodyMode } from "@sdp/types/custody";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { requestFingerprint } from "@/middleware/idempotency";
+import * as custodyProvisioning from "@/services/custody/provisioning";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
@@ -236,7 +239,7 @@ async function seedActivePrivyConnection(suffix: string) {
     })
   );
 
-  return { connectionId, walletId, publicKey };
+  return { connectionId, walletRecordId, publicKey };
 }
 
 describe("Custody multi-provider routes", () => {
@@ -299,7 +302,7 @@ describe("Custody multi-provider routes", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
-        wallets: Array<{ id: string; provider: string; custodyConfigId: string; walletId: string }>;
+        wallets: Array<{ id: string; provider: string; custodyConfigId: string }>;
       };
     };
     expect(
@@ -308,7 +311,6 @@ describe("Custody multi-provider routes", () => {
           id: wallet.id,
           provider: wallet.provider,
           custodyConfigId: wallet.custodyConfigId,
-          walletId: wallet.walletId,
         }))
         .sort((left, right) => left.id.localeCompare(right.id))
     ).toEqual([
@@ -316,27 +318,24 @@ describe("Custody multi-provider routes", () => {
         id: "cwlt_para_a",
         provider: "para",
         custodyConfigId: PARA_CONFIG_ID,
-        walletId: "para_wallet_a",
       },
       {
         id: "cwlt_para_b",
         provider: "para",
         custodyConfigId: PARA_CONFIG_ID,
-        walletId: "para_wallet_b",
       },
       {
         id: "cwlt_privy_a",
         provider: "privy",
         custodyConfigId: PRIVY_CONFIG_ID,
-        walletId: "privy_wallet_a",
       },
       {
         id: "cwlt_privy_b",
         provider: "privy",
         custodyConfigId: PRIVY_CONFIG_ID,
-        walletId: "privy_wallet_b",
       },
     ]);
+    for (const wallet of body.data.wallets) expect(wallet).not.toHaveProperty("walletId");
   });
 
   it("keeps active Connection wallets visible with fresh Runtime Execution Admission", async () => {
@@ -354,10 +353,10 @@ describe("Custody multi-provider routes", () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as {
         data: {
-          wallets: Array<Record<string, unknown> & { walletId: string }>;
+          wallets: Array<Record<string, unknown> & { id: string }>;
         };
       };
-      return body.data.wallets.find((wallet) => wallet.walletId === connection.walletId);
+      return body.data.wallets.find((wallet) => wallet.id === connection.walletRecordId);
     };
 
     await expect(readWallet()).resolves.toMatchObject({
@@ -481,7 +480,7 @@ describe("Custody multi-provider routes", () => {
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
         body: JSON.stringify({
-          walletId: "wallet_unknown_test",
+          custodyWalletId: "cwlt_unknown_test",
         }),
       },
       env
@@ -492,5 +491,119 @@ describe("Custody multi-provider routes", () => {
       error: { code: "NOT_FOUND", message: "Custody wallet not found" },
       meta: { requestId: expect.any(String) },
     });
+  });
+
+  it("deletes only the selected Config wallet and restores it on Provider failure", async () => {
+    const db = getDb(env);
+    const connection = await seedActivePrivyConnection("delete_collision");
+    await db.execute(
+      "UPDATE custody_configs SET provider = 'anchorage', config_encrypted = ? WHERE id = ?",
+      [JSON.stringify({ provider: "anchorage" }), PARA_CONFIG_ID]
+    );
+    await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({ providerOverrides: { custody: { anchorage: true } } }),
+      TEST_ORG.id,
+    ]);
+    await db.execute(
+      "UPDATE custody_wallets SET wallet_id = 'anchorage_shared' WHERE id = 'cwlt_para_a'"
+    );
+    await db.execute(
+      "UPDATE custody_wallets SET wallet_id = 'anchorage_shared', status = 'inactive' WHERE id = ?",
+      [connection.walletRecordId]
+    );
+    const states = () =>
+      db.queryMany<{ id: string; status: string }>(
+        "SELECT id, status FROM custody_wallets WHERE id IN ('cwlt_para_a', 'cwlt_para_b', ?) ORDER BY id",
+        [connection.walletRecordId]
+      );
+    const deleteAtProvider = vi
+      .spyOn(custodyProvisioning, "deleteAnchorageWallet")
+      .mockImplementationOnce(async (_env, input) => {
+        expect(input).toEqual({ walletId: "shared" });
+        expect(await states()).toEqual([
+          { id: connection.walletRecordId, status: "inactive" },
+          { id: "cwlt_para_a", status: "inactive" },
+          { id: "cwlt_para_b", status: "active" },
+        ]);
+        throw new SigningError("Provider deletion failed", "NETWORK_ERROR");
+      });
+    const remove = (custodyWalletId: string, key?: string) => {
+      const headers = new Headers({
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        "Content-Type": "application/json",
+      });
+      if (key !== undefined) headers.set("Idempotency-Key", key);
+      return app.request(
+        "/v1/wallets",
+        {
+          method: "DELETE",
+          headers,
+          body: JSON.stringify({ custodyWalletId }),
+        },
+        { ...env, ANCHORAGE_API_KEY: "anchorage-delete-test-key" }
+      );
+    };
+
+    expect((await remove("cwlt_para_a")).status).toBe(400);
+    expect(await states()).toEqual([
+      { id: connection.walletRecordId, status: "inactive" },
+      { id: "cwlt_para_a", status: "active" },
+      { id: "cwlt_para_b", status: "active" },
+    ]);
+    deleteAtProvider.mockResolvedValueOnce();
+    const deleted = await remove("cwlt_para_a", "retained-delete");
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({
+      data: { custodyWalletId: "cwlt_para_a", deleted: true },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+    const afterDelete = await states();
+    expect(afterDelete).toEqual([
+      { id: connection.walletRecordId, status: "inactive" },
+      { id: "cwlt_para_a", status: "inactive" },
+      { id: "cwlt_para_b", status: "active" },
+    ]);
+    const lastWallet = await remove("cwlt_para_b");
+    expect(lastWallet.status).toBe(400);
+    expect(await lastWallet.json()).toMatchObject({
+      error: { message: "Cannot delete the last wallet for an active custody provider" },
+    });
+    expect(deleteAtProvider).toHaveBeenCalledTimes(2);
+    expect(await states()).toEqual(afterDelete);
+
+    await db.execute(
+      "UPDATE idempotency_keys SET fingerprint = ?, response_body = ? WHERE idempotency_key = 'retained-delete'",
+      [
+        requestFingerprint({
+          operation: "DELETE /v1/wallets",
+          params: {},
+          query: {},
+          body: { walletId: "anchorage_shared" },
+        }),
+        JSON.stringify({ data: { walletId: "anchorage_shared", deleted: true } }),
+      ]
+    );
+    const retainedKey = () =>
+      db.queryOne("SELECT * FROM idempotency_keys WHERE idempotency_key = 'retained-delete'");
+    const keyBefore = await retainedKey();
+    expect(keyBefore).not.toBeNull();
+    const retired = await app.request(
+      "/v1/wallets",
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "retained-delete",
+        },
+        body: JSON.stringify({ walletId: "anchorage_shared" }),
+      },
+      env
+    );
+    expect(retired.status).toBe(400);
+    expect((await remove("cwlt_para_a", "retained-delete")).status).toBe(422);
+    expect(await retainedKey()).toEqual(keyBefore);
+    expect(await states()).toEqual(afterDelete);
+    expect(deleteAtProvider).toHaveBeenCalledTimes(2);
   });
 });

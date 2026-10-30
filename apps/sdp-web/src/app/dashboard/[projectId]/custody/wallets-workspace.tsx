@@ -90,7 +90,7 @@ export function WalletsWorkspace({
                 connectedProviders={connectedProviders}
                 configsError={configsError}
                 wallets={wallets.map((wallet) => ({
-                  walletId: wallet.walletId,
+                  walletId: wallet.id,
                   label: wallet.label,
                   provider: wallet.provider ?? null,
                   publicKey: wallet.publicKey,

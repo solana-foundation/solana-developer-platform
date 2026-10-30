@@ -47,7 +47,7 @@ beforeEach(() => {
   mocks.enabled.mockResolvedValue(true);
   mocks.wallets.mockResolvedValue({
     ok: true,
-    data: [{ id: "wallet-a", walletId: "provider-wallet-a" }],
+    data: [{ id: "wallet-a" }],
   });
   mocks.request.mockResolvedValue(
     new Response(JSON.stringify({ data: { token: { id: "tok_saved" } } }), { status: 201 })

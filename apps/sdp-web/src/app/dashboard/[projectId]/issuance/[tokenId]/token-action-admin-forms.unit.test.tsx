@@ -206,7 +206,6 @@ describe("control-list signing availability", () => {
   it("shows the list signer and reads its runtime restriction as a warning", async () => {
     const signer: PaymentsDashboardWallet = {
       id: "cw_authority",
-      walletId: "wal_authority",
       publicKey: "AuthorityPubKey",
       label: "List authority",
       isRuntimeExecutionAllowed: false,
@@ -222,7 +221,7 @@ describe("control-list signing availability", () => {
     // The list authority shows as an identity row with its wallet link, not a dead select.
     expect(screen.getByText(/List authority/)).toBeTruthy();
     expect(screen.getByRole("link", { name: /List authority/ }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/wallets/wal_authority"
+      "/dashboard/prj_test_sandbox/wallets/cw_authority"
     );
     expect(screen.queryAllByRole("combobox").map((el) => el.textContent)).not.toContainEqual(
       expect.stringContaining("List authority")
@@ -249,14 +248,12 @@ describe("control-list signing availability", () => {
       signerWallets: [
         {
           id: "cw_config",
-          walletId: "wal_config",
           publicKey: "AuthorityPubKey",
           label: "Config authority",
           isRuntimeExecutionAllowed: true,
         },
         {
           id: "cw_connection",
-          walletId: "wal_connection",
           publicKey: "AuthorityPubKey",
           label: "Connection authority",
           isRuntimeExecutionAllowed: true,

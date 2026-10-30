@@ -14,7 +14,6 @@ describe("fetchPaymentsWallets", () => {
     const wallets = [
       {
         id: "wallet-a",
-        walletId: "provider-wallet",
         publicKey: "shared-address",
         label: "Treasury",
         provider: "privy",
@@ -23,7 +22,6 @@ describe("fetchPaymentsWallets", () => {
       },
       {
         id: "wallet-b",
-        walletId: "provider-wallet",
         publicKey: "shared-address",
         label: "Treasury",
         provider: "privy",
@@ -42,7 +40,6 @@ describe("fetchPaymentsWallets", () => {
   it("rejects a wallet response without execution admission", async () => {
     const wallet = {
       id: "config-wallet",
-      walletId: "provider-wallet",
       publicKey: "address",
       label: null,
       custodyConfigId: "config",
@@ -58,7 +55,6 @@ describe("fetchPaymentsWallets", () => {
   it.each([true, false])("keeps a Config wallet with execution admission %s", async (allowed) => {
     const wallet = {
       id: "config-wallet",
-      walletId: "provider-wallet",
       publicKey: "address",
       label: null,
       provider: "privy",
@@ -86,7 +82,6 @@ describe("fetchPaymentsWallets", () => {
           wallets: [
             {
               id: "wallet",
-              walletId: "provider-wallet",
               publicKey: "address",
               isRuntimeExecutionAllowed: true,
               ...owner,
@@ -109,7 +104,6 @@ describe("fetchPaymentsWallets", () => {
           wallets: [
             {
               id: "wallet",
-              walletId: "provider-wallet",
               publicKey: "address",
               custodyConnectionId: "connection",
               isRuntimeExecutionAllowed: admission,
@@ -172,7 +166,6 @@ const twoWallets: FetchResult<PaymentsDashboardWallet[]> = {
   data: [
     {
       id: "wallet-fast",
-      walletId: "provider-fast",
       publicKey: "address-fast",
       label: null,
       provider: "privy",
@@ -181,7 +174,6 @@ const twoWallets: FetchResult<PaymentsDashboardWallet[]> = {
     },
     {
       id: "wallet-slow",
-      walletId: "provider-slow",
       publicKey: "address-slow",
       label: null,
       provider: "privy",
@@ -364,21 +356,18 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
         data: [
           {
             id: "wallet-row-1",
-            walletId: "wallet-1",
             publicKey: "address-1",
             label: null,
             isRuntimeExecutionAllowed: true,
           },
           {
             id: "wallet-row-2",
-            walletId: "wallet-1",
             publicKey: "address-1",
             label: null,
             isRuntimeExecutionAllowed: true,
           },
           {
             id: "wallet-row-3",
-            walletId: "wallet-3",
             publicKey: "address-2",
             label: null,
             isRuntimeExecutionAllowed: true,
@@ -431,14 +420,12 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
         data: [
           {
             id: "wallet-row-1",
-            walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
             isRuntimeExecutionAllowed: true,
           },
           {
             id: "wallet-row-2",
-            walletId: "provider-wallet",
             publicKey: "shared-address",
             label: null,
             isRuntimeExecutionAllowed: true,
@@ -492,7 +479,6 @@ describe("fetchDashboardPaymentTransfersForWallets", () => {
         data: [
           {
             id: "wallet-row-1",
-            walletId: "provider-wallet-1",
             publicKey: "address-1",
             label: null,
             isRuntimeExecutionAllowed: true,

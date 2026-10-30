@@ -64,7 +64,7 @@ function draftFromInitialKey(initialKey?: ApiKeyAuthoringExistingKey): ApiKeyAut
 }
 
 function walletLabel(wallet: PaymentsDashboardWallet): string {
-  return wallet.label?.trim() || wallet.walletId;
+  return wallet.label?.trim() || wallet.id;
 }
 
 /** The wallets the key's scope reaches: every wallet, or the selected ones. */
@@ -314,9 +314,7 @@ function AccessStep({
   const filteredWallets = wallets.filter((wallet) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
-    return `${walletLabel(wallet)} ${wallet.walletId} ${wallet.publicKey}`
-      .toLowerCase()
-      .includes(query);
+    return `${walletLabel(wallet)} ${wallet.id} ${wallet.publicKey}`.toLowerCase().includes(query);
   });
   const toggleWallet = (walletId: string) => {
     onWalletSelectionTouched();

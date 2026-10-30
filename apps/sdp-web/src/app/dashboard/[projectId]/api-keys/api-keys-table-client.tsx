@@ -99,7 +99,7 @@ function formatDate(
 }
 
 function formatWalletLabel(wallet: PaymentsDashboardWallet): string {
-  return wallet.label?.trim() || wallet.walletId;
+  return wallet.label?.trim() || wallet.id;
 }
 
 function getWalletNames(

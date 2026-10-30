@@ -7,7 +7,7 @@ import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
   TEST_API_KEY,
-  TEST_WALLET_ID,
+  TEST_CUSTODY_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 
 // HOO-2099: the custody signer refuses a wallet outside a selected key's
@@ -28,7 +28,7 @@ describe("signer check wallet scope", () => {
           "Content-Type": "application/json",
           "Idempotency-Key": "signer-check-out-of-scope",
         },
-        body: JSON.stringify({ walletId: TEST_WALLET_ID }),
+        body: JSON.stringify({ custodyWalletId: TEST_CUSTODY_WALLET_ID }),
       },
       env
     );

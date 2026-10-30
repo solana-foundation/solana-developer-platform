@@ -53,7 +53,6 @@ const cryptoAccount: CounterpartyAccount = {
 const wallets: PaymentsDashboardWallet[] = [
   {
     id: "wallet-sol",
-    walletId: "provider-sol",
     isRuntimeExecutionAllowed: true,
     custodyConfigId: "cc_test",
     publicKey: "sol-wallet",
@@ -64,7 +63,6 @@ const wallets: PaymentsDashboardWallet[] = [
   },
   {
     id: "wallet-usdc",
-    walletId: "provider-usdc",
     isRuntimeExecutionAllowed: true,
     custodyConfigId: "cc_test",
     publicKey: "usdc-wallet",

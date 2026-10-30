@@ -95,7 +95,7 @@ export interface UnfreezeApiResponse
 
 export interface SignerCheckApiResponse
   extends ApiResponse<{
-    walletId: string;
+    custodyWalletId: string;
     walletAddress: string;
     feePayer: string;
     memo: string;

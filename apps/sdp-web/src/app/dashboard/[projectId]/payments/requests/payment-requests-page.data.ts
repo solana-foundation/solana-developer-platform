@@ -24,6 +24,7 @@ const paymentRequestDetailResponseSchema = z.object({
     organizationId: z.string(),
     projectId: z.string().nullable(),
     walletId: z.string(),
+    custodyWalletId: z.string().min(1).nullable(),
     destinationAddress: z.string(),
     token: z.string(),
     amount: z.string(),

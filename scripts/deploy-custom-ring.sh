@@ -65,7 +65,7 @@ below() { awk -v a="$1" -v b="$2" 'BEGIN { exit (a < b) ? 0 : 1 }'; }
 step "custody wallet"
 CUSTODY_CACHE="$WORK_DIR/custody-wallet"
 
-# Asks SDP whether it still knows a wallet, printing its provider wallet id.
+# Asks SDP whether it still knows a wallet, printing its internal wallet ID.
 # Empty output means SDP answered and has no active wallet at that address.
 #
 # Returns non-zero when SDP could not answer at all. That case must stay
@@ -88,7 +88,7 @@ sdp_wallet_id_for() {
     return 1
   fi
   jq -r --arg address "$1" \
-    '.data.wallets[]? | select(.publicKey == $address and .status == "active") | .walletId' \
+    '.data.wallets[]? | select(.publicKey == $address and .status == "active") | .id' \
     <<<"$body"
 }
 
@@ -114,7 +114,7 @@ elif [ -s "$CUSTODY_CACHE" ]; then
     echo "wallet cannot take an authority the old one still holds." >&2
     echo "" >&2
     echo "  cache:    $CUSTODY_CACHE" >&2
-    echo "  provider: $(sed -n '2p' "$CUSTODY_CACHE" 2>/dev/null || echo 'not recorded by an older run')" >&2
+    echo "  wallet ID: $(sed -n '2p' "$CUSTODY_CACHE" 2>/dev/null || echo 'not recorded by an older run')" >&2
     echo "" >&2
     echo "Re-register that wallet with the project, or point at another with" >&2
     echo "CUSTODY_WALLET_ADDRESS=<address> if the ring has never been brought up." >&2
@@ -148,12 +148,11 @@ else
     exit 1
   fi
   CUSTODY_ADDRESS="$(jq -er '.data.wallet.publicKey' <<<"$body")"
-  CUSTODY_WALLET_ID="$(jq -r '.data.wallet.walletId // empty' <<<"$body")"
+  CUSTODY_WALLET_ID="$(jq -er '.data.wallet.id' <<<"$body")"
   echo "created custody wallet ring-authority-$RING_LABEL: $CUSTODY_ADDRESS"
 fi
 # Persist for re-runs: the ring must keep one authority across resumes. The
-# provider wallet id goes on line two, because recovering a lost SDP record
-# from the address alone means paging the provider's whole wallet list.
+# internal wallet ID goes on line two to identify the retained SDP record.
 {
   printf '%s\n' "$CUSTODY_ADDRESS"
   [ -n "${CUSTODY_WALLET_ID:-}" ] && printf '%s\n' "$CUSTODY_WALLET_ID"

@@ -41,7 +41,6 @@ const walletTokenBalanceSchema = z.object({
  */
 const earnFundingWalletSchema = z.object({
   id: z.string(),
-  walletId: z.string(),
   publicKey: z.string(),
   /**
    * Custody provider name, for display only. Optional and deliberately not an
@@ -160,7 +159,7 @@ export async function refreshFundingWalletBalances(
     wallets.map(async (wallet) => {
       const slot =
         typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
+      const balances = await fetchLiveFundingWalletBalance(wallet.id, slot);
       return { ...wallet, balances };
     })
   );

@@ -153,7 +153,7 @@ export function TokenWalletAddressField({
                 className="flex w-full flex-col items-start gap-1 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
               >
                 <span className="text-sm font-medium text-primary">
-                  {wallet.label?.trim() || wallet.walletId}
+                  {wallet.label?.trim() || wallet.id}
                 </span>
                 <span className="font-mono text-xs text-secondary">{wallet.publicKey}</span>
               </button>

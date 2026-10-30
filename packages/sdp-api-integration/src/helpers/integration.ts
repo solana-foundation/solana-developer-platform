@@ -468,7 +468,7 @@ async function ensureLocalCustodyWallet(): Promise<IntegrationCustodyWallet> {
       walletLabel: "Integration Local Root Wallet",
     });
     const initializedWallet = (await listActiveConfigWallets(initialized.configId)).find(
-      (wallet) => wallet.wallet_id === initialized.walletId
+      (wallet) => wallet.id === initialized.custodyWalletId
     );
     if (!initializedWallet) {
       throw new Error("Integration precondition failed: initialized local wallet not found.");

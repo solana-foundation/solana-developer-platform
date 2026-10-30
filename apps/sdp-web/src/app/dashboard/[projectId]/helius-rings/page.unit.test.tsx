@@ -31,7 +31,6 @@ it("passes the internal Custody ID from wallet summaries to the workspace", asyn
         wallets: [
           {
             id: "cwlt_treasury",
-            walletId: "provider_treasury",
             label: "Treasury",
             publicKey: "TreasuryOwner111",
           },

@@ -1,6 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { deriveCustodyWalletCreateRequestId } from "@/routes/custody/handlers/wallets";
@@ -239,7 +240,6 @@ describe("Custody wallet owner contract", () => {
         id: expect.any(String),
         custodyConfigId: CONFIG_ID,
         isRuntimeExecutionAllowed: true,
-        walletId: "privy_managed_created",
         publicKey: CREATED_PUBLIC_KEY,
         label: "Treasury",
         purpose: "transfer",
@@ -280,7 +280,6 @@ describe("Custody wallet owner contract", () => {
         id: expect.any(String),
         custodyConnectionId: CONNECTION_ID,
         isRuntimeExecutionAllowed: true,
-        walletId: "privy_connection_created",
         publicKey: CREATED_PUBLIC_KEY,
         label: "Settlement",
         purpose: "transfer",
@@ -302,18 +301,15 @@ describe("Custody wallet owner contract", () => {
     });
   });
 
-  it("requires walletId to read a public key", async () => {
+  it("requires custodyWalletId to read a public key", async () => {
     const response = await readPublicKey("");
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: { code: "BAD_REQUEST", message: "walletId is required" },
-      meta: { requestId: expect.any(String) },
-    });
+    expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
 
   it("reads the public key of the named wallet", async () => {
-    const response = await readPublicKey(`?walletId=${CONNECTION_WALLET_ID}`);
+    const response = await readPublicKey(`?custodyWalletId=${CONNECTION_WALLET_RECORD_ID}`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -385,6 +381,70 @@ describe("Custody wallet owner contract", () => {
             ["privy_keyed_created"]
           )
         ).toEqual({ idempotency_request_id: requestId(KEY) });
+      }
+    );
+
+    it.each([{ provider: "privy" }, { connectionId: CONNECTION_ID }])(
+      "projects retained HTTP and expired-key create replies without provisioning again: %j",
+      async (body) => {
+        provisionPrivyWalletMock.mockResolvedValueOnce({
+          walletId: "keyed_created",
+          address: CREATED_PUBLIC_KEY,
+        });
+        const first = await createWallet(body, KEY);
+        expect(first.status).toBe(201);
+        const original = z
+          .looseObject({ data: z.looseObject({ wallet: z.looseObject({ id: z.string() }) }) })
+          .parse(await first.json());
+        const saved = z
+          .object({ response_body: z.string() })
+          .parse(
+            await getDb(env).queryOne(
+              "SELECT response_body FROM idempotency_keys WHERE idempotency_key = ?",
+              [KEY]
+            )
+          );
+        expect(z.json().parse(JSON.parse(saved.response_body))).toEqual(original);
+        const snapshot = JSON.stringify({
+          ...original,
+          data: { wallet: { ...original.data.wallet, walletId: "privy_keyed_created" } },
+        });
+        await getDb(env).execute(
+          "UPDATE idempotency_keys SET response_body = ? WHERE idempotency_key = ?",
+          [snapshot, KEY]
+        );
+        await getDb(env).execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+          original.data.wallet.id,
+        ]);
+        const retained = await getDb(env).queryOne(
+          "SELECT * FROM idempotency_keys WHERE idempotency_key = ?",
+          [KEY]
+        );
+        provisionPrivyWalletMock.mockClear();
+
+        const replay = await createWallet(body, KEY);
+        expect(replay.status).toBe(201);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+        expect(await replay.json()).toEqual(original);
+        expect(
+          await getDb(env).queryOne("SELECT * FROM idempotency_keys WHERE idempotency_key = ?", [
+            KEY,
+          ])
+        ).toEqual(retained);
+        const rows = await readWalletRows();
+
+        await getDb(env).execute(
+          "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = ?",
+          [KEY]
+        );
+        const durable = await createWallet(body, KEY);
+        expect(durable.status).toBe(201);
+        const result = await durable.json();
+        expect(result).toHaveProperty("data.wallet.id", original.data.wallet.id);
+        expect(result).toHaveProperty("data.wallet.status", "inactive");
+        expect(result).not.toHaveProperty("data.wallet.walletId");
+        expect(await readWalletRows()).toEqual(rows);
+        expect(provisionPrivyWalletMock).not.toHaveBeenCalled();
       }
     );
 
@@ -514,7 +574,7 @@ describe("Custody wallet owner contract", () => {
 
         expect(response.status).toBe(201);
         expect(await response.json()).toMatchObject({
-          data: { wallet: { id: "cwlt_raced_winner", walletId: "privy_raced_winner", ...owner } },
+          data: { wallet: { id: "cwlt_raced_winner", ...owner } },
         });
         expect(
           (await readWalletRows()).filter((row) => row.wallet_id === "privy_raced_loser")

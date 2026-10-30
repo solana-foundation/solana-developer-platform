@@ -19,6 +19,7 @@ function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): Paymen
     organizationId: "org_1",
     projectId: "prj_1",
     walletId: "wal_1",
+    custodyWalletId: "cwlt_1",
     destinationAddress: "11111111111111111111111111111111",
     token: MAINNET_USDC,
     amount: "1",
@@ -96,13 +97,16 @@ describe("fetchPaymentRequestDetail", () => {
     return { request, paths };
   }
 
-  it("reads the request by id", async () => {
-    const row = requestRow("preq_120");
-    const api = detailApi(Response.json({ data: row }));
-    const result = await fetchPaymentRequestDetail(api.request, "preq_120");
-    expect(result).toEqual({ status: "found", request: row });
-    expect(api.paths).toEqual(["/v1/payments/requests/preq_120"]);
-  });
+  it.each(["cwlt_1", null])(
+    "reads the request by id with custody link %s",
+    async (custodyWalletId) => {
+      const row = requestRow("preq_120", { custodyWalletId });
+      const api = detailApi(Response.json({ data: row }));
+      const result = await fetchPaymentRequestDetail(api.request, "preq_120");
+      expect(result).toEqual({ status: "found", request: row });
+      expect(api.paths).toEqual(["/v1/payments/requests/preq_120"]);
+    }
+  );
 
   it("is not found on a 404", async () => {
     const api = detailApi(new Response(null, { status: 404 }));

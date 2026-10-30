@@ -33,7 +33,6 @@ const MINT = "So11111111111111111111111111111111111111112";
 const postedBatchSchema = z.object({ recipients: z.array(z.unknown()) });
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_selected",
-  walletId: "privy_shared",
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,

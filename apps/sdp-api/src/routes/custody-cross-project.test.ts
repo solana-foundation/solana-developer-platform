@@ -222,10 +222,10 @@ describe("custody wallets across an organization's projects", () => {
 
   it.each(OWNER_WALLETS)(
     "hides another project's $owner wallet from public-key and wallet reads",
-    async ({ walletId }) => {
+    async ({ custodyWalletId }) => {
       for (const path of [
-        `/v1/wallets/public-key?walletId=${walletId}`,
-        `/v1/wallets/${walletId}?includeBalance=false`,
+        `/v1/wallets/public-key?custodyWalletId=${custodyWalletId}`,
+        `/v1/wallets/${custodyWalletId}?includeBalance=false`,
       ]) {
         const response = await requestAsRequester(path, { method: "GET" });
         expect(response.status).toBe(404);
@@ -236,10 +236,10 @@ describe("custody wallets across an organization's projects", () => {
 
   it.each(OWNER_WALLETS)(
     "refuses a signer check on another project's $owner wallet",
-    async ({ walletId }) => {
+    async ({ custodyWalletId }) => {
       const response = await requestAsRequester("/v1/wallets/signer-check", {
         method: "POST",
-        body: { walletId },
+        body: { custodyWalletId },
       });
 
       expect(response.status).toBe(400);
@@ -249,10 +249,10 @@ describe("custody wallets across an organization's projects", () => {
 
   it.each(OWNER_WALLETS)(
     "leaves another project's $owner wallet untouched by label and delete requests",
-    async ({ walletId }) => {
+    async ({ custodyWalletId }) => {
       const before = await readCustodyState();
 
-      const relabel = await requestAsRequester(`/v1/wallets/${walletId}`, {
+      const relabel = await requestAsRequester(`/v1/wallets/${custodyWalletId}`, {
         method: "PATCH",
         body: { label: "Cross-project label" },
       });
@@ -261,7 +261,7 @@ describe("custody wallets across an organization's projects", () => {
 
       const deletion = await requestAsRequester("/v1/wallets", {
         method: "DELETE",
-        body: { provider: "privy", walletId },
+        body: { provider: "privy", custodyWalletId },
       });
       expect(deletion.status).toBe(404);
       expect(await deletion.json()).toEqual(errorBody("NOT_FOUND", "Custody wallet not found"));

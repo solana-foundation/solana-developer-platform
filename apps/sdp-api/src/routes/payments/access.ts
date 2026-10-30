@@ -10,7 +10,7 @@ import {
   getCounterpartiesRepository,
   getPaymentSubscriptionsRepository,
 } from "./context";
-import { findRetainedPaymentWalletByWalletId } from "./wallets";
+import { findRetainedPaymentWallet, findRetainedPaymentWalletByWalletId } from "./wallets";
 
 /**
  * Access checks for the payment routes that name wallets, plans and
@@ -33,7 +33,7 @@ function planIdParam(input: AuthorizeInput): string {
 /** Payment-request create: the receiving wallet, in the caller's project. */
 export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
   const { walletId } = body<{ walletId: string }>(input);
-  if (!(await findRetainedPaymentWalletByWalletId(c, walletId))) {
+  if (!(await findRetainedPaymentWallet(c, walletId))) {
     throw walletNotFound();
   }
 }

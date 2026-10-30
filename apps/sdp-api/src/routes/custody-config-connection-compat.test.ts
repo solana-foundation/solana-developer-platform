@@ -76,7 +76,9 @@ describe("custody Config beside a BYOK Connection", () => {
     expect(configs.status).toBe(200);
     expect(await configs.json()).toEqual(configsBody());
 
-    const available = await request(`/v1/wallets/${CONNECTION_WALLET_ID}?includeBalance=false`);
+    const available = await request(
+      `/v1/wallets/${CONNECTION_WALLET_RECORD_ID}?includeBalance=false`
+    );
     expect(available.status).toBe(200);
     expect(await available.json()).toEqual(connectionWalletBody(true));
 
@@ -85,14 +87,16 @@ describe("custody Config beside a BYOK Connection", () => {
       .bind(CREDENTIAL_ID)
       .run();
 
-    const unavailable = await request(`/v1/wallets/${CONNECTION_WALLET_ID}?includeBalance=false`);
+    const unavailable = await request(
+      `/v1/wallets/${CONNECTION_WALLET_RECORD_ID}?includeBalance=false`
+    );
     expect(unavailable.status).toBe(200);
     expect(await unavailable.json()).toEqual(connectionWalletBody(false));
   });
 
   it("answers the named Connection wallet's public key and refuses a request that names none", async () => {
     const connectionPublicKey = await request(
-      `/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`
+      `/v1/wallets/public-key?custodyWalletId=${CONNECTION_WALLET_RECORD_ID}`
     );
     expect(connectionPublicKey.status).toBe(200);
     expect(await connectionPublicKey.json()).toEqual({
@@ -103,7 +107,7 @@ describe("custody Config beside a BYOK Connection", () => {
     const unnamed = await request("/v1/wallets/public-key");
     expect(unnamed.status).toBe(400);
     expect(await unnamed.json()).toEqual({
-      error: { code: "BAD_REQUEST", message: "walletId is required" },
+      error: { code: "BAD_REQUEST", message: expect.stringContaining("custodyWalletId") },
       meta: { requestId: expect.any(String) },
     });
   });
@@ -112,7 +116,9 @@ describe("custody Config beside a BYOK Connection", () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
     expect(await (await request("/v1/wallets/configs")).json()).toEqual(configsBody());
-    const publicKey = await request(`/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`);
+    const publicKey = await request(
+      `/v1/wallets/public-key?custodyWalletId=${CONNECTION_WALLET_RECORD_ID}`
+    );
     expect(publicKey.status).toBe(403);
     expect(await publicKey.json()).toEqual({
       error: {
@@ -151,7 +157,6 @@ function connectionWalletBody(isRuntimeExecutionAllowed: boolean) {
         custodyConnectionId: CONNECTION_ID,
         provider: "privy",
         isRuntimeExecutionAllowed,
-        walletId: CONNECTION_WALLET_ID,
         publicKey: CONNECTION_PUBLIC_KEY,
         label: "Connection wallet",
         purpose: "root",

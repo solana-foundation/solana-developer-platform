@@ -114,18 +114,27 @@ describe("payment request public tokens", () => {
       .object({ data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }) })
       .parse(await res.json());
     expect(body.data.paymentRequests).toHaveLength(1);
+    expect(body.data.paymentRequests[0]).toMatchObject({ custodyWalletId: "cwlt_request_token" });
     expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
     expect(JSON.stringify(body)).not.toContain(publicToken);
   });
 
-  it("never returns the token on a single read", async () => {
-    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+  it.each(["cwlt_request_token", null])(
+    "retains wallet link %s without exposing the token",
+    async (custodyWalletId) => {
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET custody_wallet_id = ? WHERE id = ?")
+        .bind(custodyWalletId, requestId)
+        .run();
+      const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
 
-    expect(res.status).toBe(200);
-    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
-    expect(body.data.id).toBe(requestId);
-    expect(body.data).not.toHaveProperty("publicToken");
-  });
+      expect(res.status).toBe(200);
+      const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
+      expect(body.data.id).toBe(requestId);
+      expect(body.data).toMatchObject({ custodyWalletId, walletId: "wlt_request_token" });
+      expect(body.data).not.toHaveProperty("publicToken");
+    }
+  );
 
   it("refuses the link to a key without payment_requests.manage, naming the action", async () => {
     const res = await get(`/v1/payments/requests/${requestId}/link`, READ_KEY);
@@ -153,7 +162,7 @@ describe("payment request public tokens", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${READ_KEY.raw}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletId: "wlt_request_token",
+          walletId: "cwlt_request_token",
           token: DEVNET_USDC,
           amount: "1.00",
         }),

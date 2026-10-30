@@ -112,6 +112,7 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
         id: request.id,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
         walletId: TEST_WALLET_ID,
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet1,
         token: DEVNET_USDC_MINT,

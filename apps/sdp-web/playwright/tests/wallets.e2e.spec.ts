@@ -199,7 +199,7 @@ test.describe
         labelPrefix: "Wallet Routes",
       });
 
-      const encodedWalletId = encodeURIComponent(wallet.walletId);
+      const encodedWalletId = encodeURIComponent(wallet.id);
       const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
       const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
@@ -255,6 +255,12 @@ test.describe
       );
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
       await walletCard.getByRole("link", { name: `Open ${walletLabel}` }).click();
+      await expect(page).toHaveURL(walletHref);
+      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
+        timeout: E2E_POLL_TIMEOUT_MS,
+      });
+
+      await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page).toHaveURL(walletHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -604,7 +610,7 @@ test.describe
         }
       );
 
-      await gotoProjectPage(page, projectId, `/dashboard/wallets/${wallet.walletId}`);
+      await gotoProjectPage(page, projectId, `/dashboard/wallets/${wallet.id}`);
       await page.locator("[data-wallet-activity-state]").scrollIntoViewIfNeeded();
 
       const expectedActivityRows = [
@@ -690,7 +696,7 @@ test.describe
 
       // The wallet's page opens on Overview, whose recent activity reads the feed straight away;
       // the whole feed is on the Activity tab (`?tab=activity`). Both read the same window.
-      await gotoProjectPage(page, fixtures.projectId, `/dashboard/wallets/${wallet.walletId}`);
+      await gotoProjectPage(page, fixtures.projectId, `/dashboard/wallets/${wallet.id}`);
       await expect(page.getByRole("heading", { name: wallet.label ?? "Treasury" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });

@@ -32,7 +32,6 @@ const account: CounterpartyAccount = {
 };
 const managedWallet: PaymentsDashboardWallet = {
   id: "wallet_managed",
-  walletId: "provider_managed",
   publicKey: "11111111111111111111111111111111",
   label: "Managed",
   provider: "fireblocks",

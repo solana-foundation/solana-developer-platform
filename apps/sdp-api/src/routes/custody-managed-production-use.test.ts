@@ -87,7 +87,6 @@ describe("Managed custody use by project environment", () => {
           id: expect.any(String),
           custodyConfigId: CONFIG_ID,
           isRuntimeExecutionAllowed: true,
-          walletId: "privy_managed_production_use_created",
           publicKey: CREATED_PUBLIC_KEY,
           label: null,
           purpose: "transfer",
@@ -102,7 +101,7 @@ describe("Managed custody use by project environment", () => {
       createSigningService(env).admitRuntimeExecution(ORGANIZATION_ID, PROJECT_ID, WALLET_RECORD_ID)
     ).resolves.toBeUndefined();
     const publicKey = await app.request(
-      `/v1/wallets/public-key?walletId=${WALLET_ID}`,
+      `/v1/wallets/public-key?custodyWalletId=${WALLET_RECORD_ID}`,
       { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
       env
     );

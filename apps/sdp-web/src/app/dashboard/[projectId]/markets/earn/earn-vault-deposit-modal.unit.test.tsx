@@ -187,7 +187,6 @@ function fundingWallet(balances: EarnFundingWallet["balances"]): EarnFundingWall
   return {
     id: "wallet_1",
     isRuntimeExecutionAllowed: true,
-    walletId: "provider_wallet_1",
     publicKey: "7YkWnDF8W6B3gC3xZ1gRzuCUzPmGp7s1e3gHcWw6Xx5p",
     label: "Treasury wallet",
     purpose: "treasury",

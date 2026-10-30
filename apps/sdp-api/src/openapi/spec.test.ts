@@ -147,7 +147,7 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  it("documents exact signer-check runtime failures and requires its Provider-ID request", () => {
+  it("documents exact signer-check runtime failures and requires its internal wallet ID", () => {
     const operation = createPublicOpenApiDocument({ releaseChannel: "stable" }).paths?.[
       "/v1/wallets/signer-check"
     ]?.post;
@@ -155,9 +155,30 @@ describe("OpenAPI spec", () => {
     expect(operation?.responses).toHaveProperty("404");
     expect(operation?.responses).toHaveProperty("409");
     const request = getJsonSchema(operation?.requestBody);
-    expect(request.properties).toEqual({ walletId: expect.any(Object) });
+    expect(request.properties).toEqual({ custodyWalletId: expect.any(Object) });
     // A wallet scope has no default signing wallet, so the request names one.
-    expect(request.required).toEqual(["walletId"]);
+    expect(request.required).toEqual(["custodyWalletId"]);
+  });
+
+  it("uses internal wallet selectors in Custody operation contracts", () => {
+    const doc = createOpenApiDocument();
+    const deletion = getJsonSchema(doc.paths?.["/v1/wallets"]?.delete?.requestBody);
+    expect(deletion.required).toContain("custodyWalletId");
+    expect(deletion.properties).not.toHaveProperty("walletId");
+    for (const response of [
+      doc.paths?.["/v1/wallets/initialize"]?.post?.responses?.["201"],
+      doc.paths?.["/v1/wallets"]?.delete?.responses?.["200"],
+      doc.paths?.["/v1/wallets/signer-check"]?.post?.responses?.["200"],
+    ]) {
+      const data = getJsonSchema(response).properties?.data;
+      expect(data?.required).toContain("custodyWalletId");
+      expect(data?.properties).not.toHaveProperty("walletId");
+    }
+    expect(doc.paths?.["/v1/wallets/public-key"]?.get?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ in: "query", name: "custodyWalletId", required: true }),
+      ])
+    );
   });
 
   it("documents path-based versioning policy", () => {
@@ -614,11 +635,12 @@ describe("OpenAPI spec", () => {
       expect(walletSchema.properties).toHaveProperty("custodyConnectionId");
       expect(walletSchema.oneOf).toEqual(ownerConstraint);
       expect(walletSchema.required).toContain("isRuntimeExecutionAllowed");
+      expect(walletSchema.properties).not.toHaveProperty("walletId");
       expect(walletSchema.example).toMatchObject({
         custodyConfigId: "cfg_example",
         isRuntimeExecutionAllowed: true,
-        walletId: "privy_wallet_123",
       });
+      expect(walletSchema.example).not.toHaveProperty("walletId");
     }
 
     for (const walletSchema of [createWallet, listWallet, updateWallet]) {
@@ -626,6 +648,36 @@ describe("OpenAPI spec", () => {
     }
     expect(detailWallet.required).toContain("provider");
     expect(detailWallet.required ?? []).not.toContain("balance");
+  });
+
+  it("documents custodyWalletId as the payment balance response identity", () => {
+    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
+    const balances = getJsonSchema(
+      doc.paths?.["/v1/payments/wallets/{walletId}/balances"]?.get?.responses?.["200"]
+    ).properties?.data?.properties?.walletBalances;
+
+    expect(balances?.required).toContain("custodyWalletId");
+    expect(balances?.properties?.custodyWalletId?.example).toBe("cwlt_example");
+    expect(balances?.properties).not.toHaveProperty("walletId");
+  });
+
+  it("documents nullable custody identity alongside payment request cancellation", () => {
+    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
+    const request = getJsonSchema(
+      doc.paths?.["/v1/payments/requests/{paymentRequestId}/cancel"]?.post?.responses?.["200"]
+    ).properties?.data;
+
+    expect(request?.properties?.custodyWalletId).toMatchObject({ type: "string", nullable: true });
+    expect(request?.required).toEqual(
+      expect.arrayContaining([
+        "custodyWalletId",
+        "walletId",
+        "paidLate",
+        "canceledByApiKeyId",
+        "canceledByUserId",
+        "canceledAt",
+      ])
+    );
   });
 
   it("documents Connection-aware wallet resolution failures", () => {

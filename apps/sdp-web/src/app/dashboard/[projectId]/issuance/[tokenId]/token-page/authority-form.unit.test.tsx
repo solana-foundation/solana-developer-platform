@@ -13,7 +13,6 @@ const messages = getMessages("en");
 const wallets = [
   {
     id: "w1",
-    walletId: "p1",
     isRuntimeExecutionAllowed: true,
     publicKey: "Addr1",
     label: "Treasury",
@@ -58,28 +57,29 @@ function renderForm(newAuthority: string) {
   return ops;
 }
 
+function AuthorityFormHarness({ base, submitted }: { base: TokenOperations; submitted: string[] }) {
+  const [newAuthority, setNewAuthority] = useState(base.authorityModalNewAuthority);
+  const ops: TokenOperations = {
+    ...base,
+    authorityModalNewAuthority: newAuthority,
+    setAuthorityModalNewAuthority: (value) => {
+      base.setAuthorityModalNewAuthority(value);
+      setNewAuthority(value);
+    },
+    handleAuthorityModalConfirm: async () => {
+      submitted.push(newAuthority);
+    },
+  };
+  return <AuthorityForm ops={ops} />;
+}
+
 /** The form over operations that keep the new holder, as the token's operations hook does. */
 function renderStatefulForm(initial: string) {
   const base = buildOps(initial);
   const submitted: string[] = [];
-  function Harness() {
-    const [newAuthority, setNewAuthority] = useState(initial);
-    const ops = {
-      ...base,
-      authorityModalNewAuthority: newAuthority,
-      setAuthorityModalNewAuthority: (value: string) => {
-        base.setAuthorityModalNewAuthority(value);
-        setNewAuthority(value);
-      },
-      handleAuthorityModalConfirm: async () => {
-        submitted.push(newAuthority);
-      },
-    } as TokenOperations;
-    return <AuthorityForm ops={ops} />;
-  }
   render(
     <I18nProvider locale="en" messages={messages}>
-      <Harness />
+      <AuthorityFormHarness base={base} submitted={submitted} />
     </I18nProvider>
   );
   return { ops: base, submitted };

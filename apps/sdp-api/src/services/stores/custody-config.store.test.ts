@@ -27,6 +27,33 @@ describe("CustodyConfigStore project scope", () => {
     await seedScope();
   });
 
+  it("initializes the exact persisted root and reads its public key by internal ID", async () => {
+    const localEnv = {
+      ...env,
+      SDP_DEPLOYMENT_MODE: "self_hosted" as const,
+      CUSTODY_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+      CUSTODY_PRIVATE_KEY: "configured-local-custody-test-key",
+    };
+    await getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+      JSON.stringify({ providerOverrides: { custody: { local: true } } }),
+      ORGANIZATION_ID,
+    ]);
+    const service = createSigningService(localEnv);
+    const result = await service.initializeLocalSigning(ORGANIZATION_ID, PROJECT_ID);
+    const wallets = await new CustodyConfigStore(getDb(env), localEnv).getWallets(result.configId);
+
+    expect(wallets).toHaveLength(1);
+    expect(result.custodyWalletId).toBe(wallets[0].id);
+    expect(result.custodyWalletId).toMatch(/^cwlt_/);
+    expect(wallets[0].publicKey).toBe(result.publicKey);
+    await expect(
+      service.getPublicKey(ORGANIZATION_ID, PROJECT_ID, result.custodyWalletId)
+    ).resolves.toBe(result.publicKey);
+    await expect(
+      service.getPublicKey(ORGANIZATION_ID, PROJECT_ID, result.walletId)
+    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
+  });
+
   it.each(CUSTODY_CONFIG_STATUSES)(
     "finds a %s config by provider only while it is unarchived",
     async (status) => {
@@ -142,7 +169,7 @@ describe("CustodyConfigStore project scope", () => {
       store.findActiveWalletByPublicKey(ORGANIZATION_ID, PROJECT_ID, PUBLIC_KEY)
     ).resolves.toEqual(expectedWalletLookup());
     await expect(
-      signingService.getPublicKey(ORGANIZATION_ID, OTHER_PROJECT_ID, PROVIDER_WALLET_ID)
+      signingService.getPublicKey(ORGANIZATION_ID, OTHER_PROJECT_ID, CUSTODY_WALLET_ID)
     ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
     await expect(
       signingService.getTransactionSignerForWalletRecord(

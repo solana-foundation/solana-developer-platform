@@ -62,7 +62,7 @@ function WalletCell({
     const [first] = wallets;
     return (
       <div className="min-w-0">
-        <span className="block truncate">{first.label?.trim() || first.walletId}</span>
+        <span className="block truncate">{first.label?.trim() || first.id}</span>
         <span className="relative mt-1 flex items-center gap-1">
           <span className="block truncate font-mono text-[11px] font-normal text-tertiary">
             {formatWalletMeta(first.publicKey)}

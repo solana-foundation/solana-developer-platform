@@ -35,6 +35,7 @@ import {
   custodyWalletResponseSchema,
   custodyWalletsResponseSchema,
   deleteWalletResponseSchema,
+  initializeSigningResponseSchema,
   signerCheckResponseSchema,
 } from "@/openapi/schemas/custody";
 import {
@@ -268,6 +269,9 @@ export const custodyWalletAggregateResponse = successResponseSchema(
 );
 export const custodyWalletByIdResponse = successResponseSchema(custodyWalletByIdResponseSchema);
 export const custodyDeleteWalletResponse = successResponseSchema(deleteWalletResponseSchema);
+export const custodyInitializeSigningResponse = successResponseSchema(
+  initializeSigningResponseSchema
+);
 export const custodySignerCheckResponse = successResponseSchema(signerCheckResponseSchema);
 export const addressScreeningResponse = successResponseSchema(addressScreeningResponseSchema);
 

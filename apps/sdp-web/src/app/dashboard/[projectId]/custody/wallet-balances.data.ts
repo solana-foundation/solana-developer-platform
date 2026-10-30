@@ -12,7 +12,7 @@ interface ApiErrorEnvelope {
 interface WalletBalancesEnvelope extends ApiErrorEnvelope {
   data?: {
     wallets?: Array<{
-      walletId?: string;
+      id?: string;
       balances?: CustodyWalletTokenBalance[];
     }>;
   };
@@ -59,10 +59,10 @@ export async function fetchWalletBalances(): Promise<Record<string, CustodyWalle
   return Object.fromEntries(
     body.data.wallets
       .filter(
-        (wallet): wallet is { walletId: string; balances: CustodyWalletTokenBalance[] } =>
-          Boolean(wallet.walletId) && Array.isArray(wallet.balances)
+        (wallet): wallet is { id: string; balances: CustodyWalletTokenBalance[] } =>
+          Boolean(wallet.id) && Array.isArray(wallet.balances)
       )
-      .map((wallet) => [wallet.walletId, wallet.balances])
+      .map((wallet) => [wallet.id, wallet.balances])
   );
 }
 

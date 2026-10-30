@@ -475,14 +475,8 @@ export class CustodyRuntimeTargets {
   async findOwnedWalletForMutation(params: {
     organizationId: string;
     projectId: string;
-    walletId: string;
-    /** Include retained address aliases when checking source-selector ambiguity. */
-    publicKey?: string;
+    custodyWalletId: string;
   }): Promise<CustodyOwnedWallet | null> {
-    const selector = params.publicKey ? "(w.wallet_id = ? OR w.public_key = ?)" : "w.wallet_id = ?";
-    const selectorValues = params.publicKey
-      ? [params.walletId, params.publicKey]
-      : [params.walletId];
     const [configs, connections] = await Promise.all([
       this.db.queryMany<{
         id: string;
@@ -495,8 +489,8 @@ export class CustodyRuntimeTargets {
          JOIN custody_configs c ON c.id = w.custody_config_id
          WHERE c.organization_id = ?
            AND c.project_id = ?
-           AND ${selector}`,
-        [params.organizationId, params.projectId, ...selectorValues]
+           AND w.id = ?`,
+        [params.organizationId, params.projectId, params.custodyWalletId]
       ),
       this.db.queryMany<{
         id: string;
@@ -509,8 +503,8 @@ export class CustodyRuntimeTargets {
          JOIN custody_connections c ON c.id = w.custody_connection_id
          WHERE c.organization_id = ?
            AND c.project_id = ?
-           AND ${selector}`,
-        [params.organizationId, params.projectId, ...selectorValues]
+           AND w.id = ?`,
+        [params.organizationId, params.projectId, params.custodyWalletId]
       ),
     ]);
     const matches: CustodyOwnedWallet[] = [
@@ -527,9 +521,6 @@ export class CustodyRuntimeTargets {
         walletId: wallet.wallet_id,
       })),
     ];
-    if (matches.length > 1) {
-      throw conflict("Custody wallet ownership is ambiguous");
-    }
     return matches[0] ?? null;
   }
 

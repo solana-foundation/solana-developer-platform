@@ -209,10 +209,9 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     }
 
     const createWalletBody = JSON.parse(createWalletPayload) as {
-      data: { wallet: { id: string; walletId: string; publicKey: string } };
+      data: { wallet: { id: string; publicKey: string } };
     };
 
-    const walletId = createWalletBody.data.wallet.walletId;
     const custodyWalletId = createWalletBody.data.wallet.id;
     const walletAddress = createWalletBody.data.wallet.publicKey;
 
@@ -248,7 +247,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ walletId }),
+        body: JSON.stringify({ custodyWalletId }),
       });
 
       const signerCheckPayload = await signerCheckRes.text();
@@ -261,7 +260,8 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       const signerCheckBody = JSON.parse(signerCheckPayload) as SignerCheckApiResponse;
       const signerCheck = signerCheckBody.data;
 
-      expect(signerCheck.walletId).toBe(walletId);
+      expect(signerCheck.custodyWalletId).toBe(custodyWalletId);
+      expect(signerCheck).not.toHaveProperty("walletId");
       expect(signerCheck.walletAddress).toBe(walletAddress);
       expect(signerCheck.memo).toMatch(
         /^SDP signer check [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/

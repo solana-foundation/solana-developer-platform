@@ -12,14 +12,12 @@ import {
 const wallets: PaymentsDashboardWallet[] = [
   {
     id: "cwlt_a",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "address_a",
     label: "A",
   },
   {
     id: "cwlt_b",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "address_b",
     label: "B",
@@ -29,14 +27,12 @@ const wallets: PaymentsDashboardWallet[] = [
 const duplicateAuthorityWallets: PaymentsDashboardWallet[] = [
   {
     id: "cwlt_config",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Config",
   },
   {
     id: "cwlt_connection",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Connection",

@@ -5,9 +5,11 @@ import { app } from "@/index";
 import { HUMAN_SESSION_REQUIRED_MESSAGE } from "@/middleware/human-session";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { syntheticSignature } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -80,12 +82,44 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
 }
 
 describe("POST /internal/dashboard/wallets/:walletId/faucet", () => {
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeEach(async () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedSandboxWalletAndApiKey();
+  });
+
+  it("funds the human-selected internal wallet on devnet and refuses its provider selector", async () => {
+    const headers = await clerkAdminHeaders(env, getDb(env), {
+      userId: USER_ID,
+      organizationId: ORGANIZATION_ID,
+      projectId: SANDBOX_PROJECT_ID,
+    });
+    const signature = syntheticSignature(1);
+    rpc.answer("requestAirdrop", signature);
+    rpc.answer("getSignatureStatuses", {
+      context: { slot: 1 },
+      value: [{ slot: 1, confirmations: 1, err: null, confirmationStatus: "confirmed" }],
+    });
+    const request = (id: string) =>
+      app.request(
+        `/internal/dashboard/wallets/${id}/faucet`,
+        { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: "{}" },
+        env
+      );
+
+    const response = await request(CUSTODY_WALLET_ID);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { signature, status: "confirmed" } });
+    expect((await request("privy_wallet_custody_wallet_faucet")).status).toBe(404);
+    expect(rpc.requests.filter(({ method }) => method === "requestAirdrop")).toEqual([
+      {
+        cluster: "devnet",
+        method: "requestAirdrop",
+        params: [TEST_SOLANA_ADDRESSES.wallet1, 1000000000, { commitment: "confirmed" }],
+      },
+    ]);
   });
 
   it("refuses an API key holding wallets.execute on its own sandbox wallet, before any RPC call", async () => {

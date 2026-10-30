@@ -475,7 +475,7 @@ function TreasuryWalletTile({
     >
       <Link
         className="absolute inset-0 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        href={href(`${DASHBOARD_SIDE_NAV_HREFS.wallets}/${encodeURIComponent(wallet.walletId)}`)}
+        href={href(`${DASHBOARD_SIDE_NAV_HREFS.wallets}/${encodeURIComponent(wallet.id)}`)}
       >
         <span className="sr-only">{t("DashboardCustody.openWalletNamed", { wallet: name })}</span>
       </Link>

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { initializeSigningSchema } from "./schemas";
+import {
+  deleteWalletSchema,
+  initializeSigningSchema,
+  publicKeyQuerySchema,
+  signerCheckSchema,
+} from "./schemas";
 
 const hostedProviderRequests = [
   { provider: "privy" },
@@ -54,4 +59,18 @@ describe("custody initialize endpoint selection", () => {
 
     expect(initializeSigningSchema.safeParse(request).success).toBe(false);
   });
+});
+
+describe("Custody operation selectors", () => {
+  it.each([deleteWalletSchema, signerCheckSchema, publicKeyQuerySchema])(
+    "rejects retired and mixed selectors",
+    (schema) => {
+      expect(schema.safeParse({ walletId: "provider_reference" }).success).toBe(false);
+      expect(
+        schema.safeParse({ custodyWalletId: "cwlt_selected", walletId: "provider_reference" })
+          .success
+      ).toBe(false);
+      expect(schema.safeParse({ custodyWalletId: "cwlt_selected" }).success).toBe(true);
+    }
+  );
 });

@@ -216,7 +216,7 @@ describe("Managed Privy setup beside BYOK Privy", () => {
     expect(body).toEqual({
       data: {
         configId: expect.any(String),
-        walletId: "privy_wallet_side_by_side",
+        custodyWalletId: expect.stringMatching(/^cwlt_/),
         publicKey: "ManagedSideBySidePublicKey",
       },
       meta: { requestId: expect.any(String), timestamp: expect.any(String) },

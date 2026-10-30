@@ -74,7 +74,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
   const walletOptions = buildWalletOptions(wallets);
   const providerOptions = buildProviderOptions(connectedProviders);
   const firstWallet = wallets[0];
-  const exampleWalletId = firstWallet?.walletId ?? "privy_wallet_123";
+  const exampleWalletId = firstWallet?.walletId ?? "cwlt_example";
   const exampleWalletLabel = firstWallet?.label?.trim() || t("DashboardCustody.mainWallet");
   const examplePublicKey = firstWallet?.publicKey ?? "11111111111111111111111111111111";
 
@@ -91,14 +91,14 @@ export function buildWalletsPlaygroundEndpointConfigs({
           wallets:
             wallets.length > 0
               ? wallets.map((wallet) => ({
-                  walletId: wallet.walletId,
+                  id: wallet.walletId,
                   label: wallet.label,
                   provider: wallet.provider,
                   publicKey: wallet.publicKey,
                 }))
               : [
                   {
-                    walletId: exampleWalletId,
+                    id: exampleWalletId,
                     label: exampleWalletLabel,
                     provider: "privy",
                     publicKey: examplePublicKey,
@@ -143,7 +143,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       expectedResponse: {
         data: {
           wallet: {
-            walletId: exampleWalletId,
+            id: exampleWalletId,
             label: exampleWalletLabel,
             publicKey: examplePublicKey,
           },
@@ -154,11 +154,11 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "get-wallet-public-key",
       title: t("DashboardCustody.playgroundGetWalletPublicKey"),
       method: "GET",
-      path: "/v1/wallets/public-key?walletId={walletId}",
+      path: "/v1/wallets/public-key?custodyWalletId={custodyWalletId}",
       pathFields: [
         buildSelectOrTextField(
-          "walletId",
-          "walletId",
+          "custodyWalletId",
+          "custodyWalletId",
           t("DashboardCustody.walletId"),
           walletOptions
         ),
@@ -221,7 +221,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       expectedResponse: {
         data: {
           wallet: {
-            walletId: exampleWalletId,
+            id: exampleWalletId,
             label: exampleWalletLabel,
             provider: connectedProviders[0] ?? "privy",
             publicKey: examplePublicKey,
@@ -237,15 +237,15 @@ export function buildWalletsPlaygroundEndpointConfigs({
       pathFields: [],
       bodyFields: [
         buildSelectOrTextField(
-          "walletId",
-          "walletId",
+          "custodyWalletId",
+          "custodyWalletId",
           t("DashboardCustody.walletId"),
           walletOptions
         ),
       ],
       expectedResponse: {
         data: {
-          walletId: exampleWalletId,
+          custodyWalletId: exampleWalletId,
           signature: "5n2ExampleSignature",
           simulated: true,
         },

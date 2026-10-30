@@ -68,7 +68,7 @@ interface CreateWalletResponse {
 interface InitializeWalletResponse {
   configId: string;
   publicKey: string;
-  walletId: string;
+  custodyWalletId: string;
 }
 
 interface ListWalletsResponse {
@@ -77,7 +77,6 @@ interface ListWalletsResponse {
 
 export interface PlaywrightWalletFixture {
   id: string;
-  walletId: string;
   publicKey: string;
   label: string | null;
 }
@@ -183,7 +182,6 @@ function getPlaywrightDatabaseUrl(): string {
 function toFixtureWallet(wallet: PaymentsDashboardWallet): PlaywrightWalletFixture {
   return {
     id: wallet.id,
-    walletId: wallet.walletId,
     publicKey: wallet.publicKey,
     label: wallet.label ?? null,
   };
@@ -439,7 +437,7 @@ async function requestWalletAirdropLamports(
   }
 
   const airdrop = await api.post<WalletFaucetResponse>(
-    `/internal/dashboard/wallets/${encodeURIComponent(wallet.walletId)}/faucet`
+    `/internal/dashboard/wallets/${encodeURIComponent(wallet.id)}/faucet`
   );
   if (airdrop.status === "failed") {
     throw new Error(`Devnet faucet airdrop ${airdrop.signature} failed`);
@@ -728,12 +726,12 @@ export async function bootstrapLocalWalletFixtures(input: {
       provider,
       label: index === 1 ? "Delegated" : `Wallet ${index + 1}`,
     });
-    createdWalletIds.push(created.wallet.walletId);
+    createdWalletIds.push(created.wallet.id);
   }
 
   const listedWallets = await listWallets(api);
   const wallets = createdWalletIds
-    .map((walletId) => listedWallets.find((wallet) => wallet.walletId === walletId))
+    .map((walletId) => listedWallets.find((wallet) => wallet.id === walletId))
     .filter((wallet): wallet is PaymentsDashboardWallet => Boolean(wallet))
     .map(toFixtureWallet);
 
@@ -773,7 +771,7 @@ async function initializeOrCreateWallet(
       provider,
       walletLabel: label,
     });
-    return initialized.walletId;
+    return initialized.custodyWalletId;
   } catch (error) {
     if (
       !(error instanceof Error) ||
@@ -788,7 +786,7 @@ async function initializeOrCreateWallet(
     label,
     purpose: "transfer",
   });
-  return created.wallet.walletId;
+  return created.wallet.id;
 }
 
 export async function createExternalSolanaAddress(): Promise<string> {

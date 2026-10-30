@@ -18,14 +18,12 @@ vi.mock("@sdp/ui/modal", () => ({
 const wallets: PaymentsDashboardWallet[] = [
   {
     id: "cwlt_a",
-    walletId: "provider_a",
     isRuntimeExecutionAllowed: true,
     publicKey: "address_a",
     label: "Wallet A",
   },
   {
     id: "cwlt_b",
-    walletId: "provider_b",
     isRuntimeExecutionAllowed: true,
     publicKey: "address_b",
     label: "Wallet B",

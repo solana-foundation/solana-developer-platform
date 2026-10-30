@@ -133,8 +133,7 @@ function requireWallet(
   fallbackIndex: number
 ): PlaywrightWalletFixture {
   const resolved =
-    (walletId ? wallets.find((wallet) => wallet.walletId === walletId) : null) ??
-    wallets[fallbackIndex];
+    (walletId ? wallets.find((wallet) => wallet.id === walletId) : null) ?? wallets[fallbackIndex];
 
   if (!resolved) {
     throw new Error(`Failed to resolve Playwright wallet fixture at index ${fallbackIndex}`);
@@ -164,11 +163,7 @@ export async function bootstrapLocalIssuanceFixtures({
   const projectId = walletBootstrap.projectId;
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
 
-  const treasuryWallet = requireWallet(
-    walletBootstrap.wallets,
-    walletBootstrap.wallets[0]?.walletId,
-    0
-  );
+  const treasuryWallet = requireWallet(walletBootstrap.wallets, walletBootstrap.wallets[0]?.id, 0);
   const externalAddresses = await createExternalAddressSet();
   const delegatedWallet =
     walletBootstrap.wallets[1] ??
@@ -176,7 +171,6 @@ export async function bootstrapLocalIssuanceFixtures({
       ? treasuryWallet
       : ({
           id: "external-delegated-authority",
-          walletId: externalAddresses.freezeWallet,
           publicKey: externalAddresses.freezeWallet,
           label: "External delegated authority",
         } satisfies PlaywrightWalletFixture));
@@ -252,11 +246,7 @@ export async function bootstrapLocalPaymentFixtures({
   });
   const projectId = walletBootstrap.projectId;
   const api = createLocalApiClient(getBootstrapApiBaseUrl(), bearerToken, projectId);
-  const treasuryWallet = requireWallet(
-    walletBootstrap.wallets,
-    walletBootstrap.wallets[0]?.walletId,
-    0
-  );
+  const treasuryWallet = requireWallet(walletBootstrap.wallets, walletBootstrap.wallets[0]?.id, 0);
   const openDraft = await createFixtureToken(api, {
     name: "E2E Open Stable",
     symbol: "E2EOPN",

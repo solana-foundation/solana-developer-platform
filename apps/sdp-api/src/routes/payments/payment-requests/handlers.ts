@@ -16,7 +16,7 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { cancelOpenPaymentRequest } from "@/services/payments/payment-request-cancel";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
@@ -35,6 +35,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
+    custodyWalletId: row.custody_wallet_id,
     walletId: row.wallet_id,
     destinationAddress: row.destination_address,
     token: row.token,
@@ -107,7 +108,7 @@ export async function createPaymentRequest(
   // Access to the wallet was checked by authorizePaymentRequest, before the key. Whether the
   // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.walletId);
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, body.walletId);
   const token = assertValidAddress(normalizePaymentToken(body.token), "token");
   const amountBaseUnits = await parseStaticPaymentAmount(body.amount, token);
   // A SOL request to a wallet with no account below the rent minimum could

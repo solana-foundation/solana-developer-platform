@@ -17,7 +17,6 @@ type WalletListResponse = {
   data: {
     wallets: Array<{
       id: string;
-      walletId: string;
       publicKey: string;
       provider?: string;
     }>;

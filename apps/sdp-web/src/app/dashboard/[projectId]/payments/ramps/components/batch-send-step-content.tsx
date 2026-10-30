@@ -95,7 +95,7 @@ function pluralRecipients(count: number, t: Translate): string {
 function rootLabelOf(wizard: BatchSendWizard, t: Translate): string {
   return (
     wizard.selectedWallet?.label ??
-    wizard.selectedWallet?.walletId ??
+    wizard.selectedWallet?.id ??
     t("DashboardPayments.batchSend.yourWallet")
   );
 }

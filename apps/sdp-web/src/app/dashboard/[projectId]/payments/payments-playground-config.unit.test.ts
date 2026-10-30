@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
+import { getOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 import { buildPaymentsPlaygroundEndpointConfigs } from "./payments-playground-config";
 
 const messages = getMessages("en");
@@ -19,6 +20,33 @@ function providerField(
 }
 
 describe("buildPaymentsPlaygroundEndpointConfigs", () => {
+  it.each([
+    {
+      wallets: [{ id: "cwlt_selected", publicKey: "address_selected", label: "Treasury" }],
+      expectedDefault: "cwlt_selected",
+    },
+    { wallets: [], expectedDefault: undefined },
+  ])("uses the OpenAPI balance example with wallet $expectedDefault", (example) => {
+    const configs = buildPaymentsPlaygroundEndpointConfigs(
+      { transfers: [], wallets: example.wallets, rampProviders: [] },
+      t
+    );
+    const endpoint = configs.find(({ id }) => id === "wallet-balances");
+    const openApiEndpoint = getOpenApiPlaygroundEndpoints("payments").find(
+      ({ id }) => id === "get-payment-wallet-balances"
+    );
+
+    expect(endpoint?.pathFields[0]?.defaultValue).toBe(example.expectedDefault);
+    expect(openApiEndpoint).toBeDefined();
+    expect(endpoint?.expectedResponse).toEqual(openApiEndpoint?.expectedResponse);
+    expect(endpoint?.expectedResponse).toHaveProperty(
+      "data.walletBalances.custodyWalletId",
+      "cwlt_example"
+    );
+    expect(endpoint?.expectedResponse).not.toHaveProperty("data.walletBalances.walletId");
+    expect(endpoint?.expectedResponse).not.toHaveProperty("data.walletId");
+  });
+
   it("offers only the ramp providers the flags leave on, in the quote endpoints' provider picker", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
       { transfers: [], wallets: [], rampProviders: ["moonpay", "stripe"] },

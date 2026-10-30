@@ -16,14 +16,12 @@ vi.mock("sonner", () => ({ toast: { loading: vi.fn(), error: vi.fn(), success: v
 const wallets: PaymentsDashboardWallet[] = [
   {
     id: "cwlt_a",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Config",
   },
   {
     id: "cwlt_b",
-    walletId: "provider_same",
     isRuntimeExecutionAllowed: true,
     publicKey: "authority",
     label: "Connection",

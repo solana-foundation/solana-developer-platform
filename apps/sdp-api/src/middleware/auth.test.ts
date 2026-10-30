@@ -585,15 +585,15 @@ describe("Auth Middleware", () => {
 
     it("refuses a key narrowed from all wallets to selected ones on its next request", async () => {
       await seedApiKeyRow(env, validKeyHash, { ...TEST_SEEDED_API_KEY, walletScope: "all" });
-      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+      expect((await walletRequest("cwlt_fresh_b")).status).toBe(200);
 
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_SEEDED_API_KEY,
         walletScope: "selected",
         walletIds: ["cwlt_fresh_a"],
       });
-      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
-      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
+      expect((await walletRequest("cwlt_fresh_b")).status).toBe(404);
+      expect((await walletRequest("cwlt_fresh_a")).status).toBe(200);
     });
 
     it("refuses a wallet whose binding was revoked on its next request", async () => {
@@ -602,7 +602,7 @@ describe("Auth Middleware", () => {
         walletScope: "selected",
         walletIds: ["cwlt_fresh_a", "cwlt_fresh_b"],
       });
-      expect((await walletRequest("wallet_fresh_b")).status).toBe(200);
+      expect((await walletRequest("cwlt_fresh_b")).status).toBe(200);
 
       await getDb(env)
         .prepare(
@@ -611,8 +611,8 @@ describe("Auth Middleware", () => {
         .bind(TEST_API_KEY.id)
         .run();
 
-      expect((await walletRequest("wallet_fresh_b")).status).toBe(404);
-      expect((await walletRequest("wallet_fresh_a")).status).toBe(200);
+      expect((await walletRequest("cwlt_fresh_b")).status).toBe(404);
+      expect((await walletRequest("cwlt_fresh_a")).status).toBe(200);
     });
   });
 

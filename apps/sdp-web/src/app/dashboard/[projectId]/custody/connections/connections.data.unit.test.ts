@@ -316,10 +316,10 @@ describe("fetchWalletsByConnection", () => {
       jsonResponse({
         data: {
           wallets: [
-            { walletId: "w-1", custodyConnectionId: "conn-1" },
-            { walletId: "w-2", custodyConnectionId: "conn-1" },
-            { walletId: "w-3", custodyConfigId: "config-1" },
-            { walletId: "w-4", custodyConnectionId: "conn-2" },
+            { id: "w-1", custodyConnectionId: "conn-1" },
+            { id: "w-2", custodyConnectionId: "conn-1" },
+            { id: "w-3", custodyConfigId: "config-1" },
+            { id: "w-4", custodyConnectionId: "conn-2" },
           ],
         },
       })
@@ -329,7 +329,7 @@ describe("fetchWalletsByConnection", () => {
 
     expect(request).toHaveBeenCalledWith("/v1/wallets");
     expect([...byConnection.keys()].sort()).toEqual(["conn-1", "conn-2"]);
-    expect(byConnection.get("conn-1")?.map((wallet) => wallet.walletId)).toEqual(["w-1", "w-2"]);
+    expect(byConnection.get("conn-1")?.map((wallet) => wallet.id)).toEqual(["w-1", "w-2"]);
   });
 });
 

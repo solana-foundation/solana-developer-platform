@@ -144,7 +144,6 @@ const sourceWallets: CustodyWalletSummary[] = [
     id: "custody_sender",
     custodyConfigId: "custody-config-1",
     isRuntimeExecutionAllowed: true,
-    walletId: "wallet_sender",
     publicKey: "Sender1111111111111111111111111111111111",
     label: "Treasury",
     purpose: null,
@@ -155,7 +154,6 @@ const sourceWallets: CustodyWalletSummary[] = [
     id: "custody_operations",
     custodyConfigId: "custody-config-1",
     isRuntimeExecutionAllowed: true,
-    walletId: "wallet_operations",
     publicKey: "Operations22222222222222222222222222222222",
     label: "Operations",
     purpose: null,
@@ -629,7 +627,6 @@ describe("TransferForm", () => {
       {
         ...sourceWallets[0],
         id: "custody_gamma",
-        walletId: "wallet_gamma",
         publicKey: "Gamma333333333333333333333333333333333333",
         label: "Gamma treasury",
       },

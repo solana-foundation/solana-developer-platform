@@ -18,7 +18,6 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_a",
   custodyConfigId: "ccfg_a",
-  walletId: "provider_a",
   isRuntimeExecutionAllowed: true,
   publicKey: "address_a",
   label: "Wallet A",
@@ -41,7 +40,7 @@ const token: Token = {
   organizationId: "org_test",
   projectId: "prj_test",
   signingCustodyWalletId: wallet.id,
-  signingWalletId: wallet.walletId,
+  signingWalletId: "provider_a",
   name: "Draft token",
   symbol: "DRAFT",
   decimals: 6,

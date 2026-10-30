@@ -24,6 +24,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
 }));
 
 import {
+  checkWalletSignerMemoAction,
   createCustodySetupWalletAction,
   initializeCustodySetupAction,
   requestDevnetSolanaFaucetAction,
@@ -232,6 +233,22 @@ describe("createCustodySetupWalletAction", () => {
 
     expect(result.status).toBe("error");
   });
+});
+
+it("checks the selected internal wallet with the final Custody contract", async () => {
+  vi.clearAllMocks();
+  const client = {
+    fetch: vi.fn().mockResolvedValue({ custodyWalletId: "cwlt_one", signature: "sig" }),
+  };
+  mocks.createSdpApiClient.mockResolvedValue(client);
+
+  expect(await checkWalletSignerMemoAction("cwlt_one")).toEqual({
+    status: "success",
+    walletId: "cwlt_one",
+    signature: "sig",
+  });
+  expect(client.fetch).toHaveBeenCalledWith("/v1/wallets/signer-check", expect.anything());
+  expect(requestBody(client)).toEqual({ custodyWalletId: "cwlt_one" });
 });
 
 describe("requestDevnetSolanaFaucetAction", () => {

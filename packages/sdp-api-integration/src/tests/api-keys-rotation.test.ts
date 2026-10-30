@@ -17,7 +17,7 @@ const { TEST_PROJECT } = apiTestSupport;
 type WalletListResponse = {
   data: {
     wallets: Array<{
-      walletId: string;
+      id: string;
       publicKey: string;
     }>;
   };
@@ -95,9 +95,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Rotation 
     const originalWalletsRes = await originalKeyRequest("/v1/wallets");
     expect(originalWalletsRes.status).toBe(200);
     const originalWallets = (await originalWalletsRes.json()) as WalletListResponse;
-    expect(originalWallets.data.wallets.some((entry) => entry.walletId === wallet.walletId)).toBe(
-      true
-    );
+    expect(originalWallets.data.wallets.some((entry) => entry.id === wallet.id)).toBe(true);
 
     const rotateRes = await adminRequest(`/v1/api-keys/${originalKey.id}/rotate`, {
       method: "POST",

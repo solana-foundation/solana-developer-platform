@@ -49,10 +49,7 @@ export default async function PaymentRequestDetailRoute({
 
       const request = detail.status === "found" ? detail.request : null;
       const wallet = request
-        ? (walletsResult.data ?? []).find(
-            (candidate) =>
-              candidate.walletId === request.walletId || candidate.id === request.walletId
-          )
+        ? (walletsResult.data ?? []).find((candidate) => candidate.id === request.custodyWalletId)
         : undefined;
 
       return (

@@ -19,14 +19,12 @@ const confirmation: ActionConfirmationState = {
   signerWallets: [
     {
       id: "cwlt_a",
-      walletId: "provider_same",
       isRuntimeExecutionAllowed: true,
       publicKey: "address",
       label: "Config",
     },
     {
       id: "cwlt_b",
-      walletId: "provider_same",
       isRuntimeExecutionAllowed: true,
       publicKey: "address",
       label: "Connection",
