@@ -11,7 +11,7 @@ const TOKEN_CLASS = {
   prompt: styles.prompt,
   key: styles.key,
   value: styles.value,
-} as const;
+} as const satisfies Record<Exclude<CodeToken, string>["kind"], string>;
 
 /** Lets a long URL wrap after a slash on a narrow card rather than inside a word. */
 function breakable(text: string) {

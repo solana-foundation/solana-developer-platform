@@ -15,7 +15,7 @@ export const GLOBE_DRAWING = {
   corner: 1.5,
   width: 0.0032,
   ink: 1.2,
-} as const;
+} as const satisfies Record<string, number>;
 
 type Drawing = typeof GLOBE_DRAWING;
 
@@ -132,12 +132,24 @@ function coasts(drawing: Drawing) {
   return lines;
 }
 
+/**
+ * The index of a coast tube, which every caller builds as indexed `TubeGeometry`.
+ *
+ * @param part - The tube geometry.
+ * @returns Its index.
+ * @throws When the geometry has no index, which would merge it as no triangles.
+ */
+function requireIndex(part: THREE.BufferGeometry): THREE.BufferAttribute {
+  if (!part.index) throw new Error("coast tube geometry must be indexed");
+  return part.index;
+}
+
 function mergeGeometries(parts: THREE.BufferGeometry[]) {
   let vertexCount = 0;
   let indexCount = 0;
   for (const part of parts) {
     vertexCount += part.attributes.position.count;
-    indexCount += part.index?.count ?? 0;
+    indexCount += requireIndex(part).count;
   }
   const position = new Float32Array(vertexCount * 3);
   const uv = new Float32Array(vertexCount * 2);
@@ -147,7 +159,7 @@ function mergeGeometries(parts: THREE.BufferGeometry[]) {
   for (const part of parts) {
     position.set(part.attributes.position.array, vertexOffset * 3);
     uv.set(part.attributes.uv.array, vertexOffset * 2);
-    const partIndex = part.index?.array ?? [];
+    const partIndex = requireIndex(part).array;
     for (let i = 0; i < partIndex.length; i++) index[indexOffset + i] = partIndex[i] + vertexOffset;
     vertexOffset += part.attributes.position.count;
     indexOffset += partIndex.length;

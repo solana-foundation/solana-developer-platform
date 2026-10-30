@@ -32,13 +32,38 @@ export function useNearScreen(ref: RefObject<Element | null>) {
 }
 
 /**
- * Reports whether a loop may run: `element` is on screen (by `options`) and the tab is visible.
+ * What counts as on screen for `watchActive`: at least `threshold` of the element showing, or any
+ * of it within `rootMargin` of the screen.
+ */
+export type ActiveWatch = { threshold: number } | { rootMargin: string };
+
+/**
+ * Whether one observer entry puts the element on screen under `watch`. An observer reports
+ * `isIntersecting` for any visible edge, so a threshold is checked against the ratio itself.
+ *
+ * @param entry - The observer's entry for the element.
+ * @param watch - What counts as on screen.
+ * @returns True when the element is on screen.
+ */
+function isOnScreen(entry: IntersectionObserverEntry, watch: ActiveWatch): boolean {
+  if ("threshold" in watch)
+    return entry.isIntersecting && entry.intersectionRatio >= watch.threshold;
+  return entry.isIntersecting;
+}
+
+/**
+ * Reports whether a loop may run: `element` is on screen (by `watch`) and the tab is visible.
  * Calls `onChange` on every change of either; without IntersectionObserver the element counts as
  * on screen. Returns the stop function.
+ *
+ * @param element - The element whose visibility gates the loop.
+ * @param watch - What counts as on screen.
+ * @param onChange - Called with whether the loop may run, on every change.
+ * @returns The function that stops watching.
  */
 export function watchActive(
   element: Element,
-  options: IntersectionObserverInit,
+  watch: ActiveWatch,
   onChange: (active: boolean) => void
 ) {
   const watchesScreen = typeof IntersectionObserver !== "undefined";
@@ -46,9 +71,9 @@ export function watchActive(
   const update = () => onChange(onScreen && document.visibilityState === "visible");
   const observer = watchesScreen
     ? new IntersectionObserver((entries) => {
-        onScreen = entries[entries.length - 1]?.isIntersecting ?? false;
+        for (const entry of entries) onScreen = isOnScreen(entry, watch);
         update();
-      }, options)
+      }, watch)
     : null;
   document.addEventListener("visibilitychange", update);
   if (observer) observer.observe(element);

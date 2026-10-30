@@ -3,8 +3,7 @@
  * bench nears the screen, so the kit stays out of the initial bundle.
  */
 import type { PaymentKind } from "@/components/homepage/payments/kinds";
-import type { FigFonts } from "./make-fig";
-import type { FigureCopy } from "./scene-input";
+import type { SceneInput } from "./scene-input";
 import { batchScene } from "./scenes/batch";
 import { depositScene } from "./scenes/deposit";
 import { microScene } from "./scenes/micro";
@@ -19,12 +18,9 @@ const SCENES = {
   batch: batchScene,
   micro: microScene,
   deposit: depositScene,
-} satisfies Record<PaymentKind, unknown>;
+} as const satisfies Record<PaymentKind, (input: SceneInput) => string>;
 
 /** One kind's figure; a drawing error escapes to the caller. */
-export function buildFigure(
-  kind: PaymentKind,
-  input: { fonts: FigFonts; label: string; copy: FigureCopy }
-): string {
+export function buildFigure(kind: PaymentKind, input: SceneInput): string {
   return SCENES[kind](input);
 }

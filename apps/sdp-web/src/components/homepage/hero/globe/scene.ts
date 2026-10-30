@@ -25,7 +25,10 @@ import {
 import { ARC_FRAG, LAND_FRAG, LINE_VERT, RIM_FRAG, RIM_VERT } from "./shaders";
 import { discTexture, haloTexture, ringTexture } from "./textures";
 
-const COL = { ground: "#FBFAF9", grey: "#DEDEDD", mint: "#79E8B9" };
+const COL = { ground: "#FBFAF9", grey: "#DEDEDD", mint: "#79E8B9" } as const satisfies Record<
+  string,
+  string
+>;
 const CITY_KEYS = Object.keys(CITIES).filter(isCityKey);
 /* the reduced-motion scene stops drawing once everything has faded in */
 const SETTLED_AFTER = 3;
@@ -337,7 +340,7 @@ export function createGlobeScene({
       fromFigure.appendChild(currency);
     }
     if (fromLine) fromLine.textContent = labels.from(CITIES[flight.pair[0]].name);
-    if (toFigure) toFigure.textContent = labels.confirmed;
+    if (toFigure) toFigure.textContent = labels.confirmed();
     if (toLine) toLine.textContent = labels.landed(CITIES[flight.pair[1]].name);
     measure(tagFrom);
     measure(tagTo);

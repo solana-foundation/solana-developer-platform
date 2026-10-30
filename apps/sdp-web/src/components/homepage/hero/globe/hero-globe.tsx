@@ -66,10 +66,16 @@ export function HeroGlobe({ className }: { className?: string }) {
   const tagToRef = useRef<HTMLDivElement>(null);
   const staticRef = useRef<HTMLCanvasElement>(null);
 
+  /* the scene keeps one labels object for its life, and the language picker swaps `t` without
+     remounting the globe, so the labels read the latest `t` rather than the first one */
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const labelsRef = useRef<GlobeLabels>({
-    from: (city) => t("Homepage.hero.globe.from", { city }),
-    confirmed: t("Homepage.hero.globe.confirmed"),
-    landed: (city) => t("Homepage.hero.globe.landed", { city }),
+    from: (city) => tRef.current("Homepage.hero.globe.from", { city }),
+    confirmed: () => tRef.current("Homepage.hero.globe.confirmed"),
+    landed: (city) => tRef.current("Homepage.hero.globe.landed", { city }),
   });
 
   useParallax(boxRef, !reducedMotion);

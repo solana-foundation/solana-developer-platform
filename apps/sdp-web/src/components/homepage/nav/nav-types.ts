@@ -18,7 +18,7 @@ export const NAV_GROUP_IDS = {
   platform: "homepage-nav-platform",
   builders: "homepage-nav-builders",
   docs: "homepage-nav-docs",
-} as const;
+} as const satisfies Record<string, string>;
 
 export type NavGroupId = (typeof NAV_GROUP_IDS)[keyof typeof NAV_GROUP_IDS];
 

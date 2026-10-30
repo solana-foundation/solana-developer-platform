@@ -16,7 +16,7 @@ export const SECTION_LINKS = {
   // TODO: no page, redirect or rewrite serves /policies yet, so this link ends on a missing page
   // after sign-in. Point it at the policy documentation or create the page.
   policies: "/policies",
-} as const;
+} as const satisfies Record<string, string>;
 
 /** The waitlist form; signups go here while open signup is off. */
 export const waitlistHref = "https://solanafoundation.typeform.com/to/PLfMTDQs";

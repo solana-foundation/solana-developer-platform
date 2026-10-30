@@ -18,7 +18,7 @@ export const T = {
   t3: "#E1E1E4",
   t4: "#CDCDD2",
   t5: "#6A6973",
-} as const;
+} as const satisfies Record<string, string>;
 
 export const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -163,7 +163,7 @@ const EASE = {
   out: [0.22, 1, 0.36, 1],
   inOut: [0.65, 0, 0.35, 1],
   in: [0.55, 0, 1, 0.45],
-} as const;
+} as const satisfies Record<Extract<Ease, string>, readonly [number, number, number, number]>;
 
 const easeOf = (e: Ease) => (typeof e === "string" ? EASE[e] : e);
 

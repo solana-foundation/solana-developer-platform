@@ -50,6 +50,6 @@ export const AMOUNTS: readonly Amount[] = [
 /** The words the tags say, from the page's catalog. */
 export type GlobeLabels = {
   from: (city: string) => string;
-  confirmed: string;
+  confirmed: () => string;
   landed: (city: string) => string;
 };

@@ -40,7 +40,11 @@ function barState(shown: boolean, turning: boolean): BarState {
   return turning ? "turning" : "held";
 }
 
-const BAR_CLASS = { idle: undefined, turning: styles.barRun, held: styles.barFull } as const;
+const BAR_CLASS = {
+  idle: undefined,
+  turning: styles.barRun,
+  held: styles.barFull,
+} as const satisfies Record<BarState, string | undefined>;
 
 /** Arrow keys move along the tabs and wrap at either end; Home and End jump to the ends. */
 const KEY_STEPS = {
