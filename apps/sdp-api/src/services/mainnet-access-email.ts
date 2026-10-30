@@ -2,7 +2,7 @@
  * Tells the SDP alias an organization asked for mainnet (HOO-2427), through Iterable
  * (`iterable-email.ts`). Approval stays manual: the email only asks an operator to look.
  */
-import type { CountryCode } from "@sdp/types/countries";
+import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
 import type { EmailContent } from "@/services/email-layout";
@@ -95,12 +95,19 @@ export async function sendMainnetAccessRequestEmail(
   });
 }
 
+const correctionSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("set-country"),
+    countryCode: z.enum(COUNTRY_CODES),
+    countryName: z.string().min(1),
+  }),
+  z.object({ operation: z.literal("reset") }),
+]);
+
 export interface MainnetAccessCorrectionEmail {
   /** The request as it stood before the correction, as its request email described it. */
   request: MainnetAccessRequestEmail;
-  correction:
-    | { operation: "set-country"; countryCode: CountryCode; countryName: string }
-    | { operation: "reset" };
+  correction: z.infer<typeof correctionSchema>;
   operator: string;
   reason: string;
   ticket: string;
