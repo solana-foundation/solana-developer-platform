@@ -17,6 +17,17 @@ function countryLabel(code: CountryCode): string {
   return flag ? `${flag} ${name}` : name;
 }
 
+/** One formatter per locale for the life of the server, not one per render. */
+const MEDIUM_DATE_FORMATS = new Map<string, Intl.DateTimeFormat>();
+
+function mediumDateFormat(locale: string): Intl.DateTimeFormat {
+  const cached = MEDIUM_DATE_FORMATS.get(locale);
+  if (cached) return cached;
+  const format = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
+  MEDIUM_DATE_FORMATS.set(locale, format);
+  return format;
+}
+
 /**
  * The organization's mainnet access (HOO-2427): a one-time request while it has none, and what
  * it declared and accepted once it asked. Changes go through the SDP alias, never this card.
@@ -27,7 +38,7 @@ export async function MainnetAccessSection() {
     getRequestLocale(),
     loadMainnetAccess(),
   ]);
-  const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: "medium" });
+  const dateFormat = mediumDateFormat(locale);
   const formatDate = (iso: string) => dateFormat.format(new Date(iso));
 
   return (
