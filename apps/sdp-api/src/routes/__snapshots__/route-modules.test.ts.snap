@@ -42,6 +42,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "core POST /v1/members/invite",
   "core POST /v1/organizations",
   "core POST /v1/organizations/:orgId/mainnet-access",
+  "core POST /v1/organizations/:orgId/mainnet-access/notify",
   "core POST /v1/places/autocomplete",
   "core POST /v1/projects/:projectId/api-keys",
   "core POST /webhooks/clerk/link-orgs",

@@ -24,6 +24,7 @@ const HUMAN_ONLY_ROUTES = new Set([
   "PATCH /v1/organizations/:orgId",
   "GET /v1/organizations/:orgId/mainnet-access",
   "POST /v1/organizations/:orgId/mainnet-access",
+  "POST /v1/organizations/:orgId/mainnet-access/notify",
 ]);
 
 function humanOnlyRoutes(): string[] {
@@ -73,6 +74,7 @@ describe("human-only routes", () => {
       "POST /v1/api-keys/:keyId/rotate",
       "POST /v1/members/invite",
       "POST /v1/organizations/:orgId/mainnet-access",
+      "POST /v1/organizations/:orgId/mainnet-access/notify",
       "POST /v1/projects/:projectId/api-keys",
     ]);
   });

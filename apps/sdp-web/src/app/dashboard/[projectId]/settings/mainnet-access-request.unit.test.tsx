@@ -18,13 +18,7 @@ afterEach(() => {
 function renderHost() {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <MainnetAccessRequestHost
-        canRequest
-        organizationName="Acme"
-        termsVersion={SDP_TERMS.version}
-        termsUrl={SDP_TERMS.url}
-        record={null}
-      />
+      <MainnetAccessRequestHost canRequest organizationName="Acme" record={null} />
     </I18nProvider>
   );
 }
@@ -80,10 +74,9 @@ describe("MainnetAccessRequestHost", () => {
       ok: true,
       access: {
         state: "pending",
+        available: true,
         countryCode: "SG",
-        termsAcceptance: null,
         request: null,
-        currentTerms: SDP_TERMS,
         contactEmail: null,
       },
     });

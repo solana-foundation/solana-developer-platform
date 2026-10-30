@@ -290,24 +290,24 @@ export const mainnetAccessSchema = z
       description:
         "`approved` once an operator enables production for the organization; `pending` after a request; otherwise `not_requested`.",
     }),
+    available: z.boolean().openapi({
+      description:
+        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
+    }),
     countryCode: z.enum(COUNTRY_CODES).nullable(),
-    termsAcceptance: z
-      .object({
-        version: z.string(),
-        acceptedAt: isoDateTimeSchema,
-        acceptedByUserId: userIdSchema,
-      })
-      .nullable(),
     request: z
       .object({
         requestedAt: isoDateTimeSchema,
         requestedByUserId: userIdSchema,
+        termsVersion: z.string().openapi({
+          description:
+            "The SDP Terms and Conditions version the requester accepted with the request.",
+        }),
         notified: z.boolean().openapi({
-          description: "False until the SDP alias received the request; submitting again sends it.",
+          description: "False until the SDP alias received the request; `POST …/notify` sends it.",
         }),
       })
       .nullable(),
-    currentTerms: z.object({ version: z.string(), url: z.string().url() }),
     contactEmail: z.string().nullable(),
   })
   .openapi("MainnetAccess", { description: "The organization's mainnet access request." });

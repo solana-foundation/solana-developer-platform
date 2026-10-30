@@ -178,9 +178,5 @@
   {
     "candidate": "src/flags/index.ts:283:20:Enabled",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
-  },
-  {
-    "candidate": "src/lib/sdp-terms.ts:24:3:Solana Developer Platform Terms and Conditions",
-    "reason": "Legal document title: the Terms and Conditions are binding in English and come from Legal, not the translation catalog"
   }
 ]

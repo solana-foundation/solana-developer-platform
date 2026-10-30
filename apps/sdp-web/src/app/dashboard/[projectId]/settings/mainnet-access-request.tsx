@@ -1,20 +1,19 @@
 "use client";
 
-import { COUNTRIES, COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
+import { COUNTRIES, COUNTRY_CODES } from "@sdp/types/countries";
+import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { Button } from "@sdp/ui/button";
-import { Callout } from "@sdp/ui/callout";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Modal } from "@sdp/ui/modal";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
-import { CheckCircle2Icon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { CheckCircle2Icon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
-import { SDP_TERMS_DOCUMENT } from "@/lib/sdp-terms";
 import { useZodForm } from "@/lib/use-zod-form";
-import { requestMainnetAccessAction } from "./mainnet-access-actions";
+import { notifyMainnetAccessAction, requestMainnetAccessAction } from "./mainnet-access-actions";
 
 const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
   const flag = regionFlagEmoji(country.code);
@@ -35,8 +34,6 @@ const TERMS_SCHEMA = z.object({ accepted: z.boolean().refine((accepted) => accep
 
 interface RequestProps {
   organizationName: string;
-  termsVersion: string;
-  termsUrl: string;
 }
 
 /**
@@ -71,8 +68,6 @@ export function MainnetAccessRequestHost({
  */
 function MainnetAccessRequestModal({
   organizationName,
-  termsVersion,
-  termsUrl,
   onClose,
 }: RequestProps & { onClose: () => void }) {
   const t = useTranslations();
@@ -82,10 +77,7 @@ function MainnetAccessRequestModal({
   const terms = useZodForm(TERMS_SCHEMA, { accepted: false });
   const [error, setError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
-  // The API accepts one version; a reader holding another would show text the admin is not
-  // agreeing to, so it links out instead.
-  const document = SDP_TERMS_DOCUMENT.version === termsVersion ? SDP_TERMS_DOCUMENT : null;
-  const [readToEnd, setReadToEnd] = useState(document === null);
+  const [readToEnd, setReadToEnd] = useState(false);
 
   // A failed submit may still have recorded the request (its email did not go out), so the
   // card behind the dialog is refreshed after any attempt, not only a sent one.
@@ -109,7 +101,7 @@ function MainnetAccessRequestModal({
     startSubmit(async () => {
       const result = await requestMainnetAccessAction({
         countryCode: country.data.countryCode,
-        termsVersion,
+        termsVersion: SDP_TERMS.version,
       });
       attempted.current = true;
       if (result.ok) {
@@ -156,9 +148,6 @@ function MainnetAccessRequestModal({
           ) : (
             <TermsStep
               organizationName={organizationName}
-              termsVersion={termsVersion}
-              termsUrl={termsUrl}
-              document={document}
               readToEnd={readToEnd}
               onReadToEnd={() => setReadToEnd(true)}
               accepted={terms.values.accepted}
@@ -285,11 +274,12 @@ function JurisdictionStep({
   );
 }
 
+/**
+ * The terms the API records with the request, `SDP_TERMS`: the admin accepts the version of the
+ * text shown here, and the API refuses any version but its own.
+ */
 function TermsStep({
   organizationName,
-  termsVersion,
-  termsUrl,
-  document,
   readToEnd,
   onReadToEnd,
   accepted,
@@ -297,9 +287,6 @@ function TermsStep({
   disabled,
 }: {
   organizationName: string;
-  termsVersion: string;
-  termsUrl: string;
-  document: typeof SDP_TERMS_DOCUMENT | null;
   readToEnd: boolean;
   onReadToEnd: () => void;
   accepted: boolean;
@@ -335,48 +322,31 @@ function TermsStep({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border-default">
-        <div className="flex items-center justify-between gap-3 border-b border-border-default bg-fill px-4 py-2.5">
-          <span className="text-xs text-tertiary">
-            {t("Shared.mainnetAccess.termsVersion", { version: termsVersion })}
-          </span>
-          <a
-            href={termsUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-medium text-secondary hover:text-primary"
-          >
-            {t("Shared.mainnetAccess.termsOpen")}
-            <ExternalLinkIcon aria-hidden className="size-3.5" />
-          </a>
+        <div className="border-b border-border-default bg-fill px-4 py-2.5 text-xs text-tertiary">
+          {t("Shared.mainnetAccess.termsVersion", { version: SDP_TERMS.version })}
         </div>
-        {document ? (
-          <div
-            ref={readerRef}
-            onScroll={(event: UIEvent<HTMLDivElement>) => checkEnd(event.currentTarget)}
-            // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard to be read.
-            tabIndex={0}
-            role="document"
-            aria-label={document.title}
-            className="max-h-[min(22rem,45dvh)] space-y-4 overflow-y-auto bg-surface px-5 py-4 text-sm leading-6 text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-strong"
-          >
-            <div className="space-y-0.5">
-              <p className="text-base font-medium text-primary">{document.title}</p>
-              <p className="text-xs text-tertiary">{document.effectiveDate}</p>
-            </div>
-            {document.sections.map((section) => (
-              <section key={section.heading} className="space-y-1.5">
-                <h4 className="font-medium text-primary">{section.heading}</h4>
-                {section.paragraphs.map((paragraph) => (
-                  <p key={paragraph}>{paragraph}</p>
-                ))}
-              </section>
-            ))}
+        <div
+          ref={readerRef}
+          onScroll={(event: UIEvent<HTMLDivElement>) => checkEnd(event.currentTarget)}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard to be read.
+          tabIndex={0}
+          role="document"
+          aria-label={SDP_TERMS.title}
+          className="max-h-[min(22rem,45dvh)] space-y-4 overflow-y-auto bg-surface px-5 py-4 text-sm leading-6 text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-strong"
+        >
+          <div className="space-y-0.5">
+            <p className="text-base font-medium text-primary">{SDP_TERMS.title}</p>
+            <p className="text-xs text-tertiary">{SDP_TERMS.effectiveDate}</p>
           </div>
-        ) : (
-          <div className="px-5 py-4">
-            <Callout variant="info">{t("Shared.mainnetAccess.termsUnavailable")}</Callout>
-          </div>
-        )}
+          {SDP_TERMS.sections.map((section) => (
+            <section key={section.heading} className="space-y-1.5">
+              <h4 className="font-medium text-primary">{section.heading}</h4>
+              {section.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </section>
+          ))}
+        </div>
       </div>
 
       <label
@@ -402,14 +372,8 @@ function TermsStep({
   );
 }
 
-/** Resends a request whose email did not go out; the API sends the stored request. */
-export function MainnetAccessResendButton({
-  countryCode,
-  termsVersion,
-}: {
-  countryCode: CountryCode;
-  termsVersion: string;
-}) {
+/** Sends a recorded request whose email did not go out. */
+export function MainnetAccessResendButton() {
   const t = useTranslations();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -424,7 +388,7 @@ export function MainnetAccessResendButton({
         onClick={() =>
           startResend(async () => {
             setError(null);
-            const result = await requestMainnetAccessAction({ countryCode, termsVersion });
+            const result = await notifyMainnetAccessAction();
             if (result.ok) router.refresh();
             else setError(result.error);
           })

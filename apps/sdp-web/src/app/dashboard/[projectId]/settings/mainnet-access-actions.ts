@@ -10,14 +10,16 @@ import { resolveOrganizationId } from "./organization-id";
 
 const mainnetAccessSchema = z.object({
   state: z.enum(MAINNET_ACCESS_STATES),
+  available: z.boolean(),
   countryCode: z.enum(COUNTRY_CODES).nullable(),
-  termsAcceptance: z
-    .object({ version: z.string(), acceptedAt: z.string(), acceptedByUserId: z.string() })
-    .nullable(),
   request: z
-    .object({ requestedAt: z.string(), requestedByUserId: z.string(), notified: z.boolean() })
+    .object({
+      requestedAt: z.string(),
+      requestedByUserId: z.string(),
+      termsVersion: z.string(),
+      notified: z.boolean(),
+    })
     .nullable(),
-  currentTerms: z.object({ version: z.string(), url: z.string() }),
   contactEmail: z.string().nullable(),
 }) satisfies z.ZodType<MainnetAccess>;
 
@@ -57,7 +59,7 @@ export async function loadMainnetAccess(): Promise<MainnetAccessLoad> {
 /**
  * Sends the one-time request: the jurisdiction and the terms version the admin accepted. The
  * API refuses a second request, so a retried submit cannot ask twice; a request whose email
- * did not go out is resent by submitting again.
+ * did not go out is sent with {@link notifyMainnetAccessAction}.
  */
 export async function requestMainnetAccessAction(input: {
   countryCode: CountryCode;
@@ -81,6 +83,22 @@ export async function requestMainnetAccessAction(input: {
     return { ok: false, error: readableApiError(error) };
   } finally {
     // A refused submit may still have recorded the request when only its email failed.
+    revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
+  }
+}
+
+/** Sends the recorded request whose email did not go out. */
+export async function notifyMainnetAccessAction(): Promise<RequestMainnetAccessResult> {
+  try {
+    const client = await createOrgSdpApiClient();
+    const organizationId = await resolveOrganizationId(client);
+    const access = mainnetAccessSchema.parse(
+      await client.fetch<unknown>(`${mainnetAccessPath(organizationId)}/notify`, { method: "POST" })
+    );
+    return { ok: true, access };
+  } catch (error) {
+    return { ok: false, error: readableApiError(error) };
+  } finally {
     revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
   }
 }

@@ -9,9 +9,6 @@ import { serviceUnavailable } from "@/lib/errors";
 import { fetchProviderJson } from "@/lib/provider-json";
 import type { Env } from "@/types/env";
 
-/** Resend's API; `RESEND_API_URL` points it at a local stub for development. */
-const DEFAULT_RESEND_API_URL = "https://api.resend.com";
-
 const resendSendResponseSchema = z.object({ id: z.string().min(1) });
 
 export interface MainnetAccessRequestEmail {
@@ -21,18 +18,21 @@ export interface MainnetAccessRequestEmail {
   countryCode: CountryCode;
   countryName: string;
   termsVersion: string;
-  termsAcceptedAt: string;
   requestedAt: string;
 }
 
-/** Where a request email goes and who sends it; unset means the deployment cannot take requests. */
+/**
+ * Where a request email goes and who sends it. Any key unset means the deployment cannot take
+ * requests. `RESEND_API_URL` is Resend's API (`https://api.resend.com`), or a stub locally.
+ */
 export function mainnetAccessEmailConfig(
   env: Env
-): { apiKey: string; from: string; to: string } | null {
+): { apiUrl: string; apiKey: string; from: string; to: string } | null {
+  const apiUrl = env.RESEND_API_URL?.trim();
   const apiKey = env.RESEND_API_KEY?.trim();
   const from = env.MAINNET_ACCESS_EMAIL_FROM?.trim();
   const to = env.MAINNET_ACCESS_EMAIL_TO?.trim();
-  return apiKey && from && to ? { apiKey, from, to } : null;
+  return apiUrl && apiKey && from && to ? { apiUrl, apiKey, from, to } : null;
 }
 
 function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): string {
@@ -50,7 +50,7 @@ export function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail
     `Requested by: ${requesterLabel(request.requester)}`,
     `Requested at: ${request.requestedAt}`,
     `Jurisdiction (self-declared): ${request.countryName} (${request.countryCode})`,
-    `Terms and Conditions: version ${request.termsVersion}, accepted ${request.termsAcceptedAt}`,
+    `Terms and Conditions: version ${request.termsVersion}, accepted with the request`,
     "",
     "To approve, set enableProductionProject in the organization's Clerk private metadata.",
   ].join("\n");
@@ -70,7 +70,6 @@ export async function sendMainnetAccessRequestEmail(
   if (!config) {
     throw serviceUnavailable("Mainnet access requests are not available on this deployment");
   }
-  const baseUrl = env.RESEND_API_URL?.trim() || DEFAULT_RESEND_API_URL;
   const message: {
     from: string;
     to: string[];
@@ -86,7 +85,7 @@ export async function sendMainnetAccessRequestEmail(
   if (request.requester.email) message.reply_to = request.requester.email;
   await fetchProviderJson(
     "Resend",
-    `${baseUrl.replace(/\/+$/, "")}/emails`,
+    `${config.apiUrl.replace(/\/+$/, "")}/emails`,
     resendSendResponseSchema,
     {
       method: "POST",

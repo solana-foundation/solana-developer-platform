@@ -232,6 +232,7 @@
   "POST /v1/issuance/tokens/:_/unpause": "issuance.enforce",
   "POST /v1/members/invite": "members.manage",
   "POST /v1/organizations/:_/mainnet-access": "organizations.manage",
+  "POST /v1/organizations/:_/mainnet-access/notify": "organizations.manage",
   "POST /v1/payments/ramps/offramp/estimate": "offramp.read",
   "POST /v1/payments/ramps/offramp/quote": "offramp.execute",
   "POST /v1/payments/ramps/onramp/estimate": "onramp.read",

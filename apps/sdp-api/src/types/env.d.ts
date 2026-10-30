@@ -95,7 +95,7 @@ export interface Env extends ManagedRpcEnv {
 
   // Mainnet access requests (HOO-2427): Resend sends the request email to the SDP alias
   RESEND_API_KEY?: string;
-  /** Defaults to https://api.resend.com; local development points it at a stub. */
+  /** https://api.resend.com on deployments; local development points it at a stub. */
   RESEND_API_URL?: string;
   MAINNET_ACCESS_EMAIL_FROM?: string;
   MAINNET_ACCESS_EMAIL_TO?: string;

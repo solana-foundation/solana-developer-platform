@@ -1,4 +1,4 @@
-import { COUNTRIES, type CountryCode } from "@sdp/types/countries";
+import { type CountryCode, countryByCode } from "@sdp/types/countries";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { Badge } from "@sdp/ui/badge";
@@ -10,9 +10,7 @@ import { loadMainnetAccess } from "./mainnet-access-actions";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
 
 function countryLabel(code: CountryCode): string {
-  const country = COUNTRIES.find((candidate) => candidate.code === code);
-  if (!country) throw new Error(`Country ${code} is missing from the country catalog`);
-  const name = country.name;
+  const { name } = countryByCode(code);
   const flag = regionFlagEmoji(code);
   return flag ? `${flag} ${name}` : name;
 }
@@ -53,10 +51,8 @@ export async function MainnetAccessSection() {
       <CardContent className="space-y-4">
         {loaded.ok ? (
           <MainnetAccessRequestHost
-            canRequest={loaded.access.state === "not_requested"}
+            canRequest={loaded.access.state === "not_requested" && loaded.access.available}
             organizationName={loaded.organizationName}
-            termsVersion={loaded.access.currentTerms.version}
-            termsUrl={loaded.access.currentTerms.url}
             record={<MainnetAccessRecord access={loaded.access} formatDate={formatDate} t={t} />}
           />
         ) : (
@@ -90,17 +86,18 @@ function MainnetAccessRecord({
   formatDate: (iso: string) => string;
   t: Translate;
 }) {
+  if (access.state === "not_requested") {
+    // Only reached while the deployment takes no requests: the card offers none.
+    return <p className="text-sm text-secondary">{t("Shared.mainnetAccess.unavailableBody")}</p>;
+  }
   const unsent = access.state === "pending" && access.request?.notified === false;
   return (
     <>
-      {unsent && access.countryCode && access.termsAcceptance ? (
+      {unsent ? (
         <Callout variant="warning" title={t("Shared.mainnetAccess.unsentTitle")}>
           <div className="flex flex-col items-start gap-3">
             <span>{t("Shared.mainnetAccess.unsentBody")}</span>
-            <MainnetAccessResendButton
-              countryCode={access.countryCode}
-              termsVersion={access.termsAcceptance.version}
-            />
+            {access.available ? <MainnetAccessResendButton /> : null}
           </div>
         </Callout>
       ) : (
@@ -118,14 +115,12 @@ function MainnetAccessRecord({
               {countryLabel(access.countryCode)}
             </DetailRow>
           ) : null}
-          {access.termsAcceptance ? (
-            <DetailRow label={t("Shared.mainnetAccess.termsLabel")} fit="wrap">
-              {t("Shared.mainnetAccess.termsAcceptedValue", {
-                version: access.termsAcceptance.version,
-                date: formatDate(access.termsAcceptance.acceptedAt),
-              })}
-            </DetailRow>
-          ) : null}
+          <DetailRow label={t("Shared.mainnetAccess.termsLabel")} fit="wrap">
+            {t("Shared.mainnetAccess.termsAcceptedValue", {
+              version: access.request.termsVersion,
+              date: formatDate(access.request.requestedAt),
+            })}
+          </DetailRow>
           <DetailRow label={t("Shared.mainnetAccess.requestedLabel")}>
             {formatDate(access.request.requestedAt)}
           </DetailRow>

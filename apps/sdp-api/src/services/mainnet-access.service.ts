@@ -4,7 +4,7 @@
  * emails its alias. Approval is not here: an operator sets `enableProductionProject` in Clerk, the
  * webhook syncs it into the organization's settings, and `state` reads `approved` from that alone.
  */
-import { COUNTRIES, type CountryCode } from "@sdp/types/countries";
+import { type CountryCode, countryByCode } from "@sdp/types/countries";
 import { type MainnetAccess, type MainnetAccessState, SDP_TERMS } from "@sdp/types/mainnet-access";
 import type { DatabaseExecutor } from "@/db/client";
 import {
@@ -12,19 +12,13 @@ import {
   MainnetAccessRepository,
   type MainnetAccessRow,
 } from "@/db/repositories/mainnet-access.repository";
-import { conflict, internalError } from "@/lib/errors";
+import { conflict } from "@/lib/errors";
 import { createSystemAuditService } from "@/services/audit.service";
 import {
   mainnetAccessEmailConfig,
   sendMainnetAccessRequestEmail,
 } from "@/services/mainnet-access-email";
 import type { Env } from "@/types/env";
-
-export function countryName(code: CountryCode): string {
-  const country = COUNTRIES.find((candidate) => candidate.code === code);
-  if (!country) throw internalError(`Country ${code} is missing from the country catalog`);
-  return country.name;
-}
 
 export function readMainnetAccessRow(
   db: DatabaseExecutor,
@@ -45,55 +39,54 @@ export function toMainnetAccess(
 ): MainnetAccess {
   return {
     state: mainnetAccessState(row, entitled),
+    available: mainnetAccessEmailConfig(env) !== null,
     countryCode: row ? row.country_code : null,
-    termsAcceptance: row
-      ? {
-          version: row.terms_version,
-          acceptedAt: row.terms_accepted_at,
-          acceptedByUserId: row.terms_accepted_by_user_id,
-        }
-      : null,
     request: row
       ? {
           requestedAt: row.requested_at,
           requestedByUserId: row.requested_by_user_id,
+          termsVersion: row.terms_version,
           notified: row.notified_at !== null,
         }
       : null,
-    currentTerms: { version: SDP_TERMS.version, url: SDP_TERMS.url },
     contactEmail: mainnetAccessEmailConfig(env)?.to ?? null,
   };
 }
 
 /**
- * Records the request, once per organization. A second submit is refused, except while the
- * email to the alias has not gone out: then it changes nothing and the caller resends the stored
- * request, whatever terms version the submit names, since the stored acceptance is what is sent.
+ * Records the request, once per organization. An unsent one is sent with `POST …/notify`, never
+ * by submitting again.
  *
- * @returns The stored row, and whether this submit created it.
- * @throws CONFLICT when a new request names a terms version that is not the current one, or the
- *   request was already sent.
+ * @throws CONFLICT when the submit names a terms version that is not the current one, or the
+ *   organization already asked.
  */
 export async function recordMainnetAccessRequest(
   tx: DatabaseExecutor,
   submission: MainnetAccessClaim
-): Promise<{ row: MainnetAccessRow; created: boolean }> {
-  const repository = new MainnetAccessRepository(tx);
-  if (submission.termsVersion === SDP_TERMS.version) {
-    const created = await repository.claim(submission);
-    if (created) return { row: created, created: true };
-  }
-
-  const existing = await repository.get(submission.organizationId, { forUpdate: true });
-  if (!existing) {
+): Promise<MainnetAccessRow> {
+  if (submission.termsVersion !== SDP_TERMS.version) {
     throw conflict("The Terms and Conditions changed; review the current version and accept it", {
       currentTermsVersion: SDP_TERMS.version,
     });
   }
-  if (existing.notified_at !== null) {
-    throw conflict("This organization already requested mainnet access");
-  }
-  return { row: existing, created: false };
+  const created = await new MainnetAccessRepository(tx).claim(submission);
+  if (!created) throw conflict("This organization already requested mainnet access");
+  return created;
+}
+
+/**
+ * The organization's recorded request whose email has not gone out, for `POST …/notify`.
+ *
+ * @throws CONFLICT when the organization has not asked, or its request was already sent.
+ */
+export async function unsentMainnetAccessRequest(
+  db: DatabaseExecutor,
+  organizationId: string
+): Promise<MainnetAccessRow> {
+  const row = await new MainnetAccessRepository(db).get(organizationId);
+  if (!row) throw conflict("This organization has not requested mainnet access");
+  if (row.notified_at !== null) throw conflict("This organization's request was already sent");
+  return row;
 }
 
 /**
@@ -118,9 +111,8 @@ export async function notifyMainnetAccessRequest(
       name: context.requester_name,
     },
     countryCode: row.country_code,
-    countryName: countryName(row.country_code),
+    countryName: countryByCode(row.country_code).name,
     termsVersion: row.terms_version,
-    termsAcceptedAt: row.terms_accepted_at,
     requestedAt: row.requested_at,
   });
 

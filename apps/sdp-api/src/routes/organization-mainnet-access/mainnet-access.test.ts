@@ -17,7 +17,8 @@ import { clearKVStores } from "@/test/mocks/kv";
 const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 const PATH = `/v1/organizations/${ORGANIZATION_ID}/mainnet-access`;
 const MEMBER_USER = { id: "usr_mainnet_member", email: "member@example.com" };
-const RESEND_URL = "https://api.resend.com/emails";
+const RESEND_API_URL = "https://api.resend.com";
+const RESEND_URL = `${RESEND_API_URL}/emails`;
 const SUBMISSION = { countryCode: "SG", termsVersion: SDP_TERMS.version, acceptTerms: true };
 
 let adminToken: string;
@@ -75,12 +76,30 @@ function post(body: unknown, authorization = `Bearer ${adminToken}`) {
   );
 }
 
+function notify(authorization = `Bearer ${adminToken}`) {
+  return app.request(
+    `${PATH}/notify`,
+    { method: "POST", headers: { Authorization: authorization } },
+    env
+  );
+}
+
+/** Fails Resend until the returned function restores it. */
+function failResend(): () => void {
+  const answer = resend.getMockImplementation();
+  if (!answer) throw new Error("the Resend stub is installed in beforeEach");
+  resend.mockImplementation(async (input, init) =>
+    String(input) === RESEND_URL ? new Response("down", { status: 500 }) : answer(input, init)
+  );
+  return () => resend.mockImplementation(answer);
+}
+
 /** The organization's request columns, or null while it has not asked. */
 async function storedRow() {
   const row = await getDb(env)
     .prepare(
       `SELECT jurisdiction_country_code AS country_code, terms_accepted_version AS terms_version,
-              terms_accepted_at, terms_accepted_by_user_id, mainnet_requested_at AS requested_at,
+              mainnet_requested_at AS requested_at,
               mainnet_requested_by_user_id AS requested_by_user_id,
               mainnet_request_notified_at AS notified_at
        FROM organizations WHERE id = ?`
@@ -103,6 +122,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedOrganization();
+    env.RESEND_API_URL = RESEND_API_URL;
     env.RESEND_API_KEY = "re_test";
     env.MAINNET_ACCESS_EMAIL_FROM = "SDP <noreply@platform.solana.com>";
     env.MAINNET_ACCESS_EMAIL_TO = "mainnet@example.org";
@@ -116,21 +136,21 @@ describe("Organization mainnet access (HOO-2427)", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    env.RESEND_API_URL = undefined;
     env.RESEND_API_KEY = undefined;
     env.MAINNET_ACCESS_EMAIL_FROM = undefined;
     env.MAINNET_ACCESS_EMAIL_TO = undefined;
     await clearKVStores(env);
   });
 
-  it("starts not requested, with the current terms and the alias to contact", async () => {
+  it("starts not requested and available, with the alias to contact", async () => {
     const response = await get();
     expect(response.status).toBe(200);
     expect((await response.json()).data).toEqual({
       state: "not_requested",
+      available: true,
       countryCode: null,
-      termsAcceptance: null,
       request: null,
-      currentTerms: { version: SDP_TERMS.version, url: SDP_TERMS.url },
       contactEmail: "mainnet@example.org",
     });
   });
@@ -161,15 +181,17 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(data).toMatchObject({
       state: "pending",
       countryCode: "SG",
-      termsAcceptance: { version: SDP_TERMS.version, acceptedByUserId: TEST_USER.id },
-      request: { requestedByUserId: TEST_USER.id, notified: true },
+      request: {
+        requestedByUserId: TEST_USER.id,
+        termsVersion: SDP_TERMS.version,
+        notified: true,
+      },
     });
 
     const row = await storedRow();
     expect(row).toMatchObject({
       country_code: "SG",
       terms_version: SDP_TERMS.version,
-      terms_accepted_by_user_id: TEST_USER.id,
       requested_by_user_id: TEST_USER.id,
     });
     expect(row?.notified_at).not.toBeNull();
@@ -191,7 +213,8 @@ describe("Organization mainnet access (HOO-2427)", () => {
       `Organization id: ${ORGANIZATION_ID}`,
       `Requested by: Ada Admin ${TEST_USER.email} (${TEST_USER.id})`,
       "Jurisdiction (self-declared): Singapore (SG)",
-      `Terms and Conditions: version ${SDP_TERMS.version}, accepted ${row?.terms_accepted_at}`,
+      `Requested at: ${row?.requested_at}`,
+      `Terms and Conditions: version ${SDP_TERMS.version}, accepted with the request`,
     ]) {
       expect(text).toContain(field);
     }
@@ -207,20 +230,28 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(sentEmails()).toHaveLength(1);
   });
 
-  it("keeps a request whose email failed, and the next submit sends that request", async () => {
-    const answer = resend.getMockImplementation();
-    if (!answer) throw new Error("the Resend stub is installed in beforeEach");
-    resend.mockImplementation(async (input, init) =>
-      String(input) === RESEND_URL ? new Response("down", { status: 500 }) : answer(input, init)
-    );
+  it("records one request when two admins submit at once", async () => {
+    const statuses = await Promise.all([
+      post(SUBMISSION),
+      post({ ...SUBMISSION, countryCode: "US" }),
+    ]).then((responses) => responses.map((response) => response.status));
+    expect([...statuses].sort()).toEqual([201, 409]);
+    const winner = statuses[0] === 201 ? "SG" : "US";
+    expect((await storedRow())?.country_code).toBe(winner);
+    expect(sentEmails()).toHaveLength(1);
+  });
+
+  it("keeps a request whose email failed, for notify to send", async () => {
+    const restore = failResend();
     expect((await post(SUBMISSION)).status).toBe(503);
     expect((await storedRow())?.notified_at).toBeNull();
     expect((await (await get()).json()).data.request).toMatchObject({ notified: false });
-    resend.mockImplementation(answer);
+    restore();
 
-    const retry = await post({ ...SUBMISSION, countryCode: "US" });
-    expect(retry.status).toBe(201);
-    expect((await retry.json()).data).toMatchObject({
+    expect((await post({ ...SUBMISSION, countryCode: "US" })).status).toBe(409);
+    const sent = await notify();
+    expect(sent.status).toBe(200);
+    expect((await sent.json()).data).toMatchObject({
       countryCode: "SG",
       request: { notified: true },
     });
@@ -229,32 +260,34 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(emails[0]?.headers["idempotency-key"]).toBe(emails[1]?.headers["idempotency-key"]);
   });
 
-  it("resends an unsent request accepted under terms that have since changed", async () => {
-    const answer = resend.getMockImplementation();
-    if (!answer) throw new Error("the Resend stub is installed in beforeEach");
-    resend.mockImplementation(async (input, init) =>
-      String(input) === RESEND_URL ? new Response("down", { status: 500 }) : answer(input, init)
-    );
+  it("notifies an unsent request accepted under terms that have since changed", async () => {
+    const restore = failResend();
     expect((await post(SUBMISSION)).status).toBe(503);
-    resend.mockImplementation(answer);
+    restore();
     // The acceptance on record predates the current terms, as after a terms update.
     await getDb(env)
       .prepare("UPDATE organizations SET terms_accepted_version = ? WHERE id = ?")
       .bind("2026-09-previous", ORGANIZATION_ID)
       .run();
 
-    const retry = await post({ ...SUBMISSION, termsVersion: "2026-09-previous" });
-    expect(retry.status).toBe(201);
-    expect((await retry.json()).data).toMatchObject({
-      termsAcceptance: { version: "2026-09-previous" },
-      request: { notified: true },
+    const sent = await notify();
+    expect(sent.status).toBe(200);
+    expect((await sent.json()).data).toMatchObject({
+      request: { termsVersion: "2026-09-previous", notified: true },
     });
     expect(sentEmails().at(-1)?.body.text).toContain("version 2026-09-previous");
   });
 
-  it("meters submits, since each may call Resend", async () => {
-    const statuses = [];
-    for (let attempt = 0; attempt < 6; attempt += 1) statuses.push((await post(SUBMISSION)).status);
+  it("refuses to notify before a request, or once it was sent", async () => {
+    expect((await notify()).status).toBe(409);
+    expect((await post(SUBMISSION)).status).toBe(201);
+    expect((await notify()).status).toBe(409);
+    expect(sentEmails()).toHaveLength(1);
+  });
+
+  it("meters submits and notifies together, since each may call Resend", async () => {
+    const statuses = [(await post(SUBMISSION)).status, (await post(SUBMISSION)).status];
+    for (let attempt = 0; attempt < 4; attempt += 1) statuses.push((await notify()).status);
     expect(statuses).toEqual([201, 409, 409, 409, 409, 429]);
   });
 
@@ -267,10 +300,16 @@ describe("Organization mainnet access (HOO-2427)", () => {
     ).rejects.toThrow(/organizations_mainnet_request_whole/);
   });
 
-  it("refuses before recording anything when the deployment has no alias", async () => {
-    env.MAINNET_ACCESS_EMAIL_TO = undefined;
+  it.each([
+    ["no alias", "MAINNET_ACCESS_EMAIL_TO"],
+    ["no Resend API URL", "RESEND_API_URL"],
+  ] as const)("reads unavailable and refuses before recording anything with %s", async (_, key) => {
+    env[key] = undefined;
+    expect((await (await get()).json()).data).toMatchObject({ available: false });
     expect((await post(SUBMISSION)).status).toBe(503);
+    expect((await notify()).status).toBe(503);
     expect(await storedRow()).toBeNull();
+    expect(sentEmails()).toHaveLength(0);
   });
 
   it("reads approved once an operator sets enableProductionProject in Clerk", async () => {
@@ -316,6 +355,9 @@ describe("Organization mainnet access (HOO-2427)", () => {
       env
     );
     expect(write.status).toBe(403);
+    expect((await app.request(`${path}/notify`, { method: "POST", headers }, env)).status).toBe(
+      403
+    );
     const requested = await getDb(env)
       .prepare("SELECT id FROM organizations WHERE mainnet_requested_at IS NOT NULL")
       .all();
@@ -326,6 +368,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
   it("refuses a member who is not an admin", async () => {
     expect((await get(memberToken)).status).toBe(403);
     expect((await post(SUBMISSION, `Bearer ${memberToken}`)).status).toBe(403);
+    expect((await notify(`Bearer ${memberToken}`)).status).toBe(403);
     expect(await storedRow()).toBeNull();
   });
 
@@ -334,6 +377,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     const read = await app.request(PATH, { headers: { Authorization: authorization } }, env);
     expect(read.status).toBe(403);
     expect((await post(SUBMISSION, authorization)).status).toBe(403);
+    expect((await notify(authorization)).status).toBe(403);
     expect(await storedRow()).toBeNull();
   });
 
@@ -351,7 +395,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
       expect((await (await get()).json()).data).toMatchObject({
         state: "pending",
         countryCode: "GB",
-        termsAcceptance: { version: SDP_TERMS.version },
+        request: { termsVersion: SDP_TERMS.version },
       });
     });
 

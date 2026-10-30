@@ -1,9 +1,10 @@
 /**
- * An organization's mainnet access request (HOO-2427), stored on its own row (migration 0192):
- * the declared jurisdiction, the Terms and Conditions acceptance and the request. The migration's
- * checks keep each group whole, so a request exists exactly when `mainnet_requested_at` is set.
+ * An organization's mainnet access request (HOO-2427), stored on its own row (migration 0193):
+ * the declared jurisdiction, the Terms and Conditions version accepted with it, and the request.
+ * The migration's check keeps them whole, so a request exists exactly when `mainnet_requested_at`
+ * is set.
  */
-import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
+import { type CountryCode, isCountryCode } from "@sdp/types/countries";
 import type { DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
 
@@ -11,8 +12,6 @@ export interface MainnetAccessRow {
   organization_id: string;
   country_code: CountryCode;
   terms_version: string;
-  terms_accepted_at: string;
-  terms_accepted_by_user_id: string;
   requested_at: string;
   requested_by_user_id: string;
   notified_at: string | null;
@@ -33,7 +32,7 @@ export interface MainnetAccessEmailContext {
 
 /** The organization's columns under the names the rest of mainnet access reads. */
 const COLUMNS = `id AS organization_id, jurisdiction_country_code AS country_code,
-  terms_accepted_version AS terms_version, terms_accepted_at, terms_accepted_by_user_id,
+  terms_accepted_version AS terms_version,
   mainnet_requested_at AS requested_at, mainnet_requested_by_user_id AS requested_by_user_id,
   mainnet_request_notified_at AS notified_at`;
 
@@ -41,28 +40,11 @@ type StoredColumns = {
   [Column in keyof MainnetAccessRow]: string | null;
 } & { organization_id: string };
 
-function isCountryCode(code: string): code is CountryCode {
-  return COUNTRY_CODES.some((candidate) => candidate === code);
-}
-
 /** The organization's request, or null when it has not asked. */
 function requestOf(columns: StoredColumns): MainnetAccessRow | null {
-  const {
-    requested_at,
-    requested_by_user_id,
-    country_code,
-    terms_version,
-    terms_accepted_at,
-    terms_accepted_by_user_id,
-  } = columns;
+  const { requested_at, requested_by_user_id, country_code, terms_version } = columns;
   if (requested_at === null) return null;
-  if (
-    requested_by_user_id === null ||
-    country_code === null ||
-    terms_version === null ||
-    terms_accepted_at === null ||
-    terms_accepted_by_user_id === null
-  ) {
+  if (requested_by_user_id === null || country_code === null || terms_version === null) {
     throw internalError("Mainnet access request is stored incomplete");
   }
   if (!isCountryCode(country_code)) {
@@ -72,8 +54,6 @@ function requestOf(columns: StoredColumns): MainnetAccessRow | null {
     organization_id: columns.organization_id,
     country_code,
     terms_version,
-    terms_accepted_at,
-    terms_accepted_by_user_id,
     requested_at,
     requested_by_user_id,
     notified_at: columns.notified_at,
@@ -104,12 +84,11 @@ export class MainnetAccessRepository {
     const columns = await this.db.queryOne<StoredColumns>(
       `UPDATE organizations
        SET jurisdiction_country_code = ?, terms_accepted_version = ?,
-           terms_accepted_at = sdp_iso_now(), terms_accepted_by_user_id = ?,
            mainnet_requested_at = sdp_iso_now(), mainnet_requested_by_user_id = ?,
            updated_at = sdp_datetime_now()
        WHERE id = ? AND mainnet_requested_at IS NULL
        RETURNING ${COLUMNS}`,
-      [claim.countryCode, claim.termsVersion, claim.userId, claim.userId, claim.organizationId]
+      [claim.countryCode, claim.termsVersion, claim.userId, claim.organizationId]
     );
     return columns ? requestOf(columns) : null;
   }
@@ -160,7 +139,6 @@ export class MainnetAccessRepository {
     await this.db.execute(
       `UPDATE organizations
        SET jurisdiction_country_code = NULL, terms_accepted_version = NULL,
-           terms_accepted_at = NULL, terms_accepted_by_user_id = NULL,
            mainnet_requested_at = NULL, mainnet_requested_by_user_id = NULL,
            mainnet_request_notified_at = NULL, updated_at = sdp_datetime_now()
        WHERE id = ?`,

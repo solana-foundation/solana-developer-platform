@@ -12,25 +12,25 @@ vi.mock("next/cache", () => nextCache);
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-import { loadMainnetAccess, requestMainnetAccessAction } from "./mainnet-access-actions";
+import {
+  loadMainnetAccess,
+  notifyMainnetAccessAction,
+  requestMainnetAccessAction,
+} from "./mainnet-access-actions";
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
 const { revalidatePath } = nextCache;
 
 const PENDING = {
   state: "pending",
+  available: true,
   countryCode: "SG",
-  termsAcceptance: {
-    version: SDP_TERMS.version,
-    acceptedAt: "2026-10-30T00:00:00.000Z",
-    acceptedByUserId: "usr_admin",
-  },
   request: {
     requestedAt: "2026-10-30T00:00:00.000Z",
     requestedByUserId: "usr_admin",
+    termsVersion: SDP_TERMS.version,
     notified: true,
   },
-  currentTerms: SDP_TERMS,
   contactEmail: "sdp@example.org",
 };
 
@@ -106,6 +106,17 @@ describe("mainnet access actions", () => {
     });
     expect(result.ok).toBe(false);
     // A refused submit may have recorded the request, so the settings page re-reads it.
+    expect(revalidatePath).toHaveBeenCalled();
+  });
+
+  it("sends an unsent request with a body-less notify", async () => {
+    answer(PENDING);
+    expect(await notifyMainnetAccessAction()).toEqual({ ok: true, access: PENDING });
+    const call = fetchMock.mock.calls.find(([input]) =>
+      urlOf(input).endsWith("/v1/organizations/org_sdp/mainnet-access/notify")
+    );
+    expect(call?.[1]?.method).toBe("POST");
+    expect(call?.[1]?.body).toBeUndefined();
     expect(revalidatePath).toHaveBeenCalled();
   });
 });

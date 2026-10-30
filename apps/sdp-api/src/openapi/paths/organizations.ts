@@ -90,7 +90,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Get mainnet access",
     operationId: "getMainnetAccess",
     description:
-      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance. A signed-in admin only, never an API key.",
+      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance, and whether this deployment takes requests. A signed-in admin only, never an API key.",
     security: [{ clerkBearerAuth: [] }],
     request: { params: z.object({ orgId: orgIdParamSchema }) },
     responses: {
@@ -106,7 +106,7 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     summary: "Request mainnet access",
     operationId: "requestMainnetAccess",
     description:
-      "Records the organization's jurisdiction and its acceptance of the current SDP Terms and Conditions, and asks SDP to enable mainnet. Once per organization; an operator approves it. A signed-in admin only, never an API key. Refused with 409 once sent, when mainnet is already enabled, or when the terms version is not the current one.",
+      "Records the organization's jurisdiction and its acceptance of the current SDP Terms and Conditions, and asks SDP to enable mainnet. Once per organization; an operator approves it. A signed-in admin only, never an API key. Refused with 409 once the organization asked, when mainnet is already enabled, or when the terms version is not the current one. If the email to SDP fails, the request stays recorded and `POST …/notify` sends it.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       params: z.object({ orgId: orgIdParamSchema }),
@@ -115,6 +115,22 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
     responses: {
       201: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations/{orgId}/mainnet-access/notify",
+    tags: ["Organizations"],
+    summary: "Send a mainnet access request again",
+    operationId: "notifyMainnetAccess",
+    description:
+      "Sends the organization's recorded request to SDP when its email did not go out. Changes nothing else. A signed-in admin only, never an API key. Refused with 409 when the organization has not asked or its request was already sent.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { params: z.object({ orgId: orgIdParamSchema }) },
+    responses: {
+      200: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 409, 500, 503]),
     },
   });
 }
