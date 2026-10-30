@@ -2481,18 +2481,54 @@ describe("Issuance Routes", () => {
     });
 
     it("supports pagination", async () => {
-      const res = await app.request(
-        "/v1/issuance/tokens?page=1&pageSize=10",
-        {
-          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-        },
+      // Two more tokens on top of the beforeEach seed: three total, two per page.
+      for (const name of ["Paged Token B", "Paged Token A"]) {
+        const res = await app.request(
+          "/v1/issuance/tokens",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ name, symbol: "PAGED" }),
+          },
+          env
+        );
+        expect(res.status).toBe(201);
+      }
+
+      const first = await app.request(
+        "/v1/issuance/tokens?page=1&pageSize=2",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
         env
       );
+      expect(first.status).toBe(200);
+      const firstBody = await first.json();
+      expect(firstBody.meta.page).toBe(1);
+      expect(firstBody.meta.pageSize).toBe(2);
+      expect(firstBody.meta.total).toBe(3);
+      expect(firstBody.data).toHaveLength(2);
+      expect(firstBody.meta.hasMore).toBe(true);
 
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.meta.page).toBe(1);
-      expect(body.meta.pageSize).toBe(10);
+      const second = await app.request(
+        "/v1/issuance/tokens?page=2&pageSize=2",
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect(second.status).toBe(200);
+      const secondBody = await second.json();
+      expect(secondBody.meta.page).toBe(2);
+      expect(secondBody.data).toHaveLength(1);
+      expect(secondBody.meta.hasMore).toBe(false);
+
+      // The two pages tile the list exactly once: nothing dropped between
+      // pages, nothing repeated.
+      const names = [...firstBody.data, ...secondBody.data].map(
+        (token: { name: string }) => token.name
+      );
+      expect(names).toContain("Listed Token");
+      expect(new Set(names).size).toBe(names.length);
     });
 
     it("filters by search, reporting the filtered total", async () => {

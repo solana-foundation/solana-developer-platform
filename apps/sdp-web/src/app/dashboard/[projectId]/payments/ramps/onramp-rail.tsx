@@ -5,7 +5,6 @@ import Link from "next/link";
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
-import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { ContactControls } from "./components/contact-combobox";
 import { OnrampStepContent } from "./components/onramp-step-content";
@@ -19,22 +18,18 @@ import { preStepSummaryDetails } from "./wizard-summary";
 
 /**
  * Whether the footer's primary button simulates the deposit's pay-in: on the provider step of a
- * sandbox (or demo) deposit still waiting for its money, when no verification is due first.
+ * sandbox (or demo) deposit still waiting for its money.
  */
-function simulatesDeposit(wizard: OnrampWizard, verificationUrl: string | undefined): boolean {
-  return (
-    wizard.currentStepId === "PROVIDER" && verificationUrl === undefined && wizard.simulateAvailable
-  );
+function simulatesDeposit(wizard: OnrampWizard): boolean {
+  return wizard.currentStepId === "PROVIDER" && wizard.simulateAvailable;
 }
 
 function onrampPrimaryLabel(
   wizard: OnrampWizard,
-  verificationPending: boolean,
-  verificationUrl: string | undefined,
   t: ReturnType<typeof useTranslations>
 ): string {
   switch (true) {
-    case simulatesDeposit(wizard, verificationUrl):
+    case simulatesDeposit(wizard):
       return wizard.quoteSimulationSucceeded
         ? t("DashboardPayments.ramps.depositSimulated")
         : wizard.quoteSimulationLoading
@@ -42,10 +37,6 @@ function onrampPrimaryLabel(
           : t("DashboardPayments.ramps.simulateDeposit");
     case wizard.hostedQuoteLoading:
       return t("DashboardPayments.processing");
-    case verificationPending:
-      return t("DashboardPayments.verificationPending");
-    case verificationUrl !== undefined:
-      return t("DashboardPayments.completeVerification");
     case wizard.currentStepId === "REVIEW" && wizard.fields.provider !== null:
       return t("DashboardPayments.ramps.continueWithProvider", {
         provider: getRampProviderLabel(wizard.fields.provider),
@@ -55,14 +46,9 @@ function onrampPrimaryLabel(
   }
 }
 
-function onrampPrimaryAction(
-  wizard: OnrampWizard,
-  verificationUrl: string | undefined
-): () => void {
+function onrampPrimaryAction(wizard: OnrampWizard): () => void {
   switch (true) {
-    case verificationUrl !== undefined:
-      return () => openExternalRampUrl(verificationUrl);
-    case simulatesDeposit(wizard, verificationUrl):
+    case simulatesDeposit(wizard):
       return () => void wizard.simulateCurrentQuote();
     case wizard.isLastStep:
       return wizard.finish;
@@ -89,22 +75,18 @@ function displaySteps(wizard: OnrampWizard, t: ReturnType<typeof useTranslations
 }
 
 /**
- * What the frame shows for where the deposit is: the verification the provider still wants,
- * whether the transfer can still be canceled, and the hints, labels and gates that follow.
+ * What the frame shows for where the deposit is: whether the transfer can still be canceled,
+ * and the hints, labels and gates that follow.
  */
 function onrampFrameState(
   wizard: OnrampWizard,
   onCancel: (() => void) | undefined,
   t: ReturnType<typeof useTranslations>
 ) {
-  const verificationUrl: string | undefined = undefined;
-  const verificationPending = false;
   const transferState =
     wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
   const cancelable = transferState?.cancelable === true;
   return {
-    verificationUrl,
-    verificationPending,
     footerHint:
       wizard.currentStepId === "DEPOSIT" && wizard.fields.provider === null
         ? t("DashboardPayments.ramps.pickProviderHint")
@@ -120,16 +102,12 @@ function onrampFrameState(
       wizard.transferStatus?.status === "completed"
         ? t("DashboardPayments.ramps.depositComplete")
         : undefined,
-    primaryDisabled: simulatesDeposit(wizard, verificationUrl)
+    primaryDisabled: simulatesDeposit(wizard)
       ? wizard.quoteSimulationLoading || wizard.quoteSimulationSucceeded
       : wizard.hostedQuoteLoading ||
-        verificationPending ||
         !wizard.canProceed ||
         (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
-    hidePrimary:
-      wizard.currentStepId === "PROVIDER" &&
-      !verificationUrl &&
-      !simulatesDeposit(wizard, verificationUrl),
+    hidePrimary: wizard.currentStepId === "PROVIDER" && !simulatesDeposit(wizard),
     hostedStage: wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted",
     showInlineStatus: wizard.onTransactionStage && Boolean(wizard.quote),
   };
@@ -184,9 +162,9 @@ export function OnrampRail({
       confirmCancel={frame.confirmCancel}
       completionTitle={frame.completionTitle}
       primaryDisabled={frame.primaryDisabled}
-      primaryLabel={onrampPrimaryLabel(wizard, frame.verificationPending, frame.verificationUrl, t)}
+      primaryLabel={onrampPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}
-      onPrimary={onrampPrimaryAction(wizard, frame.verificationUrl)}
+      onPrimary={onrampPrimaryAction(wizard)}
       onSecondary={wizard.handleSecondary}
       counterpartyDialog={null}
       summary={provider === null ? undefined : <WizardSummaryList details={summaryDetails} />}
@@ -209,11 +187,7 @@ export function OnrampRail({
       footerActions={
         wizard.quoteTransferId !== null && wizard.onTransactionStage ? (
           // Second to the simulation while that is on offer.
-          <Button
-            asChild
-            type="button"
-            variant={simulatesDeposit(wizard, frame.verificationUrl) ? "outline" : "default"}
-          >
+          <Button asChild type="button" variant={simulatesDeposit(wizard) ? "outline" : "default"}>
             <Link
               href={projectHref(
                 `/dashboard/payments/transactions?module=payments&search=${encodeURIComponent(wizard.quoteTransferId)}`

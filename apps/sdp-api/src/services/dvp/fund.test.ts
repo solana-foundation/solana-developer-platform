@@ -91,8 +91,6 @@ vi.mock("@sdp/rpc/solana", () => ({
 
 const { fundDvpTradeLeg } = await import("./fund");
 
-const _T22 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
-
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return buildDvpTradeRow({ id: "dvp_fund_test", ...overrides });
 }

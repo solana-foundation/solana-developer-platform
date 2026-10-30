@@ -136,14 +136,6 @@ function isJwksRequest(input: Parameters<typeof fetch>[0]): boolean {
   );
 }
 
-async function _sendAs(
-  headers: Record<string, string>,
-  path: string,
-  body: Record<string, unknown>
-) {
-  return app.request(path, { method: "POST", headers, body: JSON.stringify(body) }, env);
-}
-
 async function get(path: string) {
   return app.request(path, { headers: { Authorization: `Bearer ${API_KEY.raw}` } }, env);
 }

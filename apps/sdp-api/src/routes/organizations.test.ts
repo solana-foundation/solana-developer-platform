@@ -253,6 +253,21 @@ describe("Organizations routes", () => {
         env
       );
       expect(res.status).toBe(200);
+      // The answer is read back from the committed row, so this fails if the
+      // settings write silently no-ops behind the 200.
+      expect(await res.json()).toEqual({
+        data: {
+          id: TEST_ORG.id,
+          name: TEST_ORG.name,
+          slug: TEST_ORG.slug,
+          tier: TEST_ORG.tier,
+          status: TEST_ORG.status,
+          settings: { defaultEnvironment: "production" },
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
     });
     it("rejects empty update", async () => {
       const res = await app.request(

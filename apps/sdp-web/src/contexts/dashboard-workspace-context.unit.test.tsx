@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import {
   dashboardRouter,
   resetDashboardNavigation,
@@ -33,11 +34,13 @@ vi.mock("@/lib/dashboard-url-state", () => ({
 }));
 
 function Probe() {
-  const { selectProject, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
+  const { selectProject, selectedProjectId, sdpEnvironment, dashboardCacheScope } =
+    useDashboardWorkspace();
   return (
     <>
       <output aria-label="selected project">{selectedProjectId}</output>
       <output aria-label="environment">{sdpEnvironment}</output>
+      <output aria-label="cache scope">{getDashboardCacheScopeKey(dashboardCacheScope)}</output>
       <button type="button" onClick={() => selectProject(SANDBOX_PROJECT.id)}>
         Keep project
       </button>
@@ -48,7 +51,11 @@ function Probe() {
   );
 }
 
-function WorkspaceFixture() {
+function WorkspaceFixture({
+  scope = { orgId: "org_test", userId: "user_test" },
+}: {
+  scope?: { orgId: string; userId: string };
+} = {}) {
   const [unrelatedCount, setUnrelatedCount] = useState(0);
   return (
     <>
@@ -73,7 +80,7 @@ function WorkspaceFixture() {
           releaseChannel: "experimental",
           ramps: false,
         }}
-        serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
+        serverDashboardCacheScope={scope}
         projects={[SANDBOX_PROJECT, PRODUCTION_PROJECT]}
       >
         <Probe />
@@ -133,5 +140,32 @@ describe("DashboardWorkspaceProvider project selection", () => {
 
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
     expect(screen.getByText("Refreshing scope")).toBeTruthy();
+  });
+});
+
+describe("DashboardWorkspaceProvider cache scope", () => {
+  // Every cache and key store under the workspace keys off this scope; a
+  // hardcoded or stale identity would hand one signed-in user or org another
+  // one's cached reads and Idempotency-Keys.
+  it("follows the live Clerk identity and hides the workspace while the URL still names the old scope", () => {
+    const view = render(<WorkspaceFixture />);
+    expect(screen.getByLabelText("cache scope").textContent).toBe("user_test:org_test");
+
+    // Clerk's identity changes under the page: the workspace scope goes stale,
+    // so the children unmount until the URL catches up (the bare-dashboard
+    // redirect). A scope still reading the server snapshot would keep them.
+    clerk.auth = { isLoaded: true, userId: "user_other", orgId: "org_other" };
+    view.rerender(<WorkspaceFixture />);
+    expect(screen.getByText("Refreshing scope")).toBeTruthy();
+
+    // The URL caught up: the workspace returns scoped to the NEW identity.
+    view.rerender(<WorkspaceFixture scope={{ orgId: "org_other", userId: "user_other" }} />);
+    expect(screen.getByLabelText("cache scope").textContent).toBe("user_other:org_other");
+  });
+
+  it("serves the server scope until Clerk's identity is loaded", () => {
+    clerk.auth = { isLoaded: false, userId: null, orgId: null };
+    render(<WorkspaceFixture scope={{ orgId: "org_server", userId: "user_server" }} />);
+    expect(screen.getByLabelText("cache scope").textContent).toBe("user_server:org_server");
   });
 });

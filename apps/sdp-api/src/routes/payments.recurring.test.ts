@@ -19,8 +19,6 @@ import {
   address,
   blockhash,
   generateKeyPairSigner,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
   lamports,
   type MaybeAccount,
   signature,
@@ -199,18 +197,6 @@ function mockDistinctRecentBlockhashes(): void {
   }));
 }
 
-const _TEST_COUNTERPARTY_IDENTITY = {
-  firstName: "Ada",
-  lastName: "Lovelace",
-  dateOfBirth: "1990-01-15",
-  phone: "+14155551234",
-  address: {
-    line1: "1 Market St",
-    city: "San Francisco",
-    countryCode: "US",
-  },
-} as const;
-
 async function seedCryptoWalletCounterpartyAccount(params: {
   counterpartyId: string;
   address: string;
@@ -297,33 +283,6 @@ async function activateOnIssuedToken() {
       .run();
   };
   return { activated, issuedMint, pauseToken };
-}
-
-function _expectPreparedSubscriptionTransaction(
-  preparedTransaction: {
-    serialized: string;
-    blockhash: string;
-    lastValidBlockHeight: string;
-    requiredSigners: string[];
-  },
-  expectedSigners: string[]
-): void {
-  expect(preparedTransaction.serialized).toBeTruthy();
-  expect(preparedTransaction.blockhash).toBe("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N");
-  expect(preparedTransaction.lastValidBlockHeight).toBe("1000");
-  for (const signer of expectedSigners) {
-    expect(preparedTransaction.requiredSigners).toContain(signer);
-  }
-
-  const transaction = getTransactionDecoder().decode(
-    Buffer.from(preparedTransaction.serialized, "base64")
-  );
-  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-
-  expect(message.staticAccounts.length).toBeGreaterThan(0);
-  for (const signer of expectedSigners) {
-    expect(Object.keys(transaction.signatures)).toContain(signer);
-  }
 }
 
 /** A deleted organization keeps its rows; only new money movement stops (HOO-1955). */
@@ -5135,7 +5094,6 @@ describe("Payments routes — recurring", () => {
   );
 
   it("journals failed on-chain activation attempts and retries with a fresh signature", async () => {
-    const _sourceSigner = recurringExecution.sourceSigner();
     mockDistinctRecentBlockhashes();
     confirmTransactionMock
       .mockResolvedValueOnce({

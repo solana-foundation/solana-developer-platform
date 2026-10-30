@@ -78,6 +78,19 @@ const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)
   .filter(([, cap]) => !inReleaseChannel("stable", cap))
   .map(([name]) => name);
 
+/** Pinned: the it.each over this list silently shrinks to zero cases if the classifiers stop calling a capped flag out. */
+const EXPECTED_EXCLUDED_FROM_STABLE = [
+  "issuance",
+  "assetProfiles",
+  "privateChannels",
+  "heliusRings",
+  "markets",
+  "dvp",
+  "earn",
+  "rampProviderMoonpay",
+  "rampProviderStripe",
+];
+
 const RAMP_PROVIDER_FLAG_NAMES = {
   moonpay: "rampProviderMoonpay",
   stripe: "rampProviderStripe",
@@ -91,6 +104,12 @@ describe("defineDashboardFlags", () => {
   it("delegates every flag to its Vercel decision on experimental", async () => {
     const values = await decideAll(defineFlags("experimental"));
     expect(Object.entries(values).filter(([, value]) => !value)).toEqual([]);
+  });
+
+  it("derives the stable exclusion list it tests against", () => {
+    expect(EXCLUDED_FROM_STABLE.slice().sort()).toEqual(
+      EXPECTED_EXCLUDED_FROM_STABLE.slice().sort()
+    );
   });
 
   it.each(EXCLUDED_FROM_STABLE)("serves %s off on stable whatever Vercel says", async (name) => {

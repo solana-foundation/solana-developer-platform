@@ -312,10 +312,6 @@ describe("Payments routes — transfer idempotency", () => {
   });
 
   it("does not dedup two requests under different Idempotency-Keys", async () => {
-    const _headers = {
-      Authorization: `Bearer ${TEST_API_KEY.raw}`,
-      "Content-Type": "application/json",
-    };
     const body = JSON.stringify({
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,

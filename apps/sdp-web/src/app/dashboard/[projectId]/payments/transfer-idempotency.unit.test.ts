@@ -41,6 +41,31 @@ describe("transferRequestFingerprint", () => {
     expect(fingerprint("1.01")).not.toBe(fingerprint("1"));
     expect(fingerprint("10")).not.toBe(fingerprint("1"));
   });
+
+  // The doc comment's claim, pinned: two sends that differ in any field a
+  // payment is made of are different payments, so they must never share a
+  // key — a shared key would join or replay the wrong amounts.
+  it("separates payments that differ in any field a payment is made of", () => {
+    const variants = [
+      { ...SUBMISSION, sourceCustodyWalletId: "cwlt_2" },
+      { ...SUBMISSION, destination: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" },
+      { ...SUBMISSION, token: address("So11111111111111111111111111111111111111112") },
+      { ...SUBMISSION, amount: "251" },
+      { ...SUBMISSION, memo: "invoice 7" },
+    ];
+
+    for (const variant of variants) {
+      expect(transferRequestFingerprint(variant)).not.toBe(transferRequestFingerprint(SUBMISSION));
+    }
+  });
+
+  // The token is keyed by its value, so a re-created address of the same mint
+  // is the same payment, never a fresh key per render.
+  it("fingerprints the token by value, not identity", () => {
+    expect(transferRequestFingerprint({ ...SUBMISSION, token: address(SUBMISSION.token) })).toBe(
+      transferRequestFingerprint(SUBMISSION)
+    );
+  });
 });
 
 describe("sendTransferUnderKey", () => {
