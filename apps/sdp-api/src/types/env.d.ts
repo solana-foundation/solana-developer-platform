@@ -98,8 +98,11 @@ export interface Env extends ManagedRpcEnv {
   ITERABLE_API_URL?: string;
   /** The triggered campaign whose template passes `subject`, `body` and `replyTo` through. */
   ITERABLE_TRANSACTIONAL_CAMPAIGN_ID?: string;
-  /** Mainnet access requests (HOO-2427) email this SDP alias. */
-  MAINNET_ACCESS_EMAIL_TO?: string;
+  /**
+   * The SDP operators' address: mainnet access requests (HOO-2427) email it, and customers see it
+   * as the contact for changes.
+   */
+  SDP_OPERATOR_EMAIL?: string;
 
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;

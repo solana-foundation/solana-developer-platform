@@ -31,7 +31,7 @@ const aliasSchema = z.string().trim().pipe(z.email());
  */
 export function mainnetAccessEmailConfig(env: Env): (IterableEmailConfig & { to: string }) | null {
   const email = iterableEmailConfig(env);
-  const to = aliasSchema.safeParse(env.MAINNET_ACCESS_EMAIL_TO);
+  const to = aliasSchema.safeParse(env.SDP_OPERATOR_EMAIL);
   return email && to.success ? { ...email, to: to.data } : null;
 }
 

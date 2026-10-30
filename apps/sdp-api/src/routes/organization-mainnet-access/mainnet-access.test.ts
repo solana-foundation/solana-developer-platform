@@ -135,7 +135,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     env.ITERABLE_API_URL = ITERABLE_API_URL;
     env.ITERABLE_API_KEY = ITERABLE_TEST_KEY;
     env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
-    env.MAINNET_ACCESS_EMAIL_TO = "mainnet@example.org";
+    env.SDP_OPERATOR_EMAIL = "mainnet@example.org";
     const realFetch = globalThis.fetch;
     iterable = vi
       .spyOn(globalThis, "fetch")
@@ -151,7 +151,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     env.ITERABLE_API_URL = undefined;
     env.ITERABLE_API_KEY = undefined;
     env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = undefined;
-    env.MAINNET_ACCESS_EMAIL_TO = undefined;
+    env.SDP_OPERATOR_EMAIL = undefined;
     await clearKVStores(env);
   });
 
@@ -334,9 +334,9 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it.each([
-    ["no alias", "MAINNET_ACCESS_EMAIL_TO", undefined],
+    ["no alias", "SDP_OPERATOR_EMAIL", undefined],
     // A deployment mounts `placeholder` until the real alias is set.
-    ["an alias that is not an address", "MAINNET_ACCESS_EMAIL_TO", "placeholder"],
+    ["an alias that is not an address", "SDP_OPERATOR_EMAIL", "placeholder"],
     ["no Iterable API URL", "ITERABLE_API_URL", undefined],
     ["no campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", undefined],
     ["a placeholder campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", "placeholder"],
