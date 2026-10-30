@@ -425,6 +425,7 @@
       "recipientsStep": "Recipients",
       "recipientsTitle": "Pay multiple recipients",
       "reviewStep": "Review",
+      "resultStep": "Result",
       "reviewTitle": "Review batch",
       "unknownToken": "Unknown token",
       "tokenUnavailableOnNetwork": "{currency} is not available on this network.",

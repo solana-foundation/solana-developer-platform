@@ -124,8 +124,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
-  // 422 like SIGNING_REJECTED: nothing was signed and the same request is
-  // refused again until the wallet's policy changes.
+  // Policy refusals need a policy review or request change before retrying.
   CUSTODY_POLICY_REFUSED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
@@ -322,18 +321,16 @@ export function transactionExpired(message?: string, details?: Record<string, un
 }
 
 /**
- * A signature the custody provider's own policy declined (HOO-2333): nothing was signed. The
- * custody signer raises it once, at the signer waist, for every flow that signs.
+ * A signing call the custody provider's own policy declined (HOO-2333).
+ * The shared custody signer raises it for every flow that signs.
  *
  * @param cause - The provider's refusal, kept for logs; its wording never reaches the response.
- * @param provider - The provider resolved for this custody wallet, when known.
+ * @param provider - The provider resolved for this custody wallet.
  * @returns The 422 `CUSTODY_POLICY_REFUSED` error.
  */
-export function custodyPolicyRefused(cause: Error, provider?: CustodyProvider): AppError {
-  const label = provider ? CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label : null;
-  const message = label
-    ? `${label} refused to sign this request because of a wallet policy. Review the wallet's policy in ${label} or adjust the request before retrying.`
-    : undefined;
+export function custodyPolicyRefused(cause: Error, provider: CustodyProvider): AppError {
+  const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
+  const message = `${label} refused to sign this request because of a wallet policy. Review the wallet's policy in ${label} or adjust the request before retrying.`;
   return new AppError("CUSTODY_POLICY_REFUSED", message, undefined, { cause });
 }
 

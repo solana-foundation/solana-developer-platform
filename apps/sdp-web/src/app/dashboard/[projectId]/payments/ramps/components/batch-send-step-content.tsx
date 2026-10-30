@@ -892,6 +892,9 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
                 {formatTokenAmount(recipient.amount)} {displayAsset} ·{" "}
                 {shortenAddress(recipient.destination)}
               </p>
+              {recipient.error ? (
+                <p className="mt-1 text-sm text-error">{recipient.error}</p>
+              ) : null}
             </RecipientRow>
           );
         })}
