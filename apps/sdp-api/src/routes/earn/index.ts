@@ -113,8 +113,7 @@ async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
 earnRoutes.use("*", requireEarnFeature);
 
 const earnProjectContextOptions = {
-  allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
-    isEarnExitOrRead(c.req.method, c.req.path),
+  allowExits: (c: Context<{ Bindings: Env }>) => isEarnExitOrRead(c.req.method, c.req.path),
 };
 
 const EARN_CATALOGUE_CACHE_CONTROL = "private, max-age=30";

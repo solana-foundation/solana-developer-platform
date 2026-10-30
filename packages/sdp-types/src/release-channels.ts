@@ -51,7 +51,10 @@ export type SdpEnvironmentMaturity = Readonly<Record<SdpEnvironment, SdpReleaseC
  * environment's projects when that environment's maturity is at or above the channel's
  * level, so each channel contains the more mature ones by construction. Deployment-wide
  * readers (jobs, flags, the public surface) count a module in when either environment
- * is; the API's project context refuses a project whose environment is not.
+ * is; the API's project context refuses a project whose environment is not, except
+ * exits for money already deployed. Jobs still run for every environment while either
+ * environment runs the module: demoting one environment stops new work through the API
+ * and dashboard, not in-flight reconciliation.
  * Promoting a module, or one environment of it, is a one-line change here.
  *
  * Three modules have no maturity of their own:
