@@ -328,7 +328,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | --- | --- |
 | Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
-| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again in a new batch with a new key. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
+| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A transfer batch answers as it stands: recipients its original never sent turn `failed` once no request can still send them, and were never paid. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
@@ -2538,7 +2538,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
-See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries-for-single-transfers) for the same pattern applied to a run of transfers.
 
 ## Related
 
@@ -2675,9 +2675,9 @@ One request creates a durable batch, chunks its recipients into Solana transacti
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: payroll-2026-05-14" \
+  -H "Idempotency-Key: 3f0c9e7a-5b1d-4c2e-9a8f-6d4b2e1c0a97" \
   -d '{
-    "externalId": "payroll_2026-05-14",
+    "externalId": "payroll-2026-05",
     "sourceCustodyWalletId": "cwlt_123",
     "token": "9aBCd...4eEf",
     "recipients": [
@@ -2691,7 +2691,63 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-`Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+The two ids do different jobs:
+
+- **`Idempotency-Key`** (required) identifies this one request. Reuse it to retry that exact request after a timeout; recipient order does not change the request. Any unique value works, such as a UUID.
+- **`externalId`** (required) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value; see [One batch per payout run](#one-batch-per-payout-run).
+
+Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
+
+### One batch per payout run
+
+The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
+
+- The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
+- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
+
+Derive the `externalId` from data you already have, so a worker that crashes and restarts computes the same value without storing anything: `payroll-2026-05`, `invoice-run-8812`. Never generate it at random: a random value is new on every attempt and protects nothing. New recipients go in a new run with a new `externalId`, never in a renamed copy of a run that was already sent.
+
+```ts title="payroll-worker.ts"
+// Safe to run again after a crash: the run's id comes from the period, not from storage.
+const externalId = `payroll-${period}`;
+const response = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": crypto.randomUUID(),
+  },
+  body: JSON.stringify({ externalId, sourceCustodyWalletId, token, recipients }),
+});
+const body = await response.json();
+// 200: this run's batch, new or replayed. 409 TRANSFER_BATCH_RUN_EXISTS: the run was
+// already sent with a different body; read error.details.batchId instead of resending.
+// A 5xx may come after the run was sent: its outcome is unknown, so run again with the
+// same externalId, which returns the batch if it exists. A 4xx (a 409
+// AMOUNT_BELOW_RENT_MINIMUM, say) is refused before anything is sent: report it.
+let batchId: string;
+if (response.ok) {
+  batchId = body.data.batch.id;
+} else if (body.error.code === "TRANSFER_BATCH_RUN_EXISTS") {
+  batchId = body.error.details.batchId;
+} else if (response.status >= 500) {
+  throw new Error(`Payout run ${externalId} has an unknown outcome: run it again`);
+} else {
+  throw new Error(`Payout run ${externalId} was refused: ${body.error.code}`);
+}
+```
+
+`externalId` is required, and a batch without one is refused with `400`. It only protects you if every attempt at the run sends the same value, so derive it rather than generating it.
+
+### Recovering from a partial failure
+
+A batch that ends `partially_failed` paid some recipients and not others. To finish the run:
+
+1. Read the batch with `GET /v1/payments/transfer-batches/{batchId}`.
+2. Collect the recipients whose `status` is `failed`. They were not paid.
+3. Send only those recipients in a new batch, with a new `externalId` (for example `payroll_2026-05-14_retry_1`) and a new `Idempotency-Key`.
+
+Never resend a recipient whose status is still `pending` or `processing`: its transfer may still land. Poll the batch until it settles, then resend whatever ended `failed`.
 
 ### The SOL rent-exempt minimum
 
@@ -2706,11 +2762,9 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 SDP funds the rent of each recipient token account a token batch creates, up to a per-transaction limit, so a chunk carries only as many recipients without a token account as that limit covers. Recipients whose token accounts already exist are packed by count and size alone. The estimate's `transactionCount` is the number create submits. A recipient whose token account alone costs more than the limit is refused with `409 SPONSORED_RENT_OVER_CAP` (`details.recipientIndex`) before anything is written or sent; create that recipient's token account first.
 
-The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
+## Paying recipients one transfer at a time
 
-## Designing a payout run
-
-A typical pattern:
+For destinations that are not registered counterparty accounts, a run can send one transfer per recipient instead of a batch. A typical pattern:
 
 1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
 2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
@@ -2720,9 +2774,9 @@ A typical pattern:
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
 
-## Dedup and retries
+### Dedup and retries for single transfers
 
-Two layers protect you against double-spends if a worker dies mid-run:
+Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
 
 1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
@@ -25176,10 +25230,6 @@ Estimate transaction chunking and fees for a transfer batch.
 
   Project identifier for the transfer batch context.
 
-- **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
-
-  Caller-provided batch correlation ID. Not used as an idempotency key.
-
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
   Exact SDP Wallet ID (`id` from `GET /v1/wallets`).
@@ -25209,6 +25259,10 @@ Estimate transaction chunking and fees for a transfer batch.
   - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
 
   - **`preflight`** · `boolean`
+
+- **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
+
+  Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.
 
 ## Responses
 
@@ -25354,7 +25408,6 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -25369,7 +25422,8 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": true
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   }'
 ```
 
@@ -25382,7 +25436,6 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
   },
   body: JSON.stringify({
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -25397,7 +25450,8 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": true
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   })
 });
 ```
@@ -25409,7 +25463,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -25424,7 +25477,8 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": True
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   })
 ```
 
@@ -25531,7 +25585,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfer-batches`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`).
+Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To recover from a partial failure, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and send only its `failed` recipients in a new batch, with a new `externalId` and a new Idempotency-Key. Never resend a recipient still `pending` or `processing`: its transfer may still land.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
 
@@ -25554,10 +25608,6 @@ Create a custody-executed outbound transfer batch.
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
   Project identifier for the transfer batch context.
-
-- **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
-
-  Caller-provided batch correlation ID. Not used as an idempotency key.
 
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
@@ -25588,6 +25638,10 @@ Create a custody-executed outbound transfer batch.
   - **`priorityFee`** · `string` · one of `none`, `low`, `medium`, `high`, `auto`
 
   - **`preflight`** · `boolean`
+
+- **`externalId`** · `string` · required · min length 1 · max length 256 · example `payroll_2026_06_30`
+
+  Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Required: it is what stops a resend under a new Idempotency-Key from paying the same recipients twice.
 
 ## Responses
 
@@ -26048,7 +26102,6 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -26063,7 +26116,8 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": true
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   }'
 ```
 
@@ -26077,7 +26131,6 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
   },
   body: JSON.stringify({
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -26092,7 +26145,8 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": true
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   })
 });
 ```
@@ -26104,7 +26158,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "projectId": "prj_example",
-    "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
     "token": "SOL",
     "recipients": [
@@ -26119,7 +26172,8 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
       "maxRecipientsPerTransaction": 20,
       "priorityFee": "auto",
       "preflight": True
-    }
+    },
+    "externalId": "payroll_2026_06_30"
   })
 ```
 
