@@ -25,6 +25,7 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { AuditService } from "@/services/audit.service";
+import { PAY_SPONSOR_SIGNATURES_PER_HOUR } from "@/services/payments/payment-request-sponsorship";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -594,6 +595,110 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(200);
       expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("keys the sponsor's Kora quota on the payment request, not its wallet", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actor: { type: "payment_request", id: request.id } }),
+        "payments.pay_request",
+        { custodyWalletId: null }
+      );
+    });
+
+    it("caps one request's sponsor signatures per hour and still replays its signed claim", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const other = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      // Past the claims' last valid block height, every post re-claims and asks Kora again.
+      rpc.answer("getBlockHeight", 2_000);
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+
+      const refused = await postTransaction(request.public_token);
+      expect(refused.status).toBe(429);
+      expect(Number(refused.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+
+      // Another request on the same wallet keeps its own allowance.
+      expect((await postTransaction(other.public_token)).status).toBe(200);
+      // A live signed claim replays without asking Kora, so the cap never refuses it.
+      rpc.answer("getBlockHeight", 900);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR + 1);
+    });
+
+    it("counts only posts that reach the sponsor signature", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const sponsorAsPayer = () =>
+        app.request(
+          `/pay/${request.public_token}/tx`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: TEST_MOCK_FEE_PAYER }),
+          },
+          env
+        );
+
+      for (let attempt = 0; attempt <= PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await sponsorAsPayer()).status).toBe(400);
+      }
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
+    it("holds each clock hour to the cap across an hour boundary", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000 + 3_600_000;
+      const now = vi.spyOn(Date, "now");
+      onTestFinished(() => now.mockRestore());
+      const postAt = async (ms: number) => {
+        now.mockReturnValue(ms);
+        return (await postTransaction(request.public_token)).status;
+      };
+      rpc.answer("getBlockHeight", 2_000);
+
+      // Six in the last minute of one hour fill it.
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect(await postAt(hour - 30_000)).toBe(200);
+      }
+      // Just past the boundary the previous hour still counts nearly in full: one more fits.
+      expect(await postAt(hour + 30_000)).toBe(200);
+      expect(await postAt(hour + 30_000)).toBe(429);
+      // Near the next hour's end its weight has decayed, but the hour holds to six.
+      const lateStatuses: number[] = [];
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        lateStatuses.push(await postAt(hour + 3_540_000));
+      }
+      expect(lateStatuses.filter((status) => status === 200)).toHaveLength(
+        PAY_SPONSOR_SIGNATURES_PER_HOUR - 1
+      );
+      expect(lateStatuses.at(-1)).toBe(429);
+      expect(sign).toHaveBeenCalledTimes(2 * PAY_SPONSOR_SIGNATURES_PER_HOUR);
     });
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {

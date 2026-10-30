@@ -169,7 +169,6 @@ export interface Invitation {
   email: string;
   role: OrganizationRole;
   invitedBy: string;
-  tokenHash: string;
   expiresAt: string;
   status: InvitationStatus;
   createdAt: string;

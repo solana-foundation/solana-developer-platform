@@ -1,10 +1,14 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { z } from "zod";
+import generatedExamples from "@/generated/api-examples.json";
+import { apiExampleOf, type GuideApiExamples, renderApiExample } from "./api-example";
 import {
   DOCS_ACTION_MODULES,
   DOCS_MODULES,
@@ -17,9 +21,11 @@ import {
   frontmatterOf,
   isGatePublished,
   isModulePublished,
+  isPagePublished,
   type PublicSurface,
   publicSurface,
 } from "./release-channel";
+import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module carries `module:` (or
@@ -30,12 +36,16 @@ import {
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
+ * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
+ * - `<ApiExample operation="..." />`: a request from the public reference and
+ *   snippet model.
  *
- * Each block is rendered once, to Markdown, from docs-catalog.ts and the
- * build's manifest. `remarkDocsBlocks` swaps it into the MDX tree before
- * Fumadocs extracts headings and search text; `expandDocsBlocks` swaps the same
- * Markdown into raw MDX for the llms files, the Markdown route and the link
- * checker. Both use one string, so the page and its text agree by construction.
+ * The catalog blocks render from docs-catalog.ts and the build's manifest;
+ * `ApiExample` uses generated public API snippets. `remarkDocsBlocks` swaps the
+ * text into the MDX tree before Fumadocs extracts headings and search text;
+ * `expandDocsBlocks` swaps the same Markdown into raw MDX for the llms files,
+ * the Markdown route and the link checker. Both use one string, so the page and
+ * its text agree by construction.
  */
 
 // Backslashes first, so an escaped pipe cannot be un-escaped by the cell text.
@@ -88,7 +98,23 @@ const BLOCKS = {
         DOCS_ACTION_MODULES[module],
       ])
     ),
+  RateLimitTable: ({ rateLimits }) =>
+    table(
+      ["Caller", `Requests per ${windowLabel(rateLimits.windowSeconds)}`],
+      [
+        ...Object.entries(rateLimits.apiKeyTiers).map(([tier, requests]) => [
+          `An API key on the \`${tier}\` tier`,
+          requests.toLocaleString("en-US"),
+        ]),
+        ["No API key, per IP address", rateLimits.unauthenticatedPerIp.toLocaleString("en-US")],
+      ]
+    ),
 } satisfies Record<string, (surface: PublicSurface) => string>;
+
+/** A rate limit window's length as a table heading reads it: `minute`, or `30 seconds`. */
+function windowLabel(seconds: number): string {
+  return seconds === 60 ? "minute" : `${seconds} seconds`;
+}
 
 type BlockName = keyof typeof BLOCKS;
 
@@ -107,7 +133,8 @@ function blockOf(node: RootContent, where: string): { name: BlockName } | undefi
 }
 
 // Every API method, checked against the package's list by the compiler. source.config.ts loads
-// this file without a TypeScript resolver, so workspace packages are imported for types only.
+// this file without a TypeScript resolver, so workspace packages are imported for types only:
+// Node cannot follow their extensionless imports. `@sdp/types/site` (through `./site`) has none.
 const API_METHOD_NAMES = {
   GET: true,
   POST: true,
@@ -145,11 +172,14 @@ function isElementName(name: string | null): name is ElementName {
  * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
  * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
  * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
- * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips.
+ * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips, and
+ * `<ApiOperation>` an operation's body beside its `<ApiPanel>` of samples.
  */
 const WRAPPERS = {
   ApiOperationTable: "links",
   ActionLinks: "layout",
+  ApiOperation: "layout",
+  ApiPanel: "layout",
 } as const satisfies Record<string, "links" | "layout">;
 
 type Wrapper = {
@@ -232,25 +262,97 @@ function spanOf(node: RootContent, where: string): { start: number; end: number 
 }
 
 const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
+if (generatedExamples.releaseChannel !== publicSurface.releaseChannel) {
+  throw new Error("Guide API examples and the public surface use different release channels");
+}
+const defaultExamples: GuideApiExamples = {
+  ...generatedExamples,
+  releaseChannel: publicSurface.releaseChannel,
+};
 
-/** Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. */
-export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
+function compiledPagePublished(
+  file: Parameters<typeof embedSource>[0],
+  where: string,
+  surface: PublicSurface
+): boolean {
+  // Fumadocs passes the MDX body without its frontmatter to remark.
+  const source =
+    file.path && existsSync(file.path) ? readFileSync(file.path, "utf8") : String(file.value);
+  return isPagePublished(frontmatterOf(source, where).data, where, surface);
+}
+
+function embedGuideExample(
+  child: RootContent,
+  file: Parameters<typeof embedSource>[0],
+  where: string,
+  examples: GuideApiExamples,
+  surface: PublicSurface,
+  pagePublished: boolean
+): RootContent[] | undefined {
+  const directive = apiExampleOf(child, where);
+  if (directive === undefined) return undefined;
+  const markdown = renderApiExample(
+    directive,
+    examples,
+    surface.releaseChannel,
+    where,
+    pagePublished
+  ).replaceAll(canonicalSite.apiUrl, apiUrl);
+  if (markdown === "") return [];
+  const content = parser.parse(markdown).children;
+  embedSource(file, child, markdown, content);
+  return content;
+}
+
+/**
+ * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
+ * reference page it also sets a field's facts apart and points the code at this deployment's API
+ * (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`), where the Markdown keeps the canonical one.
+ */
+export function remarkDocsBlocks(
+  options: { surface?: PublicSurface; examples?: GuideApiExamples } = {}
+) {
   const surface = options.surface ?? publicSurface;
-  return (tree: Root, file: { path?: string }) => {
+  const examples = options.examples ?? defaultExamples;
+  return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
-    const spacesFacts = REFERENCE_PAGE.test(where);
+    const pagePublished = compiledPagePublished(file, where, surface);
+    const referencePage = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
-        if (block) return parser.parse(BLOCKS[block.name](surface)).children;
+        if (block) {
+          // Fumadocs' search slices each node's Markdown from the page's source by position; the
+          // block's nodes are positioned in its own Markdown, so that source is embedded.
+          const markdown = BLOCKS[block.name](surface);
+          const content = parser.parse(markdown).children;
+          embedSource(file, child, markdown, content);
+          return content;
+        }
+        const exampleContent = embedGuideExample(
+          child,
+          file,
+          where,
+          examples,
+          surface,
+          pagePublished
+        );
+        if (exampleContent !== undefined) return exampleContent;
         const elementText = elementTextOf(child, where);
         if (elementText !== undefined) {
-          // Fumadocs' search (remark-structure) indexes `_stringify.text` for the element.
-          child.data = { ...child.data, _stringify: { text: elementText } };
+          // Fumadocs' search (remark-structure) indexes `structuredData` in place of the element.
+          child.data = {
+            ...child.data,
+            structuredData: { contents: [{ heading: undefined, content: elementText }] },
+          };
           return [child];
         }
-        if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+        if (referencePage && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
           return spacedFacts(child.value);
+        }
+        if (referencePage && child.type === "code") {
+          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+          return [child];
         }
         if ("children" in child) walk(child);
         return [child];
@@ -309,17 +411,20 @@ export function stripMdxEsm(markdown: string, where: string): string {
 export function expandDocsBlocks(
   source: string,
   where: string,
-  options: { surface?: PublicSurface } = {}
+  options: { surface?: PublicSurface; examples?: GuideApiExamples } = {}
 ): string {
   const surface = options.surface ?? publicSurface;
+  const examples = options.examples ?? defaultExamples;
   // Frontmatter is not MDX; blank it (keeping offsets) for the parse.
-  const { raw } = frontmatterOf(source, where);
+  const { raw, data } = frontmatterOf(source, where);
+  const pagePublished = isPagePublished(data, where, surface);
   const tree = parser.parse(raw.replace(/[^\n]/g, " ") + source.slice(raw.length));
   const blocks: { start: number; end: number; markdown: string }[] = [];
   const [leadProvider] = publishedRampProviderIds(surface.rampProviders);
   const walk = (parent: Parent) => {
     for (const child of parent.children) {
       const block = blockOf(child, where);
+      const example = apiExampleOf(child, where);
       const elementText = elementTextOf(child, where);
       const wrapper = wrapperOf(child, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
@@ -331,6 +436,17 @@ export function expandDocsBlocks(
         blocks.push({ ...span, markdown });
       } else if (block) {
         blocks.push({ ...spanOf(child, where), markdown: BLOCKS[block.name](surface) });
+      } else if (example) {
+        blocks.push({
+          ...spanOf(child, where),
+          markdown: renderApiExample(
+            example,
+            examples,
+            surface.releaseChannel,
+            where,
+            pagePublished
+          ),
+        });
       } else if (elementText !== undefined) {
         blocks.push({ ...spanOf(child, where), markdown: `\`${elementText}\`` });
       } else if (wrapper !== undefined) {

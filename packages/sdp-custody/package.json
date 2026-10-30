@@ -129,7 +129,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.5",
     "vitest": "4.1.12"
   },
   "dependencies": {
@@ -146,7 +146,7 @@
     "@solana/keychain-utila": "1.4.0",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
-    "jose": "6.2.12",
-    "zod": "4.6.6"
+    "jose": "6.2.13",
+    "zod": "4.6.7"
   }
 }

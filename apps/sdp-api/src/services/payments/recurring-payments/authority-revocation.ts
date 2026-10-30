@@ -335,7 +335,7 @@ async function sendRevoke(
     throw badRequest("The wallet that granted this subscription authority is not available");
   }
   const tokenMint = assertValidAddress(revocation.token_mint, "tokenMint");
-  const user = await createOrgSignerForCustodyWallet(
+  const user = await createOrgSignerForCustodyWallet<"recurring_payments">(
     env,
     revocation.organization_id,
     revocation.project_id,

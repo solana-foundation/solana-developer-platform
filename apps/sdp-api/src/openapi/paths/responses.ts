@@ -4,6 +4,7 @@ import {
   apiKeyDetailSchema,
   apiKeyResponseSchema,
   listApiKeysResponseSchema,
+  memberApiKeysResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
 } from "@/openapi/schemas/api-keys";
@@ -116,6 +117,7 @@ export const createOrganizationResponse = successResponseSchema(createOrganizati
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
 export const inviteMemberResponse = successResponseSchema(inviteMemberResponseSchema);
 export const memberRoleResponse = successResponseSchema(memberRoleSchema);
+export const memberApiKeysResponse = successResponseSchema(memberApiKeysResponseSchema);
 export const actionSuccessResponse = successResponseSchema(actionSuccessSchema);
 
 export const listApiKeysResponse = successResponseSchema(listApiKeysResponseSchema);

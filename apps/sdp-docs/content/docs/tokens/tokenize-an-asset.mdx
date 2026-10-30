@@ -34,6 +34,7 @@ const response = await fetch(
     method: "POST",
     headers: {
       Authorization: "Bearer sf_...",
+      "Idempotency-Key": crypto.randomUUID(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(operationParams),
@@ -45,10 +46,11 @@ const result = await response.json();
 <Tab value="Python">
 ```python title="compliance_action.py" rotate-token-ops
 import requests
+import uuid
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sf_..."},
+    headers={"Authorization": "Bearer sf_...", "Idempotency-Key": str(uuid.uuid4())},
     json=operation_params,
 )
 result = response.json()
@@ -58,6 +60,7 @@ result = response.json()
 ```bash title="Terminal" rotate-token-ops
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d "$OPERATION_PARAMS"
 ```

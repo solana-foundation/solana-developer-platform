@@ -121,6 +121,19 @@ function isParameterLocation(value: string): value is ApiParameterLocation {
 
 const scalarSchema = z.union([z.string(), z.number(), z.boolean()]);
 
+/**
+ * An enum's values. OpenAPI 3.0 lists `null` among a nullable enum's values, which `nullable`
+ * already says, so the model leaves it out; `null` in an enum that is not nullable fails.
+ */
+function enumValuesOf(schema: SchemaObject, where: string): ApiSchema["enum"] {
+  if (schema.enum === undefined) return null;
+  const values = z.array(scalarSchema.nullable()).parse(schema.enum);
+  if (values.includes(null) && schema.nullable !== true) {
+    throw new Error(`${where}: null in an enum that is not nullable`);
+  }
+  return values.filter((value) => value !== null);
+}
+
 function constraintsOf(schema: SchemaObject, document: OpenAPIObject, where: string) {
   const constraints: ApiConstraint[] = [];
   if (schema.minLength !== undefined) {
@@ -144,6 +157,9 @@ function constraintsOf(schema: SchemaObject, document: OpenAPIObject, where: str
     constraints.push({ kind: "minProperties", value: schema.minProperties });
   }
   if (schema.pattern !== undefined) constraints.push({ kind: "pattern", value: schema.pattern });
+  const listed = new Set(Object.keys(schema.properties ?? {}));
+  const unlisted = (schema.required ?? []).filter((name) => !listed.has(name));
+  if (unlisted.length > 0) constraints.push({ kind: "includes", value: unlisted });
   if (schema.not !== undefined) {
     const excluded = dereferenceSchema(schema.not, document);
     if (Object.keys(excluded).length !== 1 || excluded.required === undefined) {
@@ -152,6 +168,15 @@ function constraintsOf(schema: SchemaObject, document: OpenAPIObject, where: str
     constraints.push({ kind: "excludes", value: excluded.required });
   }
   return constraints;
+}
+
+/**
+ * zod writes a nullable union (`z.union([...]).nullable()`) with a `{ nullable: true }` variant,
+ * which OpenAPI 3.0 gives no type, so the model makes the union nullable instead.
+ */
+function isNullVariant(input: SchemaObject | ReferenceObject, document: OpenAPIObject): boolean {
+  const variant = dereferenceSchema(input, document);
+  return variant.nullable === true && Object.keys(variant).length === 1;
 }
 
 function variantModeOf(schema: SchemaObject, where: string): ApiSchema["variantMode"] {
@@ -163,10 +188,17 @@ function variantModeOf(schema: SchemaObject, where: string): ApiSchema["variantM
   return null;
 }
 
-/** The value a property pins a variant to, when its enum has exactly one. */
-function pinnedValue(variant: ApiSchema, name: string) {
+type EnumValue = NonNullable<ApiSchema["enum"]>[number];
+
+/**
+ * The value a property pins a variant to: the property's one enum value, or the value the
+ * variant's own variants all pin it to.
+ */
+function pinnedValue(variant: ApiSchema, name: string): EnumValue | undefined {
   const values = variant.properties.find((property) => property.name === name)?.schema.enum;
-  return values?.length === 1 ? values[0] : undefined;
+  if (values?.length === 1) return values[0];
+  const [first, ...rest] = variant.variants.map((nested) => pinnedValue(nested.schema, name));
+  return first !== undefined && rest.every((value) => value === first) ? first : undefined;
 }
 
 /**
@@ -178,7 +210,10 @@ function variantsOf(schemas: ApiSchema[], where: string): ApiVariant[] {
   if (first === undefined) throw new Error(`${where}: a oneOf or anyOf with no variants`);
   const pinned = first.properties
     .map((property) => property.name)
-    .find((name) => schemas.every((schema) => pinnedValue(schema, name) !== undefined));
+    .find((name) => {
+      const values = schemas.map((schema) => pinnedValue(schema, name));
+      return !values.includes(undefined) && new Set(values).size === schemas.length;
+    });
   return schemas.map((schema, index) => {
     if (pinned !== undefined) {
       return { title: `${pinned}: ${JSON.stringify(pinnedValue(schema, pinned))}`, schema };
@@ -230,17 +265,18 @@ function toApiSchema(
     variantInputs === undefined
       ? []
       : variantsOf(
-          variantInputs.map((variant, index) =>
-            toApiSchema(variant, document, `${where}<${index + 1}>`)
-          ),
+          variantInputs
+            .filter((variant) => !isNullVariant(variant, document))
+            .map((variant, index) => toApiSchema(variant, document, `${where}<${index + 1}>`)),
           where
         );
+  const nullVariant = variantInputs?.some((variant) => isNullVariant(variant, document)) === true;
   const node: ApiSchema = {
     type: type === undefined ? null : type,
     format: schema.format ?? null,
-    nullable: schema.nullable === true,
+    nullable: schema.nullable === true || nullVariant,
     description: schema.description ?? null,
-    enum: schema.enum === undefined ? null : z.array(scalarSchema).parse(schema.enum),
+    enum: enumValuesOf(schema, where),
     constraints: constraintsOf(schema, document, where),
     properties,
     items: schema.items === undefined ? null : toApiSchema(schema.items, document, `${where}[]`),
@@ -269,6 +305,9 @@ function toApiParameter(
   }
   if (parameter.schema === undefined) throw new Error(`${label} has no schema`);
   const schema = toApiSchema(parameter.schema, document, label);
+  const sample = jsonValueSchema.parse(
+    sampleFromSchema(dereferenceSchema(parameter.schema, document), document, parameter.name)
+  );
   if (parameter.example !== undefined) schema.example = jsonValueSchema.parse(parameter.example);
   return {
     name: parameter.name,
@@ -276,17 +315,13 @@ function toApiParameter(
     required: parameter.in === "path" || parameter.required === true,
     description: parameter.description ?? schema.description,
     schema,
+    sample,
   };
 }
 
 /** A sampled parameter value as it travels in a URL, the way the playground fills its fields. */
-function sampleText(parameter: ParameterObject, document: OpenAPIObject, where: string): string {
-  if (parameter.schema === undefined) throw new Error(`${where}: ${parameter.name} has no schema`);
-  const sample = sampleFromSchema(
-    dereferenceSchema(parameter.schema, document),
-    document,
-    parameter.name
-  );
+function sampleText(parameter: ApiParameter): string {
+  const { sample } = parameter;
   return typeof sample === "string" ? sample : JSON.stringify(sample);
 }
 
@@ -329,7 +364,7 @@ function toApiRequestBody(
  */
 function sampleRequest(
   path: string,
-  parameters: ParameterObject[],
+  parameters: ApiParameter[],
   jsonBody: ReturnType<typeof jsonRequestBodyOf>,
   document: OpenAPIObject,
   where: string
@@ -337,12 +372,12 @@ function sampleRequest(
   const filled = path.replace(/\{([^}]+)\}/g, (_match, name: string) => {
     const parameter = parameters.find((entry) => entry.in === "path" && entry.name === name);
     if (parameter === undefined) throw new Error(`${where}: no path parameter ${name}`);
-    return encodeURIComponent(sampleText(parameter, document, where));
+    return encodeURIComponent(sampleText(parameter));
   });
   const query = new URLSearchParams(
     parameters
       .filter((parameter) => parameter.in === "query" && parameter.required === true)
-      .map((parameter) => [parameter.name, sampleText(parameter, document, where)])
+      .map((parameter) => [parameter.name, sampleText(parameter)])
   ).toString();
   return {
     path: query === "" ? filled : `${filled}?${query}`,
@@ -397,6 +432,30 @@ function envelopeCodes(schema: SchemaObject, document: OpenAPIObject): ReadonlyS
   if (code === undefined) return null;
   const codes = dereferenceSchema(code, document).enum;
   return codes === undefined ? null : new Set(z.array(z.string()).parse(codes));
+}
+
+/**
+ * The error envelope's schema without its list of codes. The document lists every module's codes
+ * on every channel, held modules' included, so the reference names none, as Reference >
+ * Conventions > Errors does; each status's example still shows the code it answers with.
+ */
+function withoutErrorCodes(envelope: ApiSchema): ApiSchema {
+  const editNamed = (
+    property: ApiProperty,
+    name: string,
+    edit: (schema: ApiSchema) => ApiSchema
+  ) => (property.name === name ? { ...property, schema: edit(property.schema) } : property);
+  return {
+    ...envelope,
+    properties: envelope.properties.map((property) =>
+      editNamed(property, "error", (error) => ({
+        ...error,
+        properties: error.properties.map((field) =>
+          editNamed(field, "code", (code) => ({ ...code, enum: null }))
+        ),
+      }))
+    ),
+  };
 }
 
 /**
@@ -456,7 +515,16 @@ function toApiResponses(
             `${where} ${status}`
           )
         : jsonValueSchema.parse(sampleFromSchema(resolved, document));
-      return { status, description: response.description, body: { kind: "json", example } };
+      const body = toApiSchema(resolved, document, `${where} ${status}`);
+      return {
+        status,
+        description: response.description,
+        body: {
+          kind: "json",
+          schema: envelopeCodes(resolved, document) === null ? body : withoutErrorCodes(body),
+          example,
+        },
+      };
     })
     .sort((left, right) => Number(left.status) - Number(right.status));
 }
@@ -509,6 +577,9 @@ function toApiOperation(
     (parameter) => parameter.in === "header" && parameter.name === "Idempotency-Key"
   );
   const jsonBody = jsonRequestBodyOf(operation, document, where);
+  const apiParameters = parameters
+    .map((parameter) => toApiParameter(parameter, document, where))
+    .sort((left, right) => PARAMETER_ORDER[left.in] - PARAMETER_ORDER[right.in]);
   return {
     operationId,
     endpointId: toEndpointId(operationId),
@@ -522,12 +593,10 @@ function toApiOperation(
     group: docsGroupOf(operation, where),
     description: operation.description ?? null,
     deprecated: operation.deprecated === true,
-    parameters: parameters
-      .map((parameter) => toApiParameter(parameter, document, where))
-      .sort((left, right) => PARAMETER_ORDER[left.in] - PARAMETER_ORDER[right.in]),
+    parameters: apiParameters,
     requestBody: jsonBody === null ? null : toApiRequestBody(jsonBody, document, where),
     responses: toApiResponses(operation, action, takesIdempotencyKey, document, where),
-    request: sampleRequest(path, parameters, jsonBody, document, where),
+    request: sampleRequest(path, apiParameters, jsonBody, document, where),
   };
 }
 

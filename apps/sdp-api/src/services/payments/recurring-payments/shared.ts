@@ -3,7 +3,7 @@ import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -266,7 +266,7 @@ export function assertRecurringPaymentSourceWallet(
 export async function sendSubscriptionInstructions(input: {
   env: Env;
   /** The movement these instructions serve; the custody signer decides on it. */
-  movement: MovementId;
+  movement: MovementOf<"recurring_payments">;
   organizationId: string;
   projectId: string;
   sourceWallet: CustodyWallet;
@@ -277,7 +277,7 @@ export async function sendSubscriptionInstructions(input: {
 }): Promise<Signature> {
   const signer =
     input.sourceSigner ??
-    (await createOrgSignerForCustodyWallet(
+    (await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,
@@ -291,7 +291,7 @@ export async function sendSubscriptionInstructions(input: {
 
   const rpc = createClusterRpc();
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"recurring_payments">(
     input.env,
     await resolveProjectSponsorshipScope(input.env, {
       organizationId: input.organizationId,
@@ -689,7 +689,7 @@ export async function lockLiveActivatingKey(
     activator: ReturnType<typeof currentMandateActivator>;
     organizationId: string;
     projectId: string;
-    movement: MovementId;
+    movement: MovementOf<"recurring_payments">;
     recurringPaymentId: string;
     /** The custody wallets the claimed operation signs with. */
     custodyWalletIds: readonly string[];

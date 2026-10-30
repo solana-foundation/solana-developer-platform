@@ -1,11 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listApiCatalogOperations } from "@sdp/api-catalog/catalog";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import {
   operationGroups,
   renderFamilyIndex,
   renderOperationPage,
+  renderOperationTable,
   SAMPLE_TAB_MARKERS,
 } from "./lib/api-reference-page.ts";
 import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
@@ -40,14 +42,20 @@ const loadReference = async () => {
   return apiReferenceSchema.parse(JSON.parse(json));
 };
 
-const renderIndexPage = ({ tagPages }) => {
-  const links = tagPages
-    .map((tagPage) => `- [${tagPage.title}](/docs/reference/api/${tagPage.slug})`)
-    .join("\n");
+const renderIndexPage = ({ families, operationCount }) => {
+  const sections = families
+    .map((family) => {
+      const slug = slugify(family.name);
+      const table = renderOperationTable(family.operations, (operation) =>
+        operationHref(slug, operation)
+      );
+      return `## ${family.name}\n\n${table}`;
+    })
+    .join("\n\n");
 
   return `---
 title: API Reference
-description: Endpoint index from the repository OpenAPI spec.
+description: Every public API endpoint, grouped by family and generated from OpenAPI.
 ---
 
 <ActionLinks>
@@ -55,7 +63,11 @@ description: Endpoint index from the repository OpenAPI spec.
   <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
 </ActionLinks>
 
-${links}
+Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
+
+Browse ${operationCount} endpoints across ${families.length} API families. Select an operation to see its parameters, request body, responses and examples.
+
+${sections}
 `;
 };
 
@@ -94,12 +106,22 @@ const familyLayout = (family) => {
  * three request samples: the reference's coverage, checked on what was written.
  */
 const validateGeneratedTagPages = async ({ outputDir, families }) => {
+  const index = await fs.readFile(path.join(outputDir, "index.mdx"), "utf8");
   const generatedSlugs = new Set(families.map((family) => slugify(family.name)));
   const missingPublicPages = ALWAYS_PUBLIC_TAG_SLUGS.filter((slug) => !generatedSlugs.has(slug));
   if (missingPublicPages.length > 0) {
     throw new Error(
       `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
     );
+  }
+
+  for (const family of families) {
+    const slug = slugify(family.name);
+    for (const operation of family.operations) {
+      if (!index.includes(`](${operationHref(slug, operation)})`)) {
+        throw new Error(`The all-endpoints index does not link ${operation.operationId}`);
+      }
+    }
   }
 
   const pages = await Promise.all(
@@ -211,14 +233,9 @@ const run = async () => {
       ]);
     })
   );
-  const exposedOperationsCount = families.reduce(
-    (total, family) => total + family.operations.length,
-    0
-  );
+  const exposedOperationsCount = listApiCatalogOperations({ families }).length;
 
-  const indexContent = renderIndexPage({
-    tagPages,
-  });
+  const indexContent = renderIndexPage({ families, operationCount: exposedOperationsCount });
 
   await fs.writeFile(path.join(outputDir, "index.mdx"), indexContent, "utf8");
 

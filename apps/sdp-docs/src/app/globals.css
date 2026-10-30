@@ -1702,7 +1702,8 @@ body {
 
 /* The path wraps beside its method on a phone rather than dropping below it. */
 .launch-api-endpoint {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 10px;
   margin: 0 0 18px;
@@ -1723,6 +1724,45 @@ body {
 
 .launch-api-path-param {
   color: var(--ink-tertiary);
+}
+
+.launch-api-playground-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-playground-link:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-api-playground-link:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .launch-api-playground-link {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 /* Method colours follow the dashboard playground's badges. */
@@ -1797,6 +1837,17 @@ body {
   font-size: var(--font-size-meta);
 }
 
+/* Under Responses (the generator's `## Responses`), a status leads with its description, which
+   reads as body text; the fields under it keep the field style above. */
+.is-api-reference
+  #responses
+  + .launch-mdx-unordered-list
+  > .launch-mdx-list-item
+  > .launch-mdx-paragraph:first-child {
+  color: var(--ink-secondary);
+  font-size: var(--font-size-body);
+}
+
 /* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
 .launch-api-separator {
   margin: 0 0.3em;
@@ -1811,6 +1862,89 @@ body {
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--font-size-body);
+}
+
+/* An operation's page (`<ApiOperation>`): its body, then a panel of its samples and example
+   responses (`<ApiPanel>`), a box each whose code scrolls inside it. From 1280px the panel sits
+   beside the body; below, it follows, at the article's width. */
+.launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+  max-width: 780px;
+}
+
+.launch-api-operation-main,
+.launch-api-panel {
+  min-width: 0;
+}
+
+/* One frame per sample: the tab card's, not a second border on the code inside it. */
+.launch-api-panel figure.shiki {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.launch-api-panel .fd-scroll-container {
+  max-height: 26rem;
+}
+
+@media (min-width: 1280px) {
+  .launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+    max-width: none;
+  }
+
+  .launch-api-operation {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 42%, 500px);
+    column-gap: 40px;
+    align-items: start;
+  }
+
+  .launch-api-panel > .launch-mdx-heading-2:first-child {
+    margin-top: 0;
+  }
+}
+
+/* On a window this tall the panel stays in view, sized to the window, and never scrolls itself:
+   the samples keep their box, the last box (the example responses) takes the height left, and
+   only code scrolls, inside a whole box. 750px leaves that box at least 10 lines beside the
+   tallest samples; a shorter window keeps the panel in the page's flow. */
+@media (min-width: 1280px) and (min-height: 750px) {
+  .launch-api-panel {
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 48px);
+  }
+
+  /* A flex column keeps margins apart, so the panel sets the gaps the page's flow collapses
+     them to. */
+  .launch-api-panel > .launch-mdx-heading-2 {
+    margin: 40px 0 16px;
+  }
+
+  .launch-api-panel > div {
+    margin: 0;
+  }
+
+  .launch-api-panel > div:not(:last-child) .fd-scroll-container {
+    max-height: min(18rem, 25vh);
+  }
+
+  .launch-api-panel > div:last-child,
+  .launch-api-panel > div:last-child > [role="tabpanel"]:not([hidden]),
+  .launch-api-panel > div:last-child figure.shiki {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .launch-api-panel > div:last-child > [role="tablist"] {
+    flex: none;
+  }
+
+  .launch-api-panel > div:last-child .fd-scroll-container {
+    max-height: none;
+  }
 }
 
 /* ── Docs Home page ── */

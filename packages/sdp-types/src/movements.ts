@@ -282,6 +282,17 @@ export type MovementOf<Module extends SdpModule> = {
 }[MovementId];
 
 /**
+ * The movement a signing waist takes (HOO-2098). Each waist is generic over
+ * the calling module, with no inference and a `never` default, so every call
+ * names its module (`createOrgSignerForCustodyWallet<"dvp">(…)`) and another
+ * module's id does not compile: an exit is never refused for the
+ * organization, so passing one module's exit from another would skip
+ * admission. `SdpModule` admits every movement, for code that serves no single
+ * module.
+ */
+export type WaistMovement<Module extends SdpModule> = NoInfer<MovementOf<Module>>;
+
+/**
  * The movement each Rings operation signs for. A new operation type does not
  * compile until it is classified here (a security-reviewed change).
  */

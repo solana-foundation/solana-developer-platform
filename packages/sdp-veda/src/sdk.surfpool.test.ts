@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { Instruction } from "@solana/kit";
 import {
@@ -103,7 +104,11 @@ async function finalizedTransactionLogs(signature: string): Promise<readonly str
       meta: { err: unknown; logMessages: readonly string[] | null };
     } | null>("getTransaction", [
       signature,
-      { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 },
+      {
+        commitment: "finalized",
+        encoding: "json",
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+      },
     ]);
     if (transaction) {
       expect(transaction.meta.err).toBeNull();

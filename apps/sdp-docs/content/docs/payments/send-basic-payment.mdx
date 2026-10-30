@@ -181,10 +181,7 @@ Click the record to see full details including the Solana Explorer link.
 
 Poll status for async confirmations:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="get-payment-transfer" />
 
 </Tab>
 </Tabs>
@@ -204,7 +201,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
-See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries-for-single-transfers) for the same pattern applied to a run of transfers.
 
 ## Related
 

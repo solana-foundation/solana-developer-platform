@@ -64,6 +64,7 @@
     "build": "turbo run build",
     "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
+    "check:transaction-reads": "node --test scripts/check-transaction-read-version.test.mjs && node scripts/check-transaction-read-version.mjs",
     "check:value-movement": "node scripts/check-value-movement.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
@@ -101,12 +102,12 @@
     "kora:devnet:test": "TEST_DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${TEST_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.6.2",
     "@sdp/types": "workspace:*",
-    "turbo": "2.11.4",
+    "turbo": "2.11.10",
     "typescript": "6.0.3",
     "yaml": "2.9.1",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   },
   "workspaces": {
     "packages": [
