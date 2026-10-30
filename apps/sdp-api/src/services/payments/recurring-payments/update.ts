@@ -52,6 +52,7 @@ import {
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import type { SubscriptionAuthorityRevokeFence } from "@/db/repositories/subscription-authority-revocations.repository";
 import {
   AppError,
   badRequest,
@@ -77,11 +78,13 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
+  approveSubscriptionAuthority,
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenAdmitted,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
+  keepAttemptRevokeFence,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -1080,6 +1083,7 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
   mint: Address;
   tokenProgram: Address;
   feePayer: Address;
+  revokeFence: SubscriptionAuthorityRevokeFence;
 }) {
   if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
     return input.subscriptionAuthority;
@@ -1114,13 +1118,27 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
     sourceSigner: input.sourceSigner,
     instructions: [
       ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      ...(initAuthorityInstruction
+        ? [
+            initAuthorityInstruction,
+            // The setup approves the authority for u64::MAX; collections approve their own
+            // amount, so it holds nothing at rest (HOO-2339).
+            approveSubscriptionAuthority({
+              tokenAccount: input.sourceTokenAccount.tokenAccount,
+              authority: input.subscriptionAuthorityAddress,
+              owner: input.sourceSigner,
+              amount: 0n,
+              tokenProgram: input.tokenProgram,
+            }),
+          ]
+        : []),
     ],
     feePayer: input.feePayer,
     submissionStore: createSubscriptionStepStore({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      revokeFence: input.revokeFence,
       save: async (send) => {
         requireUpdatedAttempt(
           await input.recurringRepo.updateUpdateAttempt({
@@ -1445,6 +1463,7 @@ async function runReplacementUpdate(input: {
   request: UpdatePaymentRecurringPaymentRequest;
   createdBy: string | null;
   idempotency: RecurringPaymentUpdateIdempotency | null;
+  revokeFence: SubscriptionAuthorityRevokeFence;
 }): Promise<PaymentRecurringPaymentRow> {
   if (
     !input.claimed.plan_pda ||
@@ -1730,6 +1749,7 @@ async function runReplacementUpdate(input: {
       mint,
       tokenProgram,
       feePayer,
+      revokeFence: input.revokeFence,
     });
     if (!subscriptionAuthority.exists) {
       throw new ResumedStepUnsettledError(
@@ -1760,6 +1780,7 @@ async function runReplacementUpdate(input: {
       feePayer,
       submissionStore: createSubscriptionStepStore({
         ...authorizationStep,
+        revokeFence: input.revokeFence,
         save: async (send) => {
           attempt = requireUpdatedAttempt(
             await recurringRepo.updateUpdateAttempt({
@@ -2084,6 +2105,7 @@ async function claimActiveRecurringPaymentUpdate(input: {
 }): Promise<{
   claimed: PaymentRecurringPaymentRow;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
+  revokeFence: SubscriptionAuthorityRevokeFence;
 } | null> {
   const updatedAt = new Date().toISOString();
   const staleBefore = getRecurringPaymentOperationStaleBefore(input.nowIso);
@@ -2101,7 +2123,7 @@ async function claimActiveRecurringPaymentUpdate(input: {
         ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
         : [input.sourceWallet.id],
     });
-    await refuseWhileSubscriptionAuthorityRevokes(tx, {
+    const claimFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
       projectId: input.projectId,
       custodyWalletIds: input.newSourceCustodyWalletId
         ? [input.sourceWallet.id, input.newSourceCustodyWalletId]
@@ -2144,7 +2166,14 @@ async function claimActiveRecurringPaymentUpdate(input: {
       idempotency: input.idempotency,
       previousActivator,
     });
-    return { claimed, attempt };
+    const revokeFence = await keepAttemptRevokeFence(tx, {
+      attempt: "update",
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      fence: claimFence,
+    });
+    return { claimed, attempt, revokeFence };
   });
 }
 
@@ -2266,7 +2295,7 @@ export async function updateRecurringPayment(input: {
   if (!claimResult) {
     throw conflict("Recurring payment update is already processing");
   }
-  const { attempt, claimed } = claimResult;
+  const { attempt, claimed, revokeFence } = claimResult;
 
   let updated: PaymentRecurringPaymentRow;
   try {
@@ -2297,6 +2326,7 @@ export async function updateRecurringPayment(input: {
         request: input.request,
         createdBy: input.createdBy,
         idempotency: input.idempotency,
+        revokeFence,
       });
     }
   } catch (error) {

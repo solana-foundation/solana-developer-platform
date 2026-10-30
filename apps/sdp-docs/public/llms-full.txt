@@ -28257,6 +28257,30 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -28411,6 +28435,16 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -29038,6 +29072,30 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -29195,6 +29253,16 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -29440,6 +29508,30 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -29548,6 +29640,16 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -29616,6 +29718,8 @@ Source: https://platform.solana.com/docs/reference/api/payments/activate-payment
 > Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.
 
 `POST /v1/payments/recurring-payments/{id}/activate`
+
+The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -29761,6 +29865,30 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -29883,6 +30011,16 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -29984,11 +30122,11 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
 ### Cancel recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-recurring-payment
 
-> Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction.
+> Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period.
 
 `POST /v1/payments/recurring-payments/{id}/cancel`
 
-A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles before the approval is revoked: the revoke waits for it, and the background sweep revokes the approval once it has settled.
+A canceled recurring payment never collects or resumes again. Every recurring payment from one wallet in one token relies on one token approval. When no other live recurring payment uses it, it is revoked right after the cancel; otherwise it stays for the schedules that still use it. The response's `tokenApproval` says which: `revoked`, `kept` with the recurring payments still using it in `sharedWith`, or `revoking` while a collection that was already processing settles, after which the background sweep revokes it. GET returns the same `tokenApproval` for a canceled recurring payment.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.manage` action.
 
@@ -30134,6 +30272,30 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -30256,6 +30418,16 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -31352,6 +31524,30 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         ISO 8601 timestamp.
 
+    - **`tokenApproval`** · `object`
+
+      Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.
+
+      - **`status`** · `string` · required · one of `revoked`, `kept`, `revoking` · example `kept`
+
+        `revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.
+
+      - **`delegate`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+        The approval's delegate: the Subscriptions program's authority for this wallet and token.
+
+      - **`sharedWith`** · `object[]` · required
+
+        The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.
+
+        - **`id`** · `string` · required · example `prp_example`
+
+          SDP recurring payment ID.
+
+        - **`status`** · `string` · required · one of `pending_activation`, `activating`, `active`, `updating`, `canceling`, `resuming`, `paused`, `canceled`, `expired` · example `active`
+
+          Recurring payment status.
+
   - **`meta`** · `object` · required
 
     Response metadata.
@@ -31474,6 +31670,16 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "createdBy": "example",
       "createdAt": "2025-01-01T00:00:00.000Z",
       "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    "tokenApproval": {
+      "status": "kept",
+      "delegate": "So11111111111111111111111111111111111111112",
+      "sharedWith": [
+        {
+          "id": "prp_example",
+          "status": "active"
+        }
+      ]
     }
   },
   "meta": {
@@ -33597,7 +33803,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-s
 
 `POST /v1/payments/subscriptions`
 
-The customer must still sign the Solana subscription authorization transaction.
+The customer must still sign the Solana subscription authorization transaction. The subscriber must be the customer's own wallet: a subscriber that is one of the organization's SDP wallets answers 409, because to pay on a schedule from an SDP wallet you create a recurring payment, which keeps the wallet's token approval bounded.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.manage` action.
 
@@ -34225,7 +34431,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 `POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization`
 
-The transaction must still be signed and submitted by the client.
+The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -34419,6 +34625,10 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 
   Same fields as `400`.
 
+- **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
 
   Same fields as `400`.
@@ -34550,6 +34760,18 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
   "error": {
     "code": "NOT_FOUND",
     "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
   },
   "meta": {
     "requestId": "req_example"
@@ -35232,7 +35454,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection`
 
-The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment answers 409: SDP collects those through the recurring payment.
+The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 

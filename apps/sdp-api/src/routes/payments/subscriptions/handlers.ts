@@ -34,7 +34,11 @@ import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import {
+  isOrganizationCustodyWalletAddress,
+  resolveScope,
+  resolveWallet,
+} from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -159,6 +163,24 @@ async function getSubscriptionWithPlan(
   return { plan, subscription };
 }
 
+/**
+ * Refuses a subscription paid from one of the organization's SDP wallets (HOO-2339). Its payer's
+ * authorization approves the program for u64::MAX, which for a custody wallet would leave SDP-held
+ * funds unbounded and share the per-mint approval a recurring payment keeps at 0 between
+ * collections. A custody wallet pays on a schedule through a recurring payment. One database read.
+ *
+ * @param c - The request.
+ * @param subscriberAddress - The subscription's payer.
+ * @throws AppError `CONFLICT` when the payer is one of the organization's SDP wallets.
+ */
+async function refuseCustodyWalletSubscriber(c: AppContext, subscriberAddress: string) {
+  if (await isOrganizationCustodyWalletAddress(c, subscriberAddress)) {
+    throw conflict(
+      "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet."
+    );
+  }
+}
+
 export const createSubscription = async (
   c: ValidatedBodyContext<typeof createSubscriptionSchema>
 ) => {
@@ -179,6 +201,7 @@ export const createSubscription = async (
   if (counterparty.status !== "active") {
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
+  await refuseCustodyWalletSubscriber(c, body.subscriberAddress);
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
@@ -234,6 +257,9 @@ export const prepareSubscriptionAuthorization = async (
   const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  // One created before the create route refused it: refused here, before its authorization can
+  // approve anything.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (plan.status !== "active") {
     throw badRequest("Subscription plan must be active before authorization");
   }
@@ -454,6 +480,9 @@ export const prepareSubscriptionCollection = async (
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
   await assertStandaloneSubscription(c, subscription);
+  // One authorized before the create-time refusal: a recurring collect from the same wallet now
+  // resets the shared allowance to zero, so its pull would fail on chain.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (subscription.status !== "active") {
     throw badRequest("Subscription must be active before collection");
   }

@@ -2,6 +2,7 @@ import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION,
   PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
@@ -15,8 +16,9 @@ import type { DatabaseExecutor } from "@/db/client";
 
 /**
  * Revokes of a wallet's per-mint Subscriptions authority (HOO-2210, migration 0153). The
- * revoke-subscription-authorities cron is the only writer; activation, update and resume only read
- * whether one holds their wallet.
+ * revoke-subscription-authorities cron, a recurring payment's cancel and the operator's incident
+ * revoke (HOO-2339) write them; activation, update and resume only read whether one holds their
+ * wallet.
  */
 
 /**
@@ -26,6 +28,28 @@ import type { DatabaseExecutor } from "@/db/client";
  * payment's cancel is terminal (HOO-2339), so its subscriptions hold nothing once released.
  */
 const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
+
+/**
+ * The revokes a claim saw on each of its wallets, under their locks (HOO-2339). An operator's
+ * incident revoke claims under the same lock but skips the idle predicate, so it can close an
+ * authority under an activation or update that claimed first. Before that work sends the setup
+ * that creates an authority, or the subscribe that binds a schedule to one, it recounts, so it
+ * never recreates or subscribes to an authority revoked after its claim. The attempt keeps its
+ * first claim's fence (migration 0200), so recovering it later checks against that claim.
+ */
+export interface SubscriptionAuthorityRevokeFence {
+  wallets: readonly { walletAddress: string; environment: SdpEnvironment; revocations: number }[];
+}
+
+const revokeFenceSchema = z.object({
+  wallets: z.array(
+    z.object({
+      walletAddress: z.string(),
+      environment: z.enum(SDP_ENVIRONMENTS),
+      revocations: z.number().int().nonnegative(),
+    })
+  ),
+});
 
 const revocationRowSchema = z.object({
   id: z.string(),
@@ -191,6 +215,23 @@ export interface SubscriptionAuthorityRevocationsRepository {
    * decides.
    */
   lockWalletAuthorities(walletAddress: string): Promise<void>;
+  /**
+   * How many revokes the wallet's authorities have ever had, in any status. Rows are never
+   * deleted, so a higher count later means a revoke was claimed in between. Call under the
+   * wallet's lock.
+   */
+  countRevocations(input: { environment: SdpEnvironment; walletAddress: string }): Promise<number>;
+  /**
+   * Stores `fence` on the attempt unless it already has one, in its claim's transaction, and
+   * returns the attempt's fence: the one its first claim saw, so a recovery checks against that.
+   */
+  keepAttemptRevokeFence(input: {
+    attempt: "activation" | "update";
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+    fence: SubscriptionAuthorityRevokeFence;
+  }): Promise<SubscriptionAuthorityRevokeFence>;
   /** Whether a revoke holds any of the wallet's authorities. Call under the wallet's lock. */
   hasRevocationHolding(input: {
     environment: SdpEnvironment;
@@ -248,7 +289,54 @@ export interface SubscriptionAuthorityRevocationsRepository {
     now: string;
     limit: number;
   }): Promise<SubscriptionAuthorityRevocationRow[]>;
+  /**
+   * Records a `processing` revoke of the authority whatever still uses it: the operator's
+   * incident revoke (HOO-2339). Call under the wallet's lock. Null when another revoke holds it.
+   */
+  claimRevocationNow(input: {
+    id: string;
+    leaseId: string;
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    custodyWalletId: string;
+    walletAddress: string;
+    tokenMint: string;
+    subscriptionAuthorityAddress: string;
+    now: string;
+  }): Promise<SubscriptionAuthorityRevocationRow | null>;
+  /**
+   * The environment's other recurring payments on the authority that still need it (any status
+   * but {@link RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY}), in any project, oldest first: the
+   * ones that keep the approval after a cancel (HOO-2339). The authority is per wallet and mint,
+   * so, like the sweep's idle predicate, this spans projects; callers filter what they expose.
+   */
+  listRecurringPaymentsSharingAuthority(input: {
+    environment: SdpEnvironment;
+    subscriptionAuthorityAddress: string;
+    excludeRecurringPaymentId: string;
+  }): Promise<SharingRecurringPayment[]>;
+  /**
+   * Whether a revoke of the authority has confirmed at or after `since`. A confirmed row changes
+   * no more, so its `updated_at` is when it confirmed; a revoke claimed before `since` that
+   * confirms after it counts.
+   */
+  hasConfirmedRevocationSince(input: {
+    environment: SdpEnvironment;
+    subscriptionAuthorityAddress: string;
+    since: string;
+  }): Promise<boolean>;
 }
+
+const sharingRecurringPaymentSchema = z.object({
+  id: z.string(),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+  organization_id: z.string(),
+  project_id: z.string(),
+});
+
+/** A recurring payment that still needs a subscription authority. */
+export type SharingRecurringPayment = z.infer<typeof sharingRecurringPaymentSchema>;
 
 export function createPostgresSubscriptionAuthorityRevocationsRepository(
   db: DatabaseExecutor
@@ -287,6 +375,37 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
         "SELECT pg_advisory_xact_lock(hashtext('sdp:subscription-authority'), hashtext(?::text))",
         [walletAddress]
       );
+    },
+
+    async keepAttemptRevokeFence({ attempt, attemptId, organizationId, projectId, fence }) {
+      const table =
+        attempt === "activation"
+          ? "payment_recurring_payment_activation_attempts"
+          : "payment_recurring_payment_update_attempts";
+      const row = await db.queryOne<{ revoke_fence: unknown }>(
+        `UPDATE ${table}
+            SET revoke_fence = COALESCE(revoke_fence, ?::jsonb)
+          WHERE id = ? AND organization_id = ? AND project_id = ?
+          RETURNING revoke_fence`,
+        [JSON.stringify(fence), attemptId, organizationId, projectId]
+      );
+      if (!row) {
+        throw new Error(`Recurring payment ${attempt} attempt ${attemptId} not found`);
+      }
+      return revokeFenceSchema.parse(row.revoke_fence);
+    },
+
+    async countRevocations({ environment, walletAddress }) {
+      const row = await db.queryOne<{ revocations: string }>(
+        `SELECT COUNT(*) AS revocations FROM payment_subscription_authority_revocations
+          WHERE environment = ? AND wallet_address = ?`,
+        [environment, walletAddress]
+      );
+      // COUNT(*) always answers one row.
+      if (!row) {
+        throw new Error("Subscription authority revocation count returned no row");
+      }
+      return Number(row.revocations);
     },
 
     async hasRevocationHolding({ environment, walletAddress }) {
@@ -380,6 +499,62 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
         [now, environment, staleBefore, limit]
       );
       return rows.map((row) => revocationRowSchema.parse(row));
+    },
+
+    async claimRevocationNow(input) {
+      const row = await db.queryOne(
+        `INSERT INTO payment_subscription_authority_revocations (
+            id, organization_id, project_id, environment, custody_wallet_id, wallet_address,
+            token_mint, subscription_authority_address, status, lease_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.environment,
+          input.custodyWalletId,
+          input.walletAddress,
+          input.tokenMint,
+          input.subscriptionAuthorityAddress,
+          input.leaseId,
+          input.now,
+          input.now,
+        ]
+      );
+      return row ? revocationRowSchema.parse(row) : null;
+    },
+
+    async listRecurringPaymentsSharingAuthority(input) {
+      const rows = await db.queryMany(
+        `SELECT payment.id, payment.status, payment.organization_id, payment.project_id
+           FROM payment_recurring_payments payment
+           JOIN projects payment_project ON payment_project.id = payment.project_id
+          WHERE payment_project.environment = ?
+            AND payment.subscription_authority_address = ?
+            AND payment.id <> ?
+            AND payment.status <> ALL(?::text[])
+          ORDER BY payment.created_at ASC, payment.id ASC`,
+        [
+          input.environment,
+          input.subscriptionAuthorityAddress,
+          input.excludeRecurringPaymentId,
+          [...RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY],
+        ]
+      );
+      return rows.map((row) => sharingRecurringPaymentSchema.parse(row));
+    },
+
+    async hasConfirmedRevocationSince({ environment, subscriptionAuthorityAddress, since }) {
+      const row = await db.queryOne(
+        `SELECT 1 AS revoked FROM payment_subscription_authority_revocations
+          WHERE environment = ? AND subscription_authority_address = ?
+            AND status = 'confirmed' AND updated_at >= ?
+          LIMIT 1`,
+        [environment, subscriptionAuthorityAddress, since]
+      );
+      return row !== null;
     },
   };
 }

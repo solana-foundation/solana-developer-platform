@@ -1539,8 +1539,34 @@ export interface UpdatePaymentRecurringPaymentRequest {
   metadataUri?: string | null;
 }
 
+/**
+ * What became of the token approval a canceled recurring payment relied on (HOO-2339). Every
+ * recurring payment on one wallet and token shares one approval, to the Subscriptions program's
+ * per-mint authority: `revoked` once a revoke of it has confirmed since the cancel, `kept` while
+ * other live recurring payments on that wallet and token, in any project, still use it
+ * (`sharedWith` names those in the same project),
+ * and `revoking` when nothing else uses it but the revoke has not confirmed yet (it waits for a
+ * collection in flight, or failed and the hourly sweep retries it).
+ */
+export const RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES = ["revoked", "kept", "revoking"] as const;
+export type RecurringPaymentTokenApprovalStatus =
+  (typeof RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES)[number];
+
+export interface RecurringPaymentTokenApproval {
+  status: RecurringPaymentTokenApprovalStatus;
+  /** The approval's delegate: the per-mint subscription authority. */
+  delegate: string;
+  /**
+   * The other live recurring payments in the same project on the same wallet and token, empty
+   * unless `kept`. Ones in other projects keep it too but are not named here.
+   */
+  sharedWith: { id: string; status: PaymentRecurringPaymentStatus }[];
+}
+
 export interface PaymentRecurringPaymentResponse {
   recurringPayment: PaymentRecurringPayment;
+  /** Set on a canceled recurring payment's cancel and get responses (HOO-2339). */
+  tokenApproval?: RecurringPaymentTokenApproval;
 }
 
 export interface PaymentRecurringPaymentCollectionResponse {

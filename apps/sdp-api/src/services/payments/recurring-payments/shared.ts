@@ -25,6 +25,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import { getApproveInstruction } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -36,7 +37,10 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createTokenRepository } from "@/db/repositories/repository-factory";
-import { createPostgresSubscriptionAuthorityRevocationsRepository } from "@/db/repositories/subscription-authority-revocations.repository";
+import {
+  createPostgresSubscriptionAuthorityRevocationsRepository,
+  type SubscriptionAuthorityRevokeFence,
+} from "@/db/repositories/subscription-authority-revocations.repository";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
   AppError,
@@ -418,16 +422,23 @@ async function clearSubscriptionStepSignature(
  *
  * @param step - The step's rows and the writer that saves its send to them.
  * @param step.save - Writes the signature and the block height to the step's rows.
+ * @param step.revokeFence - Checked before the save, for a step an incident revoke must stop.
  * @returns The store.
  */
 export function createSubscriptionStepStore(
   step: SubscriptionStep & {
     save: (send: { signature: Signature; lastValidBlockHeight: string }) => Promise<void>;
+    /** For a step that creates or subscribes to an authority: refused once a revoke overtook it. */
+    revokeFence?: SubscriptionAuthorityRevokeFence;
   }
 ): SignedSubmissionStore {
   return {
-    persistSigned: ({ signature, lastValidBlockHeight }) =>
-      step.save({ signature, lastValidBlockHeight }),
+    persistSigned: async ({ signature, lastValidBlockHeight }) => {
+      if (step.revokeFence) {
+        await refuseIfSubscriptionAuthorityRevokedSince(step.env, step.revokeFence);
+      }
+      await step.save({ signature, lastValidBlockHeight });
+    },
     markStarted: async () => {},
     hasStarted: async () => false,
     clearSigned: (signature) => clearSubscriptionStepSignature(step, signature, "refused"),
@@ -435,14 +446,47 @@ export function createSubscriptionStepStore(
 }
 
 /**
- * Whether a subscription delegation is canceled on chain: `cancelSubscription`
- * sets `expiresAtTs` to the end of the current period and `resumeSubscription`
- * clears it to 0.
+ * Whether a subscription delegation is canceled on chain: `cancelSubscriptionNow`
+ * sets `expiresAtTs` to the chain's clock, `cancelSubscription` to the end of the
+ * current period, and `resumeSubscription` clears it to 0.
  */
 export function isSubscriptionDelegationCanceled(
   delegation: MaybeAccount<SubscriptionDelegation>
 ): boolean {
   return delegation.exists && delegation.data.expiresAtTs !== 0n;
+}
+
+/**
+ * Sets how much the wallet's per-mint Subscriptions authority may spend from its token account
+ * (HOO-2339). The program's authority setup approves it for u64::MAX, which would leave the whole
+ * balance to the program's correctness; the program itself never reads the allowance. So SDP sets
+ * it to 0 right after that setup, in the same transaction, and each collection approves exactly
+ * its own amount right before its pull, which spends it back to 0. Approve sets the allowance
+ * outright, so schedules sharing the account never add to one another's.
+ *
+ * @param input.tokenAccount - The wallet's token account for the mint.
+ * @param input.authority - The per-mint authority, the delegate.
+ * @param input.owner - The custody wallet, the account's owner.
+ * @param input.amount - The allowance in base units.
+ * @param input.tokenProgram - The mint's token program.
+ * @returns The token program's Approve instruction.
+ */
+export function approveSubscriptionAuthority(input: {
+  tokenAccount: Address;
+  authority: Address;
+  owner: TransactionSigner;
+  amount: bigint;
+  tokenProgram: Address;
+}): Instruction {
+  return getApproveInstruction(
+    {
+      source: input.tokenAccount,
+      delegate: input.authority,
+      owner: input.owner,
+      amount: input.amount,
+    },
+    { programAddress: input.tokenProgram }
+  );
 }
 
 /** What the warning names when a step is found on chain without its saved signature. */
@@ -779,13 +823,13 @@ export async function lockLiveActivatingKey(
  *
  * @param tx - The claim's transaction.
  * @param input - The project and every custody wallet the claimed operation signs with.
- * @returns Resolves once no revoke holds the wallets' authorities.
+ * @returns The fence the claimed work checks before it sends an authority setup or a subscribe.
  * @throws AppError `CONFLICT` while a revoke on one of the wallets is in flight.
  */
 export async function refuseWhileSubscriptionAuthorityRevokes(
   tx: DatabaseExecutor,
   input: { projectId: string; custodyWalletIds: readonly string[] }
-): Promise<void> {
+): Promise<SubscriptionAuthorityRevokeFence> {
   const wallets = await tx.queryMany<{ public_key: string; environment: SdpEnvironment }>(
     `SELECT DISTINCT w.public_key, p.environment
        FROM custody_wallets w, projects p
@@ -794,6 +838,7 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
     [[...input.custodyWalletIds], input.projectId]
   );
   const revocations = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+  const fence: SubscriptionAuthorityRevokeFence["wallets"][number][] = [];
   for (const wallet of wallets) {
     await revocations.lockWalletAuthorities(wallet.public_key);
     if (
@@ -806,5 +851,64 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
         "This wallet's recurring payment authorization is being cleaned up; retry in a minute"
       );
     }
+    fence.push({
+      walletAddress: wallet.public_key,
+      environment: wallet.environment,
+      revocations: await revocations.countRevocations({
+        environment: wallet.environment,
+        walletAddress: wallet.public_key,
+      }),
+    });
   }
+  return { wallets: fence };
+}
+
+/**
+ * The fence an activation or update checks before its sends: the one its attempt's first claim
+ * saw. A fresh claim stores the fence it just took; a stale attempt's recovery keeps the stored
+ * one, so an incident revoke claimed after the original claim refuses the recovery's authority
+ * setup and subscribe too, instead of passing a recount taken after it.
+ *
+ * @param tx - The claim's transaction.
+ * @param input.fence - The fence this claim took ({@link refuseWhileSubscriptionAuthorityRevokes}).
+ * @returns The attempt's fence.
+ */
+export function keepAttemptRevokeFence(
+  tx: DatabaseExecutor,
+  input: {
+    attempt: "activation" | "update";
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+    fence: SubscriptionAuthorityRevokeFence;
+  }
+): Promise<SubscriptionAuthorityRevokeFence> {
+  return createPostgresSubscriptionAuthorityRevocationsRepository(tx).keepAttemptRevokeFence(input);
+}
+
+/**
+ * Refuses, before broadcast, an authority setup or subscribe whose claim a revoke has overtaken:
+ * one claimed on any of the fence's wallets since. The check commits before the send, so a revoke
+ * claimed in that gap reads the chain first; if a setup lands after it, the subscribe's own check
+ * refuses, and the authority it left, with no allowance and no subscription, is the sweep's.
+ *
+ * @param env - Runtime environment for the database.
+ * @param fence - What the claim saw.
+ * @throws AppError `CONFLICT` once a revoke was claimed on one of the wallets after the claim.
+ */
+export async function refuseIfSubscriptionAuthorityRevokedSince(
+  env: Env,
+  fence: SubscriptionAuthorityRevokeFence
+): Promise<void> {
+  await getDb(env).transaction(async (tx) => {
+    const revocations = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+    for (const wallet of fence.wallets) {
+      await revocations.lockWalletAuthorities(wallet.walletAddress);
+      if ((await revocations.countRevocations(wallet)) > wallet.revocations) {
+        throw conflict(
+          "This wallet's recurring payment authorization was revoked during this change; retry it"
+        );
+      }
+    }
+  });
 }
