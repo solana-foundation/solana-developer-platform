@@ -42,5 +42,5 @@ export function createToken2022Service(
       })
     : undefined;
 
-  return new Token2022Service(env, signer, feePayment);
+  return new Token2022Service(signer, feePayment);
 }

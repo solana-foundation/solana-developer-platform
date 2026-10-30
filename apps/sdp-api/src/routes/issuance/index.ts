@@ -7,6 +7,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { publicRoute, requireAction } from "@/middleware/require-action";
+import { requireDevnetCluster } from "@/middleware/require-module";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
@@ -84,6 +85,7 @@ issuance.get(
 
 issuance.use("*", unifiedAuthMiddleware());
 issuance.use("*", projectContextMiddleware());
+issuance.use("*", requireDevnetCluster("issuance"));
 
 // Templates (read-only, any authenticated user can view)
 issuance.get("/templates", requireAction("issuance.read"), listTokenTemplates);

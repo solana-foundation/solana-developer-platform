@@ -10,6 +10,7 @@ import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.a
 import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
 import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Address } from "@solana/kit";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
@@ -183,6 +184,7 @@ const providerAdapterFactories = {
   utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
+        cluster: currentClusterScope().cluster,
         network: parsed.network,
         vaultId: parsed.vaultId,
       })

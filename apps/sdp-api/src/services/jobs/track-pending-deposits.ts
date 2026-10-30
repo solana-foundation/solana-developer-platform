@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background Job: Track Pending Private Channel Deposits
  *
@@ -46,7 +47,10 @@ const MAX_PER_RUN = 100;
 export async function trackPendingDeposits(env: Env): Promise<void> {
   const repo = createPrivateChannelDepositRepository(env);
   const instanceRepo = createPrivateChannelInstanceRepository(env);
-  const pending = await repo.listNonTerminal(MAX_PER_RUN);
+  const pending = await repo.listNonTerminal({
+    environment: currentClusterScope().environment,
+    limit: MAX_PER_RUN,
+  });
   if (pending.length === 0) {
     return;
   }

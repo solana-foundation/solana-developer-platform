@@ -46,7 +46,7 @@ Create a local API environment file:
 cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 ```
 
-For local devnet work, set `SOLANA_RPC_URL=https://api.devnet.solana.com` in `apps/sdp-api/.env.local`.
+For local devnet work, set `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://api.devnet.solana.com` in `apps/sdp-api/.env.local`.
 
 Start the local Postgres and Redis services, then the apps:
 

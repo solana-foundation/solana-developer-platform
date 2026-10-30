@@ -742,6 +742,31 @@ export function createClusterHistoryRpc(): SolanaRpc {
 }
 
 /**
+ * The scope's cluster client over its Helius endpoint alone, for Helius Rings, which sends only
+ * through Helius. It shares the managed pool's per-endpoint deadline, key-refusal memo and genesis
+ * guard, with no failover to another provider. Biome restricts it to the Rings RPC adapter.
+ *
+ * @returns The Helius RPC client for the scope's cluster.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws RpcUnavailableError `not_configured` when the cluster's Helius endpoint is unset or
+ * not a Helius host for the cluster.
+ */
+export function createClusterHeliusRpc(): SolanaRpc {
+  const { cluster } = currentClusterScope();
+  const envKey = MANAGED_RPC_ENV_KEYS[cluster].helius;
+  const endpointUrl = process.env[envKey]?.trim();
+  if (!endpointUrl) {
+    throw new RpcUnavailableError(
+      "not_configured",
+      `No Helius endpoint is configured for ${cluster}: set ${envKey}`,
+      { cluster }
+    );
+  }
+  assertManagedEndpointUrl(cluster, "helius", envKey, endpointUrl);
+  return pooledClusterRpc(cluster, [endpointUrl], managedPools);
+}
+
+/**
  * The Solana RPC the open scope's cluster's Kora simulates against, for the Fee Payer's own reads
  * (fee pricing, budget reconciliation), so they never share endpoints or failover state with the
  * managed pool. One endpoint, no failover, with the pool's attempt deadline, dead-socket re-send

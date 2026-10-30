@@ -39,7 +39,7 @@ configuration without changing this schema.
 | Variable | Meaning |
 | --- | --- |
 | `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
-| `SOLANA_NETWORK` | Must be `devnet`. |
+| `SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL` | The Helius devnet endpoint Rings sends through. Rings refuses non-devnet projects. |
 
 ### Where the shielded keys come from
 

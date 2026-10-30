@@ -120,7 +120,7 @@ Create `apps/sdp-api/.env.local` with at least:
 SDP_DEPLOYMENT_MODE=self_hosted
 
 # Use an RPC endpoint that supports the methods exercised by the API
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 
 # Wallet signer (generate both values with `pnpm --filter @sdp/api keygen:local`)
 SIGNING_PROVIDER=local
@@ -224,7 +224,7 @@ KORA_DEVNET_RPC_URL=<the Solana RPC that Kora reads>
 # so wallet-balance queries will log "failed to fetch SPL balances" on every
 # refresh. Use a free Helius / Triton / QuickNode / Validation Cloud key or a
 # local solana-test-validator instead.
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 ```
 
 Generate `CUSTODY_PRIVATE_KEY` and `CUSTODY_ENCRYPTION_KEY` values:

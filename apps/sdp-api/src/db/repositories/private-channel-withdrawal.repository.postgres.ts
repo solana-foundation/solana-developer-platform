@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PrivateChannelTransferContext } from "@sdp/types/private-channels";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import {
@@ -172,15 +173,17 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       return result.results.map(mapRow);
     },
 
-    async listNonTerminal(limit: number) {
+    async listNonTerminal({ environment, limit }: { environment: SdpEnvironment; limit: number }) {
       const result = await db
         .prepare(
-          `SELECT * FROM private_channel_withdrawals
-             WHERE status IN ('pending', 'submitted', 'confirmed')
-             ORDER BY updated_at ASC, id ASC
+          `SELECT x.* FROM private_channel_withdrawals x
+             JOIN projects p ON p.id = x.project_id
+             WHERE p.environment = ?
+               AND x.status IN ('pending', 'submitted', 'confirmed')
+             ORDER BY x.updated_at ASC, x.id ASC
              LIMIT ?`
         )
-        .bind(limit)
+        .bind(environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

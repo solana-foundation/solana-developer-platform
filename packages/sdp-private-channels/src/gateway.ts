@@ -12,14 +12,13 @@
  */
 
 import {
-  createRpc,
+  createEndpointRpc,
   createRpcFromTransport,
   getAccountInfo,
   type RpcRequestHeaders,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { isForbiddenRpcError } from "@sdp/rpc/transient";
-import type { RpcEnv } from "@sdp/rpc/types";
 import type { Address, RpcTransport } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
@@ -46,14 +45,13 @@ export interface GatewayClientOptions {
  * `@sdp/rpc/solana` works against the returned client.
  */
 export function createChannelGatewayRpc(
-  env: RpcEnv,
   gatewayUrl: string,
   options?: GatewayClientOptions
 ): SolanaRpc {
   if (options?.transportFactory) {
     return createRpcFromTransport(options.transportFactory(options.headers ?? {}));
   }
-  return createRpc(env, { rpcUrl: gatewayUrl, headers: options?.headers });
+  return createEndpointRpc(gatewayUrl, { headers: options?.headers });
 }
 
 /** A channel token-account balance as reported by the gateway. */

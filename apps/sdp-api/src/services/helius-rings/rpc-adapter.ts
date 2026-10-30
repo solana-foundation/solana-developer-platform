@@ -1,6 +1,8 @@
 import { decodeShieldedPoolError } from "@sdp/helius-rings-sdk/error-bridge";
+// biome-ignore lint/style/noRestrictedImports: Rings sends only through the scope's Helius endpoint
+import { createClusterHeliusRpc } from "@sdp/rpc/factory";
 import {
-  createRpc,
+  createEndpointRpc,
   createRpcFromTransport,
   getSignatureStatuses,
   type SolanaRpc,
@@ -16,12 +18,6 @@ import {
 import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError, type RingsAdapterFailureCode } from "./adapter-error";
-import { requireRingsHeliusRpcUrl } from "./rpc-config";
-
-function createRingsHeliusRpc(env: Env): { rpc: SolanaRpc; rpcUrl: string } {
-  const rpcUrl = requireRingsHeliusRpcUrl(env);
-  return { rpc: createRpc(env, { rpcUrl }), rpcUrl };
-}
 
 /**
  * Broadcasts the signed outer transaction through the configured Helius RPC.
@@ -37,7 +33,7 @@ export interface SubmitRingsOuterTransactionInput {
   signedTxBase64: string;
   /** Persisted Rings connection URL. Legacy callers may omit it. */
   rpcUrl?: string;
-  /** Test seam; production resolves the env RPC. */
+  /** Test seam; production uses the scope's Helius endpoint. */
   rpc?: SolanaRpc;
 }
 
@@ -56,12 +52,10 @@ export async function submitRingsOuterTransaction(
     // endpoints legitimately resolve to loopback.
     rpc =
       input.env.ENVIRONMENT === "development"
-        ? createRpc(input.env, { rpcUrl: input.rpcUrl })
+        ? createEndpointRpc(input.rpcUrl)
         : createRpcFromTransport(createCustomerRpcTransport(input.rpcUrl));
   } else {
-    const configuredRpc = createRingsHeliusRpc(input.env);
-    rpc = configuredRpc.rpc;
-    resolvedRpcUrl = configuredRpc.rpcUrl;
+    rpc = createClusterHeliusRpc();
   }
   const signedBytes = getBase64Codec().encode(input.signedTxBase64);
 
@@ -72,12 +66,10 @@ export async function submitRingsOuterTransaction(
     throw new RingsAdapterError(classified.failureCode, classified.message, {
       retryable: classified.retryable,
       cause: error,
-      // withHeliusApiKey can place the encoded credential in the URL path, so
-      // query-only URL redaction is not sufficient.
-      sensitiveValues: [input.env.SOLANA_RPC_HELIUS_API_KEY ?? ""],
-      // Pre-keyed URLs have no separate credential value to redact. Sanitize
-      // the exact endpoint while retaining its origin for diagnostics.
-      sensitiveUrls: resolvedRpcUrl && !input.env.SOLANA_RPC_HELIUS_API_KEY ? [resolvedRpcUrl] : [],
+      sensitiveValues: [],
+      // A connection URL can carry its key. Sanitize the exact endpoint while
+      // retaining its origin for diagnostics.
+      sensitiveUrls: resolvedRpcUrl ? [resolvedRpcUrl] : [],
     });
   }
 }
@@ -158,13 +150,9 @@ function readDiagnosticLogs(error: unknown): readonly string[] {
  * `last_valid_block_height`, a NUMERIC column read as a string; `number` would
  * lose precision inside the range the column allows.
  */
-export async function readRingsBlockHeight(input: {
-  env: Env;
-  rpc?: SolanaRpc;
-}): Promise<string | null> {
+export async function readRingsBlockHeight(rpc?: SolanaRpc): Promise<string | null> {
   try {
-    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
-    return (await rpc.getBlockHeight().send()).toString();
+    return (await (rpc ?? createClusterHeliusRpc()).getBlockHeight().send()).toString();
   } catch {
     // Not knowing the height means this tick cannot judge expiry — a reason to
     // leave operations alone, not to abandon the rest of the sweep.
@@ -185,12 +173,11 @@ export type RingsSignatureOutcome = "landed" | "failed" | "absent";
  * transaction never landed.
  */
 export async function readRingsSignatureStatus(input: {
-  env: Env;
   signature: string;
   rpc?: SolanaRpc;
 }): Promise<RingsSignatureOutcome | null> {
   try {
-    const rpc = input.rpc ?? createRingsHeliusRpc(input.env).rpc;
+    const rpc = input.rpc ?? createClusterHeliusRpc();
     const [status] = await getSignatureStatuses(rpc, [input.signature as Signature], {
       searchTransactionHistory: true,
     });

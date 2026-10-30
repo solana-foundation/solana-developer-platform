@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
@@ -98,10 +99,13 @@ export interface PrivateChannelWithdrawalRepository {
   /** Opportunistic sweep of non-terminal withdrawals for a project. */
   listNonTerminalByProject(scope: WithdrawalProjectScope): Promise<PrivateChannelWithdrawalRow[]>;
   /**
-   * Global sweep of non-terminal withdrawals, oldest-updated first. Used by the
-   * cron reconciler; `limit` caps the per-tick work.
+   * Sweep of non-terminal withdrawals on projects in `environment`, oldest-updated
+   * first. Used by the cron reconciler; `limit` caps the per-tick work.
    */
-  listNonTerminal(limit: number): Promise<PrivateChannelWithdrawalRow[]>;
+  listNonTerminal(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PrivateChannelWithdrawalRow[]>;
   /** Delete guard. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
   /** Merge `patch` into `context` JSONB atomically (see deposit repo). */

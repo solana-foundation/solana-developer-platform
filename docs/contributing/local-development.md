@@ -49,7 +49,7 @@ cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
 For basic devnet development, set:
 
 ```bash
-SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL=https://api.devnet.solana.com
 ```
 
 Start the local Postgres and Redis services, then the apps:

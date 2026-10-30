@@ -153,7 +153,7 @@ export async function withGatewayRpc<T>(
 ): Promise<T> {
   const attempt = (token: string) =>
     run(
-      createChannelGatewayRpc(env, gatewayUrl, {
+      createChannelGatewayRpc(gatewayUrl, {
         ...gatewayAuthOptions(token),
         // Egress-guarded transport: the factory receives the bearer-token headers
         // above, so the guarded transport dials with the same credentials kit

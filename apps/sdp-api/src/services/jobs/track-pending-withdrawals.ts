@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 /**
  * Background Job: Track Pending Private Channel Withdrawals
  *
@@ -31,7 +32,7 @@
  */
 
 import {
-  createRpc,
+  createEndpointRpc,
   getSignatureStatuses,
   getSignaturesForAddress,
   getTransaction,
@@ -80,7 +81,10 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const repo = createPrivateChannelWithdrawalRepository(env);
   const instanceRepo = createPrivateChannelInstanceRepository(env);
   const observationRepo = createPrivateChannelSettlementObservationRepository(env);
-  const pending = await repo.listNonTerminal(MAX_PER_RUN);
+  const pending = await repo.listNonTerminal({
+    environment: currentClusterScope().environment,
+    limit: MAX_PER_RUN,
+  });
   if (pending.length === 0) {
     return;
   }
@@ -116,7 +120,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createRpc(env, { rpcUrl: instance.gateway_url });
+      rpc = createEndpointRpc(instance.gateway_url);
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;
