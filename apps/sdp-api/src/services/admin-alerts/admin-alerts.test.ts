@@ -228,6 +228,55 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
     },
     "[SDP] Mainnet disabled in Acme Pay",
   ],
+  [
+    "a custody connection completed",
+    {
+      action: "check",
+      resourceType: "custody_connection",
+      resourceId: "cconn_alert",
+      metadata: {
+        event: "provider_credential_installation_completed",
+        provider: "fireblocks",
+        projectId: PRODUCTION_PROJECT,
+        auditPhase: "outcome",
+        auditIntentId: "aint_1",
+      },
+    },
+    "[SDP] Custody connection added in Acme Pay",
+  ],
+  [
+    "a custody connection deactivated",
+    {
+      action: "deactivate",
+      resourceType: "custody_connection",
+      resourceId: "cconn_alert",
+      metadata: {
+        event: "custody_connection_deactivated",
+        provider: "fireblocks",
+        projectId: PRODUCTION_PROJECT,
+        auditPhase: "outcome",
+        auditIntentId: "aint_2",
+      },
+    },
+    "[SDP] Custody connection removed in Acme Pay",
+  ],
+  [
+    "a custody wallet created",
+    {
+      action: "create",
+      resourceType: "custody_wallet",
+      resourceId: "cwlt_alert",
+      metadata: {
+        event: "custody_wallet_created",
+        projectId: PRODUCTION_PROJECT,
+        provider: "fireblocks",
+        result: "created",
+        auditPhase: "outcome",
+        auditIntentId: "aint_3",
+      },
+    },
+    "[SDP] Wallet created in Acme Pay",
+  ],
 ];
 
 describe("admin alert emails (HOO-2299)", () => {
@@ -365,6 +414,29 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(sentEmails()[0]?.body).toContain(
         "Max Member (member@example.com)'s role changed from member to admin."
       );
+    });
+
+    it("ignores a custody intent, a started event, and a replayed wallet outcome", async () => {
+      await audit({
+        action: "deactivate",
+        resourceType: "custody_connection",
+        metadata: {
+          event: "custody_connection_deactivation_started",
+          projectId: PRODUCTION_PROJECT,
+        },
+      });
+      await audit({
+        action: "create",
+        resourceType: "custody_wallet",
+        metadata: {
+          event: "custody_wallet_created",
+          projectId: PRODUCTION_PROJECT,
+          result: "already_recorded",
+          auditPhase: "outcome",
+        },
+      });
+      await runWorker();
+      expect(sentEmails()).toHaveLength(0);
     });
 
     it("ignores a failed entry, an audit intent, and entries no alert covers", async () => {

@@ -75,6 +75,7 @@ const auditMetadataSchema = z
     name: z.string().optional(),
     provider: z.string().nullable().optional(),
     enabled: z.boolean().optional(),
+    result: z.string().optional(),
     settings: z
       .object({
         allowedIpAddresses: z.unknown().optional(),
@@ -123,7 +124,8 @@ function parseAuditMetadata(row: AuditRow): AuditMetadata | null {
 /**
  * The alerts one audit entry raises; most raise none. An organization update can raise two (an
  * allowlist and the alert-email setting in one request). Entries of critical operations count
- * only as their successful outcome, never as the intent that admitted them.
+ * only as their successful outcome, never as the intent that admitted them; an outcome entry
+ * carries its intent's metadata with the outcome's own `event` written over it.
  */
 export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
   const metadata = parseAuditMetadata(row);
@@ -168,15 +170,16 @@ export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
     case "create:custody_config":
       return [{ kind: "custody_connected", projectId, subject: metadata.provider ?? null }];
     case "check:custody_connection":
-      return outcome && metadata.event === "provider_credential_installation_completion_started"
+      return outcome && metadata.event === "provider_credential_installation_completed"
         ? [{ kind: "custody_connected", projectId, subject: metadata.provider ?? null }]
         : [];
     case "deactivate:custody_connection":
-      return outcome && metadata.event === "custody_connection_deactivation_started"
+      return outcome && metadata.event === "custody_connection_deactivated"
         ? [{ kind: "custody_disconnected", projectId, subject: metadata.provider ?? null }]
         : [];
     case "create:custody_wallet":
-      return outcome
+      // An idempotent replay writes a second outcome (`already_recorded`) for the same wallet.
+      return outcome && metadata.result === "created"
         ? [{ kind: "custody_wallet_created", projectId, subject: metadata.provider ?? null }]
         : [];
     case "delete:custody_wallet":
