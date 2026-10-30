@@ -14,6 +14,7 @@ import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
 import { closeDatabasePools, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
+import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { correctMainnetAccess, readMainnetAccessRow } from "@/services/mainnet-access.service";
 
 const COMMANDS = ["status", "set-country", "reset"] as const;
@@ -82,4 +83,5 @@ runWithSystemDatabaseIdentity("script:mainnet-access", main)
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   })
-  .finally(closeDatabasePools);
+  // The audit ledger's checkpoint store holds a Redis client open; close it so the script exits.
+  .finally(() => Promise.all([closeDatabasePools(), closeAllRedisClients()]));

@@ -8,7 +8,8 @@ import { serviceUnavailable } from "@/lib/errors";
 import { fetchProviderJson } from "@/lib/provider-json";
 import type { Env } from "@/types/env";
 
-const RESEND_EMAILS_URL = "https://api.resend.com/emails";
+/** Resend's API; `RESEND_API_URL` points it at a local stub for development. */
+const DEFAULT_RESEND_API_URL = "https://api.resend.com";
 
 const resendSendResponseSchema = z.object({ id: z.string().min(1) });
 
@@ -68,21 +69,27 @@ export async function sendMainnetAccessRequestEmail(
   if (!config) {
     throw serviceUnavailable("Mainnet access requests are not available on this deployment");
   }
-  await fetchProviderJson("Resend", RESEND_EMAILS_URL, resendSendResponseSchema, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${config.apiKey}`,
-      "content-type": "application/json",
-      "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}`,
-    },
-    body: JSON.stringify({
-      from: config.from,
-      to: [config.to],
-      ...(request.requester.email ? { reply_to: request.requester.email } : {}),
-      subject: `Mainnet access request: ${request.organizationName}`,
-      text: mainnetAccessRequestEmailText(request),
-    }),
-    timeoutMs: 10_000,
-    maxBytes: 16_384,
-  });
+  const baseUrl = env.RESEND_API_URL?.trim() || DEFAULT_RESEND_API_URL;
+  await fetchProviderJson(
+    "Resend",
+    `${baseUrl.replace(/\/+$/, "")}/emails`,
+    resendSendResponseSchema,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        "content-type": "application/json",
+        "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}`,
+      },
+      body: JSON.stringify({
+        from: config.from,
+        to: [config.to],
+        ...(request.requester.email ? { reply_to: request.requester.email } : {}),
+        subject: `Mainnet access request: ${request.organizationName}`,
+        text: mainnetAccessRequestEmailText(request),
+      }),
+      timeoutMs: 10_000,
+      maxBytes: 16_384,
+    }
+  );
 }
