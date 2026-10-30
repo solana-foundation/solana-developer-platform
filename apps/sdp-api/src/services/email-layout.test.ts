@@ -42,10 +42,18 @@ describe("renderEmailHtml", () => {
     expect(html).toContain(">Open Clerk</a>");
   });
 
-  it("refuses an action that is not an https link", () => {
-    expect(() =>
-      renderEmailHtml({ ...CONTENT, action: { label: "Open", url: "javascript:alert(1)" } })
-    ).toThrow();
+  it.each(["javascript:alert(1)", "http://platform.example/dashboard"])(
+    "refuses an action link to %s",
+    (url) => {
+      expect(() => renderEmailHtml({ ...CONTENT, action: { label: "Open", url } })).toThrow();
+    }
+  );
+
+  it("links over http to a local dashboard", () => {
+    const url = "http://localhost:3000/dashboard";
+    expect(renderEmailHtml({ ...CONTENT, action: { label: "Open", url } })).toContain(
+      `href="${url}"`
+    );
   });
 });
 

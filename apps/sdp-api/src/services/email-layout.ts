@@ -21,13 +21,19 @@ export interface EmailContent {
   heading: string;
   summary: string;
   details?: readonly EmailDetail[];
-  /** A link SDP itself chose, never one built from customer input. */
+  /** A link SDP itself chose, never one built from customer input. https, or http to localhost. */
   action?: { label: string; url: string };
   /** A closing note under the details, such as how to act on the email. */
   note?: string;
 }
 
-const actionUrlSchema = z.url({ protocol: /^https$/ });
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** An https link, or an http one to this machine, so a local dashboard link works in local dev. */
+const actionUrlSchema = z.url({ protocol: /^https?$/ }).refine((url) => {
+  const parsed = new URL(url);
+  return parsed.protocol === "https:" || LOOPBACK_HOSTS.has(parsed.hostname);
+}, "An email action links over https, or over http only to localhost");
 
 const HTML_ESCAPES = {
   "&": "&amp;",

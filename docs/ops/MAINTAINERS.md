@@ -18,6 +18,10 @@ How Doppler is used for local development, secret-aware CI, and Vercel configura
 
 Read this when setting up local development, configuring CI, rotating secrets, or investigating environment drift.
 
+### [Email](./email.md)
+
+How SDP sends email through Iterable, where each environment's settings live, how to get SDP email locally, and what to check when an email doesn't arrive.
+
 ## Common Tasks
 
 ### Deploy a change to dev
