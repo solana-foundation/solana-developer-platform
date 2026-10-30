@@ -61,7 +61,7 @@ export const createTransferBatchSchema = transferBatchMovementSchema.extend({
 
 /** An estimate moves nothing, so it needs no run name; one sent is accepted. */
 export const estimateTransferBatchSchema = transferBatchMovementSchema.extend({
-  externalId: z.string().min(1).max(256).optional(),
+  externalId: transferBatchExternalIdSchema.optional(),
 });
 
 /** A retry names its batch in the path and carries no body. */

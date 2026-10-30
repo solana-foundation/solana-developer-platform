@@ -114,10 +114,10 @@ reconciler works from them.
 
 A transfer batch commits its row and its recipients before any chunk, and each chunk commits its
 transfer row and recipient links before it broadcasts. So a recipient still pending with no
-transfer row was never sent. When a takeover or a retry past the 24 hours finds its batch still
-`processing`, the record finder fails those unsent recipients and recomputes the batch before it
-answers; the pending-transfers job does the same for a batch over an hour old that no one retries.
-Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
+transfer row was never sent. The record finder answers a batch as it stands and never settles it,
+since the request that wrote it may still be running under another key (below); the
+pending-transfers job fails a batch's unsent recipients once it is over an hour old. Neither resumes
+or re-sends: a recipient with a transfer row is settled from that row as before.
 
 The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
 SA-2). `externalId` is required on create, and a batch is recorded under its run's key, derived
@@ -230,7 +230,7 @@ records its outcome after all, which is then replayed). A released claim (a refu
 | Original's lease lapsed unreleased, within `claimed_at` + renewal cap + lease                                                                  | No                                                                                                            | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` (time left, at most 60s)                                                                                        |
 | Lapsed unreleased past that window, `rerun` or `recovery: "record"`                                                                            | Taken over                                                                                                    | Answered from the domain row (or run again on `rerun`)                                                                                                          |
 | Lapsed unreleased past that window, other `store` route                                                                                        | No; the claim is left as is                                                                                   | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key                                                                         |
-| Domain row exists, different fingerprint (`replayFromRecord`)                                                                                  | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`                                                                                                                                    |
+| Domain row exists, different fingerprint (`replayFromRecord`)                                                                                  | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`; a transfer batch's run, 409 `TRANSFER_BATCH_RUN_EXISTS`                                                                           |
 | Domain row exists, same fingerprint (`replayFromRecord`)                                                                                       | Yes                                                                                                           | The row's answer + `Idempotent-Replayed: true`                                                                                                                  |
 | 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts)                                                                        | No, unless the handler called `markIdempotencyCommitted`: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again                                                                                                                                   |
 | Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h                                                                                                      | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
