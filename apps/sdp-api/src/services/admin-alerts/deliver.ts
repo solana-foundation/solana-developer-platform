@@ -13,6 +13,7 @@ import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getLogger } from "@/runtime/logger";
+import { actionUrlSchema } from "@/services/email-layout";
 import { iterableEmailConfig, sendIterableEmail } from "@/services/iterable-email";
 import type { Env } from "@/types/env";
 import { ADMIN_ALERT_KINDS, adminAlertDetailsSchema, adminAlertEmail } from "./content";
@@ -43,14 +44,15 @@ const deliveryTargetSchema = z.object({
   alert_emails: z.string().nullable(),
 });
 
-const dashboardUrlSchema = z
-  .string()
-  .trim()
-  .pipe(z.url({ protocol: /^https$/ }));
+/**
+ * The dashboard every alert links to, held to the layout's own link rule. It is parsed as a URL
+ * first: the layout's rule reads it with `new URL`, which throws on a placeholder.
+ */
+const dashboardUrlSchema = z.string().trim().pipe(z.url()).pipe(actionUrlSchema);
 
 /**
- * Alerts run only where Iterable is configured and the dashboard has an https URL to link to
- * (the email layout only links https): prod. On
+ * Alerts run only where Iterable is configured and the dashboard has a URL the email layout will
+ * link (https, or http to localhost for local development): prod, and a local API on Doppler dev. On
  * dev and stage there is no Iterable key, so the cron never registers, nothing is written and
  * nothing retries. A mounted `placeholder` reads as unconfigured, like a missing key.
  */

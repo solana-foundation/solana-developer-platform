@@ -686,6 +686,7 @@ describe("admin alert emails (HOO-2299)", () => {
       ["a placeholder Iterable URL", { ITERABLE_API_URL: "placeholder" }],
       ["no dashboard URL", { FRONTEND_URL: undefined }],
       ["a placeholder dashboard URL", { FRONTEND_URL: "placeholder" }],
+      ["an http dashboard URL to another host", { FRONTEND_URL: "http://dashboard.example.com" }],
     ] as const)("does not register the cron with %s", (_, overrides) => {
       const configured = { ...env, ...overrides };
       expect(adminAlertEmailsEnabled(configured)).toBe(false);
@@ -694,6 +695,12 @@ describe("admin alert emails (HOO-2299)", () => {
 
     it("registers it where Iterable and the dashboard are both configured", () => {
       expect(adminAlertEmailsCron.enabled(env)).toBe(true);
+    });
+
+    it("registers it with a local dashboard over http", () => {
+      expect(adminAlertEmailsCron.enabled({ ...env, FRONTEND_URL: "http://localhost:3000" })).toBe(
+        true
+      );
     });
 
     it("summarizes at most a day of money when email is turned on long after", async () => {

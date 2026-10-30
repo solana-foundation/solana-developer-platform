@@ -30,7 +30,7 @@ export interface EmailContent {
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /** An https link, or an http one to this machine, so a local dashboard link works in local dev. */
-const actionUrlSchema = z.url({ protocol: /^https?$/ }).refine((url) => {
+export const actionUrlSchema = z.url({ protocol: /^https?$/ }).refine((url) => {
   const parsed = new URL(url);
   return parsed.protocol === "https:" || LOOPBACK_HOSTS.has(parsed.hostname);
 }, "An email action links over https, or over http only to localhost");
