@@ -1193,6 +1193,31 @@ describe("payment transfer batches", () => {
       "failed",
     ]);
 
+    // Each chunk's audit intent closes with its chain verdict, not with RPC
+    // accepting the send (APE-425).
+    const settledTransfers = z
+      .array(z.object({ id: z.string(), status: z.string(), signature: z.string() }))
+      .parse(
+        (
+          await getDb(env)
+            .prepare(
+              "SELECT id, status, signature FROM payment_transfers WHERE type = 'transfer_batch'"
+            )
+            .all()
+        ).results
+      );
+    expect(settledTransfers).toHaveLength(2);
+    for (const transfer of settledTransfers) {
+      const { intent, outcome } = await readChunkAudit(transfer.id);
+      expect(required(outcome).status).toBe(transfer.status === "failed" ? "failure" : "success");
+      expect(required(outcome).metadata).toMatchObject({
+        auditPhase: "outcome",
+        auditIntentId: required(intent).resource_id,
+        batchTransferStatus: transfer.status,
+        signature: transfer.signature,
+      });
+    }
+
     const detailRes = await app.request(
       `/v1/payments/transfer-batches/${body.data.batch.id}`,
       {
@@ -1543,8 +1568,9 @@ describe("payment transfer batches", () => {
     ]);
     expect(sendTransactionMock).toHaveBeenCalledOnce();
 
-    // The ledger admitted the chunk before it was sent and closed it with the
-    // signature (APE-425), naming the batch and each recipient it paid.
+    // The ledger admitted the chunk before it was sent, naming the batch and
+    // each recipient it pays (APE-425). RPC accepting it is no verdict, so the
+    // outcome waits for the pending-transfers job.
     const { intent, outcome } = await readChunkAudit(required(body.data.transfers[0]).id);
     const recipient = {
       recipientId: required(body.data.recipients[0]).id,
@@ -1567,13 +1593,7 @@ describe("payment transfer batches", () => {
         },
       },
     });
-    expect(required(outcome).status).toBe("success");
-    expect(required(outcome).metadata).toMatchObject({
-      auditPhase: "outcome",
-      auditIntentId: required(intent).resource_id,
-      signature: persistedSignature,
-      recipients: [recipient],
-    });
+    expect(outcome).toBeNull();
   });
 
   it("fails a batch chunk unsent when the audit ledger refuses its intent", async () => {
@@ -1712,10 +1732,23 @@ describe("payment transfer batches", () => {
       }),
       "sdp_api_payment_submission_unresolved"
     );
-    // The outcome is unknown, so the intent stays open for reconciliation to page on.
-    const audit = await readChunkAudit(required(body.data.transfers[0]).id);
+    // The outcome is unknown until the chain answers; the pending-transfers job
+    // then closes the intent with that verdict.
+    const transferId = required(body.data.transfers[0]).id;
+    const audit = await readChunkAudit(transferId);
     expect(audit.intent).not.toBeNull();
     expect(audit.outcome).toBeNull();
+    getSignatureStatusesMock.mockResolvedValueOnce([
+      { slot: 101n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
+    ]);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
+    const settled = await readChunkAudit(transferId);
+    expect(required(settled.outcome)).toMatchObject({ status: "success" });
+    expect(required(settled.outcome).metadata).toMatchObject({
+      auditIntentId: required(audit.intent).resource_id,
+      batchTransferStatus: "confirmed",
+      signature: required(body.data.transfers[0]).signature,
+    });
     warn.mockRestore();
   });
 

@@ -35,7 +35,10 @@ import {
   type Slot,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
 } from "@solana/kit";
-import { TRANSFER_BATCH_ATTEMPT_LIFETIME_MS } from "@/db/repositories/payment-transfer-batches.repository";
+import {
+  TRANSFER_BATCH_ATTEMPT_LIFETIME_MS,
+  transferBatchChunkAuditIntentId,
+} from "@/db/repositories/payment-transfer-batches.repository";
 import type {
   ConfirmedTransferPollVerdict,
   PaymentsRepository,
@@ -51,6 +54,7 @@ import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import { createSystemAuditService } from "@/services/audit.service";
 import { refreshFireblocksTransfer } from "@/services/payments/fireblocks-transfer";
 import type { Env } from "@/types/env";
 
@@ -170,7 +174,7 @@ async function updateTerminalTransfer(
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    return createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
+    const settled = await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
       requireUnsigned: input.requireUnsigned,
       organizationId: transfer.organization_id,
@@ -181,8 +185,44 @@ async function updateTerminalTransfer(
       updatedAt: input.updatedAt,
       requireUnstarted: input.requireUnstarted,
     });
+    if (settled) await closeChunkAuditIntent(env, transfer, input);
+    return settled;
   }
   return (await repo.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+}
+
+/**
+ * Closes a settled batch chunk's audit intent with its chain verdict (APE-425).
+ * The request that sent the chunk wrote the intent under an id derived from
+ * the transfer, and only the writer that settled the chunk closes it. Best
+ * effort, like every outcome write: a failure leaves the intent open, which the
+ * ledger's integrity check pages on.
+ */
+async function closeChunkAuditIntent(
+  env: Env,
+  transfer: PaymentTransferRow,
+  input: { status: TransferChainVerdictStatus; slot?: number | null; error?: string | null }
+): Promise<void> {
+  await createSystemAuditService(env).completeCriticalSystem(
+    {
+      id: transferBatchChunkAuditIntentId(transfer.id),
+      entry: {
+        organizationId: transfer.organization_id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+      },
+    },
+    {
+      status: input.status === "failed" ? "failure" : "success",
+      metadata: {
+        batchTransferStatus: input.status,
+        signature: transfer.signature,
+        slot: input.slot === undefined || input.slot === null ? null : String(input.slot),
+        ...(input.status === "failed" ? { error: input.error } : {}),
+      },
+    }
+  );
 }
 
 /**

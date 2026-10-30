@@ -6,6 +6,7 @@ import type {
   PaymentTransferBatchesRepository,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
+import { transferBatchChunkAuditIntentId } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -112,8 +113,9 @@ export function applyRecipientRowUpdates(
  * processing for reconciliation rather than falsely failing the recipients.
  * The audit ledger admits each chunk before its bytes can reach the chain, as
  * it does a single transfer (APE-425): a refused intent fails the chunk unsent,
- * a refusal or failed send closes it as a failure, a send closes it with the
- * signature, and an ambiguous send leaves it open for reconciliation to page on.
+ * and a refusal or failed send closes it as a failure. A chunk that may have
+ * been sent is closed by the pending-transfers job from its chain verdict,
+ * since RPC accepting it is not one.
  *
  * @param params.resolved - Resolved batch request.
  * @param params.chunk - Chunk to sign and submit.
@@ -223,27 +225,31 @@ export async function executeChunk(params: {
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: AuditIntent;
   try {
-    auditIntent = await auditService.beginCritical(c, {
-      action: "transfer",
-      resourceType: "payment_transfer",
-      resourceId: transfer.id,
-      metadata: {
-        batchId: firstRecipient.batch_id,
-        custodyWalletId: resolved.sourceWallet.id,
-        walletId: resolved.sourceWallet.walletId,
-        sourceAddress: resolved.sourceAddress,
-        // Named tokenMint: a bare "token" key is scrubbed as a credential.
-        tokenMint: resolved.tokenContext.token,
-        amount: chunk.amount,
-        recipients: recipientRows.map((row) => ({
-          recipientId: row.id,
-          counterpartyId: row.counterparty_id,
-          counterpartyAccountId: row.counterparty_account_id,
-          destination: row.destination_address,
-          amount: row.amount,
-        })),
+    auditIntent = await auditService.beginCritical(
+      c,
+      {
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+        metadata: {
+          batchId: firstRecipient.batch_id,
+          custodyWalletId: resolved.sourceWallet.id,
+          walletId: resolved.sourceWallet.walletId,
+          sourceAddress: resolved.sourceAddress,
+          // Named tokenMint: a bare "token" key is scrubbed as a credential.
+          tokenMint: resolved.tokenContext.token,
+          amount: chunk.amount,
+          recipients: recipientRows.map((row) => ({
+            recipientId: row.id,
+            counterpartyId: row.counterparty_id,
+            counterpartyAccountId: row.counterparty_account_id,
+            destination: row.destination_address,
+            amount: row.amount,
+          })),
+        },
       },
-    });
+      { intentId: transferBatchChunkAuditIntentId(transfer.id) }
+    );
   } catch (error) {
     // Nothing was sent: failing the chunk settles its recipients failed, so
     // the ledger refusal can't leave an unaudited transfer to land or replay.
@@ -251,7 +257,9 @@ export async function executeChunk(params: {
     return;
   }
   const failAuditedChunk = async (cause: unknown) => {
-    await failChunk(cause);
+    // Only the writer that settled the chunk closes its intent; a lost race
+    // means the pending-transfers job already did, from the chain verdict.
+    if (!(await failChunk(cause))) return;
     await auditService.completeCritical(c, auditIntent, {
       status: "failure",
       metadata: { error: cause instanceof Error ? cause.message : String(cause) },
@@ -274,9 +282,8 @@ export async function executeChunk(params: {
   }
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
-  let signature: string;
   try {
-    signature = await submitSponsoredTransaction({
+    await submitSponsoredTransaction({
       feePayment: params.feePayment,
       rpc: resolved.rpc,
       transaction: txBytes,
@@ -304,5 +311,4 @@ export async function executeChunk(params: {
     await failAuditedChunk(error);
     return;
   }
-  await auditService.completeCritical(c, auditIntent, { metadata: { signature } });
 }

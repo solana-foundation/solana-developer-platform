@@ -709,11 +709,17 @@ export class AuditService {
    *
    * @param c - The request context, for the actor and the authenticated organization.
    * @param entry - The operation the intent admits; its outcome is appended against it.
+   * @param options.intentId - A caller-derived id, for an outcome a job appends later
+   *   without the request's intent in hand (a batch chunk's chain verdict).
    * @returns The durable intent `completeCritical` resolves.
    * @throws AppError `FORBIDDEN` when the entry names an organization other than the
    *   authenticated caller's.
    */
-  async beginCritical(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<AuditIntent> {
+  async beginCritical(
+    c: Context<{ Bindings: Env }>,
+    entry: AuditLogEntry,
+    options: { intentId?: string } = {}
+  ): Promise<AuditIntent> {
     const auth = getOptionalAuth(c);
     if (
       auth !== null &&
@@ -722,7 +728,7 @@ export class AuditService {
     ) {
       throw forbidden("Audit intent names an organization other than the caller's");
     }
-    const intentId = `aint_${crypto.randomUUID()}`;
+    const intentId = options.intentId ?? `aint_${crypto.randomUUID()}`;
     await this.log(c, {
       organizationId: entry.organizationId,
       action: "maintenance",
