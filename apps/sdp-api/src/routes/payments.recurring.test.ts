@@ -4917,7 +4917,10 @@ describe("Payments routes — recurring", () => {
       expect(
         await failCollection(
           activated.id,
-          custodyPolicyRefused(new SigningError("Policy denied the transaction", "POLICY_REFUSED"))
+          custodyPolicyRefused(
+            new SigningError("Policy denied the transaction", "POLICY_REFUSED"),
+            "privy"
+          )
         )
       ).toBe("paused");
       expect(pauseEvents()).toEqual([

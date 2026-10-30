@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import type { CustodyProvider } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
 import {
   assertIsTransactionSigner,
@@ -17,11 +18,12 @@ import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money
  * policy refused the signature and unchanged otherwise.
  *
  * @param error - What the custody signing call rejected with.
+ * @param provider - The provider resolved for this custody wallet.
  * @returns Never; it always throws.
  */
-function rethrowPolicyRefusal(error: unknown): never {
+function rethrowPolicyRefusal(error: unknown, provider: CustodyProvider): never {
   if (error instanceof SigningError && error.code === "POLICY_REFUSED") {
-    throw custodyPolicyRefused(error);
+    throw custodyPolicyRefused(error, provider);
   }
   throw error;
 }
@@ -31,6 +33,7 @@ export interface AdmittedSignerContext {
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
+  provider: CustodyProvider;
 }
 
 /**
@@ -56,6 +59,7 @@ export function admittedSigner(
   decide: () => Promise<MoneyAdmissionDecision>,
   context: AdmittedSignerContext
 ): TransactionSigner {
+  const rethrow = (error: unknown): never => rethrowPolicyRefusal(error, context.provider);
   const admit = async () => {
     assertMovementAdmitted(await decide(), {
       surface: "signer",
@@ -71,7 +75,7 @@ export function admittedSigner(
       ? {
           signTransactions: async (...args: Parameters<typeof signer.signTransactions>) => {
             await admit();
-            return signer.signTransactions(...args).catch(rethrowPolicyRefusal);
+            return signer.signTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -81,7 +85,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.modifyAndSignTransactions>
           ) => {
             await admit();
-            return signer.modifyAndSignTransactions(...args).catch(rethrowPolicyRefusal);
+            return signer.modifyAndSignTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -91,7 +95,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.signAndSendTransactions>
           ) => {
             await admit();
-            return signer.signAndSendTransactions(...args).catch(rethrowPolicyRefusal);
+            return signer.signAndSendTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -99,7 +103,7 @@ export function admittedSigner(
       ? {
           signMessages: async (...args: Parameters<typeof signer.signMessages>) => {
             await admit();
-            return signer.signMessages(...args).catch(rethrowPolicyRefusal);
+            return signer.signMessages(...args).catch(rethrow);
           },
         }
       : {}),
@@ -109,7 +113,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.modifyAndSignMessages>
           ) => {
             await admit();
-            return signer.modifyAndSignMessages(...args).catch(rethrowPolicyRefusal);
+            return signer.modifyAndSignMessages(...args).catch(rethrow);
           },
         }
       : {}),

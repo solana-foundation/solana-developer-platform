@@ -339,11 +339,12 @@ describe("Recurring Payment exact source selection", () => {
 });
 
 describe("Recurring Payment lifecycle actions", () => {
-  const lastRunError = "The custody provider's policy refused to sign.";
+  const lastRunError =
+    "Privy blocked signing due to a wallet policy. Review the policy in Privy or adjust the request.";
   const pausedCopy = {
     failed_attempts: `SDP paused this schedule because its runs kept failing: one run failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`,
     custody_policy_refused:
-      "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Change the wallet's policy with your custody provider, then resume it, or cancel it.",
+      "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Review the wallet's policy and payment details, then resume or cancel it.",
   } satisfies Record<RecurringPaymentPauseReason, string>;
   const failedRun: PaymentSubscriptionCollectionAttempt = {
     id: "pcat_failed",
@@ -399,6 +400,33 @@ describe("Recurring Payment lifecycle actions", () => {
       ).toBe("outline");
     }
   );
+
+  it("shows the last failure without repeating its label while a schedule remains active", () => {
+    renderDetail({ ...recurring, status: "active", subscriptionId: "psub_test" }, [failedRun]);
+    expect(screen.getByText("Last run failed")).toBeTruthy();
+    const failureNotice = screen.getByText(
+      "Schedule is active. Review the failure below before retrying."
+    );
+    expect(failureNotice.textContent).toContain(lastRunError);
+    expect(screen.queryByText(`Last run: ${lastRunError}`)).toBeNull();
+  });
+
+  it("clears the failure band after a later successful collection", () => {
+    renderDetail({ ...recurring, status: "active", subscriptionId: "psub_test" }, [
+      failedRun,
+      {
+        ...failedRun,
+        id: "pcat_recovered",
+        attemptedAt: "2026-09-20T00:10:00.000Z",
+        status: "confirmed",
+        error: null,
+      },
+    ]);
+    expect(screen.queryByText("Last run failed")).toBeNull();
+    expect(
+      screen.queryByText("Schedule is active. Review the failure below before retrying.")
+    ).toBeNull();
+  });
 
   it("a canceled schedule offers no lifecycle action", async () => {
     renderDetail({ ...recurring, status: "canceled", subscriptionId: "psub_test" }, [failedRun]);

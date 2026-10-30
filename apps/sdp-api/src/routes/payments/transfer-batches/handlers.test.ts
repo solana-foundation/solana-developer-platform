@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SigningError } from "@sdp/custody/signing";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
@@ -39,6 +40,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaSigner from "@/services/solana/signer";
@@ -1025,6 +1027,106 @@ describe("payment transfer batches", () => {
       simulationSpy.mockRestore();
     }
   });
+
+  it.each([false, true])(
+    "preserves batch results and replay when Privy refuses a chunk (allow first: %s)",
+    async (allowFirst) => {
+      const source = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(source.address);
+      let calls = 0;
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(
+        admittedSigner(
+          {
+            ...source,
+            signTransactions: async (...args) => {
+              calls += 1;
+              if (allowFirst && calls === 1) return source.signTransactions(...args);
+              throw new SigningError("private provider response", "POLICY_REFUSED");
+            },
+          },
+          async () => ({ admitted: true }),
+          {
+            movement: "payments.transfer_batch",
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            custodyWalletId: TEST_CUSTODY_WALLET_ID,
+            provider: "privy",
+          }
+        )
+      );
+      createKoraAdapterMock.mockReturnValueOnce(
+        ownedSubmissionAdapter(async () => FIRST_SIGNATURE)
+      );
+      const counterpartyId = await seedCounterparty("batch_privy_refusal");
+      const accounts = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+        TEST_SOLANA_ADDRESSES.wallet2,
+        TEST_SOLANA_ADDRESSES.wallet3,
+      ]);
+      const key = crypto.randomUUID();
+      const post = () =>
+        app.request(
+          "/v1/payments/transfer-batches",
+          {
+            method: "POST",
+            headers: {
+              "Idempotency-Key": key,
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              externalId: testRunId(),
+              sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+              token: "SOL",
+              recipients: accounts.map((counterpartyAccountId) => ({
+                counterpartyId,
+                counterpartyAccountId,
+                amount: "0.1",
+              })),
+              options: { maxRecipientsPerTransaction: 1, preflight: false },
+            }),
+          },
+          env
+        );
+      const response = await post();
+      const body = z
+        .object({
+          data: z.object({
+            recipients: z.array(
+              z.object({
+                status: z.string(),
+                error: z.string().nullable(),
+                transferId: z.string().nullable(),
+              })
+            ),
+            transfers: z.array(z.object({ status: z.string() })),
+          }),
+        })
+        .parse(await response.json());
+
+      expect(response.status).toBe(200);
+      const failed = body.data.recipients.filter((row) => row.status === "failed");
+      expect(failed).toHaveLength(allowFirst ? 1 : 2);
+      for (const recipient of failed) {
+        expect(recipient).toMatchObject({
+          error: expect.stringContaining("Privy blocked signing"),
+          transferId: null,
+        });
+        expect(recipient.error).not.toContain("private provider response");
+      }
+      expect(body.data.transfers).toHaveLength(allowFirst ? 1 : 0);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(allowFirst ? 1 : 0);
+      const replay = await post();
+      expect(replay.status).toBe(200);
+      expect(
+        z
+          .object({
+            data: z.object({ recipients: z.array(z.object({ error: z.string().nullable() })) }),
+          })
+          .parse(await replay.json()).data.recipients
+      ).toEqual(body.data.recipients.map(({ error }) => ({ error })));
+      expect(calls).toBe(2);
+    }
+  );
 
   it("creates a SOL transfer batch and records chunk transfers", async () => {
     const sourceSigner = await generateKeyPairSigner();
