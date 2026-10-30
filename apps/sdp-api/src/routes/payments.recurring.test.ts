@@ -198,7 +198,7 @@ function sentApprovals(): { delegate: string; amount: bigint }[] {
 
 /**
  * Sets a schedule's status as a crash would have left it, even one already canceled: the
- * tombstone trigger (migration 0190) lets a test database's transaction that asks rewind a cancel.
+ * tombstone trigger (migration 0195) lets a test database's transaction that asks rewind a cancel.
  */
 async function rewindRecurringPaymentStatus(
   recurringPaymentId: string,
@@ -5723,7 +5723,11 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
   });
 
-  it("recovers stale activating recurring payments without recreating the plan", async () => {
+  /**
+   * A recurring payment left `activating` by a claim that created its plan and then stopped, with
+   * its in-flight attempt keeping `revokeFence` (null: an attempt from before migration 0196).
+   */
+  async function seedStaleActivationAfterPlan(revokeFence: unknown = null) {
     const sourceSigner = recurringExecution.sourceSigner();
     const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const planId = `psp_${crypto.randomUUID()}`;
@@ -5794,9 +5798,10 @@ describe("Payments routes — recurring", () => {
            authorization_signature,
            error,
            metadata,
+           revoke_fence,
            created_at,
            updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)`
       )
       .bind(
         attemptId,
@@ -5809,10 +5814,17 @@ describe("Payments routes — recurring", () => {
         null,
         null,
         "{}",
+        revokeFence === null ? null : JSON.stringify(revokeFence),
         now,
         now
       )
       .run();
+
+    return { recurringPayment, attemptId };
+  }
+
+  it("recovers stale activating recurring payments without recreating the plan", async () => {
+    const { recurringPayment, attemptId } = await seedStaleActivationAfterPlan();
 
     const freshRetryRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
@@ -5861,6 +5873,75 @@ describe("Payments routes — recurring", () => {
       status: "confirmed",
       stage: "finalize",
       authorization_signature: authorizationSignature,
+    });
+  });
+
+  it("refuses to recover a stale activation an incident revoke overtook after its first claim", async () => {
+    // Its first claim saw no revoke on the wallet; an incident revoke then confirmed before the
+    // recovery's claim, whose own recount would include it.
+    const { recurringPayment, attemptId } = await seedStaleActivationAfterPlan({
+      wallets: [
+        {
+          walletAddress: recurringExecution.sourceSigner().address,
+          environment: "sandbox",
+          revocations: 0,
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_authority_revocations
+           (id, organization_id, project_id, environment, custody_wallet_id, wallet_address,
+            token_mint, subscription_authority_address, status, lease_id)
+         VALUES ('psar_incident', ?, ?, 'sandbox', ?, ?, ?, ?, 'confirmed', 'lease_incident')`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
+        recurringExecution.sourceSigner().address,
+        TEST_SOLANA_ADDRESSES.wallet3,
+        TEST_SOLANA_ADDRESSES.wallet1
+      )
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), recurringPayment.id)
+      .run();
+
+    const res = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "CONFLICT",
+        message:
+          "This wallet's recurring payment authorization was revoked during this change; retry it",
+      },
+      meta: { requestId: expect.stringMatching(/^req_/) },
+    });
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT revoke_fence FROM payment_recurring_payment_activation_attempts WHERE id = ?"
+        )
+        .bind(attemptId)
+        .first<{ revoke_fence: unknown }>()
+    ).toEqual({
+      revoke_fence: {
+        wallets: [
+          {
+            walletAddress: recurringExecution.sourceSigner().address,
+            environment: "sandbox",
+            revocations: 0,
+          },
+        ],
+      },
     });
   });
 

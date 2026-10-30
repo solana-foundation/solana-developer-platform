@@ -37,7 +37,10 @@ import type {
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createTokenRepository } from "@/db/repositories/repository-factory";
-import { createPostgresSubscriptionAuthorityRevocationsRepository } from "@/db/repositories/subscription-authority-revocations.repository";
+import {
+  createPostgresSubscriptionAuthorityRevocationsRepository,
+  type SubscriptionAuthorityRevokeFence,
+} from "@/db/repositories/subscription-authority-revocations.repository";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
 import {
   AppError,
@@ -812,17 +815,7 @@ export async function lockLiveActivatingKey(
   }
 }
 
-/**
- * The revokes a claim saw on each of its wallets, under their locks (HOO-2339). An operator's
- * incident revoke claims under the same lock but skips the idle predicate, so it can close an
- * authority under an activation or update that claimed first. Before that work sends the setup
- * that creates an authority, or the subscribe that binds a schedule to one, it checks this
- * ({@link refuseIfSubscriptionAuthorityRevokedSince}), so it never recreates or subscribes to an
- * authority revoked after its claim.
- */
-export interface SubscriptionAuthorityRevokeFence {
-  wallets: readonly { walletAddress: string; environment: SdpEnvironment; revocations: number }[];
-}
+export type { SubscriptionAuthorityRevokeFence };
 
 /**
  * Inside a claim that may use a wallet's Subscriptions authorities (activation, update, resume),
@@ -870,6 +863,29 @@ export async function refuseWhileSubscriptionAuthorityRevokes(
     });
   }
   return { wallets: fence };
+}
+
+/**
+ * The fence an activation or update checks before its sends: the one its attempt's first claim
+ * saw. A fresh claim stores the fence it just took; a stale attempt's recovery keeps the stored
+ * one, so an incident revoke claimed after the original claim refuses the recovery's authority
+ * setup and subscribe too, instead of passing a recount taken after it.
+ *
+ * @param tx - The claim's transaction.
+ * @param input.fence - The fence this claim took ({@link refuseWhileSubscriptionAuthorityRevokes}).
+ * @returns The attempt's fence.
+ */
+export function keepAttemptRevokeFence(
+  tx: DatabaseExecutor,
+  input: {
+    attempt: "activation" | "update";
+    attemptId: string;
+    organizationId: string;
+    projectId: string;
+    fence: SubscriptionAuthorityRevokeFence;
+  }
+): Promise<SubscriptionAuthorityRevokeFence> {
+  return createPostgresSubscriptionAuthorityRevocationsRepository(tx).keepAttemptRevokeFence(input);
 }
 
 /**

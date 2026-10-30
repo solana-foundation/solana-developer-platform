@@ -252,7 +252,7 @@ describe("revokeIdleSubscriptionAuthorities", () => {
   });
 
   it("asks the chain nothing when there is nothing to revoke", async () => {
-    // A canceled schedule stays canceled (migration 0190), so another one still needs it.
+    // A canceled schedule stays canceled (migration 0195), so another one still needs it.
     await seedAuthoritySubscription(tenant, {
       authority,
       tokenMint: MINT,

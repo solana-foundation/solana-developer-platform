@@ -150,7 +150,7 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await getDb(env).execute(
       "UPDATE payment_recurring_payment_update_attempts SET status = 'failed' WHERE id = 'rpua_replacement'"
     );
-    // Reviving a canceled schedule is refused outside a test database (migration 0190).
+    // Reviving a canceled schedule is refused outside a test database (migration 0195).
     await getDb(env).transaction(async (tx) => {
       await tx.execute("SELECT set_config('sdp.test_rewind_canceled', 'on', true)", []);
       await tx.execute(
@@ -433,6 +433,31 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await expect(refuseIfSubscriptionAuthorityRevokedSince(env, fence)).rejects.toMatchObject({
       code: "CONFLICT",
     });
+  });
+
+  it("dates a confirmed revoke by when it confirmed, not when it was claimed", async () => {
+    await canceledSchedule();
+    const claimed = required(await claim("psar_confirmed_late"));
+    const confirmedAt = "2026-10-21T13:00:00.000Z";
+    required(
+      await repo.finish({
+        id: claimed.id,
+        leaseId: claimed.lease_id,
+        status: "confirmed",
+        error: null,
+        updatedAt: confirmedAt,
+      })
+    );
+    const confirmedSince = (since: string) =>
+      repo.hasConfirmedRevocationSince({
+        environment: "sandbox",
+        subscriptionAuthorityAddress: AUTHORITY,
+        since,
+      });
+
+    // A cancel that landed after the claim but before the confirm sees the revoke.
+    expect(await confirmedSince("2026-10-21T12:30:00.000Z")).toBe(true);
+    expect(await confirmedSince("2026-10-21T13:30:00.000Z")).toBe(false);
   });
 
   it("lets only the lease holder save, clear or finish a revoke", async () => {
