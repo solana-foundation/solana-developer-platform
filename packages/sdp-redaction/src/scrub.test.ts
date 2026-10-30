@@ -70,6 +70,24 @@ describe("scrubTelemetry", () => {
     });
   });
 
+  it("redacts a bare derivation seed and a wallet passphrase by key", () => {
+    // A signer helper that logs its derivation input does so under `seed`,
+    // and custodian configs carry `walletPassphrase` — both key material no
+    // suffix rule catches. A sibling PDA `seeds` array is public derivation
+    // data and survives.
+    const scrubbed = scrubTelemetry({
+      seed: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      walletPassphrase: "correct horse battery staple",
+      seeds: ["owner", "aux"],
+    });
+
+    assert.deepEqual(scrubbed, {
+      seed: "[REDACTED]",
+      walletPassphrase: "[REDACTED]",
+      seeds: ["owner", "aux"],
+    });
+  });
+
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
       event: "sdp_api_earn_split_swap_orphaned",
@@ -206,6 +224,187 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.ok(!scrubbed.includes("sk_live_supersecret"));
     assert.ok(scrubbed.includes("x-api-key"));
+  });
+
+  it("redacts a cookie that arrives inside a serialized header blob", () => {
+    // A Sentry request-header dump serializes headers to a string, where the
+    // object-key `cookie` rule cannot reach; the string forms have to cover it.
+    const scrubbed = scrubTelemetryString(
+      '{"headers":{"accept":"*/*","cookie":"session=supersecret-value"}}'
+    );
+
+    assert.ok(!scrubbed.includes("supersecret-value"));
+    assert.ok(scrubbed.includes("cookie"));
+
+    const assignment = scrubTelemetryString("Cookie: session=supersecret-value; theme=dark");
+
+    assert.ok(!assignment.includes("supersecret-value"));
+  });
+
+  it("redacts every cookie pair in a raw header, not only the one before the first space", () => {
+    // The generic assignment rule's value stops at whitespace, so a session
+    // cookie that is not the first pair — and every pair after it — stayed
+    // readable. A cookie header is one credential blob; the rule consumes it
+    // to the end of the line.
+    const scrubbed = scrubTelemetryString("Cookie: theme=dark; session=supersecret-value");
+
+    assert.ok(!scrubbed.includes("supersecret-value"));
+    assert.ok(!scrubbed.includes("theme=dark"));
+    assert.ok(scrubbed.includes("Cookie:"));
+
+    const twoCookies = scrubTelemetryString("Cookie: session=first; refresh=second");
+
+    assert.ok(!twoCookies.includes("first"));
+    assert.ok(!twoCookies.includes("second"));
+  });
+
+  it("keeps the fields that follow a cookie header inside a serialized message", () => {
+    // Whole-line matching is only correct for a raw header. An embedded header
+    // ends where its containing string ends: stopping at the line end erased
+    // `status` and the closing quotes, hiding the error details the message
+    // carried.
+    const scrubbed = scrubTelemetryString(
+      '{"message":"Cookie: session=supersecret-value","status":502}'
+    );
+
+    assert.equal(scrubbed, '{"message":"Cookie: [REDACTED]","status":502}');
+  });
+
+  it("does not end an embedded cookie value at an escaped quote", () => {
+    // Quotes inside a serialized string are escaped; only the string's own
+    // closing quote ends the value. Ending early would leak the tail of the
+    // header, and the escaped quotes themselves stay inside the redaction.
+    const scrubbed = scrubTelemetryString(
+      '{"message":"Cookie: session=abc; note=\\"hello\\"","status":502}'
+    );
+
+    assert.ok(!scrubbed.includes("hello"));
+    assert.ok(!scrubbed.includes("session=abc"));
+    assert.ok(scrubbed.includes('"status":502}'));
+  });
+
+  it("consumes quoted cookie values in a raw header instead of stopping at a quote", () => {
+    // The boundary that preserves serialized structure must not fire on a raw
+    // header: a quoted value followed by another pair would otherwise leak the
+    // second credential.
+    const scrubbed = scrubTelemetryString('Cookie: session="abc"; refresh="def"');
+
+    assert.ok(!scrubbed.includes("abc"));
+    assert.ok(!scrubbed.includes("def"));
+    assert.ok(scrubbed.includes("Cookie:"));
+  });
+
+  it("redacts a seed and a passphrase in a serialized body while public seeds survive", () => {
+    // The object-key rules catch a scrubbed object, but a log argument that
+    // is already a string — a serialized body, an error message carrying one
+    // — only passes through the string patterns, so the same names have to
+    // live there too. The bare `seed` stays exact-only: a PDA `seeds` array
+    // is public derivation data.
+    const scrubbed = scrubTelemetryString(
+      '{"seed":"jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE=","walletPassphrase":"correct horse battery staple"}'
+    );
+
+    assert.ok(!scrubbed.includes("jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE="));
+    assert.ok(!scrubbed.includes("correct horse battery staple"));
+    assert.ok(scrubbed.includes('"seed"'));
+    assert.ok(scrubbed.includes("walletPassphrase"));
+
+    const assignments = scrubTelemetryString(
+      "seed=jZ2ZCg8BfJqknAfG; walletPassphrase=correct-horse"
+    );
+
+    assert.ok(!assignments.includes("jZ2ZCg8BfJqknAfG"));
+    assert.ok(!assignments.includes("correct-horse"));
+
+    const publicSeeds = scrubTelemetryString('{"seeds":["owner","aux"]}');
+
+    assert.ok(publicSeeds.includes('"seeds":["owner","aux"]'));
+  });
+
+  it("redacts every word of a space-separated mnemonic or passphrase assignment", () => {
+    // The generic assignment rule's value stops at the first space, which is
+    // exactly where a recovery secret keeps going: an interpolated mnemonic or
+    // passphrase kept every word after the first readable.
+    const scrubbed = scrubTelemetryString(
+      "seed=legal winner thank year wave sausage worth useful legal winner thank yellow"
+    );
+
+    assert.equal(scrubbed, "seed=[REDACTED]");
+
+    const passphrase = scrubTelemetryString("walletPassphrase=correct horse battery staple");
+
+    assert.equal(passphrase, "walletPassphrase=[REDACTED]");
+
+    const mnemonic = scrubTelemetryString("mnemonic=legal winner thank yellow");
+
+    assert.equal(mnemonic, "mnemonic=[REDACTED]");
+  });
+
+  it("redacts every word across runs of whitespace — double spaces and tabs", () => {
+    // The continuation between words was one literal space, so a value
+    // formatted with a double space or a tab — exactly how a formatted
+    // mnemonic or passphrase renders — stopped redacting at the wide
+    // separator and left the words after it readable.
+    const doubleSpaced = scrubTelemetryString("seed=legal  winner thank year");
+
+    assert.equal(doubleSpaced, "seed=[REDACTED]");
+
+    const passphrase = scrubTelemetryString("walletPassphrase=correct  horse battery staple");
+
+    assert.equal(passphrase, "walletPassphrase=[REDACTED]");
+
+    const tabbed = scrubTelemetryString("walletPassphrase=correct\thorse battery staple");
+
+    assert.equal(tabbed, "walletPassphrase=[REDACTED]");
+
+    const mixed = scrubTelemetryString("passphrase=alpha\t beta  gamma");
+
+    assert.equal(mixed, "passphrase=[REDACTED]");
+  });
+
+  it("ends a space-separated assignment value at the next assignment, not inside it", () => {
+    // The value must not swallow a following pair: the pair's key stays
+    // structured and its own value is still redacted by the generic rule.
+    const scrubbed = scrubTelemetryString("seed=legal winner thank yellow token=sk_live_abc123");
+
+    assert.equal(scrubbed, "seed=[REDACTED] token=[REDACTED]");
+  });
+
+  it("ends a space-separated assignment value at structure", () => {
+    const scrubbed = scrubTelemetryString(
+      "Import failed (walletPassphrase=correct horse battery staple, retrying)"
+    );
+
+    assert.ok(!scrubbed.includes("horse"));
+    assert.ok(!scrubbed.includes("staple"));
+    assert.ok(scrubbed.includes(", retrying)"));
+  });
+
+  it("keeps punctuation that continues a value inside the redaction", () => {
+    // The value must not stop where the generic rule's punctuation stopped:
+    // `password=alpha;bravo` used to redact whole, and the word-list form
+    // reintroducing `;`, `)` and `]` as boundaries would leave those tails
+    // readable for a value that contains them.
+    for (const tail of [";", ")", "]", '"']) {
+      const scrubbed = scrubTelemetryString(`password=alpha${tail}bravo baz`);
+
+      assert.ok(!scrubbed.includes("alpha"), tail);
+      assert.ok(!scrubbed.includes("bravo"), tail);
+    }
+
+    const semicolonPair = scrubTelemetryString("seed=jZ2ZCg8BfJqknAfG; token=sk_live_abc123");
+
+    assert.equal(semicolonPair, "seed=[REDACTED] token=[REDACTED]");
+  });
+
+  it("keeps seed exact-only in serialized fields and assignments", () => {
+    const body =
+      '{"pda_seed":"public-derivation","pda-seed":"public-derivation","seeds":["owner","aux"]}';
+    const assignment = "pda_seed=public-derivation; pda-seed=public-derivation";
+
+    assert.equal(scrubTelemetryString(body), body);
+    assert.equal(scrubTelemetryString(assignment), assignment);
+    assert.equal(scrubTelemetryString('{"seed":"recovery phrase"}'), '{"seed":"[REDACTED]"}');
   });
 
   it("keeps a key that merely contains a denied name as a prefix", () => {
