@@ -28,6 +28,9 @@ incident or Linear ticket; the command logs them with the outcome as
   under `brokenRecurringPayments`, each with its `projectId`. Their collections fail on chain and pause them
   after the failed-attempt limit (HOO-2340). Cancel them, or once the incident
   is over, activate replacements; resuming a paused one does not re-approve.
+- An activation or update already running on the wallet when it is claimed
+  never recreates the authority or subscribes to one: it answers `409` before
+  sending either, and leaves its schedule to be activated again later.
 - Only a revoke already in flight for the same authority stops it (`held`).
   Run the command again after that one settles, or check the authority on
   chain.

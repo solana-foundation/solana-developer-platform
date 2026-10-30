@@ -3344,6 +3344,72 @@ describe("Payments routes — recurring", () => {
     }
   );
 
+  it.each([
+    ["the authority setup that would recreate it", "missing"],
+    ["the subscribe that would bind to it", "present"],
+  ] as const)(
+    "refuses %s once an incident revoke overtakes a claimed activation, then activates again",
+    async (_step, authority) => {
+      const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      let sendsAtRevoke = 0;
+      // The incident revoke lands while this activation, already claimed, is at the subscribe
+      // step: it claims and confirms its revoke, then the activation reads the authority.
+      fetchMaybeSubscriptionAuthorityMock.mockImplementationOnce(async () => {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO payment_subscription_authority_revocations
+               (id, organization_id, project_id, environment, custody_wallet_id, wallet_address,
+                token_mint, subscription_authority_address, status, lease_id)
+             VALUES ('psar_incident', ?, ?, 'sandbox', ?, ?, ?, ?, 'confirmed', 'lease_incident')`
+          )
+          .bind(
+            TEST_ORG.id,
+            TEST_PROJECT.id,
+            TEST_CUSTODY_WALLET_ID,
+            recurringExecution.sourceSigner().address,
+            TEST_SOLANA_ADDRESSES.wallet3,
+            TEST_SOLANA_ADDRESSES.wallet1
+          )
+          .run();
+        sendsAtRevoke = sendTransactionMock.mock.calls.length;
+        return authority === "missing"
+          ? noAccount
+          : ({
+              exists: true,
+              address: address(TEST_SOLANA_ADDRESSES.wallet3),
+              data: { initId: 1n },
+            } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>>);
+      });
+
+      const overtaken = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(overtaken.status).toBe(409);
+      expect(await overtaken.json()).toEqual({
+        error: {
+          code: "CONFLICT",
+          message:
+            "This wallet's recurring payment authorization was revoked during this change; retry it",
+        },
+        meta: { requestId: expect.stringMatching(/^req_/) },
+      });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsAtRevoke);
+      expect((await recurringPaymentDueAt(recurringPayment.id)).status).toBe("pending_activation");
+
+      // Activated again once the incident is over, it claims after the revoke and goes through.
+      const again = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(again.status).toBe(200);
+      expect((await parseRecurringResponse(again)).data.recurringPayment.status).toBe("active");
+    }
+  );
+
   it("refuses a resume while a revoke holds the wallet's authorities, leaving it paused", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await pauseRecurringPayment(activated.id);

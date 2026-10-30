@@ -193,6 +193,12 @@ export interface SubscriptionAuthorityRevocationsRepository {
    * decides.
    */
   lockWalletAuthorities(walletAddress: string): Promise<void>;
+  /**
+   * How many revokes the wallet's authorities have ever had, in any status. Rows are never
+   * deleted, so a higher count later means a revoke was claimed in between. Call under the
+   * wallet's lock.
+   */
+  countRevocations(input: { environment: SdpEnvironment; walletAddress: string }): Promise<number>;
   /** Whether a revoke holds any of the wallet's authorities. Call under the wallet's lock. */
   hasRevocationHolding(input: {
     environment: SdpEnvironment;
@@ -332,6 +338,15 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
         "SELECT pg_advisory_xact_lock(hashtext('sdp:subscription-authority'), hashtext(?::text))",
         [walletAddress]
       );
+    },
+
+    async countRevocations({ environment, walletAddress }) {
+      const row = await db.queryOne<{ revocations: string }>(
+        `SELECT COUNT(*) AS revocations FROM payment_subscription_authority_revocations
+          WHERE environment = ? AND wallet_address = ?`,
+        [environment, walletAddress]
+      );
+      return Number(row?.revocations ?? 0);
     },
 
     async hasRevocationHolding({ environment, walletAddress }) {
