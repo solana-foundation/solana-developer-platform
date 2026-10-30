@@ -88,6 +88,22 @@ export function vaultWithdrawalAmountError(
   return amount.trim() === "" || amountValidation.kind === "valid" ? null : invalidMessage;
 }
 
+/**
+ * Whether the entered amount is above the available ceiling, so the field can
+ * show the over-amount warning beside it. Same derivation as every exit that
+ * converts an amount to shares: the conversion silently answers undefined for
+ * an amount above the ceiling, so without this the over-available amount
+ * would disable Continue with no explanation.
+ */
+export function vaultWithdrawalAmountExceedsAvailable(
+  amountValidation: VaultWithdrawalAmountValidation,
+  availableAmount: string | undefined
+): boolean {
+  return amountValidation.kind === "valid" && availableAmount !== undefined
+    ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
+    : false;
+}
+
 function multiplyDivideDecimal(
   left: string,
   right: string,

@@ -33,6 +33,20 @@ export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "s
   return movement.status === "confirmed" || movement.status === "finalized";
 }
 
+/**
+ * A committed movement whose commit this page has WITNESSED — the
+ * `committedObservedAt` stamp exists. Status alone says the chain reached
+ * confirmation; the stamp says a movement observer saw it and stamped the
+ * wall clock. Balance refreshes act only on witnessed commits, so a status
+ * that arrived without its observer (a mid-render read, a recovered record)
+ * keeps waiting for its evidence.
+ */
+export function isObservedCommittedVaultMovement(
+  movement: Pick<TrackedVaultMovement, "status" | "committedObservedAt">
+): boolean {
+  return isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined;
+}
+
 export function hasUnconfirmedVaultMovement(
   activities: readonly VaultActivity[],
   positionId?: string
@@ -81,8 +95,7 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
   return activities.filter(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
-      isCommittedVaultMovement(movement) &&
-      movement.committedObservedAt !== undefined &&
+      isObservedCommittedVaultMovement(movement) &&
       (!acknowledgedMovements.has(movement.movementId) ||
         unreadablePositions.has(movement.positionId))
   );

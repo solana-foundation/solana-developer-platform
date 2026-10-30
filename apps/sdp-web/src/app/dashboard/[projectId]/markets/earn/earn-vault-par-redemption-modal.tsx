@@ -17,43 +17,47 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
-import { useSWRConfig } from "swr";
+import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
+import {
+  EarnBlockingIssues,
+  EarnPendingStatus,
+  EarnReviewActions,
+  useVaultRequestPreview,
+  useVaultRequestResultView,
+  useVaultRequestSubmission,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-vault-request-flow";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
-import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
-import { formatProviderAmount, formatTokenValue, shortenMarketAddress } from "./earn-format";
+import { formatProviderAmount, formatTokenValue, positionDisplayName } from "./earn-format";
 import { TransactionLink } from "./earn-market-presentation";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import {
-  cancelEarnVaultWithdrawalRequest,
-  createEarnVaultWithdrawalRequest,
-  type EarnVaultQueuedWithdrawalOutcome,
   fetchEarnVaultParRedemptionPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
-import { earnQueryKeys } from "./earn-query-key";
-import {
-  vaultAsyncWithdrawalIdempotencyKeyStore,
-  vaultAsyncWithdrawalRequestFingerprint,
-} from "./earn-vault-async-withdrawal-tracking";
+import { vaultAsyncWithdrawalRequestFingerprint } from "./earn-vault-async-withdrawal-tracking";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultParRedemptionStatusPresentation,
   isEarnVaultParRedemptionCancelable,
   isEarnVaultParRedemptionTerminal,
 } from "./earn-vault-par-redemption-presentation";
+import {
+  withdrawalRequestFlowStepIndex,
+  withdrawalRequestFlowStepKey,
+  withdrawalRequestFlowSteps,
+} from "./earn-vault-request-flow-steps";
 import { earnStatusTextTone } from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
+  vaultWithdrawalAmountExceedsAvailable,
   vaultWithdrawalAvailableAmount,
   vaultWithdrawalSharesForAmount,
 } from "./earn-vault-withdraw-amount";
@@ -158,10 +162,7 @@ function parRedemptionAmountState(
     belowBatchMinimum:
       canonical !== undefined &&
       compareUnsignedDecimals(canonical, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1,
-    overAvailableAmount:
-      canonical !== undefined && availableAmount !== undefined
-        ? compareUnsignedDecimals(canonical, availableAmount) === 1
-        : false,
+    overAvailableAmount: vaultWithdrawalAmountExceedsAvailable(validation, availableAmount),
   };
   if (source === "intermediate") {
     return {
@@ -185,175 +186,6 @@ function parRedemptionAmountState(
     intermediateAmount: undefined,
     shares,
   };
-}
-
-function parRedemptionSteps(t: ReturnType<typeof useTranslations>): string[] {
-  return [
-    t("DashboardEarn.vaultWithdraw.flowDetails"),
-    t("DashboardEarn.vaultWithdraw.flowReview"),
-    t("DashboardEarn.parRedemption.flowRequested"),
-  ];
-}
-
-function parRedemptionStepIndex(
-  outcome: EarnVaultQueuedWithdrawalOutcome | null,
-  step: FormStep
-): number {
-  if (outcome) return 2;
-  return step === "review" ? 1 : 0;
-}
-
-function parRedemptionStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | null, step: FormStep) {
-  return outcome ? `result:${outcome.kind}` : step;
-}
-
-function freshCancelRecord(
-  cancelResult: EarnVaultWithdrawalRequestRecord | null,
-  observed: EarnVaultWithdrawalRequestRecord | undefined,
-  submitted: EarnVaultWithdrawalRequestRecord
-): EarnVaultWithdrawalRequestRecord {
-  if (cancelResult === null) return observed ?? submitted;
-  if (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt)) {
-    return cancelResult;
-  }
-  return observed;
-}
-
-function useParRedemptionPreview(
-  input: EarnVaultParRedemptionTermsRequest | null,
-  active: boolean
-) {
-  const t = useTranslations();
-  const [preview, setPreview] = useState<EarnVaultParRedemptionPreview | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!active || !input) return;
-    const controller = new AbortController();
-    setPreview(null);
-    setLoading(true);
-    setError(null);
-    void fetchEarnVaultParRedemptionPreview(input, controller.signal)
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        if (result.kind === "ready") setPreview(result.value);
-        else setError(t("DashboardEarn.parRedemption.previewError"));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [active, input, t]);
-
-  return { preview, loading, error, setError };
-}
-
-function useParRedemptionSubmission(options: {
-  onSubmissionStart?: VaultSubmissionObserver;
-  custodyWalletId: string;
-  onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
-  projectId: string | null;
-  setError: (error: string | null) => void;
-}) {
-  const t = useTranslations();
-  const { mutate } = useSWRConfig();
-  const [submitting, setSubmitting] = useState(false);
-  const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
-
-  async function submit(
-    input: EarnVaultParRedemptionTermsRequest | null,
-    preview: EarnVaultParRedemptionPreview | null
-  ) {
-    if (!input || !preview || preview.blockingIssues.length > 0) return;
-    setSubmitting(true);
-    const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
-    options.setError(null);
-    try {
-      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-        projectId: options.projectId,
-        positionId: input.positionId,
-        ...(input.intermediateAmount === undefined
-          ? { shares: input.shares }
-          : { intermediateAmount: input.intermediateAmount }),
-        route: { kind: "operator_redemption" },
-      });
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      if (!persisted) {
-        options.setError(t("DashboardEarn.intentStorageUnavailable"));
-        return;
-      }
-      const result = await createEarnVaultWithdrawalRequest(input, key);
-      // A withdrawal request moves money: an unknown outcome or a reused key
-      // keeps the key, so the next press is answered under it.
-      const answer = fetchResultAnswer(result);
-      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
-      const uncertain = uncertainMoneyAnswerMessage(answer);
-      if (result.ok) {
-        setOutcome(result.data);
-        options.onRequested?.(result.data.withdrawalRequest);
-      } else if (uncertain !== null) {
-        options.setError(t(uncertain));
-        void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
-      } else {
-        options.setError(result.error);
-      }
-    } finally {
-      finishSubmission?.();
-      setSubmitting(false);
-    }
-  }
-
-  return { submitting, outcome, submit };
-}
-
-/**
- * Owns the settled-request view model: local cancellation state wins only
- * until server polling reports a record at least as fresh, and the recovery
- * cancel action reuses one idempotency key per ambiguous transport attempt.
- */
-function useParRedemptionRequestView(
-  submitted: EarnVaultWithdrawalRequestRecord,
-  observed: EarnVaultWithdrawalRequestRecord | undefined,
-  cancelAllowed: boolean
-) {
-  const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
-  const t = useTranslations();
-  const request = freshCancelRecord(cancelResult, observed, submitted);
-  const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
-
-  async function cancel() {
-    if (!cancelable || cancelling) return;
-    setCancelling(true);
-    setCancelError(null);
-    const fingerprint = `cancel:${request.withdrawalRequestId}`;
-    try {
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      if (!persisted) {
-        setCancelError(t("DashboardEarn.intentStorageUnavailable"));
-        return;
-      }
-      const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
-      if (result.ok) {
-        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
-        setCancelResult(result.data);
-      } else {
-        settleIdempotencyKey(
-          vaultAsyncWithdrawalIdempotencyKeyStore,
-          fingerprint,
-          key,
-          fetchResultAnswer(result)
-        );
-        setCancelError(result.error);
-      }
-    } finally {
-      setCancelling(false);
-    }
-  }
-
-  return { cancel, cancelError, cancelable, cancelling, request };
 }
 
 function ParRedemptionResultDetails({
@@ -408,11 +240,11 @@ function ParRedemptionResult({
 }) {
   const t = useTranslations();
   const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
-  const { cancel, cancelError, cancelable, cancelling, request } = useParRedemptionRequestView(
-    submitted,
+  const { cancel, cancelable, cancelError, cancelling, request } = useVaultRequestResultView({
+    cancelable: (candidate) => terms.cancelable && isEarnVaultParRedemptionCancelable(candidate),
     observed,
-    terms.cancelable
-  );
+    submitted,
+  });
   const presentation = earnVaultParRedemptionStatusPresentation(request.status);
   const terminal = isEarnVaultParRedemptionTerminal(request.status);
 
@@ -589,10 +421,7 @@ function ParRedemptionReview({
     <>
       <p className="mt-1 text-body text-secondary">{t(PAR_SOURCE_COPY[source].reviewBody)}</p>
       {loading ? (
-        <div className="mt-5 flex items-center gap-2 text-body text-secondary" role="status">
-          <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
-          {t("DashboardEarn.parRedemption.previewLoading")}
-        </div>
+        <EarnPendingStatus>{t("DashboardEarn.parRedemption.previewLoading")}</EarnPendingStatus>
       ) : preview ? (
         <DetailList className="mt-5" variant="summary">
           <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.expectedAmount")}>
@@ -608,18 +437,10 @@ function ParRedemptionReview({
         </DetailList>
       ) : null}
       {preview && preview.blockingIssues.length > 0 ? (
-        <Callout
-          className="mt-4"
-          live
+        <EarnBlockingIssues
+          issues={preview.blockingIssues}
           title={t("DashboardEarn.parRedemption.previewBlocked")}
-          variant="warning"
-        >
-          <ul className="list-disc space-y-1 pl-5">
-            {preview.blockingIssues.map((issue) => (
-              <li key={`${issue.code}:${issue.message}`}>{issue.message}</li>
-            ))}
-          </ul>
-        </Callout>
+        />
       ) : null}
       {belowBatchMinimum ? (
         <Callout className="mt-4" live variant="warning">
@@ -628,21 +449,15 @@ function ParRedemptionReview({
       ) : null}
       <p className="mt-4 text-meta text-tertiary">{t(PAR_SOURCE_COPY[source].reviewNotice)}</p>
       {error ? <EarnErrorNote message={error} /> : null}
-      <div className="mt-6 flex gap-2">
-        <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
-          {t("DashboardEarn.deposit.back")}
-        </Button>
-        <Button
-          className="flex-[2]"
-          disabled={submitting || loading || !preview || preview.blockingIssues.length > 0}
-          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
-          onClick={onSubmit}
-        >
-          {submitting
-            ? t("DashboardEarn.parRedemption.submitting")
-            : t("DashboardEarn.parRedemption.submit")}
-        </Button>
-      </div>
+      <EarnReviewActions
+        backLabel={t("DashboardEarn.deposit.back")}
+        onBack={onBack}
+        onSubmit={onSubmit}
+        submitDisabled={submitting || loading || !preview || preview.blockingIssues.length > 0}
+        submitLabel={t("DashboardEarn.parRedemption.submit")}
+        submitting={submitting}
+        submittingLabel={t("DashboardEarn.parRedemption.submitting")}
+      />
     </>
   );
 }
@@ -692,13 +507,7 @@ function ParRedemptionForm({
 }) {
   return (
     <>
-      <h2
-        className="pr-8 text-subheading font-medium text-primary"
-        data-modal-focus-target
-        tabIndex={-1}
-      >
-        {modalLabel}
-      </h2>
+      <h2 className="pr-8 text-subheading font-medium text-primary">{modalLabel}</h2>
       {step === "details" ? (
         <ParRedemptionDetails
           amount={amount}
@@ -751,15 +560,30 @@ export function EarnVaultParRedemptionModal({
       parPreviewInput(position, { belowMinimum, intermediateAmount, overAvailableAmount, shares }),
     [position, belowMinimum, intermediateAmount, overAvailableAmount, shares]
   );
-  const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
-  const { submitting, outcome, submit } = useParRedemptionSubmission({
-    onSubmissionStart,
-    custodyWalletId: position.custodyWalletId,
-    onRequested,
-    projectId,
-    setError,
-  });
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const { preview, previewLoading, error, setError } = useVaultRequestPreview(
+    input,
+    step === "review",
+    fetchEarnVaultParRedemptionPreview,
+    "DashboardEarn.parRedemption.previewError"
+  );
+  const { submitting, outcome, submit } =
+    useVaultRequestSubmission<EarnVaultParRedemptionTermsRequest>({
+      custodyWalletId: position.custodyWalletId,
+      fingerprint: (redemptionInput) =>
+        vaultAsyncWithdrawalRequestFingerprint({
+          projectId,
+          positionId: redemptionInput.positionId,
+          ...(redemptionInput.intermediateAmount === undefined
+            ? { shares: redemptionInput.shares }
+            : { intermediateAmount: redemptionInput.intermediateAmount }),
+          route: { kind: "operator_redemption" },
+        }),
+      onRequested,
+      onSubmissionStart,
+      projectId,
+      setError,
+    });
+  const positionName = positionDisplayName(position);
   const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
   return (
@@ -772,10 +596,10 @@ export function EarnVaultParRedemptionModal({
     >
       <div className="p-6">
         <EarnFlowStepper
-          currentStep={parRedemptionStepIndex(outcome, step)}
-          steps={parRedemptionSteps(t)}
+          currentStep={withdrawalRequestFlowStepIndex(outcome, step)}
+          steps={withdrawalRequestFlowSteps(t, "DashboardEarn.parRedemption.flowRequested")}
         />
-        <EarnFlowTransition stepKey={parRedemptionStepKey(outcome, step)}>
+        <EarnFlowTransition stepKey={withdrawalRequestFlowStepKey(outcome, step)}>
           {outcome ? (
             <ParRedemptionResult
               environment={environment}
@@ -793,7 +617,7 @@ export function EarnVaultParRedemptionModal({
               belowMinimum={amountState.belowMinimum}
               detailsValid={input !== null}
               error={error}
-              loading={loading}
+              loading={previewLoading}
               modalLabel={modalLabel}
               onAmountChange={setAmount}
               onBack={() => setStep("details")}

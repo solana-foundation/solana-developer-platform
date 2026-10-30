@@ -5,7 +5,7 @@ import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { Modal } from "@sdp/ui/modal";
-import { ArrowRightIcon, Clock3Icon, Loader2Icon, type LucideIcon, ZapIcon } from "lucide-react";
+import { ArrowRightIcon, Clock3Icon, type LucideIcon, ZapIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDurationSeconds, positionDisplayName } from "./earn-format";
@@ -18,6 +18,7 @@ import {
 } from "./earn-vault-async-withdrawal";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import type { EarnVaultParRedemptionSource } from "./earn-vault-par-redemption-modal";
+import { EarnPendingStatus } from "./earn-vault-request-flow";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 interface EarnVaultExitModalProps {
@@ -189,12 +190,7 @@ function ExitRouteChooser({
 
   let body: ReactNode;
   if (!options) {
-    body = (
-      <div className="mt-5 flex items-center gap-2 text-body text-secondary" role="status">
-        <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
-        {t("DashboardEarn.exitRoute.loading")}
-      </div>
-    );
+    body = <EarnPendingStatus>{t("DashboardEarn.exitRoute.loading")}</EarnPendingStatus>;
   } else if (options.kind === "unavailable") {
     body = (
       <Callout className="mt-5" variant="warning">
@@ -213,13 +209,7 @@ function ExitRouteChooser({
   return (
     <Modal isOpen ariaLabel={modalLabel} onClose={onClose} {...EARN_TRANSACTION_MODAL_FRAME}>
       <div className="p-6">
-        <h2
-          className="pr-8 text-subheading font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {modalLabel}
-        </h2>
+        <h2 className="pr-8 text-subheading font-medium text-primary outline-none">{modalLabel}</h2>
         {body}
       </div>
     </Modal>

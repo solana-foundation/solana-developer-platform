@@ -92,31 +92,43 @@ function useWithdrawalRequestId(
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
-const WITHDRAWAL_STATUS_BADGES = {
-  processing: { variant: "warning", key: "DashboardEarn.withdraw.statusProcessing" },
-  pending_approval: { variant: "warning", key: "DashboardEarn.withdraw.statusPendingApproval" },
-  completed: { variant: "success", key: "DashboardEarn.withdraw.statusCompleted" },
-  partially_completed: {
+const WITHDRAWAL_STATUS_PRESENTATION = {
+  processing: {
+    descriptionKey: "DashboardEarn.withdraw.createdDescription",
+    labelKey: "DashboardEarn.withdraw.statusProcessing",
     variant: "warning",
-    key: "DashboardEarn.withdraw.statusPartiallyCompleted",
   },
-  failed: { variant: "danger", key: "DashboardEarn.withdraw.statusFailed" },
-  cancelled: { variant: "danger", key: "DashboardEarn.withdraw.statusCancelled" },
+  pending_approval: {
+    // SDP does not expose a provider's customer-approval actions yet. Say where the
+    // withdrawal is parked and prevent an unsafe duplicate submission.
+    descriptionKey: "DashboardEarn.withdraw.pendingApprovalDescription",
+    labelKey: "DashboardEarn.withdraw.statusPendingApproval",
+    variant: "warning",
+  },
+  completed: {
+    descriptionKey: "DashboardEarn.overview.withdrawalCompleted",
+    labelKey: "DashboardEarn.withdraw.statusCompleted",
+    variant: "success",
+  },
+  partially_completed: {
+    descriptionKey: "DashboardEarn.overview.withdrawalPartiallyCompleted",
+    labelKey: "DashboardEarn.withdraw.statusPartiallyCompleted",
+    variant: "warning",
+  },
+  failed: {
+    descriptionKey: "DashboardEarn.overview.withdrawalFailed",
+    labelKey: "DashboardEarn.withdraw.statusFailed",
+    variant: "danger",
+  },
+  cancelled: {
+    descriptionKey: "DashboardEarn.overview.withdrawalCancelled",
+    labelKey: "DashboardEarn.withdraw.statusCancelled",
+    variant: "danger",
+  },
 } as const satisfies Record<
   EarnPortfolioWithdrawal["status"],
-  { variant: "success" | "warning" | "danger"; key: MessageKey }
+  { descriptionKey: MessageKey; labelKey: MessageKey; variant: "success" | "warning" | "danger" }
 >;
-
-const WITHDRAWAL_STATUS_DESCRIPTIONS = {
-  processing: "DashboardEarn.withdraw.createdDescription",
-  // SDP does not expose a provider's customer-approval actions yet. Say where the
-  // withdrawal is parked and prevent an unsafe duplicate submission.
-  pending_approval: "DashboardEarn.withdraw.pendingApprovalDescription",
-  completed: "DashboardEarn.overview.withdrawalCompleted",
-  partially_completed: "DashboardEarn.overview.withdrawalPartiallyCompleted",
-  failed: "DashboardEarn.overview.withdrawalFailed",
-  cancelled: "DashboardEarn.overview.withdrawalCancelled",
-} as const satisfies Record<EarnPortfolioWithdrawal["status"], MessageKey>;
 
 type PreviewState =
   | { phase: "idle" }
@@ -380,20 +392,18 @@ function WithdrawalCreatedView({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const badge = WITHDRAWAL_STATUS_BADGES[withdrawal.status];
+  const status = WITHDRAWAL_STATUS_PRESENTATION[withdrawal.status];
   return (
     <>
       <div className="flex items-center gap-3 pr-8">
         <h2 className="text-subheading font-medium text-primary">
           {t("DashboardEarn.withdraw.createdTitle")}
         </h2>
-        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(badge.variant)}>
-          {t(badge.key)}
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(status.variant)}>
+          {t(status.labelKey)}
         </StatusText>
       </div>
-      <p className="mt-2 text-body text-secondary">
-        {t(WITHDRAWAL_STATUS_DESCRIPTIONS[withdrawal.status])}
-      </p>
+      <p className="mt-2 text-body text-secondary">{t(status.descriptionKey)}</p>
 
       <DetailList className="mt-5" variant="summary">
         <DetailRow fit="figure" label={t("DashboardEarn.withdraw.amountLabel")}>

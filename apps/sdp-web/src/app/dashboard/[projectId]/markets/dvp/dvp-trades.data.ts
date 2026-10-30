@@ -42,7 +42,6 @@ function legsRenderable(legs: unknown): boolean {
   );
 }
 
-/** Never throws: a list page that renders an error beats one that 500s. */
 /**
  * Whether a decoded body is a trade this UI can actually render.
  *
@@ -69,6 +68,8 @@ function isRenderableTrade(value: unknown): value is DvpTrade {
 
 /**
  * Reads the project's trades, narrowed server-side by the given filters.
+ *
+ * Never throws: a list page that renders an error beats one that 500s.
  *
  * The filters ride the query string because the upstream list is capped with
  * no cursor: a client-side filter over the newest page makes a matching trade

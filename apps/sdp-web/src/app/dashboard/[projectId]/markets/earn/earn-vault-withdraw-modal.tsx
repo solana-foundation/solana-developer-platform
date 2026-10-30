@@ -15,11 +15,11 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
-import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
+import { EarnReviewActions } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-request-flow";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
@@ -70,6 +70,7 @@ import {
   validateVaultWithdrawalShares,
   vaultProviderOrderShares,
   vaultWithdrawalAmountError,
+  vaultWithdrawalAmountExceedsAvailable,
   vaultWithdrawalAvailableAmount,
   vaultWithdrawalSharesForValidatedAmount,
 } from "./earn-vault-withdraw-amount";
@@ -193,10 +194,10 @@ function deriveWithdrawalFormState(
     position.shares !== undefined &&
     position.withdrawableShares !== undefined &&
     compareUnsignedDecimals(position.shares, position.withdrawableShares) === 1;
-  const overAvailableAmount =
-    amountValidation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
-      : false;
+  const overAvailableAmount = vaultWithdrawalAmountExceedsAvailable(
+    amountValidation,
+    availableAmount
+  );
   const amountError = vaultWithdrawalAmountError(
     amountInput,
     amountValidation,
@@ -705,21 +706,15 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
       </p>
       {submitError ? <EarnErrorNote message={submitError} /> : null}
 
-      <div className="mt-6 flex gap-2">
-        <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
-          {t("DashboardEarn.deposit.back")}
-        </Button>
-        <Button
-          className="flex-[2]"
-          disabled={submitting || submitBlocked}
-          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
-          onClick={onSubmit}
-        >
-          {submitting
-            ? t("DashboardEarn.vaultWithdraw.submitting")
-            : t("DashboardEarn.vaultWithdraw.submit")}
-        </Button>
-      </div>
+      <EarnReviewActions
+        backLabel={t("DashboardEarn.deposit.back")}
+        onBack={onBack}
+        onSubmit={onSubmit}
+        submitDisabled={submitting || submitBlocked}
+        submitLabel={t("DashboardEarn.vaultWithdraw.submit")}
+        submitting={submitting}
+        submittingLabel={t("DashboardEarn.vaultWithdraw.submitting")}
+      />
     </>
   );
 }
