@@ -34,7 +34,7 @@ export async function fetchWalletBalancesAction(
   ]);
   const channel = channelResult.status === "fulfilled" ? channelResult.value : null;
   const wallets = walletsResult.status === "fulfilled" ? walletsResult.value : [];
-  const wallet = wallets.find((w) => w.walletId === walletId);
+  const wallet = wallets.find((w) => w.id === walletId);
   // Prefer the requested mint; fall back to whichever the channel read resolved so
   // a caller without a token list still lines both sides up on the same token.
   const wantedMint = mint ?? channel?.mint;

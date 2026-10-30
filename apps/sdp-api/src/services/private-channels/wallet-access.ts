@@ -1,9 +1,10 @@
 import type { MovementOf } from "@sdp/types/movements";
+import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import {
   AppError,
-  conflict,
+  badRequest,
   missingAction,
   providerUnavailable,
   walletNotFound,
@@ -31,33 +32,16 @@ export async function resolvePrivateChannelCustodyWallet(
   auth: ApiKeyContext,
   projectId: string,
   selector: string,
-  wallets?: CustodyWallet[],
-  allowAddress = false
+  wallets?: CustodyWallet[]
 ): Promise<CustodyWallet> {
   if (!authMayPerform(auth, "private_channels.execute")) {
     throw missingAction("private_channels.execute");
   }
   const candidates =
     wallets ?? (await listPrivateChannelCustodyWallets(env, auth.organizationId, projectId));
-  const matches = candidates.filter(
-    (wallet) => wallet.walletId === selector || (allowAddress && wallet.publicKey === selector)
-  );
-  if (matches.length > 1) throw conflict("Custody wallet ownership is ambiguous");
-  const wallet = matches[0];
+  const wallet = candidates.find((candidate) => candidate.id === selector);
   if (!wallet) throw walletNotFound();
 
-  // Retained records must not silently disappear into an active replacement.
-  const owned = await new CustodyRuntimeTargets(
-    getDb(env),
-    env,
-    new Map()
-  ).findOwnedWalletForMutation({
-    organizationId: auth.organizationId,
-    projectId,
-    walletId: selector,
-    publicKey: allowAddress ? selector : undefined,
-  });
-  if (owned?.id !== wallet.id) throw conflict("Custody wallet ownership is ambiguous");
   // The custody signer refuses a wallet outside the key's scope for every
   // movement, withdrawals included (HOO-2099); refusing here as well stops the
   // flow before it records a movement or calls the gateway.
@@ -86,4 +70,18 @@ export async function createPrivateChannelSigner(
     if (error instanceof AppError) throw error;
     throw providerUnavailable("The source custody wallet is not currently signable.");
   }
+}
+
+/** Resolve Q7 address fields without accepting a provider wallet reference. */
+export function resolvePrivateChannelWalletAddress(
+  wallets: CustodyWallet[],
+  value: string,
+  fieldName: string
+): string {
+  const wallet = wallets.find((candidate) => candidate.id === value);
+  if (wallet) return wallet.publicKey;
+  if (!isAddress(value)) {
+    throw badRequest(`${fieldName} must be an internal SDP wallet ID or a valid Solana address`);
+  }
+  return value;
 }

@@ -319,25 +319,7 @@ describe("OperationComposer USDC", () => {
     }
   });
 
-  it("withdraws to its custody address", async () => {
-    renderComposer([]);
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
-    await fillShield(user);
-    await user.click(screen.getByRole("button", { name: "Review" }));
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-
-    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        walletId: "hrw_treasury",
-        opType: "withdraw",
-        to: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-      })
-    );
-  });
-
-  it("submits a USDC withdrawal from the default ring", async () => {
+  it("withdraws USDC from the default ring to its custody address", async () => {
     renderComposer([]);
 
     const user = userEvent.setup();
@@ -351,7 +333,9 @@ describe("OperationComposer USDC", () => {
     expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
       // USDC has six decimals, so "1.5" is 1_500_000 base units.
       expect.objectContaining({
+        walletId: "hrw_treasury",
         opType: "withdraw",
+        to: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
         asset: { mint: USDC_MINT, amountRaw: "1500000" },
       })
     );

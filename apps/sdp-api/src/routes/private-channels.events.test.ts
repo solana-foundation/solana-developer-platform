@@ -395,6 +395,7 @@ describe("Private Channels — event routes", () => {
           id: "pcvw_event_test",
           user_id: "pcu_event_test",
           wallet_id: "wallet_event_test",
+          custody_wallet_id: "cw_event_test",
           pubkey,
           verified_at: "2026-07-30T12:00:00.000Z",
         },
@@ -408,7 +409,7 @@ describe("Private Channels — event routes", () => {
     let res: Response;
     try {
       res = await app.request(
-        "/v1/private-channels/wallets/wallet_event_test/verify",
+        "/v1/private-channels/wallets/cw_event_test/verify",
         { method: "POST", headers: authHeaders() },
         env
       );
@@ -422,7 +423,7 @@ describe("Private Channels — event routes", () => {
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED)
       .first<{
         payload: {
-          walletId: string;
+          custodyWalletId: string;
           pubkey: string;
           principalId: string;
           actorId: string;
@@ -430,7 +431,7 @@ describe("Private Channels — event routes", () => {
         };
       }>();
     expect(event?.payload).toEqual({
-      walletId: "wallet_event_test",
+      custodyWalletId: "cw_event_test",
       pubkey,
       principalId: "pcu_event_test",
       actorId: TEST_API_KEY.id,

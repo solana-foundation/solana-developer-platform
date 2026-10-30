@@ -14,6 +14,7 @@ import {
   buildPrivateChannelDepositFingerprint,
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
+import * as channelBalance from "@/services/private-channels/balance";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -189,7 +190,7 @@ function depositDto(overrides: Partial<PrivateChannelDeposit>): PrivateChannelDe
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
-    walletId: ACTOR_WALLET_ID,
+    custodyWalletId: "cw-pcv-actor",
     depositor: ACTOR_ADDRESS,
     recipient: ACTOR_ADDRESS,
     mint: EXTERNAL_ADDRESS,
@@ -211,7 +212,7 @@ function withdrawalDto(overrides: Partial<PrivateChannelWithdrawal>): PrivateCha
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
-    walletId: ACTOR_WALLET_ID,
+    custodyWalletId: "cw-pcv-actor",
     owner: ACTOR_ADDRESS,
     destination: ACTOR_ADDRESS,
     mint: EXTERNAL_ADDRESS,
@@ -432,11 +433,13 @@ async function privateChannelRows(): Promise<Record<string, unknown[]>> {
 }
 
 async function recordedDeposit(recipient: string) {
-  return createPrivateChannelDepositRepository(env).createDeposit({
+  const repo = createPrivateChannelDepositRepository(env);
+  const row = await repo.createDeposit({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
     walletId: ACTOR_WALLET_ID,
+    custodyWalletId: "cw-pcv-actor",
     depositor: ACTOR_ADDRESS,
     recipient,
     mint: EXTERNAL_ADDRESS,
@@ -451,14 +454,27 @@ async function recordedDeposit(recipient: string) {
       amount: "1.5",
     }),
   });
+  assert(row);
+  // Keep this fixture representative of history written before custody pins existed.
+  await getDb(env)
+    .prepare("UPDATE private_channel_deposits SET custody_wallet_id = NULL WHERE id = ?")
+    .bind(row.id)
+    .run();
+  return repo.getDepositById({
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    id: row.id,
+  });
 }
 
 async function recordedWithdrawal(destination: string) {
-  const row = await createPrivateChannelWithdrawalRepository(env).createWithdrawal({
+  const repo = createPrivateChannelWithdrawalRepository(env);
+  const row = await repo.createWithdrawal({
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
     walletId: ACTOR_WALLET_ID,
+    custodyWalletId: "cw-pcv-actor",
     owner: ACTOR_ADDRESS,
     destination,
     mint: EXTERNAL_ADDRESS,
@@ -474,7 +490,18 @@ async function recordedWithdrawal(destination: string) {
     }),
   });
   assert(row);
-  return row;
+  // Keep this fixture representative of history written before custody pins existed.
+  await getDb(env)
+    .prepare("UPDATE private_channel_withdrawals SET custody_wallet_id = NULL WHERE id = ?")
+    .bind(row.id)
+    .run();
+  return required(
+    await repo.getWithdrawalById({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      id: row.id,
+    })
+  );
 }
 
 async function abandonedWithdrawal() {
@@ -552,17 +579,167 @@ describe("Private Channels — deposit and withdrawal access", () => {
       await clearKVStores(env);
 
       for (const post of [postDeposit, postWithdrawal]) {
-        const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders());
+        const response = await post(
+          { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
+          apiKeyHeaders()
+        );
         expect(response.status).toBe(200);
       }
       if (replay) expect(providerSignerMock).not.toHaveBeenCalled();
     }
   );
 
+  it("keeps the C2 retained key and source evidence through strict cutover and ambiguous history", async () => {
+    const original = required(await recordedDeposit(ACTOR_ADDRESS));
+    const repo = createPrivateChannelDepositRepository(env);
+    const scope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID, id: original.id };
+    const body = { custodyWalletId: "cw-pcv-actor", amount: "1.5" };
+    expect(
+      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+    ).toBe(400);
+    const replay = await postDeposit(body, humanHeaders({}));
+    expect(replay.status).toBe(200);
+    const { data } = await replay.json();
+    expect(data).toMatchObject({
+      id: original.id,
+      custodyWalletId: "cw-pcv-actor",
+      depositor: ACTOR_ADDRESS,
+    });
+    expect(data).not.toHaveProperty("walletId");
+    expect(await repo.getDepositById(scope)).toEqual(original);
+
+    await getDb(env)
+      .prepare(`INSERT INTO custody_configs
+      (id, organization_id, project_id, provider, config_encrypted, status)
+      SELECT 'cust-pcv-retained', organization_id, project_id, provider, config_encrypted, 'archived'
+      FROM custody_configs WHERE id = 'cust-pcv'`)
+      .run();
+    await getDb(env)
+      .prepare(`INSERT INTO custody_wallets
+      (id, custody_config_id, wallet_id, public_key, status)
+      VALUES ('cw-pcv-sibling', 'cust-pcv-retained', ?, ?, 'inactive')`)
+      .bind(ACTOR_WALLET_ID, COLLEAGUE_ADDRESS)
+      .run();
+    const distinctAddress = await app.request(
+      `/v1/private-channels/deposits/${original.id}`,
+      { headers: humanHeaders({}) },
+      env
+    );
+    expect(distinctAddress.status).toBe(200);
+    expect(await distinctAddress.json()).toMatchObject({
+      data: { id: original.id, custodyWalletId: "cw-pcv-actor" },
+    });
+    expect((await postDeposit(body, humanHeaders({}))).status).toBe(200);
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET public_key = ? WHERE id = 'cw-pcv-sibling'")
+      .bind(ACTOR_ADDRESS)
+      .run();
+    expect((await postDeposit(body, humanHeaders({}))).status).toBe(409);
+    for (const suffix of [`/${original.id}`, ""]) {
+      const response = await app.request(
+        `/v1/private-channels/deposits${suffix}`,
+        { headers: humanHeaders({}) },
+        env
+      );
+      expect(response.status).toBe(200);
+      const { data: history } = await response.json();
+      const item = suffix ? history : history.deposits[0];
+      expect(item).toMatchObject({
+        id: original.id,
+        custodyWalletId: null,
+        depositor: ACTOR_ADDRESS,
+      });
+      expect(item).not.toHaveProperty("walletId");
+    }
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          "UPDATE private_channel_deposits SET custody_wallet_id = 'cw-pcv-actor' WHERE id = ?"
+        )
+        .bind(original.id),
+      getDb(env)
+        .prepare(
+          "UPDATE private_channel_verified_wallets SET custody_wallet_id = 'cw-pcv-actor' WHERE pubkey = ?"
+        )
+        .bind(ACTOR_ADDRESS),
+    ]);
+    expect((await postDeposit(body, humanHeaders({}))).status).toBe(200);
+    expect(
+      (await postDeposit({ ...body, custodyWalletId: "cw-pcv-sibling" }, humanHeaders({}))).status
+    ).toBe(409);
+    expect(await repo.getDepositById(scope)).toEqual({
+      ...original,
+      custody_wallet_id: "cw-pcv-actor",
+    });
+    await getDb(env)
+      .prepare(
+        "UPDATE private_channel_deposits SET custody_wallet_id = 'cw-pcv-colleague' WHERE id = ?"
+      )
+      .bind(original.id)
+      .run();
+    const invalid = await app.request(
+      `/v1/private-channels/deposits/${original.id}`,
+      { headers: humanHeaders({}) },
+      env
+    );
+    expect(await invalid.json()).toMatchObject({ data: { custodyWalletId: null } });
+    expect((await postDeposit(body, humanHeaders({}))).status).toBe(409);
+    expect(await repo.getDepositById(scope)).toEqual({
+      ...original,
+      custody_wallet_id: "cw-pcv-colleague",
+    });
+    expect(providerSignerMock).not.toHaveBeenCalled();
+    expect(createChannelDepositMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves Q7 owner IDs and addresses and rejects retired address aliases", async () => {
+    const readBalance = vi
+      .spyOn(channelBalance, "getChannelBalance")
+      .mockImplementation(async (_env, input) => ({
+        owner: input.owner,
+        mint: EXTERNAL_ADDRESS,
+        tokenAccount: ACTOR_ADDRESS,
+        amount: "0",
+        uiAmount: "0",
+        decimals: 6,
+      }));
+    try {
+      for (const owner of ["cw-pcv-actor", ACTOR_ADDRESS]) {
+        const response = await app.request(
+          `/v1/private-channels/balance?owner=${owner}`,
+          { headers: humanHeaders({}) },
+          env
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ data: { owner: ACTOR_ADDRESS } });
+      }
+      expect(
+        (
+          await app.request(
+            `/v1/private-channels/balance?owner=${ACTOR_WALLET_ID}`,
+            { headers: humanHeaders({}) },
+            env
+          )
+        ).status
+      ).toBe(400);
+      const body = { custodyWalletId: "cw-pcv-actor", amount: "1.5" };
+      expect(
+        (await postDeposit({ ...body, recipient: COLLEAGUE_WALLET_ID }, humanHeaders({}))).status
+      ).toBe(400);
+      expect(
+        (await postWithdrawal({ ...body, destination: COLLEAGUE_WALLET_ID }, humanHeaders({})))
+          .status
+      ).toBe(400);
+      expect(readBalance).toHaveBeenCalledTimes(2);
+    } finally {
+      readBalance.mockRestore();
+    }
+  });
+
   it("applies a grant reduction to replay while history stays readable", async () => {
     const original = await recordedDeposit(ACTOR_ADDRESS);
     await setKeyGrants(["private_channels.read"]);
-    const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
+    const body = { custodyWalletId: "cw-pcv-actor", amount: "1.5" };
     expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
     expect((await postDeposit(body, apiKeyHeaders())).status).toBe(403);
     const history = await app.request(
@@ -580,7 +757,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     async ({ grants }) => {
       await recordedDeposit(ACTOR_ADDRESS);
       await setKeyGrants(grants);
-      const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
+      const body = { custodyWalletId: "cw-pcv-actor", amount: "1.5" };
       expect((await postWithdrawal(body, apiKeyHeaders())).status).toBe(403);
       expect((await postDeposit(body, apiKeyHeaders())).status).toBe(403);
       expect(providerSignerMock).not.toHaveBeenCalled();
@@ -596,7 +773,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       for (const replay of [false, true]) {
         if (replay) await recordedDeposit(ACTOR_ADDRESS);
         const response = await postDeposit(
-          { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+          { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
           apiKeyHeaders()
         );
         expect(response.status).toBe(403);
@@ -610,26 +787,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   );
 
   it("requires write for deposit replay and keeps history readable", async () => {
-    const repo = createPrivateChannelDepositRepository(env);
-    const original = await repo.createDeposit({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      instanceId: INSTANCE_ID,
-      walletId: ACTOR_WALLET_ID,
-      depositor: ACTOR_ADDRESS,
-      recipient: ACTOR_ADDRESS,
-      mint: EXTERNAL_ADDRESS,
-      amount: "1.5",
-      context: {},
-      idempotencyKey: "idem_pc_value",
-      idempotencyFingerprint: buildPrivateChannelDepositFingerprint({
-        instanceId: INSTANCE_ID,
-        walletId: ACTOR_WALLET_ID,
-        recipient: ACTOR_ADDRESS,
-        mint: EXTERNAL_ADDRESS,
-        amount: "1.5",
-      }),
-    });
+    const original = await recordedDeposit(ACTOR_ADDRESS);
     await getDb(env).batch([
       getDb(env).prepare(
         "UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cw-pcv-actor'"
@@ -644,7 +802,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await clearKVStores(env);
 
     const response = await postDeposit(
-      { walletId: ACTOR_WALLET_ID, amount: "1.500" },
+      { custodyWalletId: "cw-pcv-actor", amount: "1.500" },
       apiKeyHeaders()
     );
 
@@ -665,7 +823,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("refuses verification of a wallet outside the key's current wallet grants", async () => {
     const before = await privateChannelRows();
     const response = await app.request(
-      `/v1/private-channels/wallets/${ACTOR_WALLET_ID}/verify`,
+      `/v1/private-channels/wallets/cw-pcv-actor/verify`,
       {
         method: "POST",
         headers: scopedApiKeyHeaders(),
@@ -682,30 +840,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   });
 
   it("requires the original source for withdrawal replay while history remains readable", async () => {
-    const original = await createPrivateChannelWithdrawalRepository(env).createWithdrawal({
-      organizationId: ORGANIZATION_ID,
-      projectId: PROJECT_ID,
-      instanceId: INSTANCE_ID,
-      walletId: ACTOR_WALLET_ID,
-      owner: ACTOR_ADDRESS,
-      destination: ACTOR_ADDRESS,
-      mint: EXTERNAL_ADDRESS,
-      amount: "1.5",
-      context: {},
-      idempotencyKey: "idem_pc_value",
-      idempotencyFingerprint: buildPrivateChannelWithdrawalFingerprint({
-        instanceId: INSTANCE_ID,
-        walletId: ACTOR_WALLET_ID,
-        destination: ACTOR_ADDRESS,
-        mint: EXTERNAL_ADDRESS,
-        amount: "1.5",
-      }),
-    });
+    const original = await recordedWithdrawal(ACTOR_ADDRESS);
     await getDb(env)
       .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cw-pcv-actor'")
       .run();
     const response = await postWithdrawal(
-      { walletId: ACTOR_WALLET_ID, amount: "1.500" },
+      { custodyWalletId: "cw-pcv-actor", amount: "1.500" },
       humanHeaders({})
     );
     expect(response.status).toBe(404);
@@ -726,7 +866,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await useConnectionSource();
     custodyReleaseChannel.outOfChannelMode = "byok";
     for (const post of [postDeposit, postWithdrawal]) {
-      const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}));
+      const response = await post(
+        { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
+        humanHeaders({})
+      );
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
         error: {
@@ -745,7 +888,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
     await useConnectionSource();
     for (const post of [postDeposit, postWithdrawal]) {
       expect(
-        (await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+        (await post({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({}))).status
       ).toBe(200);
     }
     expect(providerSignerMock).toHaveBeenCalledTimes(2);
@@ -756,10 +899,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("preserves Config execution while BYOK is out of channel", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(200);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(200);
   });
 
@@ -782,7 +927,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       }
       for (const post of [postDeposit, postWithdrawal]) {
         expect(
-          (await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+          (await post({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({}))).status
         ).toBe(reason === "credential" ? 409 : 403);
       }
       expect(providerSignerMock).not.toHaveBeenCalled();
@@ -800,11 +945,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
         .bind(ACTOR_WALLET_ID, ACTOR_ADDRESS)
         .run();
       expect(
-        (await postDeposit({ walletId: selector, amount: "1.5" }, humanHeaders({}))).status
-      ).toBe(409);
+        (await postDeposit({ custodyWalletId: selector, amount: "1.5" }, humanHeaders({}))).status
+      ).toBe(404);
       expect(
-        (await postWithdrawal({ walletId: selector, amount: "1.5" }, humanHeaders({}))).status
-      ).toBe(409);
+        (await postWithdrawal({ custodyWalletId: selector, amount: "1.5" }, humanHeaders({})))
+          .status
+      ).toBe(404);
       expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     }
@@ -844,8 +990,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
         .run();
       for (const post of [postDeposit, postWithdrawal]) {
         expect(
-          (await post({ walletId: ACTOR_ADDRESS, amount: "1.5" }, humanHeaders({}))).status
-        ).toBe(409);
+          (await post({ custodyWalletId: ACTOR_ADDRESS, amount: "1.5" }, humanHeaders({}))).status
+        ).toBe(404);
       }
       expect(providerSignerMock).not.toHaveBeenCalled();
       expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
@@ -862,7 +1008,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       (
         await postDeposit(
           {
-            walletId: ACTOR_WALLET_ID,
+            custodyWalletId: "cw-pcv-actor",
             amount: "1.5",
             recipient: COLLEAGUE_ADDRESS,
           },
@@ -874,7 +1020,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       (
         await postWithdrawal(
           {
-            walletId: ACTOR_WALLET_ID,
+            custodyWalletId: "cw-pcv-actor",
             amount: "1.5",
             destination: COLLEAGUE_ADDRESS,
           },
@@ -896,10 +1042,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .bind(API_KEY.id, COLLEAGUE_WALLET_ID)
       .run();
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, apiKeyHeaders()))
+        .status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, apiKeyHeaders()))
+        .status
     ).toBe(403);
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
@@ -912,7 +1060,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .run();
     // Authentication reads the key's row fresh, so it refuses before the route's own check.
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, apiKeyHeaders()))
+        .status
     ).toBe(401);
     expect(providerSignerMock).not.toHaveBeenCalled();
   });
@@ -927,7 +1076,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .run();
 
     const response = await postWithdrawal(
-      { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+      { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
       apiKeyHeaders()
     );
     expect(response.status).toBe(401);
@@ -944,10 +1093,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("does not create new work for a read-only key", async () => {
     await setKeyGrants(["private_channels.read"]);
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, apiKeyHeaders()))
+        .status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders())).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, apiKeyHeaders()))
+        .status
     ).toBe(403);
     expect(providerSignerMock).not.toHaveBeenCalled();
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
@@ -963,7 +1114,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
       { post: postDeposit, id: required(deposit).id },
       { post: postWithdrawal, id: withdrawal.id },
     ]) {
-      const response = await post({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, apiKeyHeaders());
+      const response = await post(
+        { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
+        apiKeyHeaders()
+      );
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ data: { id, status: "pending" } });
     }
@@ -983,8 +1137,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
         VALUES ('cw-pcv-replacement', 'cust-pcv', ?, ?, 'active')`)
         .bind(ACTOR_WALLET_ID, EXTERNAL_ADDRESS),
     ]);
-    const body = { walletId: ACTOR_WALLET_ID, amount: "1.5" };
-    expect((await postDeposit(body, apiKeyHeaders())).status).toBe(409);
+    const body = { custodyWalletId: "cw-pcv-actor", amount: "1.5" };
+    expect((await postDeposit(body, apiKeyHeaders())).status).toBe(404);
     const read = await app.request(
       `/v1/private-channels/deposits/${required(original).id}`,
       { headers: apiKeyHeaders() },
@@ -1001,14 +1155,14 @@ describe("Private Channels — deposit and withdrawal access", () => {
     { amount: "2" },
     { mint: COLLEAGUE_ADDRESS },
     { recipient: COLLEAGUE_ADDRESS },
-    { walletId: COLLEAGUE_WALLET_ID },
-    { recipient: COLLEAGUE_WALLET_ID },
+    { custodyWalletId: "cw-pcv-colleague" },
+    { recipient: "cw-pcv-colleague" },
   ])("conflicts on changed or unprovable historical payload %j", async (changed) => {
     await recordedDeposit(ACTOR_ADDRESS);
     expect(
       (
         await postDeposit(
-          { walletId: ACTOR_WALLET_ID, amount: "1.5", ...changed },
+          { custodyWalletId: "cw-pcv-actor", amount: "1.5", ...changed },
           humanHeaders({})
         )
       ).status
@@ -1020,9 +1174,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const original = await recordedDeposit(COLLEAGUE_ADDRESS);
     const response = await postDeposit(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
-        recipient: COLLEAGUE_WALLET_ID,
+        recipient: "cw-pcv-colleague",
       },
       humanHeaders({})
     );
@@ -1038,9 +1192,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const original = await recordedDeposit(ACTOR_ADDRESS);
     const response = await postDeposit(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
-        recipient: ACTOR_WALLET_ID,
+        recipient: "cw-pcv-actor",
       },
       humanHeaders({})
     );
@@ -1056,9 +1210,9 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const original = await recordedWithdrawal(COLLEAGUE_ADDRESS);
     const response = await postWithdrawal(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
-        destination: COLLEAGUE_WALLET_ID,
+        destination: "cw-pcv-colleague",
       },
       humanHeaders({})
     );
@@ -1078,10 +1232,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
       custodyReleaseChannel.outOfChannelMode = "byok";
       await setKeyGrants(write ? ["private_channels.execute"] : ["private_channels.read"]);
       const response = await postWithdrawal(
-        { walletId: ACTOR_WALLET_ID, amount: "1.5" },
+        { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
         apiKeyHeaders()
       );
       expect(response.status).toBe(write ? 200 : 403);
+      if (write)
+        expect(await response.json()).toMatchObject({ data: { custodyWalletId: "cw-pcv-actor" } });
       const history = await app.request(
         `/v1/private-channels/withdrawals/${original.id}`,
         { headers: apiKeyHeaders() },
@@ -1089,7 +1245,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
       );
       expect(history.status).toBe(200);
       expect(await history.json()).toMatchObject({
-        data: { id: original.id, status: write ? "failed" : "pending" },
+        data: {
+          id: original.id,
+          status: write ? "failed" : "pending",
+          custodyWalletId: "cw-pcv-actor",
+        },
       });
       expect(resolveGatewayAuthMock).toHaveBeenCalledTimes(write ? 1 : 0);
       expect(providerSignerMock).not.toHaveBeenCalled();
@@ -1099,10 +1259,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("fails signer setup before opening an SPC session", async () => {
     providerSignerMock.mockRejectedValue(new Error("provider unavailable"));
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(503);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(503);
     expect(resolveGatewayAuthMock).not.toHaveBeenCalled();
     expect(createChannelDepositMock).not.toHaveBeenCalled();
@@ -1116,10 +1278,12 @@ describe("Private Channels — deposit and withdrawal access", () => {
       .run();
 
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
@@ -1135,10 +1299,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const headers = buildHeaders();
 
     expect(
-      (await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, headers)).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-unverified", amount: "1.5" }, headers)).status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, headers)).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-unverified", amount: "1.5" }, headers))
+        .status
     ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
@@ -1150,8 +1315,11 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const headers = scopedApiKeyHeaders();
     const before = await privateChannelRows();
 
-    const deposit = await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
-    const withdrawal = await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, headers);
+    const deposit = await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, headers);
+    const withdrawal = await postWithdrawal(
+      { custodyWalletId: "cw-pcv-actor", amount: "1.5" },
+      headers
+    );
 
     for (const response of [deposit, withdrawal]) {
       expect(response.status).toBe(403);
@@ -1167,12 +1335,16 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("refuses a custody wallet that is not enrolled under the principal", async () => {
     expect(
-      (await postDeposit({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, humanHeaders({})))
+      (await postDeposit({ custodyWalletId: "cw-pcv-unverified", amount: "1.5" }, humanHeaders({})))
         .status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: UNVERIFIED_WALLET_ID, amount: "1.5" }, humanHeaders({})))
-        .status
+      (
+        await postWithdrawal(
+          { custodyWalletId: "cw-pcv-unverified", amount: "1.5" },
+          humanHeaders({})
+        )
+      ).status
     ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
@@ -1180,11 +1352,16 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("does not let a caller move funds out of another principal's verified wallet", async () => {
     expect(
-      (await postDeposit({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-colleague", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(403);
     expect(
-      (await postWithdrawal({ walletId: COLLEAGUE_WALLET_ID, amount: "1.5" }, humanHeaders({})))
-        .status
+      (
+        await postWithdrawal(
+          { custodyWalletId: "cw-pcv-colleague", amount: "1.5" },
+          humanHeaders({})
+        )
+      ).status
     ).toBe(403);
     expect(createChannelDepositMock).not.toHaveBeenCalled();
     expect(createChannelWithdrawalMock).not.toHaveBeenCalled();
@@ -1193,7 +1370,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("credits only addresses verified on this instance", async () => {
     const external = await postDeposit(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
         recipient: EXTERNAL_ADDRESS,
       },
@@ -1204,7 +1381,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
     const colleague = await postDeposit(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
         recipient: COLLEAGUE_ADDRESS,
       },
@@ -1223,7 +1400,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       expect(
         (
           await postDeposit(
-            { walletId: ACTOR_WALLET_ID, amount: "1.5", recipient: unsafe },
+            { custodyWalletId: "cw-pcv-actor", amount: "1.5", recipient: unsafe },
             humanHeaders({})
           )
         ).status
@@ -1231,7 +1408,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
       expect(
         (
           await postWithdrawal(
-            { walletId: ACTOR_WALLET_ID, amount: "1.5", destination: unsafe },
+            { custodyWalletId: "cw-pcv-actor", amount: "1.5", destination: unsafe },
             humanHeaders({})
           )
         ).status
@@ -1244,7 +1421,7 @@ describe("Private Channels — deposit and withdrawal access", () => {
   it("allows an unverified withdrawal destination", async () => {
     const response = await postWithdrawal(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pcv-actor",
         amount: "1.5",
         destination: EXTERNAL_ADDRESS,
       },
@@ -1263,10 +1440,10 @@ describe("Private Channels — deposit and withdrawal access", () => {
     const { "Idempotency-Key": _omitted, ...withoutKey } = headers;
 
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, withoutKey)).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, withoutKey)).status
     ).toBe(400);
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, withoutKey)).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, withoutKey)).status
     ).toBe(400);
 
     expect(createChannelDepositMock).not.toHaveBeenCalled();
@@ -1275,7 +1452,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
 
   it("hands the service the resolved wallet, counterparty, acting member and key", async () => {
     expect(
-      (await postDeposit({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postDeposit({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(200);
     expect(createChannelDepositMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -1294,7 +1472,8 @@ describe("Private Channels — deposit and withdrawal access", () => {
     );
 
     expect(
-      (await postWithdrawal({ walletId: ACTOR_WALLET_ID, amount: "1.5" }, humanHeaders({}))).status
+      (await postWithdrawal({ custodyWalletId: "cw-pcv-actor", amount: "1.5" }, humanHeaders({})))
+        .status
     ).toBe(200);
     expect(createChannelWithdrawalMock).toHaveBeenCalledWith(
       expect.anything(),

@@ -85,18 +85,12 @@ export async function resolveTransferCreateContext(
   c: AppContext,
   input: {
     channelId: string;
-    walletId: string;
+    custodyWalletId: string;
     recipientVerifiedWalletId: string;
   }
 ): Promise<TransferCreateContext> {
   const context = await resolveTransferActor(c, input.channelId);
-  const { wallet } = await resolveVerifiedSourceWallet(
-    c,
-    context,
-    input.walletId,
-    undefined,
-    false
-  );
+  const { wallet } = await resolveVerifiedSourceWallet(c, context, input.custodyWalletId);
 
   const match = context.recipients.find(
     (candidate) => candidate.id === input.recipientVerifiedWalletId

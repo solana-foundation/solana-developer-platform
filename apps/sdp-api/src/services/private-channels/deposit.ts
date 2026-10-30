@@ -56,6 +56,7 @@ import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
+import { resolvePrivateChannelCustodyLinks } from "./custody-links";
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
 import { resolveChannelToken } from "./mint";
@@ -183,6 +184,7 @@ async function reserveDeposit(
     projectId: string;
     instanceId: string;
     walletId: string;
+    custodyWalletId: string;
     depositor: string;
     recipient: string;
     mint: string;
@@ -274,6 +276,7 @@ export async function createChannelDeposit(
     projectId,
     instanceId: instance.id,
     walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     depositor,
     recipient,
     mint,
@@ -395,7 +398,9 @@ export async function getChannelDeposit(
   scope: { organizationId: string; projectId: string; id: string }
 ): Promise<PrivateChannelDeposit | null> {
   const row = await createPrivateChannelDepositRepository(env).getDepositById(scope);
-  return row ? mapPrivateChannelDepositRow(row) : null;
+  if (!row) return null;
+  const [linked] = await resolvePrivateChannelCustodyLinks(env, scope, [row]);
+  return mapPrivateChannelDepositRow(linked);
 }
 
 /** List a project's deposits, newest first. */
@@ -404,5 +409,6 @@ export async function listChannelDeposits(
   scope: { organizationId: string; projectId: string }
 ): Promise<PrivateChannelDeposit[]> {
   const rows = await createPrivateChannelDepositRepository(env).listDepositsByProject(scope);
-  return rows.map(mapPrivateChannelDepositRow);
+  const linked = await resolvePrivateChannelCustodyLinks(env, scope, rows);
+  return linked.map(mapPrivateChannelDepositRow);
 }

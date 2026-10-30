@@ -54,7 +54,7 @@ const transfer: PrivateChannelTransfer = {
   projectId: "project_test",
   instanceId: "pci_test",
   channelId: "channel_alpha",
-  walletId: "wallet_sender",
+  custodyWalletId: "custody_sender",
   sender: "Sender1111111111111111111111111111111111",
   recipient: "Recipient11111111111111111111111111111111",
   mint: "Usdc111111111111111111111111111111111111",
@@ -99,7 +99,7 @@ describe("private-channel transfer API helpers", () => {
         client,
         "channel/alpha",
         {
-          walletId: "wallet_sender",
+          custodyWalletId: "custody_sender",
           recipientVerifiedWalletId: "pcvw_recipient",
           amount: "1.25",
         },
@@ -113,7 +113,7 @@ describe("private-channel transfer API helpers", () => {
         // The reservation rides as a header; the body stays the request itself.
         headers: { "Idempotency-Key": "idem_transfer_unit" },
         body: JSON.stringify({
-          walletId: "wallet_sender",
+          custodyWalletId: "custody_sender",
           recipientVerifiedWalletId: "pcvw_recipient",
           amount: "1.25",
         }),

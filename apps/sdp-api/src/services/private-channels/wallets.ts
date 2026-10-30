@@ -1,3 +1,4 @@
+import { resolvePrivateChannelCustodyLinks } from "./custody-links";
 /**
  * SPC wallet-verification orchestration (the write path) + the default-identity read.
  *
@@ -146,10 +147,11 @@ export async function listPrivateChannelWallets(
     instance.id
   );
   if (!pcUser) return [];
-  return createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
+  const rows = await createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
     pcUser.id,
     instance.id
   );
+  return resolvePrivateChannelCustodyLinks(env, scope, rows);
 }
 
 /**
@@ -236,7 +238,8 @@ export async function verifyPrivateChannelWallet(
       ...scope,
       userId: pcUser.id,
       instanceId: instance.id,
-      walletId,
+      walletId: wallet.walletId,
+      custodyWalletId: wallet.id,
       pubkey,
     });
   } catch (error) {
@@ -262,7 +265,7 @@ export async function verifyPrivateChannelWallet(
           ...scope,
           userId: pcUser.id,
           instanceId: instance.id,
-          walletId,
+          walletId: wallet.walletId,
           pubkey,
         });
         await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);

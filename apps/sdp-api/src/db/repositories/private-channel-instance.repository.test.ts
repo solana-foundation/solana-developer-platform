@@ -25,6 +25,7 @@ function depositInput(instanceId: string): CreateDepositInput {
     projectId: TEST_PROJECT_ID,
     instanceId,
     walletId: "wal_pci_1",
+    custodyWalletId: "cw_pci_1",
     depositor: "DepositorAddr1111111111111111111111111111",
     recipient: "RecipientAddr11111111111111111111111111111",
     mint: "MintAddr11111111111111111111111111111111111",

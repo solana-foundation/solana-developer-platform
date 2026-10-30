@@ -22,16 +22,17 @@
 
 import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import { isAddress } from "@solana/addresses";
 import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
 import type { PrivateChannelVerifiedWalletRow } from "@/db/repositories/private-channel-verified-wallet.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, conflict, forbidden } from "@/lib/errors";
+import { badRequest, forbidden } from "@/lib/errors";
+import { resolvePrivateChannelCustodyLinks } from "@/services/private-channels/custody-links";
 import {
   listPrivateChannelCustodyWallets,
   resolvePrivateChannelCustodyWallet,
+  resolvePrivateChannelWalletAddress,
 } from "@/services/private-channels/wallet-access";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
@@ -123,16 +124,14 @@ export async function resolveVerifiedSourceWallet(
   c: AppContext,
   context: PrivateChannelActorContext,
   walletId: string,
-  wallets?: CustodyWallet[],
-  allowAddress = true
+  wallets?: CustodyWallet[]
 ): Promise<{ wallet: CustodyWallet; verified: PrivateChannelVerifiedWalletRow }> {
   const wallet = await resolvePrivateChannelCustodyWallet(
     c.env,
     context.auth,
     context.projectId,
     walletId,
-    wallets,
-    allowAddress
+    wallets
   );
   // Enrolment answers whether the wallet may move value on this instance at
   // all; the key's wallet scope, checked as the wallet resolves, answers
@@ -142,9 +141,12 @@ export async function resolveVerifiedSourceWallet(
     context.actor.id,
     context.instance.id
   );
-  const verified = verifiedWallets.find(
-    (candidate) => candidate.wallet_id === wallet.walletId && candidate.pubkey === wallet.publicKey
+  const linked = await resolvePrivateChannelCustodyLinks(
+    c.env,
+    { organizationId: context.auth.organizationId, projectId: context.projectId },
+    verifiedWallets
   );
+  const verified = linked.find((candidate) => candidate.custody_wallet_id === wallet.id);
   if (!verified) {
     throw forbidden(
       "The source custody wallet must be enrolled under the project's Private Channels principal."
@@ -157,7 +159,7 @@ export async function resolveVerifiedSourceWallet(
 /**
  * Resolve a caller-supplied counterparty address for a value movement.
  *
- * Accepts a `walletId` or public key of a wallet in the project's custody scope,
+ * Accepts an internal SDP wallet ID or public key of a wallet in the project's custody scope,
  * or a raw Solana address, and rejects the addresses that can only ever strand
  * funds. `requireVerifiedOnInstance` additionally demands that the resolved
  * address be a wallet some member has verified on this instance — which is the
@@ -175,20 +177,7 @@ async function resolveCounterpartyAddress(
     requireVerifiedOnInstance: boolean;
   }
 ): Promise<string> {
-  const matches = wallets.filter(
-    (candidate) => candidate.walletId === input.value || candidate.publicKey === input.value
-  );
-  if (new Set(matches.map((wallet) => wallet.publicKey)).size > 1) {
-    throw conflict("Counterparty address is ambiguous");
-  }
-  const matched = matches[0];
-  const resolved = matched?.publicKey ?? input.value;
-
-  if (!matched && !isAddress(resolved)) {
-    throw badRequest(
-      `${input.fieldName} must be a \`walletId\` returned by GET /v1/wallets or a valid Solana address, got: ${input.value}`
-    );
-  }
+  const resolved = resolvePrivateChannelWalletAddress(wallets, input.value, input.fieldName);
 
   if (unsafeAddresses(context.instance).has(resolved)) {
     throw badRequest("System, program, and connected instance addresses cannot be used.");
@@ -219,11 +208,11 @@ export interface DepositCreateContext extends PrivateChannelActorContext {
 /** The single access-policy seam for creating an escrow deposit. */
 export async function resolveDepositCreateContext(
   c: AppContext,
-  input: { walletId: string; recipient?: string }
+  input: { custodyWalletId: string; recipient?: string }
 ): Promise<DepositCreateContext> {
   const context = await resolvePrivateChannelActor(c);
   const wallets = await loadProjectWallets(c, context);
-  const { wallet } = await resolveVerifiedSourceWallet(c, context, input.walletId, wallets);
+  const { wallet } = await resolveVerifiedSourceWallet(c, context, input.custodyWalletId, wallets);
 
   // The depositor is already verified, so defaulting to it needs no second look.
   const recipient =
@@ -256,11 +245,11 @@ export interface WithdrawalCreateContext extends PrivateChannelActorContext {
  */
 export async function resolveWithdrawalCreateContext(
   c: AppContext,
-  input: { walletId: string; destination?: string }
+  input: { custodyWalletId: string; destination?: string }
 ): Promise<WithdrawalCreateContext> {
   const context = await resolvePrivateChannelActor(c);
   const wallets = await loadProjectWallets(c, context);
-  const { wallet } = await resolveVerifiedSourceWallet(c, context, input.walletId, wallets);
+  const { wallet } = await resolveVerifiedSourceWallet(c, context, input.custodyWalletId, wallets);
 
   const destination =
     input.destination === undefined

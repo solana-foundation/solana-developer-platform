@@ -61,11 +61,10 @@ export async function createPrivateChannelWithdrawal(
     const auth = getAuth(c);
     const repo = getPrivateChannelWithdrawalRepository(c);
     const onReplay = async (row: PrivateChannelWithdrawalRow) => {
-      // Source from the recorded row, never the body's wallet; destination from
-      // the body, resolved by the same seam as the first request.
-      const context = await authorizeMovementReplay(c, row, () =>
+      // Prove the selected internal ID against the saved source before resolving the destination.
+      const context = await authorizeMovementReplay(c, row, body.custodyWalletId, () =>
         resolveWithdrawalCreateContext(c, {
-          walletId: row.wallet_id,
+          custodyWalletId: body.custodyWalletId,
           destination: body.destination,
         })
       );
@@ -77,12 +76,13 @@ export async function createPrivateChannelWithdrawal(
           projectId: context.projectId,
           userId: auth.userId,
         });
-        return resolveAbandonedWithdrawalReservation(c.env, repo, row, {
+        const recovered = await resolveAbandonedWithdrawalReservation(c.env, repo, row, {
           gatewayUrl: context.instance.gatewayUrl,
           gatewayAuth,
         });
+        return { ...recovered, custodyWalletId: context.wallet.id };
       }
-      return mapPrivateChannelWithdrawalRow(row);
+      return mapPrivateChannelWithdrawalRow({ ...row, custody_wallet_id: context.wallet.id });
     };
     const replay = await repo.findWithdrawalByIdempotency({
       organizationId: auth.organizationId,
@@ -91,7 +91,7 @@ export async function createPrivateChannelWithdrawal(
     });
     if (replay) return success(c, await onReplay(replay));
     const context = await resolveWithdrawalCreateContext(c, {
-      walletId: body.walletId,
+      custodyWalletId: body.custodyWalletId,
       destination: body.destination,
     });
     const signer = await createPrivateChannelSigner(

@@ -28,7 +28,7 @@ export async function emitTransferEvent(
       status,
       payload: {
         transferId: transfer.id,
-        senderWalletId: transfer.sender_wallet_id,
+        custodyWalletId: transfer.custody_wallet_id ?? null,
         sender: transfer.sender,
         recipient: transfer.recipient,
         amount: transfer.amount,

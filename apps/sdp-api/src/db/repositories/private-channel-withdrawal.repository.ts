@@ -14,6 +14,7 @@ export interface PrivateChannelWithdrawalRow {
   project_id: string;
   instance_id: string;
   wallet_id: string;
+  custody_wallet_id: string | null;
   owner: string;
   destination: string;
   mint: string;
@@ -42,6 +43,7 @@ export interface WithdrawalProjectScope {
 export interface CreateWithdrawalInput extends WithdrawalProjectScope {
   instanceId: string;
   walletId: string;
+  custodyWalletId: string;
   owner: string;
   destination: string;
   mint: string;
@@ -116,7 +118,7 @@ export function mapPrivateChannelWithdrawalRow(
     instanceId: row.instance_id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id ?? null,
     owner: row.owner,
     destination: row.destination,
     mint: row.mint,

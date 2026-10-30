@@ -65,6 +65,7 @@ vi.mock("./deposit-progress", () => ({
 
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { DepositForm } from "./deposit-form";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -106,9 +107,44 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear();
+  resetIdempotencyKeyStoresForTests();
 });
 
 describe("DepositForm", () => {
+  it("keeps the exact internal source and retry key after remount", async () => {
+    const user = userEvent.setup();
+    mocks.fetchWalletBalancesAction.mockReturnValue(new Promise(() => undefined));
+    mocks.createDepositAction.mockResolvedValue({
+      ok: false,
+      kind: "server",
+      message: "Response lost",
+      answer: { status: null, replayed: false, code: null },
+    });
+    const treasury = wallets[0];
+    if (!treasury) throw new Error("Missing treasury fixture");
+    const sibling = { ...treasury, id: "custody_sibling", label: "Sibling" };
+    const submit = async () => {
+      render(<DepositForm tokens={eligibleTokens} wallets={[...wallets, sibling]} />, {
+        wrapper: I18nWrapper,
+      });
+      const walletSelect = screen.getAllByRole("combobox")[0];
+      if (!walletSelect) throw new Error("Missing wallet picker");
+      await user.selectOptions(walletSelect, "custody_sibling");
+      await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
+      await user.click(screen.getByRole("button", { name: "Deposit" }));
+      await screen.findByText("Response lost");
+    };
+    await submit();
+    const first = mocks.createDepositAction.mock.calls[0]?.[0];
+    expect(first).toMatchObject({ custodyWalletId: "custody_sibling", amount: "1.25" });
+    expect(first).not.toHaveProperty("walletId");
+    cleanup();
+    resetIdempotencyKeyStoresForTests();
+    await submit();
+    expect(mocks.createDepositAction.mock.calls[1]?.[0]).toEqual(first);
+  });
+
   it("refuses to submit until the user picks the wallet", async () => {
     const user = userEvent.setup();
     render(<DepositForm tokens={eligibleTokens} wallets={wallets} />, { wrapper: I18nWrapper });
@@ -132,7 +168,7 @@ describe("DepositForm", () => {
       render(<DepositForm tokens={eligibleTokens} wallets={wallets} />, { wrapper: I18nWrapper });
       const [walletSelect] = screen.getAllByRole("combobox");
       if (!walletSelect) throw new Error("No wallet select rendered");
-      await user.selectOptions(walletSelect, "wallet_treasury");
+      await user.selectOptions(walletSelect, "custody_treasury");
       await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
       await user.click(screen.getByRole("button", { name: "Deposit" }));
 
