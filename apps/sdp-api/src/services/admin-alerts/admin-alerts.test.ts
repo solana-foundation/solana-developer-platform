@@ -202,7 +202,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
       resourceType: "invitation",
       metadata: { email: "x@y.z", role: "admin" },
     },
-    "[SDP] Member invited in Acme Pay",
+    "Member invited in Acme Pay",
   ],
   [
     "a role change",
@@ -212,7 +212,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
       resourceId: `mem_${MEMBER.id}`,
       metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
     },
-    "[SDP] Member role changed in Acme Pay",
+    "Member role changed in Acme Pay",
   ],
   [
     "a removal",
@@ -222,7 +222,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
       resourceId: `mem_${MEMBER.id}`,
       metadata: { userId: MEMBER.id, left: false },
     },
-    "[SDP] Member removed in Acme Pay",
+    "Member removed in Acme Pay",
   ],
   [
     "a mainnet entitlement change",
@@ -232,7 +232,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
       resourceId: ORGANIZATION_ID,
       metadata: { event: "production_entitlement_changed", enabled: false, source: "clerk" },
     },
-    "[SDP] Mainnet disabled in Acme Pay",
+    "Mainnet disabled in Acme Pay",
   ],
   [
     "a custody connection completed",
@@ -248,7 +248,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
         auditIntentId: "aint_1",
       },
     },
-    "[SDP] Custody connection added in Acme Pay",
+    "Custody connected in Acme Pay",
   ],
   [
     "a custody connection deactivated",
@@ -264,7 +264,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
         auditIntentId: "aint_2",
       },
     },
-    "[SDP] Custody connection removed in Acme Pay",
+    "Custody disconnected in Acme Pay",
   ],
   [
     "a custody wallet created",
@@ -281,7 +281,7 @@ const CONFIG_EVENTS: [string, Omit<SystemAuditLogEntry, "organizationId">, strin
         auditIntentId: "aint_3",
       },
     },
-    "[SDP] Wallet created in Acme Pay",
+    "Wallet created in Acme Pay",
   ],
 ];
 
@@ -340,11 +340,16 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(emails.map((email) => email.to).sort()).toEqual(
         [OTHER_ADMIN.email, TEST_USER.email].sort()
       );
-      expect(emails[0]?.subject).toBe("[SDP] API key created in Acme Pay");
-      expect(emails[0]?.body).toContain("The API key ci-deployer was created.");
+      expect(emails[0]?.subject).toBe("API key created in Acme Pay");
+      expect(emails[0]?.body).toContain("A new API key, ci-deployer, was created.");
+      expect(emails[0]?.body).toContain("Network: Mainnet");
       expect(emails[0]?.body).toContain("By: Ada Admin");
+      expect(emails[0]?.body).toMatch(/When: \d{1,2} \w{3} \d{4}, \d{2}:\d{2} UTC/);
       expect(emails[0]?.body).toContain(`${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/api-keys`);
       expect(emails[0]?.body).not.toMatch(/sk_|secret/i);
+      expect(emails[0]?.bodyHtml).toContain(
+        `href="${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/api-keys"`
+      );
     });
 
     it("emails each admin once when a mainnet API key is revoked", async () => {
@@ -381,8 +386,8 @@ describe("admin alert emails (HOO-2299)", () => {
       await runWorker();
       const emails = sentEmails();
       expect(emails.map((email) => email.subject)).toEqual([
-        "[SDP] API key revoked in Acme Pay",
-        "[SDP] API key revoked in Acme Pay",
+        "API key revoked in Acme Pay",
+        "API key revoked in Acme Pay",
       ]);
       expect(emails[0]?.body).toContain("Project: ");
     });
@@ -417,9 +422,9 @@ describe("admin alert emails (HOO-2299)", () => {
         metadata: { userId: MEMBER.id, previousRole: "member", role: "admin" },
       });
       await runWorker();
-      expect(sentEmails()[0]?.body).toContain(
-        "Max Member (member@example.com)'s role changed from member to admin."
-      );
+      const [email] = sentEmails();
+      expect(email?.body).toContain("Max Member (member@example.com) is now admin in Acme Pay.");
+      expect(email?.body).toContain("Role: Member to Admin");
     });
 
     it("ignores a custody intent, a started event, and a replayed wallet outcome", async () => {
@@ -469,7 +474,7 @@ describe("admin alert emails (HOO-2299)", () => {
       await runWorker();
       const [email] = sentEmails();
       expect(email?.body).toContain("Organization: Acme <b>Pay</b> & Co");
-      expect(email?.bodyHtml).toContain("Organization: Acme &lt;b&gt;Pay&lt;/b&gt; &amp; Co<br>");
+      expect(email?.bodyHtml).toContain("Acme &lt;b&gt;Pay&lt;/b&gt; &amp; Co</td>");
       expect(email?.bodyHtml).not.toContain("<b>");
     });
 
@@ -554,8 +559,8 @@ describe("admin alert emails (HOO-2299)", () => {
       await audit({ action: "invite", resourceType: "invitation", metadata: { role: "admin" } });
       await runWorker();
       expect(sentEmails().map((email) => email.subject)).toEqual([
-        "[SDP] Alert emails off in Acme Pay",
-        "[SDP] Alert emails off in Acme Pay",
+        "Alert emails off in Acme Pay",
+        "Alert emails off in Acme Pay",
       ]);
     });
 
@@ -609,10 +614,16 @@ describe("admin alert emails (HOO-2299)", () => {
         [OTHER_ADMIN.email, TEST_USER.email].sort()
       );
       const [email] = emails;
-      expect(email?.subject).toBe("[SDP] Money movement in Acme Pay");
-      expect(email?.body).toContain(
-        "New money movement: 2 transfers, 1 batch payout, 1 recurring collection, 1 deposit."
-      );
+      expect(email?.subject).toBe("Money movement in Acme Pay");
+      for (const row of [
+        "Network: Mainnet",
+        "Transfers: 2",
+        "Batch payouts: 1",
+        "Recurring collections: 1",
+        "Deposits: 1",
+      ]) {
+        expect(email?.body).toContain(row);
+      }
       expect(email?.body).toContain(
         `${DASHBOARD}/dashboard/${PRODUCTION_PROJECT}/payments/transactions`
       );
@@ -702,7 +713,7 @@ describe("admin alert emails (HOO-2299)", () => {
       await asWorker(() => deliverAdminAlerts(env));
       const emails = sentEmails();
       expect(emails).toHaveLength(2);
-      expect(emails[0]?.body).toContain("New money movement: 1 transfer.");
+      expect(emails[0]?.body).toContain("Transfers: 1\nStarted:");
     });
   });
 
@@ -740,8 +751,16 @@ describe("admin alert emails (HOO-2299)", () => {
       occurredAt: "2026-10-30T10:15:00.000Z",
       dashboardOrigin: DASHBOARD,
     });
-    expect(email.body.split("\n")[0]).toBe(
-      "New money movement: 1 transfer, 2 recurring collections."
-    );
+    expect(email.subject).toBe("Money movement in Acme");
+    expect(email.content.summary).toBe("New money movement started in Treasury.");
+    expect(email.content.details).toEqual([
+      { label: "Organization", value: "Acme" },
+      { label: "Project", value: "Treasury" },
+      { label: "Network", value: "Mainnet" },
+      { label: "Transfers", value: "1" },
+      { label: "Recurring collections", value: "2" },
+      { label: "Started", value: "30 Oct 2026, 10:00 to 10:15 UTC" },
+    ]);
+    expect(email.content.action?.url).toBe(`${DASHBOARD}/dashboard/prj_1/payments/transactions`);
   });
 });

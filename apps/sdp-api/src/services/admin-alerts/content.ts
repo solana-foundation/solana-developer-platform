@@ -3,9 +3,10 @@
  * organization and project, who did it, and a dashboard link. It never carries an address, an
  * amount or a secret; the dashboard shows those to someone signed in.
  */
-import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
+import type { EmailContent, EmailDetail } from "@/services/email-layout";
 
 export const CONFIG_ALERT_KINDS = [
   "member_invited",
@@ -42,7 +43,6 @@ export const moneyMovementCountsSchema = z.object({
 
 export type MoneyMovementCounts = z.infer<typeof moneyMovementCountsSchema>;
 
-/** Everything an email renders, snapshotted when the alert is written. */
 /** The project an alert is about, as its email names it. */
 export const alertProjectSchema = z.object({
   id: z.string(),
@@ -50,6 +50,7 @@ export const alertProjectSchema = z.object({
   environment: z.enum(SDP_ENVIRONMENTS),
 });
 
+/** Everything an email renders, snapshotted when the alert is written. */
 export const adminAlertDetailsSchema = z.object({
   organizationName: z.string(),
   project: alertProjectSchema.nullable(),
@@ -74,105 +75,130 @@ const moneyAlertDetailsSchema = adminAlertDetailsSchema.extend({
   windowEnd: z.string(),
 });
 
-export interface AdminAlertEmailContent {
+export interface AdminAlertEmail {
   subject: string;
-  body: string;
+  content: EmailContent;
 }
 
 /** Each count's label, in the order an email lists them. */
 const MONEY_COUNT_LABELS = [
-  ["transfers", "transfer", "transfers"],
-  ["batches", "batch payout", "batch payouts"],
-  ["recurringCollections", "recurring collection", "recurring collections"],
-  ["paymentRequestSettlements", "payment request settlement", "payment request settlements"],
-  ["deposits", "deposit", "deposits"],
-  ["offramps", "off-ramp", "off-ramps"],
-  ["onramps", "on-ramp", "on-ramps"],
-] as const satisfies readonly (readonly [keyof MoneyMovementCounts, string, string])[];
+  ["transfers", "Transfers"],
+  ["batches", "Batch payouts"],
+  ["recurringCollections", "Recurring collections"],
+  ["paymentRequestSettlements", "Payment request settlements"],
+  ["deposits", "Deposits"],
+  ["offramps", "Off-ramps"],
+  ["onramps", "On-ramps"],
+] as const satisfies readonly (readonly [keyof MoneyMovementCounts, string])[];
 
-function moneyMovementSummary(counts: MoneyMovementCounts): string {
-  return MONEY_COUNT_LABELS.filter(([key]) => counts[key] > 0)
-    .map(([key, one, many]) => `${counts[key]} ${counts[key] === 1 ? one : many}`)
-    .join(", ");
+const ENVIRONMENT_LABELS = {
+  production: "Mainnet",
+  sandbox: "Devnet",
+} as const satisfies Record<SdpEnvironment, string>;
+
+const ROLE_LABELS = {
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
+} as const satisfies Record<(typeof ORGANIZATION_ROLES)[number], string>;
+
+const TIME_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+
+const CLOCK_FORMAT = new Intl.DateTimeFormat("en-GB", { timeStyle: "short", timeZone: "UTC" });
+
+function utc(iso: string): string {
+  return `${TIME_FORMAT.format(new Date(iso))} UTC`;
 }
 
-/** The headline (used in the subject) and the sentence that opens the body. */
+/** A money window, such as "30 Oct 2026, 10:00 to 10:01 UTC". */
+function utcWindow(start: string, end: string): string {
+  return `${TIME_FORMAT.format(new Date(start))} to ${CLOCK_FORMAT.format(new Date(end))} UTC`;
+}
+
+function role(value: AdminAlertDetails["role"]): string {
+  if (!value) throw new Error("A member alert has no role");
+  return ROLE_LABELS[value];
+}
+
+/** The alert's heading (also its subject) and the one sentence under it. */
 function describe(
   kind: AdminAlertKind,
   details: AdminAlertDetails
-): { headline: string; sentence: string } {
-  const subject = details.subject ?? "someone";
+): { heading: string; summary: string } {
+  const subject = details.subject ?? "Someone";
+  const organization = details.organizationName;
   switch (kind) {
     case "member_invited":
       return {
-        headline: "Member invited",
-        sentence: `An invitation to join as ${details.role ?? "a member"} was sent.`,
+        heading: "Member invited",
+        summary: `Someone was invited to join ${organization} as ${role(details.role).toLowerCase()}.`,
       };
     case "member_joined":
-      return {
-        headline: "Member joined",
-        sentence: `${subject} joined as ${details.role ?? "a member"}.`,
-      };
+      return { heading: "Member joined", summary: `${subject} joined ${organization}.` };
     case "member_role_changed":
       return {
-        headline: "Member role changed",
-        sentence: `${subject}'s role changed from ${details.previousRole ?? "unknown"} to ${details.role ?? "unknown"}.`,
+        heading: "Member role changed",
+        summary: `${subject} is now ${role(details.role).toLowerCase()} in ${organization}.`,
       };
     case "member_removed":
-      return { headline: "Member removed", sentence: `${subject} no longer has access.` };
+      return {
+        heading: "Member removed",
+        summary: `${subject} no longer has access to ${organization}.`,
+      };
     case "api_key_created":
-      return { headline: "API key created", sentence: `The API key ${subject} was created.` };
+      return { heading: "API key created", summary: `A new API key, ${subject}, was created.` };
     case "api_key_rotated":
       return {
-        headline: "API key rotated",
-        sentence: `The API key ${subject} was rotated; its replacement is a new secret.`,
+        heading: "API key rotated",
+        summary: `The API key ${subject} was rotated, so a new secret is now in use.`,
       };
     case "api_key_revoked":
-      return { headline: "API key revoked", sentence: `The API key ${subject} was revoked.` };
+      return { heading: "API key revoked", summary: `The API key ${subject} was revoked.` };
     case "custody_connected":
       return {
-        headline: "Custody connection added",
-        sentence: `A custody connection (${subject}) was connected.`,
+        heading: "Custody connected",
+        summary: `A ${subject} custody connection was added.`,
       };
     case "custody_disconnected":
       return {
-        headline: "Custody connection removed",
-        sentence: `A custody connection (${subject}) was deactivated.`,
+        heading: "Custody disconnected",
+        summary: `A ${subject} custody connection was deactivated.`,
       };
     case "custody_wallet_created":
-      return { headline: "Wallet created", sentence: `A custody wallet (${subject}) was created.` };
+      return { heading: "Wallet created", summary: `A new ${subject} custody wallet was created.` };
     case "custody_wallet_removed":
-      return { headline: "Wallet removed", sentence: `A custody wallet (${subject}) was removed.` };
+      return { heading: "Wallet removed", summary: `A ${subject} custody wallet was removed.` };
     case "ip_allowlist_changed":
       return {
-        headline: "IP allowlist changed",
-        sentence: "The organization's API IP allowlist changed.",
+        heading: "IP allowlist changed",
+        summary: `The IP addresses ${organization}'s API keys may be used from changed.`,
       };
     case "alert_emails_changed":
       return details.enabled
-        ? { headline: "Alert emails on", sentence: "Alert emails to admins were turned on." }
+        ? {
+            heading: "Alert emails on",
+            summary: `Alert emails for ${organization} were turned on.`,
+          }
         : {
-            headline: "Alert emails off",
-            sentence:
-              "Alert emails were turned off. Admins will no longer be emailed when money moves or the organization changes.",
+            heading: "Alert emails off",
+            summary: `Alert emails for ${organization} were turned off. Admins will no longer be emailed about money movement or organization changes.`,
           };
     case "mainnet_entitlement_changed":
       return details.enabled
-        ? {
-            headline: "Mainnet enabled",
-            sentence: "The organization can now use mainnet projects.",
-          }
+        ? { heading: "Mainnet enabled", summary: `${organization} can now use mainnet projects.` }
         : {
-            headline: "Mainnet disabled",
-            sentence: "The organization can no longer use mainnet projects.",
+            heading: "Mainnet disabled",
+            summary: `${organization} can no longer use mainnet projects.`,
           };
-    case "money_movement": {
-      const { counts } = moneyAlertDetailsSchema.parse(details);
+    case "money_movement":
       return {
-        headline: "Money movement",
-        sentence: `New money movement: ${moneyMovementSummary(counts)}.`,
+        heading: "Money movement",
+        summary: `New money movement started in ${details.project?.name ?? organization}.`,
       };
-    }
     default: {
       const unreachable: never = kind;
       throw new Error(`Unhandled admin alert kind: ${String(unreachable)}`);
@@ -191,39 +217,69 @@ function dashboardPath(kind: AdminAlertKind, details: AdminAlertDetails): string
   return `/dashboard/${projectId}`;
 }
 
+/** The labelled rows under the summary: where, who or how much, and when. */
+function detailRows(
+  kind: AdminAlertKind,
+  details: AdminAlertDetails,
+  occurredAt: string
+): EmailDetail[] {
+  const rows: EmailDetail[] = [{ label: "Organization", value: details.organizationName }];
+  if (details.project) {
+    rows.push(
+      { label: "Project", value: details.project.name },
+      { label: "Network", value: ENVIRONMENT_LABELS[details.project.environment] }
+    );
+  }
+  if (kind === "money_movement") {
+    const money = moneyAlertDetailsSchema.parse(details);
+    for (const [key, label] of MONEY_COUNT_LABELS) {
+      if (money.counts[key] > 0) rows.push({ label, value: String(money.counts[key]) });
+    }
+    rows.push({ label: "Started", value: utcWindow(money.windowStart, money.windowEnd) });
+    return rows;
+  }
+  if (kind === "member_role_changed") {
+    rows.push({
+      label: "Role",
+      value: `${role(details.previousRole)} to ${role(details.role)}`,
+    });
+  }
+  rows.push(
+    { label: "By", value: details.actor ?? "SDP" },
+    { label: "When", value: utc(occurredAt) }
+  );
+  return rows;
+}
+
 /**
- * The email for one alert.
+ * The email for one alert. The dashboard link is SDP's own page on its own origin, never built
+ * from customer input; every other field is escaped by the layout.
  *
  * @param input.kind - What happened.
  * @param input.details - The alert's snapshot.
  * @param input.occurredAt - When it happened (ISO 8601).
- * @param input.dashboardOrigin - The dashboard's origin, for the link.
+ * @param input.dashboardOrigin - The dashboard's https origin, for the link.
  */
 export function adminAlertEmail(input: {
   kind: AdminAlertKind;
   details: AdminAlertDetails;
   occurredAt: string;
   dashboardOrigin: string;
-}): AdminAlertEmailContent {
+}): AdminAlertEmail {
   const { kind, details } = input;
-  const { headline, sentence } = describe(kind, details);
-  const lines = [sentence, "", `Organization: ${details.organizationName}`];
-  if (details.project) {
-    lines.push(`Project: ${details.project.name} (${details.project.environment})`);
-  }
-  if (kind === "money_movement") {
-    const { windowStart, windowEnd } = moneyAlertDetailsSchema.parse(details);
-    lines.push(`Between: ${windowStart} and ${windowEnd}`);
-  } else {
-    lines.push(`By: ${details.actor ?? "SDP"}`, `When: ${input.occurredAt}`);
-  }
-  lines.push(
-    "",
-    `Review it in the dashboard: ${input.dashboardOrigin}${dashboardPath(kind, details)}`,
-    "",
-    `You get this email because you are an admin of ${details.organizationName}.`,
-    "If you did not expect this, review your organization's members and API keys.",
-    "An organization admin can turn off alert emails in organization settings."
-  );
-  return { subject: `[SDP] ${headline} in ${details.organizationName}`, body: lines.join("\n") };
+  const { heading, summary } = describe(kind, details);
+  return {
+    subject: `${heading} in ${details.organizationName}`,
+    content: {
+      preheader: summary,
+      heading,
+      summary,
+      details: detailRows(kind, details, input.occurredAt),
+      action: {
+        label: "Review in dashboard",
+        url: `${input.dashboardOrigin}${dashboardPath(kind, details)}`,
+      },
+      note: `You get this email because you are an admin of ${details.organizationName}. If you did not expect this change, review your organization's members and API keys. An admin can turn off alert emails in organization settings.`,
+    },
+  };
 }

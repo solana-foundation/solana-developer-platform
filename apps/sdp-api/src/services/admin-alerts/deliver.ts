@@ -46,10 +46,11 @@ const deliveryTargetSchema = z.object({
 const dashboardUrlSchema = z
   .string()
   .trim()
-  .pipe(z.url({ protocol: /^https?$/ }));
+  .pipe(z.url({ protocol: /^https$/ }));
 
 /**
- * Alerts run only where Iterable is configured and the dashboard has a URL to link to: prod. On
+ * Alerts run only where Iterable is configured and the dashboard has an https URL to link to
+ * (the email layout only links https): prod. On
  * dev and stage there is no Iterable key, so the cron never registers, nothing is written and
  * nothing retries. A mounted `placeholder` reads as unconfigured, like a missing key.
  */
