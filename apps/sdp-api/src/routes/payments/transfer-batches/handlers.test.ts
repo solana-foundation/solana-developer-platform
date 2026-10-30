@@ -1607,13 +1607,15 @@ describe("payment transfer batches", () => {
       );
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as {
-        data: {
-          batch: { status: string };
-          recipients: Array<{ status: string }>;
-          transfers: Array<{ id: string; status: string }>;
-        };
-      };
+      const body = z
+        .object({
+          data: z.object({
+            batch: z.object({ status: z.string() }),
+            recipients: z.array(z.object({ status: z.string() })),
+            transfers: z.array(z.object({ id: z.string(), status: z.string() })),
+          }),
+        })
+        .parse(await response.json());
       expect(sendTransactionMock).not.toHaveBeenCalled();
       // Settled failed, not left processing: the retry route can resend the
       // recipient, and nothing unaudited can land or replay.

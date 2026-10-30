@@ -250,11 +250,11 @@ export async function executeChunk(params: {
     await failChunk(error);
     return;
   }
-  const failAuditedChunk = async (error: unknown) => {
-    await failChunk(error);
+  const failAuditedChunk = async (cause: unknown) => {
+    await failChunk(cause);
     await auditService.completeCritical(c, auditIntent, {
       status: "failure",
-      metadata: { error: error instanceof Error ? error.message : String(error) },
+      metadata: { error: cause instanceof Error ? cause.message : String(cause) },
     });
   };
 
