@@ -46,11 +46,15 @@ const DASHBOARD_FLAGS = vi.hoisted(
     }) as const satisfies DashboardFlags
 );
 
+const dashboardFlags = vi.hoisted(() => ({
+  getDashboardFlags: vi.fn<() => Promise<DashboardFlags>>(),
+}));
+
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/sdp-api", () => sdpApi);
 vi.mock("@/lib/sdp-auth", () => sdpAuth);
-vi.mock("@/flags/dashboard", () => ({ getDashboardFlags: async () => DASHBOARD_FLAGS }));
+vi.mock("@/flags/dashboard", () => dashboardFlags);
 vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStatus: async () => null }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   DashboardWorkspaceProvider: dashboardShell.DashboardWorkspaceProvider,
@@ -88,6 +92,8 @@ beforeEach(() => {
   sdpApi.listSdpProjects.mockReset();
   dashboardShell.DashboardWorkspaceProvider.mockClear();
   sdpApi.listSdpProjects.mockResolvedValue([SANDBOX_PROJECT, PRODUCTION_PROJECT]);
+  dashboardFlags.getDashboardFlags.mockReset();
+  dashboardFlags.getDashboardFlags.mockResolvedValue(DASHBOARD_FLAGS);
 });
 
 describe("bare dashboard landing", () => {
@@ -159,6 +165,20 @@ describe("project-scoped dashboard layout", () => {
 
   it("moves a page of an unlisted project under the sandbox, whatever was last used", async () => {
     setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
+
+    await expectRedirect(
+      renderProjectPage(
+        OTHER_ORGANIZATION_PROJECT.id,
+        `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys`
+      ),
+      `/dashboard/${SANDBOX_PROJECT.id}/api-keys`
+    );
+  });
+
+  it("redirects an unlisted project without reading its flags, which need a listed project", async () => {
+    dashboardFlags.getDashboardFlags.mockRejectedValue(
+      new Error(`Project ${OTHER_ORGANIZATION_PROJECT.id} is not in the signed-in organization`)
+    );
 
     await expectRedirect(
       renderProjectPage(

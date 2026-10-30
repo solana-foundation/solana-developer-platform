@@ -1,6 +1,21 @@
 import { API_KEY_FORBIDDEN_ACTIONS, API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
-import { describe, expect, it } from "vitest";
-import { assertGrantableApiKeyGrants, parseRequestedWalletScope } from "./api-key-scope.service";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
+import {
+  assertApiKeyGrantsInReleaseChannel,
+  assertGrantableApiKeyGrants,
+  parseRequestedWalletScope,
+} from "./api-key-scope.service";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelMaturity(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
+});
 
 describe("parseRequestedWalletScope", () => {
   it("keeps an all-wallets key unlisted", () => {
@@ -82,5 +97,38 @@ describe("assertGrantableApiKeyGrants", () => {
       assertGrantableApiKeyGrants("member", ["transfers.execute", "counterparties.read"])
     ).not.toThrow();
     expect(() => assertGrantableApiKeyGrants("member", [])).not.toThrow();
+  });
+});
+
+describe("assertApiKeyGrantsInReleaseChannel", () => {
+  beforeEach(() => {
+    providerMaturity.moduleEnvironmentMaturityOverride = null;
+  });
+
+  it("refuses a grant whose module the channel leaves out for the key's environment only", () => {
+    providerMaturity.moduleEnvironmentMaturityOverride = {
+      module: "payments",
+      environment: "production",
+      stage: "beta",
+    };
+    const stable = {
+      releaseChannel: "stable",
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
+    } as const;
+
+    expect(() =>
+      assertApiKeyGrantsInReleaseChannel({ ...stable, environment: "production" }, [
+        "transfers.read",
+      ])
+    ).toThrowError(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+        statusCode: 400,
+        details: { actions: ["transfers.read"] },
+      })
+    );
+    expect(() =>
+      assertApiKeyGrantsInReleaseChannel({ ...stable, environment: "sandbox" }, ["transfers.read"])
+    ).not.toThrow();
   });
 });

@@ -25,6 +25,7 @@ const INPUT: CreateApiKeyInput = {
   actorRole: "admin",
   grantChannel: {
     releaseChannel: "experimental",
+    environment: TEST_PROJECT.environment,
     rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   },
   name: "Racing key",

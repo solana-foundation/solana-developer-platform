@@ -8,10 +8,12 @@ import type { ApiKeyGrantChannel } from "./api-key-scope.service";
 const TEST_SCOPE = createTenantScope({ organizationId: "org_1", projectId: "prj_1" });
 const EXPERIMENTAL: ApiKeyGrantChannel = {
   releaseChannel: "experimental",
+  environment: "sandbox",
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 };
 const STABLE: ApiKeyGrantChannel = {
   releaseChannel: "stable",
+  environment: "sandbox",
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 };
 

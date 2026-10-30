@@ -80,8 +80,9 @@ function isStageInReleaseChannel(
  * whose `isModuleInReleaseChannel` reads the overridden module's stage from
  * `providerMaturity.moduleMaturityOverride`, and whose
  * `isModuleInReleaseChannelForEnvironment` reads the overridden (module, environment)
- * stage from `providerMaturity.moduleEnvironmentMaturityOverride`; everything else is
- * the real module.
+ * stage from `providerMaturity.moduleEnvironmentMaturityOverride`, then the module's
+ * stage from `providerMaturity.moduleMaturityOverride` for every environment; everything
+ * else is the real module.
  * Load it with `await import()` inside the test file's `vi.mock` factory, so the
  * factory and the test share this module's toggle.
  * @param original - The real module, from the factory's `importOriginal`.
@@ -120,6 +121,10 @@ export function mockReleaseChannelMaturity(
       const override = providerMaturity.moduleEnvironmentMaturityOverride;
       if (override !== null && override.module === module && override.environment === environment) {
         return isStageInReleaseChannel(original, override.stage, releaseChannel);
+      }
+      const moduleOverride = providerMaturity.moduleMaturityOverride;
+      if (moduleOverride !== null && moduleOverride.module === module) {
+        return isStageInReleaseChannel(original, moduleOverride.stage, releaseChannel);
       }
       return original.isModuleInReleaseChannelForEnvironment(
         releaseChannel,
