@@ -29,7 +29,7 @@ import {
 } from "./schemas";
 
 /** Batch sends and retries share one quota per actor and organization. */
-export const TRANSFER_BATCH_QUOTA = { name: "transfer-batch", actorMax: 10, orgMax: 30 };
+const TRANSFER_BATCH_QUOTA = { name: "transfer-batch", actorMax: 10, orgMax: 30 };
 
 export const transferBatches = new Hono<{ Bindings: Env }>();
 

@@ -499,7 +499,6 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
   .extend({
     ...createTransferBatchRequestSchema.shape,
-    // An estimate moves nothing, so it needs no payout run name.
     externalId: createTransferBatchRequestSchema.shape.externalId.optional().openapi({
       description:
         "Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.",

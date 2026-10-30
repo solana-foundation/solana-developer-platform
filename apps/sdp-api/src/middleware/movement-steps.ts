@@ -46,6 +46,19 @@ export interface RecordAnswer {
 }
 
 /**
+ * Marks an answer read from a domain row as a replay (`Idempotent-Replayed: true`), so a client
+ * retires its key on it. Copied, so the header lands on whatever Response the answer built.
+ *
+ * @param answered - The row's answer.
+ * @returns The answer with the replay header.
+ */
+export function markReplayed(answered: Response): Response {
+  const replayed = new Response(answered.body, answered);
+  replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
+  return replayed;
+}
+
+/**
  * Answers a request whose Idempotency-Key already has a domain row, from that
  * row: after a takeover of a crashed attempt (the route declares
  * `idempotent({ ..., recovery: "record" })` so that takeover is allowed), or
@@ -83,11 +96,7 @@ export function replayFromRecord<TAuthorized>(
         // under the key like any answer after the row exists, and marked as a
         // replay, so a client retires the key on it.
         markIdempotencyCommitted(c);
-        // Copied, so the header lands on whatever Response the finder built.
-        const answered = await answer.respond();
-        const replayed = new Response(answered.body, answered);
-        replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
-        return replayed;
+        return markReplayed(await answer.respond());
       }
     }
     await next();
