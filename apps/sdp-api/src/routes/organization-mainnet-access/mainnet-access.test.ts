@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { hashString } from "@sdp/payments/hash";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
@@ -200,7 +201,9 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(others).toHaveLength(0);
     expect(email?.headers.authorization).toBe("Bearer re_test");
     expect(email?.headers["idempotency-key"]).toBe(
-      `mainnet-access/${ORGANIZATION_ID}/${row?.requested_at}`
+      `mainnet-access/${ORGANIZATION_ID}/${row?.requested_at}/${createHash("sha256")
+        .update(JSON.stringify(email?.body))
+        .digest("hex")}`
     );
     expect(email?.body).toMatchObject({
       from: "SDP <noreply@platform.solana.com>",
@@ -258,6 +261,21 @@ describe("Organization mainnet access (HOO-2427)", () => {
     const emails = sentEmails();
     expect(emails).toHaveLength(2);
     expect(emails[0]?.headers["idempotency-key"]).toBe(emails[1]?.headers["idempotency-key"]);
+  });
+
+  it("keys a resend of changed content apart, so Resend does not refuse it", async () => {
+    const restore = failResend();
+    expect((await post(SUBMISSION)).status).toBe(503);
+    await getDb(env)
+      .prepare("UPDATE organizations SET name = ? WHERE id = ?")
+      .bind("Renamed Org", ORGANIZATION_ID)
+      .run();
+    restore();
+
+    expect((await notify()).status).toBe(200);
+    const [failed, sent] = sentEmails();
+    expect(sent?.body.subject).toBe("Mainnet access request: Renamed Org");
+    expect(sent?.headers["idempotency-key"]).not.toBe(failed?.headers["idempotency-key"]);
   });
 
   it("notifies an unsent request accepted under terms that have since changed", async () => {

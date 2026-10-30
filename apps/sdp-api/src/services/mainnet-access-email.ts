@@ -3,6 +3,7 @@
  * the provider other Foundation apps on solana.com already send with. Approval stays manual:
  * the email only asks an operator to look.
  */
+import { createHash } from "node:crypto";
 import type { CountryCode } from "@sdp/types/countries";
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
@@ -41,7 +42,7 @@ function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): stri
 }
 
 /** Plain text only: every field is customer-supplied, and text needs no escaping. */
-export function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): string {
+function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail): string {
   return [
     "An organization asked for SDP mainnet access.",
     "",
@@ -58,7 +59,9 @@ export function mainnetAccessRequestEmailText(request: MainnetAccessRequestEmail
 
 /**
  * Sends the request email. Resend's Idempotency-Key makes a resend of the same request one email,
- * so a retry after a lost answer does not reach the alias twice.
+ * so a retry after a lost answer does not reach the alias twice. The key carries a hash of the
+ * message: Resend refuses a key it has seen with another payload for 24 hours, and the message
+ * changes when the organization is renamed or an operator corrects its country.
  *
  * @throws PROVIDER_UNAVAILABLE when Resend does not accept it; SERVICE_UNAVAILABLE when unconfigured.
  */
@@ -83,6 +86,8 @@ export async function sendMainnetAccessRequestEmail(
     text: mainnetAccessRequestEmailText(request),
   };
   if (request.requester.email) message.reply_to = request.requester.email;
+  const body = JSON.stringify(message);
+  const contentHash = createHash("sha256").update(body).digest("hex");
   await fetchProviderJson(
     "Resend",
     `${config.apiUrl.replace(/\/+$/, "")}/emails`,
@@ -92,9 +97,9 @@ export async function sendMainnetAccessRequestEmail(
       headers: {
         authorization: `Bearer ${config.apiKey}`,
         "content-type": "application/json",
-        "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}`,
+        "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}/${contentHash}`,
       },
-      body: JSON.stringify(message),
+      body,
       timeoutMs: 10_000,
       maxBytes: 16_384,
     }
