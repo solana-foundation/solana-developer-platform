@@ -247,7 +247,7 @@ describe("renderOperation", () => {
     assert.ok(page.includes("- **`widgetId`** · `string` · required · always `fixed`"));
   });
 
-  it("lists every status, and gives each JSON answer a response tab", () => {
+  it("lists every status and shows the useful response examples", () => {
     const at = ["- **`201`** Created it", "- **`204`** No body", "- **`404`** Not Found"].map(
       (status) => markdown.indexOf(status)
     );
@@ -257,17 +257,13 @@ describe("renderOperation", () => {
       [...at].sort((left, right) => left - right)
     );
     assert.ok(markdown.includes("- **`204`** No body\n\n- **`404`** Not Found"));
-    for (const tab of [
-      'tab="cURL"',
-      'tab="TypeScript"',
-      'tab="Python"',
-      'tab="201"',
-      'tab="404"',
-      'tab="409"',
-    ]) {
+    for (const tab of ['tab="cURL"', 'tab="TypeScript"', 'tab="Python"', 'tab="201"']) {
       assert.ok(markdown.includes(tab), tab);
     }
     assert.ok(!markdown.includes('tab="204"'));
+    assert.ok(!markdown.includes('tab="404"'));
+    assert.ok(!markdown.includes('tab="409"'));
+    assert.ok(markdown.includes("[standard error shape](/docs/reference/conventions/errors)"));
     assert.ok(markdown.includes("curl -X POST 'https://api.solana.com/v1/widgets/wdg_1'"));
   });
 
@@ -409,6 +405,57 @@ describe("renderOperation", () => {
     assert.ok(keyed.includes('    "Idempotency-Key": crypto.randomUUID()'));
     assert.ok(keyed.includes('"Idempotency-Key": str(uuid.uuid4())'));
   });
+
+  it("summarizes the shared idempotency contract without dropping custom headers", () => {
+    const header = {
+      name: "Idempotency-Key",
+      in: "header" as const,
+      required: false,
+      schema: schema({
+        example: "key",
+        constraints: [{ kind: "pattern", value: "^[a-z]+$" }],
+      }),
+      sample: "key",
+    };
+    const shared = renderOperation({
+      ...CREATE_WIDGET,
+      parameters: [
+        {
+          ...header,
+          description:
+            "Within 24 hours, a retry with the same key and the same request returns the original answer. A long contract follows.",
+        },
+      ],
+    });
+    assert.ok(shared.includes("[Retry and recovery rules](/docs/developing-with-sdp/idempotency)"));
+    assert.ok(!shared.includes("A long contract follows."));
+    assert.ok(shared.includes("1–255 printable ASCII key"));
+    assert.ok(!shared.includes("pattern `^[a-z]+$`"));
+    assert.ok(!shared.includes("example `key`"));
+
+    const custom = renderOperation({
+      ...CREATE_WIDGET,
+      parameters: [{ ...header, description: "This route has custom retry rules." }],
+    });
+    assert.ok(custom.includes("This route has custom retry rules."));
+    assert.ok(custom.includes("pattern `^[a-z]+$`"));
+  });
+
+  it("keeps an example for a route-specific error", () => {
+    const custom = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        ...CREATE_WIDGET.responses,
+        {
+          status: "422",
+          description: "Request conflicts with the existing widget.",
+          body: { kind: "json", schema: ERROR_SCHEMA, example: ERROR_EXAMPLE },
+        },
+      ],
+    });
+    assert.ok(custom.includes('tab="422"'));
+    assert.ok(!custom.includes('tab="404"'));
+  });
 });
 
 describe("the operation's panel", () => {
@@ -417,7 +464,7 @@ describe("the operation's panel", () => {
   it("holds the samples and example responses, after the responses list", () => {
     const panel = markdown.slice(markdown.indexOf("<ApiPanel>"), markdown.indexOf("</ApiPanel>"));
     assert.ok(markdown.indexOf("## Responses") < markdown.indexOf("<ApiPanel>"));
-    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="404"']) {
+    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="201"']) {
       assert.ok(panel.includes(part), part);
     }
     // The response fields stay in the body, under Responses.

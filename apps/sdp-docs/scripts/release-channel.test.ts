@@ -101,6 +101,21 @@ describe("docs follow the release channel", () => {
     assert.match(experimental, /After$/);
   });
 
+  it("keeps the tutorial landing page within the published modules", () => {
+    const page = readFileSync(
+      path.resolve(import.meta.dirname, "../content/docs/tutorials/index.mdx"),
+      "utf8"
+    );
+    const stable = expandDocsBlocks(page, "tutorials/index.mdx", { surface: STABLE });
+    const experimental = expandDocsBlocks(page, "tutorials/index.mdx", {
+      surface: EXPERIMENTAL,
+    });
+
+    assert.match(stable, /end-to-end-payment-flow/);
+    assert.doesNotMatch(stable, /issue-a-regulated-stablecoin|TutorialLinks/);
+    assert.match(experimental, /issue-a-regulated-stablecoin/);
+  });
+
   it("tables the API's rate limits from the manifest", () => {
     const limits = expandDocsBlocks("<RateLimitTable />\n", "rate-limits.mdx", { surface: STABLE });
     assert.equal(

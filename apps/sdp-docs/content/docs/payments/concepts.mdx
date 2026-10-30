@@ -7,13 +7,15 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, choose the key's [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module) and [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access).
+Every SDP payment uses a **custody wallet** in your organization, optionally scoped to a project. A custody provider holds its key; SDP exposes its Solana address and routes signing to that provider. The wallet signs outbound transfers and receives inbound funds. Limit what an API key may do with it through [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module) and [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access).
 
 You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+For SPL tokens, `POST /v1/payments/transfers` takes the on-chain mint address, not a symbol such as `USDC`. Use the literal `SOL` for native SOL.
+
+The `token` filter on `GET /v1/payments/transfers` matches the stored `Transfer.token` exactly. API-created transfers store the mint you supplied (or `SOL`); indexed transfers may store a resolved symbol. Filter with the label returned in the response, or filter client-side. Balance responses attempt symbol resolution and return the symbol when known.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 

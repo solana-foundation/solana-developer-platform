@@ -3,8 +3,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { ProviderCallout } from "@/components/docs-shell/home";
-import { HOME_TOC } from "@/components/docs-shell/home-sections";
+import { type BreadcrumbItem, DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
 import { PageActions } from "@/components/docs-shell/page-actions";
 import { getDocsMarkdownPath, getDocsMarkdownUrl, getDocsPagePath } from "@/lib/site";
@@ -27,6 +26,7 @@ type DocsData = {
   steps?: string[];
   /** Set by generate:api on each API reference page (scripts/lib/api-reference-page.ts). */
   apiReference?: boolean;
+  breadcrumbParent?: string;
 };
 
 type DocsPageProps = {
@@ -56,6 +56,45 @@ function resolvePage(slug?: string[]): ResolvedPage | null {
   }
 
   return null;
+}
+
+function breadcrumbsFor(page: ResolvedPage["page"]): BreadcrumbItem[] {
+  const topLevelUrls = new Set(
+    source.pageTree.children.flatMap((node) => (node.type === "page" ? [node.url] : []))
+  );
+  if (topLevelUrls.has(page.url)) return [];
+
+  const items: BreadcrumbItem[] = [];
+  const seen = new Set([page.url]);
+  let current = page;
+
+  while (!topLevelUrls.has(current.url)) {
+    const override = (current.data as DocsData).breadcrumbParent;
+    const segments = current.url
+      .replace(/^\/docs\/?/, "")
+      .split("/")
+      .filter(Boolean);
+    const parent = override
+      ? resolvePage(
+          override
+            .replace(/^\/docs\/?/, "")
+            .split("/")
+            .filter(Boolean)
+        )?.page
+      : [...segments.keys()]
+          .slice(1)
+          .reverse()
+          .map((length) => resolvePage(segments.slice(0, length))?.page)
+          .find((candidate) => candidate && candidate.url !== current.url);
+
+    if (override && !parent) throw new Error(`Unknown breadcrumb parent: ${override}`);
+    if (!parent || seen.has(parent.url)) break;
+    seen.add(parent.url);
+    items.unshift({ name: String(parent.data.title), url: parent.url });
+    current = parent;
+  }
+
+  return items;
 }
 
 /** A page's headings. An API operation's page has none: its samples take the right column. */
@@ -92,7 +131,7 @@ export default async function Page({ params }: DocsPageProps) {
     : undefined;
 
   const isHome = resolvedPage.pageSlug.length === 0;
-  const baseToc = isHome ? HOME_TOC : headingsToc(data);
+  const baseToc = headingsToc(data);
   const steps = data.steps ?? [];
   let toc = baseToc;
   if (steps.length > 0) {
@@ -111,24 +150,26 @@ export default async function Page({ params }: DocsPageProps) {
   const pageSlug = resolvedPage.pageSlug.join("/");
 
   return (
-    <DocsPage
-      toc={toc}
-      // An API operation's page takes the full width beside its samples (globals.css).
-      full={data.full === true || data.apiReference === true}
-      tocFooter={isHome ? <ProviderCallout /> : undefined}
-    >
-      <div className="launch-docs-header">
-        {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
-        <PageActions
-          markdownPath={getDocsMarkdownPath(pageSlug)}
-          markdownUrl={getDocsMarkdownUrl(pageSlug)}
-        />
-      </div>
-      {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
-      <DocsBody prev={prev} next={next} bare={data.hideTitle} apiReference={data.apiReference}>
-        <MDX components={mdxComponents} />
-      </DocsBody>
-    </DocsPage>
+    <>
+      <DocsBreadcrumb items={breadcrumbsFor(resolvedPage.page)} />
+      <DocsPage
+        toc={toc}
+        // An API operation's page takes the full width beside its samples (globals.css).
+        full={isHome || data.full === true || data.apiReference === true}
+      >
+        <div className="launch-docs-header">
+          {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
+          <PageActions
+            markdownPath={getDocsMarkdownPath(pageSlug)}
+            markdownUrl={getDocsMarkdownUrl(pageSlug)}
+          />
+        </div>
+        {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
+        <DocsBody prev={prev} next={next} bare={data.hideTitle} apiReference={data.apiReference}>
+          <MDX components={mdxComponents} />
+        </DocsBody>
+      </DocsPage>
+    </>
   );
 }
 

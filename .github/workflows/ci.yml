@@ -774,6 +774,9 @@ jobs:
       - name: Docs release-channel tests
         run: pnpm --filter sdp-docs test
 
+      - name: Check docs prose
+        run: pnpm --filter sdp-docs check:prose
+
       - name: Check docs links (experimental)
         run: pnpm --filter sdp-docs check:links
 

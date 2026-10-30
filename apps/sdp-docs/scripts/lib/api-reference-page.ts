@@ -47,6 +47,8 @@ const PARAMETER_HEADINGS = {
 const GENERIC_ERROR_DESCRIPTION = "Error";
 
 const AUTHENTICATION_GUIDE = "/docs/developing-with-sdp/authentication";
+const IDEMPOTENCY_GUIDE = "/docs/developing-with-sdp/idempotency";
+const ERRORS_GUIDE = "/docs/reference/conventions/errors";
 
 /** Text from the document as MDX: outside a code span, `{`, `}` and `<` would open JSX. */
 export function mdxText(value: string): string {
@@ -229,13 +231,26 @@ function fieldLines(
 }
 
 function parameterLines(parameter: ApiParameter): string[] {
-  return fieldLines(
-    codeSpan(parameter.name),
-    parameter.required,
-    parameter.schema,
-    parameter.description,
-    0
-  );
+  const sharedIdempotency =
+    parameter.in === "header" &&
+    parameter.name === "Idempotency-Key" &&
+    parameter.description?.includes(
+      "Within 24 hours, a retry with the same key and the same request"
+    );
+  // Keep the full contract in OpenAPI. The reference links to it instead of repeating it per route.
+  const description = sharedIdempotency
+    ? `Use a unique 1–255 printable ASCII key per operation. Reuse it with the same request on retries. An in-flight attempt returns \`409\`; a changed request returns \`422\`. [Retry and recovery rules](${IDEMPOTENCY_GUIDE}).`
+    : parameter.description;
+  const displaySchema = sharedIdempotency
+    ? {
+        ...parameter.schema,
+        constraints: parameter.schema.constraints.filter(
+          (constraint) => constraint.kind !== "pattern"
+        ),
+        example: undefined,
+      }
+    : parameter.schema;
+  return fieldLines(codeSpan(parameter.name), parameter.required, displaySchema, description, 0);
 }
 
 function parameterSections(parameters: ApiParameter[]): string[] {
@@ -322,7 +337,21 @@ function sampleFences(operation: ApiOperation): string[] {
 }
 
 function exampleResponseFences(responses: ApiResponse[]): string[] {
-  return responses.flatMap((response) => {
+  const successes = responses.filter(
+    (response) => response.status.startsWith("2") && response.body.kind !== "empty"
+  );
+  const specificError = responses.find(
+    (response) =>
+      !response.status.startsWith("2") &&
+      response.description !== GENERIC_ERROR_DESCRIPTION &&
+      response.body.kind !== "empty"
+  );
+  const selected = [...successes, ...(specificError ? [specificError] : [])];
+  if (selected.length === 0) {
+    const first = responses.find((response) => response.body.kind !== "empty");
+    if (first) selected.push(first);
+  }
+  return selected.flatMap((response) => {
     if (response.body.kind === "empty") return [];
     return [
       fence("json", `tab="${response.status}"`, JSON.stringify(response.body.example, null, 2)),
@@ -362,6 +391,9 @@ export function renderOperation(operation: ApiOperation): string {
   lines.push("<ApiPanel>", "", "## Example request", "", ...sampleFences(operation));
   const examples = exampleResponseFences(operation.responses);
   if (examples.length > 0) lines.push("## Example responses", "", ...examples);
+  if (operation.responses.some((response) => response.description === GENERIC_ERROR_DESCRIPTION)) {
+    lines.push(`Error responses use the [standard error shape](${ERRORS_GUIDE}).`, "");
+  }
   lines.push("</ApiPanel>", "", "</ApiOperation>");
   return lines
     .join("\n")

@@ -13,6 +13,7 @@ import {
   DOCS_ACTION_MODULES,
   DOCS_MODULES,
   DOCS_RAMP_PROVIDERS,
+  DOCS_TUTORIALS,
   type ModuleEntry,
   publishedRampProviderIds,
   ROTATE_PROVIDERS_TOKEN,
@@ -37,6 +38,7 @@ import { apiUrl, canonicalSite } from "./site";
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
  * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
+ * - `<TutorialLinks />`: tutorials available on this build.
  * - `<ApiExample operation="..." />`: a request from the public reference and
  *   snippet model.
  *
@@ -72,6 +74,10 @@ const BLOCKS = {
   ModuleCapabilities: (surface) =>
     publishedModules(surface)
       .map((entry) => `- ${entry.capability}`)
+      .join("\n"),
+  TutorialLinks: (surface) =>
+    DOCS_TUTORIALS.filter((entry) => !entry.module || isModulePublished(entry.module, surface))
+      .map((entry) => `- [${entry.title}](${entry.href}): ${entry.description}`)
       .join("\n"),
   RampProviderMatrix: (surface) =>
     table(

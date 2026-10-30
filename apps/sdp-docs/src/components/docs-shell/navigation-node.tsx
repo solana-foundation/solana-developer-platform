@@ -24,10 +24,11 @@ function nodeContainsPath(node: PageTreeNode, pathname: string): boolean {
 
 type NavigationNodeProps = {
   node: PageTreeNode;
+  onNavigate: () => void;
 };
 
 /** A page tree node in the sidebar. Each level of children sits further in (globals.css). */
-export function NavigationNode({ node }: NavigationNodeProps) {
+export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
   const pathname = usePathname();
 
   if (node.type === "separator") {
@@ -43,7 +44,16 @@ export function NavigationNode({ node }: NavigationNodeProps) {
   if (node.type === "page") {
     const isActive = pathname === node.url;
     return (
-      <Link href={node.url} className={cn("launch-docs-nav-item", isActive && "is-active")}>
+      <Link
+        href={node.url}
+        onClick={onNavigate}
+        className={cn(
+          "launch-docs-nav-item",
+          node.url === "/docs" && "is-start",
+          isActive && "is-active"
+        )}
+        aria-current={isActive ? "page" : undefined}
+      >
         {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
         {node.name}
       </Link>
@@ -51,7 +61,7 @@ export function NavigationNode({ node }: NavigationNodeProps) {
   }
 
   if (node.type === "folder") {
-    return <FolderNode node={node} pathname={pathname} />;
+    return <FolderNode node={node} pathname={pathname} onNavigate={onNavigate} />;
   }
 
   return null;
@@ -60,6 +70,7 @@ export function NavigationNode({ node }: NavigationNodeProps) {
 type FolderNodeProps = {
   node: Extract<PageTreeNode, { type: "folder" }>;
   pathname: string;
+  onNavigate: () => void;
 };
 
 /** A plain click, which opens the page here rather than in another tab or window. */
@@ -71,7 +82,7 @@ function isPlainClick(event: MouseEvent<HTMLAnchorElement>) {
  * A folder. Its row is one highlight, toggle included. A linked folder's link opens the folder
  * as it opens the page, and toggles it from the page itself, as the chevron does.
  */
-function FolderNode({ node, pathname }: FolderNodeProps) {
+function FolderNode({ node, pathname, onNavigate }: FolderNodeProps) {
   const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
   const [isOpen, setIsOpen] = useState(containsPath);
 
@@ -92,7 +103,10 @@ function FolderNode({ node, pathname }: FolderNodeProps) {
               href={node.index.url}
               className="launch-docs-nav-folder-link"
               onClick={(event) => {
-                if (isPlainClick(event)) setIsOpen((open) => (isActive ? !open : true));
+                if (isPlainClick(event)) {
+                  setIsOpen((open) => (isActive ? !open : true));
+                  onNavigate();
+                }
               }}
             >
               {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
@@ -135,7 +149,7 @@ function FolderNode({ node, pathname }: FolderNodeProps) {
       {hasChildren && isOpen ? (
         <div className="launch-docs-nav-children">
           {node.children.map((child) => (
-            <NavigationNode key={getNodeKey(child)} node={child} />
+            <NavigationNode key={getNodeKey(child)} node={child} onNavigate={onNavigate} />
           ))}
         </div>
       ) : null}

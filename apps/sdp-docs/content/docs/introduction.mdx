@@ -1,126 +1,20 @@
 ---
 title: What is SDP?
-icon: BookOpen
-description: One API in front of interchangeable providers for building on Solana.
+description: One project-scoped API for building on Solana with your chosen providers.
 ---
 
-import { Steps, Step } from "fumadocs-ui/components/steps";
+Solana Developer Platform (SDP) gives your app one API for the Solana services it uses. Set up a project in the dashboard, then make requests with a key scoped to that project.
 
-SDP puts each of its modules behind one stable API in front of interchangeable providers. Operations use project-scoped authentication.
+## How it fits together
+
+- **Projects** separate environments, keys, wallets, and team access. Start in a sandbox before moving to production.
+- **Providers** supply the services behind SDP. Configure the providers you use for each project; your app calls the same SDP API.
+- **Access** is explicit. API keys hold only the actions you grant, and sensitive operations leave an audit trail.
+
+## What you can build
+
+The capabilities below reflect what this deployment publishes.
 
 <ModuleTable />
 
-## Background
-
-Institutional capital is moving onchain: [$35 billion in tokenized real-world assets](https://app.rwa.xyz/) across public blockchains, [$3.2 billion of it on Solana](https://app.rwa.xyz/networks/solana), and [tokenized stocks](https://app.rwa.xyz/stocks) — where Solana settles most trading volume — as the fastest-growing slice.
-
-Assets at this scale need regulated custody, enforceable compliance, and auditable controls. SDP provides them as one API, so bringing an asset onchain does not require a team of Solana developers.
-
-## Core Features
-
-<Steps>
-<Step>
-### Unified Programming Interface
-
-SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same call works for every custody provider. The `provider` field is the only thing that changes.
-
-The examples read your project key from `SDP_API_KEY`.
-
-<Tabs items={["TypeScript", "Python", "curl"]}>
-<Tab value="TypeScript">
-<ApiExample operation="create-wallet" language="ts" />
-</Tab>
-<Tab value="Python">
-<ApiExample operation="create-wallet" language="py" />
-</Tab>
-<Tab value="curl">
-<ApiExample operation="create-wallet" />
-</Tab>
-</Tabs>
-</Step>
-<Step>
-### Wallet Custody
-
-Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes authentication, permission and allowed-operation checks before it executes.
-
-- **Built on `@solana/keychain`**
-
-   The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
-
-- **[Grants by module](/docs/developing-with-sdp/manage-api-keys#grants-by-module)**
-
-   Limit what an API key may do. A key holds an explicit list of actions, such as reading one module or executing in another, and every other route is refused before it runs.
-
-- **Scoped custody configuration**
-
-   Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
-</Step>
-<Step>
-### Onchain Transfers
-
-SDP exposes unified endpoints for onchain transfers, recurring payments, and batch transfers.
-
-Save one [idempotency key](/docs/developing-with-sdp/idempotency#choosing-a-key)
-per operation. Retry with the same key, body, and API credential; use a new key
-for a new operation. Batch `externalId` values are correlation labels.
-
-<Tabs items={["Recurring Payments", "Batch Transfers"]}>
-<Tab value="Recurring Payments">
-```bash title="Terminal"
-RECURRING_IDEMPOTENCY_KEY="recurring-subscriber-42"
-
-curl -X POST https://api.solana.com/v1/payments/recurring-payments \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $RECURRING_IDEMPOTENCY_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceCustodyWalletId": "cwlt_example",
-    "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
-    "token": "USDC",
-    "amount": "25.00",
-    "periodHours": 720
-  }'
-```
-</Tab>
-<Tab value="Batch Transfers">
-```bash title="Terminal"
-PAYROLL_IDEMPOTENCY_KEY="payroll-run-001"
-
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $PAYROLL_IDEMPOTENCY_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "externalId": "payroll_run_001",
-    "sourceCustodyWalletId": "cwlt_example",
-    "token": "USDC",
-    "recipients": [
-      {
-        "externalId": "payroll_row_001",
-        "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
-        "amount": "25.00"
-      }
-    ]
-  }'
-```
-</Tab>
-</Tabs>
-
-See [Payments](/docs/payments) for transfers, batches, and recurring payments.
-</Step>
-<Step>
-### Audit Trails
-
-Every sensitive operation is recorded automatically. Each entry captures the acting user or API key, the resource touched, success or failure, client IP, user agent, request id, and secret-redacted metadata, and is queryable per organization.
-
-| Area                    | Recorded events                                                                    |
-| ----------------------- | ---------------------------------------------------------------------------------- |
-| API keys                | Create, revoke, and rotate, for both organization and project-scoped keys          |
-| Custody                 | Provider configuration, wallet provisioning, and credential lifecycle changes      |
-| Transactions & signing  | Signing requests, submissions, and failed submissions                              |
-| Organization & access   | Members, invitations, projects, and project membership             |
-| Counterparties          | Counterparty and Counterparty Account changes                                      |
-</Step>
-</Steps>
+[Get started](/docs) with a sandbox project, or [browse the API reference](/docs/reference/api).
