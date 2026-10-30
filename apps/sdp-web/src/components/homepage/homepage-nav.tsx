@@ -3,7 +3,6 @@ import { FILMS, filmUrl, SERIES_URL } from "./builders/films";
 import type { HomepageLinks } from "./homepage-links";
 import { NavShell } from "./nav/nav-shell";
 import { NAV_GROUP_IDS, type NavGroup, type NavLink } from "./nav/nav-types";
-import { type GatedSurface, isComingSoon } from "./release-gate";
 
 /** The builders' films the Builders panel lists by name, by video id. */
 const PANEL_FILM_IDS = ["ZfUtJgkE5dE", "QGRwG0XdTJs", "VdjsVXMcvrQ", "PN7ZoAEpcgo", "U9V2nmGMNUw"];
@@ -12,8 +11,6 @@ const PANEL_FILMS = FILMS.filter((film) => PANEL_FILM_IDS.includes(film.id));
 /** The homepage's sticky bar: brand, the three groups with their panels, the account actions. */
 export async function HomepageNav({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
-  const comingSoon = (surface: GatedSurface) =>
-    isComingSoon(surface) ? t("Homepage.comingSoon") : undefined;
   const sandbox: NavLink = {
     label: t("Homepage.nav.platform.sandbox"),
     href: links.signup.href,
@@ -26,29 +23,23 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
       label: t("Homepage.nav.platform.label"),
       features: [
         {
-          label: t("Homepage.nav.platform.issuance.title"),
-          body: t("Homepage.nav.platform.issuance.body"),
-          href: "#issuance",
-          comingSoon: comingSoon("issuance"),
-        },
-        {
           label: t("Homepage.nav.platform.payments.title"),
           body: t("Homepage.nav.platform.payments.body"),
           href: "#payments-api",
         },
         {
+          label: t("Homepage.nav.platform.issuance.title"),
+          body: t("Homepage.nav.platform.issuance.body"),
+          href: "#issuance",
+        },
+        {
           label: t("Homepage.nav.platform.markets.title"),
           body: t("Homepage.nav.platform.markets.body"),
           href: "#markets",
-          comingSoon: comingSoon("markets"),
         },
       ],
       links: [
-        {
-          label: t("Homepage.nav.platform.privacy"),
-          href: "#privacy",
-          comingSoon: comingSoon("privacy"),
-        },
+        { label: t("Homepage.nav.platform.privacy"), href: "#privacy" },
         { label: t("Homepage.nav.platform.partners"), href: "#stack" },
         { label: t("Homepage.nav.platform.interfaces"), href: "#interfaces" },
         { label: t("Homepage.nav.platform.network"), href: "#network" },
@@ -114,22 +105,10 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
   ];
 
   const mobileLinks: NavLink[] = [
-    {
-      label: t("Homepage.nav.platform.issuance.title"),
-      href: "#issuance",
-      comingSoon: comingSoon("issuance"),
-    },
     { label: t("Homepage.nav.platform.payments.title"), href: "#payments-api" },
-    {
-      label: t("Homepage.nav.platform.markets.title"),
-      href: "#markets",
-      comingSoon: comingSoon("markets"),
-    },
-    {
-      label: t("Homepage.nav.platform.privacy"),
-      href: "#privacy",
-      comingSoon: comingSoon("privacy"),
-    },
+    { label: t("Homepage.nav.platform.issuance.title"), href: "#issuance" },
+    { label: t("Homepage.nav.platform.markets.title"), href: "#markets" },
+    { label: t("Homepage.nav.platform.privacy"), href: "#privacy" },
     { label: t("Homepage.nav.platform.partners"), href: "#stack" },
     { label: t("Homepage.nav.mobile.builders"), href: "#builders" },
     { label: t("Homepage.nav.platform.interfaces"), href: "#interfaces" },
