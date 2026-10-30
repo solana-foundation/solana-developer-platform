@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { notFound } from "@/lib/errors";
+import { isModuleAvailableForEnvironment } from "@/lib/feature-flags";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
@@ -28,12 +29,15 @@ export async function findPaymentRequest(env: Env, token: string): Promise<Payme
 /**
  * Run the rest of a `/pay` chain under the cluster scope of the Project the payment request was
  * created in: the link carries no project, so the stored row decides the cluster. It moves money
- * as that payment request (HOO-2099): the sponsor admits it only while the request is open.
+ * as that payment request (HOO-2099): the sponsor admits it only while the request is open. A
+ * Project whose environment the release channel does not run Payments for answers like a
+ * missing link, so no QR code or transaction is built on that cluster.
  *
  * @param c - The request context, on a route with a `:token` parameter.
  * @param next - The rest of the route chain.
  * @returns Resolves when the chain has run.
- * @throws AppError `NOT_FOUND` when no request has that token, or the request has no Project.
+ * @throws AppError `NOT_FOUND` when no request has that token, the request has no Project, or the
+ * release channel does not run Payments for the Project's environment.
  */
 export async function paymentRequestScope(
   c: Context<{ Bindings: Env }, "/:token" | "/:token/tx">,
@@ -44,7 +48,15 @@ export async function paymentRequestScope(
     c.req.param("token")
   );
   const project = await new ProjectService(getDb(c.env)).getProject(projectId);
-  if (!project) {
+  if (
+    !project ||
+    !isModuleAvailableForEnvironment(
+      c.env,
+      "payments",
+      project.environment,
+      c.get("rampProviderMaturity")
+    )
+  ) {
     throw notFound("Payment request");
   }
   await runInClusterScope({ projectId: project.id, environment: project.environment }, () =>
