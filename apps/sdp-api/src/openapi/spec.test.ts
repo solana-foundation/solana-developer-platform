@@ -427,7 +427,8 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("keeps every literal Embedded Yield guide route in the publishable Earn document", () => {
+  it("keeps Embedded Yield routes in their publishable or internal document", () => {
+    const internalDocument = createOpenApiDocument();
     const publicDocument = createPublicOpenApiDocument(PUBLISHABLE_EARN);
     // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
     // "Unpublishing a Page") but its route contract is still pinned here.
@@ -456,7 +457,18 @@ describe("OpenAPI spec", () => {
       ])
     );
     for (const path of referencedPaths) {
-      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      if (path.startsWith("/v1/earn/onboarding/wisdomtree/")) {
+        expect(
+          internalDocument.paths?.[path],
+          `Missing internal onboarding path: ${path}`
+        ).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Onboarding must remain internal: ${path}`
+        ).toBeUndefined();
+      } else {
+        expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+      }
     }
   });
 

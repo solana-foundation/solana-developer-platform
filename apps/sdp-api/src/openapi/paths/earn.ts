@@ -41,6 +41,7 @@ import {
   earnVaultWithdrawalRequestParamsSchema,
   listEarnStrategiesQuerySchema,
 } from "@/routes/earn/schemas";
+import { registerEarnOnboardingPaths } from "./earn-onboarding";
 import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   errorResponses,
@@ -56,6 +57,7 @@ const earnConfigurationSecurity: EarnSecurity = [{ apiKeyAuth: [] }, { clerkBear
 const earnPublicSecurity: EarnSecurity = [{ apiKeyAuth: [] }];
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
+  registerEarnOnboardingPaths(registry);
   registerEarnTreasuryPaths(registry, earnConfigurationSecurity);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity);

@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import type { EarnProviderId } from "@sdp/types/provider-access";
+import type { z } from "zod";
 import { providerNotConfigured, providerUnavailable, SdpEarnError } from "#/errors";
-import { providerFetchJson } from "#/fetch";
+import { classifyProviderStatus, providerFetch, providerFetchJson } from "#/fetch";
 import type { EarnRuntimeContext } from "#/types";
+import {
+  wisdomTreeModeratorSchema,
+  wisdomTreeOnboardingRecoverySchema,
+} from "./onboarding-schemas";
 
 /**
  * WisdomTree Connect REST client — the HTTP half of the integration, shared by
@@ -25,7 +30,7 @@ import type { EarnRuntimeContext } from "#/types";
 
 const WISDOMTREE_PROVIDER: EarnProviderId = "wisdomtree";
 
-const WISDOMTREE_PRODUCTION_API_URL = "https://app.wisdomtreeconnect.com";
+const WISDOMTREE_PRODUCTION_API_URL = "https://api.wisdomtreeconnect.com";
 const WISDOMTREE_SANDBOX_API_URL = "https://api.sandbox.wisdomtreeconnect.com";
 
 /** Same sizing argument as Kamino's: both callers are deadline-bounded jobs or requests. */
@@ -279,9 +284,14 @@ function readWisdomTreeProduct(value: unknown): WisdomTreeProduct {
  * shelf rather than degrade (same rule as Kamino's metrics pages).
  */
 export async function listWisdomTreeProducts(
-  ctx: EarnRuntimeContext
+  ctx: EarnRuntimeContext,
+  organizationGuid?: string
 ): Promise<WisdomTreeProduct[]> {
-  const response = await connectGetJson<{ products?: unknown }>(ctx, "/api/orders/products");
+  const response = await connectGetJson<{ products?: unknown }>(
+    ctx,
+    "/api/orders/products",
+    organizationGuid === undefined ? undefined : { organization_guid: organizationGuid }
+  );
   if (!Array.isArray(response.products)) {
     throw providerUnavailable("WisdomTree returned a products response with no products array");
   }
@@ -432,12 +442,11 @@ const wisdomTreeDepositIneligible = (): WisdomTreeDepositEligibility => ({
  * Is `address` registered and approved, AND is `exchangeCode` tradable for the
  * organization authenticated by this credential?
  *
- * This intentionally implements Connect's direct/omnibus credential model:
- * `/api/organizations/me` is the organization whose wallet registry and
- * organization-scoped product shelf SDP checks. A moderator credential needs
- * an explicit, durable SDP-organization -> Connect child-organization mapping;
- * none exists, so this code MUST NOT guess a child GUID or claim moderator
- * support.
+ * The hosted API supplies its durable customer mapping for Moderator mode.
+ * `/me` must still name that moderator and assign that child on EVERY check;
+ * wallet paths and product queries then use the child GUID. No caller-supplied
+ * GUID reaches this boundary. Standalone direct-org tooling may omit customer,
+ * in which case it checks the authenticated organization's own wallet registry.
  *
  * This is the API-side half of WisdomTree's admission model — the on-chain
  * half is the transfer hook, which would fail the settlement leg anyway.
@@ -447,17 +456,38 @@ const wisdomTreeDepositIneligible = (): WisdomTreeDepositEligibility => ({
  */
 export async function checkWisdomTreeDepositEligibility(
   ctx: EarnRuntimeContext,
-  input: { address: string; exchangeCode: string }
+  input: {
+    address: string;
+    exchangeCode: string;
+    customer?: { moderatorReference: string; customerReference: string };
+  }
 ): Promise<WisdomTreeDepositEligibility> {
-  // Resolve `/me` exactly once, then perform both admission reads using the
-  // same runtime context and cached bearer token. The products endpoint is
-  // scoped by that token; the wallets endpoint is scoped by the resolved GUID.
+  // Resolve the customer context before either admission read. Moderator
+  // assignment is live; never cache a child's access for the token lifetime.
   // The reads are independent of each other, so they are issued in parallel:
   // one fewer provider round-trip on the money-in hot path.
-  const guid = await getWisdomTreeOrganizationGuid(ctx);
+  let guid: string;
+  if (input.customer === undefined) {
+    guid = await getWisdomTreeOrganizationGuid(ctx);
+  } else {
+    const moderator = await requestWisdomTreeOnboarding(ctx, {
+      method: "GET",
+      path: "/api/organizations/me",
+      responseSchema: wisdomTreeModeratorSchema,
+    });
+    const identity = input.customer;
+    if (
+      moderator.guid !== identity.moderatorReference ||
+      identity.customerReference === moderator.guid ||
+      !moderator.client_organizations.some((child) => child.guid === identity.customerReference)
+    ) {
+      return wisdomTreeDepositIneligible();
+    }
+    guid = identity.customerReference;
+  }
   const [wallets, products] = await Promise.all([
     listWisdomTreeSolanaWalletsForOrganization(ctx, guid),
-    listWisdomTreeProducts(ctx),
+    listWisdomTreeProducts(ctx, input.customer === undefined ? undefined : guid),
   ]);
 
   const address = input.address.trim();
@@ -489,4 +519,69 @@ export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<un
     if (Array.isArray(wrapped)) return wrapped;
   }
   throw providerUnavailable("WisdomTree returned an orders response in an unrecognized shape");
+}
+
+/**
+ * Sensitive onboarding exchange using the existing environment-pinned OAuth
+ * identity. Reads may refresh a revoked token once; writes are NEVER replayed,
+ * including on 401, timeout, malformed replies or a partially saved 4xx.
+ * The caller must retain returned GUIDs and reconcile before another create.
+ */
+export async function requestWisdomTreeOnboarding<T>(
+  ctx: EarnRuntimeContext,
+  input: {
+    method: "GET" | "POST" | "PATCH" | "DELETE";
+    path: string;
+    body?: Record<string, unknown> | FormData;
+    responseSchema: z.ZodType<T>;
+  }
+): Promise<T> {
+  const getAccess = async () => {
+    try {
+      return await getWisdomTreeAccessToken(ctx);
+    } catch (error) {
+      if (error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED") throw error;
+      throw providerUnavailable("WisdomTree onboarding authentication failed");
+    }
+  };
+  let access = await getAccess();
+  const request = () =>
+    providerFetch("wisdomtree", `${access.baseUrl}${input.path}`, {
+      method: input.method,
+      body: input.body,
+      headers: { Authorization: `Bearer ${access.token}` },
+      timeoutMs: WISDOMTREE_REQUEST_TIMEOUT_MS,
+    });
+  let result = await request();
+  if (input.method === "GET" && result.response.status === 401) {
+    tokenCache.delete(access.cacheKey);
+    access = await getAccess();
+    result = await request();
+  }
+  if (!result.response.ok) {
+    // Strip everything except validated GUIDs. Even field-error prose may
+    // contain the submitted SSN or an applicant's identity.
+    const recovery = wisdomTreeOnboardingRecoverySchema.safeParse(result.parsed);
+    const details: Record<string, unknown> = {
+      provider: WISDOMTREE_PROVIDER,
+      providerStatus: result.response.status,
+    };
+    if (recovery.success) Object.assign(details, recovery.data);
+    throw new SdpEarnError(
+      classifyProviderStatus(result.response.status),
+      "WisdomTree onboarding request failed; reconcile saved records before retrying",
+      details
+    );
+  }
+  const parsed = input.responseSchema.safeParse(result.parsed);
+  if (!parsed.success) {
+    const recovery = wisdomTreeOnboardingRecoverySchema.safeParse(result.parsed);
+    const details: Record<string, unknown> = {};
+    if (recovery.success) Object.assign(details, recovery.data);
+    throw providerUnavailable(
+      "WisdomTree returned a malformed onboarding response; reconcile before retrying",
+      details
+    );
+  }
+  return parsed.data;
 }

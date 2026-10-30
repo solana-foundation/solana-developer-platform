@@ -292,10 +292,15 @@ export async function buildExternalWalletDepositTransaction(
   // settlement. A refusal deliberately stays generic and non-enumerating;
   // wallet registration, approval and product entitlement must not be
   // distinguishable through this admission boundary.
-  await assertVaultDepositEligible(client, runtime, {
-    providerReference: input.providerReference,
-    owner: input.ownerAddress,
-  });
+  await assertVaultDepositEligible(
+    client,
+    runtime,
+    {
+      providerReference: input.providerReference,
+      owner: input.ownerAddress,
+    },
+    { organizationId: input.organizationId, projectId: input.projectId, database: env }
+  );
 
   /**
    * One build attempt at a given swap route width. Swap-funded builds may run
