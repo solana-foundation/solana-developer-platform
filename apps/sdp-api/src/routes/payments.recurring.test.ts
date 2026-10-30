@@ -47,6 +47,7 @@ import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/p
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
+import type { SubscriptionAuthorityRevokeFence } from "@/db/repositories/subscription-authority-revocations.repository";
 import * as subscriptionAuthorityRevocationsRepository from "@/db/repositories/subscription-authority-revocations.repository";
 import { app as baseApp } from "@/index";
 import {
@@ -5655,7 +5656,9 @@ describe("Payments routes — recurring", () => {
    * A recurring payment left `activating` by a claim that created its plan and then stopped, with
    * its in-flight attempt keeping `revokeFence` (null: an attempt from before migration 0196).
    */
-  async function seedStaleActivationAfterPlan(revokeFence: unknown = null) {
+  async function seedStaleActivationAfterPlan(
+    revokeFence: SubscriptionAuthorityRevokeFence | null = null
+  ) {
     const sourceSigner = recurringExecution.sourceSigner();
     const recurringPayment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const planId = `psp_${crypto.randomUUID()}`;

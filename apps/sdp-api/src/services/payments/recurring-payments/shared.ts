@@ -815,8 +815,6 @@ export async function lockLiveActivatingKey(
   }
 }
 
-export type { SubscriptionAuthorityRevokeFence };
-
 /**
  * Inside a claim that may use a wallet's Subscriptions authorities (activation, update, resume),
  * waits out and then refuses a revoke of them in flight (HOO-2210). The revoke cron claims under
