@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { markets } from "@/flags";
+import { markets } from "@/flags/project-modules";
 
 export default async function MarketsLayout({ children }: { children: ReactNode }) {
   // Module-level gate only. Until DvP, every routable Markets surface was

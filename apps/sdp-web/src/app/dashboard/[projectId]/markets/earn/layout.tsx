@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { earn } from "@/flags";
+import { earn } from "@/flags/project-modules";
 
 /**
  * The Earn sub-module flag on this segment's legacy alias routes

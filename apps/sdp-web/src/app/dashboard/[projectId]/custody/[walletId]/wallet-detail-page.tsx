@@ -7,7 +7,7 @@ import {
   isKnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { formatWalletPurposeLabel } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
-import { issuance } from "@/flags";
+import { issuance } from "@/flags/project-modules";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";

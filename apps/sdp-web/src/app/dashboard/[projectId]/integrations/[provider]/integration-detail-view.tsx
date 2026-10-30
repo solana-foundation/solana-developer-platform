@@ -15,7 +15,7 @@ import {
   CustodyConnectionsSection,
 } from "@/app/dashboard/[projectId]/integrations/custody-connections-section";
 import type { IntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
-import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
+import { custodyUseCasesInProjectReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
 import { docsHref } from "@/components/dashboard-nav";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
@@ -254,7 +254,7 @@ function CustodyConnectionsBlock({
   );
 }
 
-function CapabilitiesSection({
+async function CapabilitiesSection({
   entry,
   t,
 }: {
@@ -264,7 +264,7 @@ function CapabilitiesSection({
   return (
     <Section title={t("Shared.integrations.detailCapabilities")}>
       <ul className="flex flex-wrap gap-2">
-        {custodyUseCasesInDeploymentReleaseChannel(entry.useCases).map((useCase) => (
+        {(await custodyUseCasesInProjectReleaseChannel(entry.useCases)).map((useCase) => (
           <li
             key={useCase}
             className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"

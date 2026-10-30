@@ -9,7 +9,7 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { issuance } from "@/flags";
+import { issuance } from "@/flags/project-modules";
 import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";

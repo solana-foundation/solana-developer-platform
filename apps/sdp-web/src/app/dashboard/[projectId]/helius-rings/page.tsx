@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
-import { heliusRings } from "@/flags";
+import { heliusRings } from "@/flags/project-modules";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import { HeliusRingsWorkspace } from "./helius-rings-workspace";

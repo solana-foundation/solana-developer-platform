@@ -3,10 +3,8 @@ import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-a
 import type { SdpModule } from "@sdp/types/release-channels";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
-import {
-  isModuleInDeploymentReleaseChannel,
-  rampProvidersInReleaseChannel,
-} from "@/flags/release-channel";
+import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
+import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
 export type IntegrationFeatureFlags = {
@@ -71,18 +69,20 @@ const CUSTODY_USE_CASE_MODULES = {
 } as const satisfies Record<CustodyProviderUseCase, SdpModule>;
 
 /**
- * A custody provider's use cases the deployment's release channel runs, so its Capabilities
- * never advertise a module the deployment refuses (Issuance on `stable`).
+ * A custody provider's use cases the release channel runs for the request's Project
+ * environment, so its Capabilities never advertise a module the API refuses (Issuance on
+ * `stable`).
  *
  * @param useCases - The provider's use cases.
  * @returns The use cases whose module the channel runs, in their given order.
  */
-export function custodyUseCasesInDeploymentReleaseChannel(
+export async function custodyUseCasesInProjectReleaseChannel(
   useCases: readonly CustodyProviderUseCase[]
-): CustodyProviderUseCase[] {
-  return useCases.filter((useCase) =>
-    isModuleInDeploymentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase])
+): Promise<CustodyProviderUseCase[]> {
+  const inChannel = await Promise.all(
+    useCases.map((useCase) => isModuleInProjectReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase]))
   );
+  return useCases.filter((_, index) => inChannel[index]);
 }
 
 /** What the catalog will render, so its loading placeholder reserves exactly that. */

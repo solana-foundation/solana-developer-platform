@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { assetProfiles } from "@/flags";
+import { assetProfiles } from "@/flags/project-modules";
 import { getTranslations } from "@/i18n/server";
 import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient } from "@/lib/sdp-api";

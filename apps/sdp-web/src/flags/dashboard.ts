@@ -1,4 +1,5 @@
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
+import { paymentsDemoMode } from "@/flags";
 import {
   assetProfiles,
   dvp,
@@ -6,13 +7,10 @@ import {
   heliusRings,
   issuance,
   markets,
-  paymentsDemoMode,
   privateChannels,
-} from "@/flags";
-import {
-  deploymentReleaseChannel,
-  isModuleInDeploymentReleaseChannel,
-} from "@/flags/release-channel";
+} from "@/flags/project-modules";
+import { deploymentReleaseChannel } from "@/flags/release-channel";
+import { isModuleInProjectReleaseChannel } from "./project-release-channel";
 import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
@@ -55,6 +53,9 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
+    complianceInChannel,
+    custodyInChannel,
+    paymentsInChannel,
   ] = await Promise.all([
     assetProfiles(),
     dvp(),
@@ -65,19 +66,22 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
+    isModuleInProjectReleaseChannel("compliance"),
+    isModuleInProjectReleaseChannel("custody"),
+    isModuleInProjectReleaseChannel("payments"),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
-    compliance: isModuleInDeploymentReleaseChannel("compliance"),
+    compliance: complianceInChannel,
     // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
-    custody: isModuleInDeploymentReleaseChannel("custody"),
+    custody: custodyInChannel,
     dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
-    payments: isModuleInDeploymentReleaseChannel("payments"),
+    payments: paymentsInChannel,
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,

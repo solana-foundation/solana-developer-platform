@@ -12,7 +12,7 @@ import {
   isKnownCustodyProvider,
   providerSupportsStoredCredentialSetup,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { offersCustodyMode } from "@/lib/provider-availability";
@@ -37,7 +37,7 @@ export default async function CustodyConnectionPage({
     notFound();
   }
 
-  if (!isModuleInDeploymentReleaseChannel("custody")) {
+  if (!(await isModuleInProjectReleaseChannel("custody"))) {
     notFound();
   }
 

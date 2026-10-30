@@ -3,10 +3,15 @@ import { redirect } from "next/navigation";
 import { grantableActionsInChannel } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring";
 import { fetchApiKeyAuthoringWallets } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import { isModuleInEnvironmentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  requestMemberRole,
+  requestProjectEnvironment,
+  requestProjectHref,
+} from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +29,14 @@ export default async function NewApiKeyPage() {
 
   const client = await createSdpApiClient();
   const wallets = await fetchApiKeyAuthoringWallets(client);
+  const environment = await requestProjectEnvironment();
   return (
     <ApiKeyAuthoringWorkspace
       mode="create"
       wallets={wallets}
-      offeredActions={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
+      offeredActions={grantableActionsInChannel((module) =>
+        isModuleInEnvironmentReleaseChannel(module, environment)
+      )}
     />
   );
 }

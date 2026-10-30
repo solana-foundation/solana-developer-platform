@@ -2,7 +2,7 @@
 // bundle into a Client Component module, so any client import of it fails the build. Server
 // loaders that call it need no `import "server-only"`.
 import { auth } from "@clerk/nextjs/server";
-import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import type { ListProjectsResponse, Project, ProjectEnvironment } from "@sdp/types/projects";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import { headers } from "next/headers";
@@ -383,6 +383,26 @@ const getRequestProjectId = cache(async (): Promise<string> => {
  */
 export function requestProjectId(): Promise<string> {
   return getRequestProjectId();
+}
+
+const getRequestProjectEnvironment = cache(async (): Promise<ProjectEnvironment> => {
+  const [projectId, projects] = await Promise.all([requestProjectId(), listSdpProjects()]);
+  const project = projects.find((candidate) => candidate.id === projectId);
+  if (!project) {
+    throw new Error(`Project ${projectId} is not in the signed-in organization`);
+  }
+  return project.environment;
+});
+
+/**
+ * The environment of the Project the current request acts on, from the request's
+ * cached Project list.
+ *
+ * @returns The request's Project environment.
+ * @throws Error when the request has no Project or it is not in the signed-in organization.
+ */
+export function requestProjectEnvironment(): Promise<ProjectEnvironment> {
+  return getRequestProjectEnvironment();
 }
 
 /**
