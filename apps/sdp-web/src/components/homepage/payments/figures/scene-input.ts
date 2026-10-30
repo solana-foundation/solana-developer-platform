@@ -24,7 +24,7 @@ export const FIGURE_WORDS = [
   "depositReceived",
 ] as const;
 
-export type FigureWord = (typeof FIGURE_WORDS)[number];
+type FigureWord = (typeof FIGURE_WORDS)[number];
 
 /** The words drawn inside the figures, from the catalog; names, amounts and addresses are data. */
 export type FigureCopy = {

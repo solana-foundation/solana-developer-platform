@@ -20,8 +20,8 @@ const SLOW = "#6E6A78";
 const SETTLE = "#14F195";
 const RIPPLE_SECONDS = 0.9;
 
-export type Signal = { t: number };
-export type Ripple = { y: number; t: number };
+type Signal = { t: number };
+type Ripple = { y: number; t: number };
 
 export type RaceState = {
   lanes: Signal[][];

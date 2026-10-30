@@ -17,7 +17,7 @@ const FADE_OUT = 500;
 const FADE_IN = 800;
 const SNUG_QUERY = "(max-width:600px), (max-height:500px) and (orientation:landscape)";
 
-export type BenchClasses = { fig: string; on: string; out: string };
+type BenchClasses = { fig: string; on: string; out: string };
 
 export type BenchOptions = {
   kinds: readonly PaymentKind[];
@@ -260,13 +260,13 @@ export function createBenchController(o: BenchOptions): BenchController {
       if (arrived) {
         const shown = cur;
         cur = -1;
-        show(shown < 0 ? 0 : shown);
+        show(Math.max(shown, 0));
       }
     },
     arrive() {
       if (arrived) return;
       arrived = true;
-      show(cur < 0 ? 0 : cur);
+      show(Math.max(cur, 0));
     },
     select(index) {
       show(index);

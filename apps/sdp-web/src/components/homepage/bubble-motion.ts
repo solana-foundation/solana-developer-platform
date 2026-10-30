@@ -11,7 +11,7 @@ import { restartAttribute } from "./restart-animation";
 /** On wide screens every bubble is staggered on the page by this much, in page order. */
 const STAGGER = 1100;
 /** A bubble's timeline starts this long after its block has landed. */
-export const BUBBLE_LAND_DELAY = 900;
+const BUBBLE_LAND_DELAY = 900;
 
 /**
  * Where a bubble's clock starts: on wide screens it waits for its `slot` in page order (the

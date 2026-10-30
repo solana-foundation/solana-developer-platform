@@ -22,8 +22,6 @@ export const FILMS = [
   { id: "eg1joEasU7s", name: "Dynamic" },
 ] as const;
 
-export type Film = (typeof FILMS)[number];
-
 export const SERIES_URL =
   "https://www.youtube.com/@solana/search?query=Solana%20Developer%20Platform";
 
