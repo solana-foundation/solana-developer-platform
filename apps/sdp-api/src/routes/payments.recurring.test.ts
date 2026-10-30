@@ -4896,6 +4896,7 @@ describe("Payments routes — recurring", () => {
         expect.objectContaining({
           reason: "failed_attempts",
           failed_attempts: maxFailedAttemptsBeforePause,
+          error_code: "UNEXPECTED",
           recurring_payment_id: activated.id,
           due_at: dueAt,
         }),
@@ -4921,7 +4922,11 @@ describe("Payments routes — recurring", () => {
         )
       ).toBe("paused");
       expect(pauseEvents()).toEqual([
-        expect.objectContaining({ reason: "custody_policy_refused", failed_attempts: 1 }),
+        expect.objectContaining({
+          reason: "custody_policy_refused",
+          failed_attempts: 1,
+          error_code: "CUSTODY_POLICY_REFUSED",
+        }),
       ]);
       const paused = await app.request(
         `/v1/payments/recurring-payments/${activated.id}`,
@@ -4932,6 +4937,50 @@ describe("Payments routes — recurring", () => {
         "custody_policy_refused"
       );
     });
+
+    // SPL Token's custom errors for the pull: a drained source has too little to move
+    // (`InsufficientFunds`), and with its delegation revoked the program's signature no longer
+    // matches the account's owner or delegate (`OwnerMismatch`). Neither clears on a retry.
+    it.each([
+      { case: "a drained source wallet", tokenError: 1 },
+      { case: "a revoked delegation", tokenError: 4 },
+    ])(
+      "pauses $case at the period's fifth failed attempt (SDP-023 RE-5)",
+      async ({ tokenError }) => {
+        const pauseEvents = capturePauseEvents();
+        const { activated, dueAt } = await dueRecurringPayment();
+        await seedEarlierFailures(activated, dueAt, maxFailedAttemptsBeforePause - 2);
+        mockDistinctRecentBlockhashes();
+
+        async function pullRefused() {
+          sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(tokenError));
+          const response = await app.request(
+            `/v1/payments/recurring-payments/${activated.id}/collect`,
+            { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+            env
+          );
+          expect(response.status).toBe(400);
+          const body = errorResponseSchema.parse(await response.json());
+          expect(body.error.code).toBe("TRANSACTION_FAILED");
+          expect(body.error.message).toContain(`#${tokenError}`);
+          return (await recurringPaymentDueAt(activated.id)).status;
+        }
+
+        expect(await pullRefused()).toBe("active");
+        expect(await pullRefused()).toBe("paused");
+        expect(pauseEvents()).toEqual([
+          expect.objectContaining({
+            reason: "failed_attempts",
+            failed_attempts: maxFailedAttemptsBeforePause,
+            error_code: "TRANSACTION_FAILED",
+            recurring_payment_id: activated.id,
+          }),
+        ]);
+        expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(
+          maxFailedAttemptsBeforePause
+        );
+      }
+    );
 
     it("rolls an automated failure's attempt back with a pause that fails, and pauses on the next tick", async () => {
       const { activated, dueAt } = await dueRecurringPayment();
