@@ -31,10 +31,6 @@ export const STACK_PARTNERS: readonly StackPartner[] = [
   partner("Range", "range"),
   partner("MoonPay", "moonpay"),
   partner("Stripe", "stripe"),
-  partner("BVNK", "bvnk"),
-  partner("MoneyGram", "moneygram"),
-  partner("Lightspark", "lightspark"),
-  partner("Mural", "mural"),
   partner("Kamino", "kamino"),
   partner("IBM", "ibm-digital-asset-haven"),
 ];

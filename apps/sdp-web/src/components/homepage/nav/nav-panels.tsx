@@ -2,6 +2,8 @@
 
 import { cn } from "@sdp/ui/cn";
 import { type FocusEvent, useEffect, useEffectEvent, useRef } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
+import shared from "@/components/homepage/homepage.module.css";
 import { externalLinkProps } from "@/components/homepage/homepage-links";
 import styles from "./nav.module.css";
 import type { NavGroup, NavGroupId } from "./nav-types";
@@ -171,7 +173,12 @@ export function NavPanels({
                     aria-label={feature.ariaLabel}
                     onClick={() => onOpenChange(null)}
                   >
-                    <b>{feature.label}</b>
+                    <b>
+                      {feature.label}
+                      {feature.comingSoon ? (
+                        <ComingSoon label={feature.comingSoon} className={shared.soonInline} />
+                      ) : null}
+                    </b>
                     <span>{feature.body}</span>
                   </a>
                 ))}
@@ -186,6 +193,9 @@ export function NavPanels({
                     onClick={() => onOpenChange(null)}
                   >
                     {link.label}
+                    {link.comingSoon ? (
+                      <ComingSoon label={link.comingSoon} className={shared.soonInline} />
+                    ) : null}
                   </a>
                 ))}
               </div>

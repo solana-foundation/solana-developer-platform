@@ -278,6 +278,14 @@
   transform: translateY(-0.02em);
 }
 
+/* the pill after a held-back service, sized with the word so it scales with the bubble */
+.word .wordSoon {
+  height: 1.8em;
+  margin-left: 0.5em;
+  padding: 0 0.7em;
+  font-size: 0.26em;
+}
+
 .wordIcon svg {
   width: 0.86em;
   height: 0.86em;

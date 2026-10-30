@@ -1,25 +1,32 @@
 import { cn } from "@sdp/ui/cn";
 import { getTranslations } from "@/i18n/server";
+import { ComingSoon } from "./coming-soon";
 import { FormHeadline } from "./form-headline";
 import shared from "./homepage.module.css";
 import { SECTION_LINKS } from "./homepage-links";
 import styles from "./markets/markets.module.css";
 import { MarketsChart } from "./markets/markets-chart";
 import { MoreLink } from "./more-link";
+import { isComingSoon } from "./release-gate";
 import { Rise } from "./rise";
 
 /**
  * Markets: the headline with its paragraph and sandbox link, then the yield chart across the whole
  * width. The chart is the section's first block (it arrives first), the words the second, but the
- * words come first in the document so they are read first.
+ * words come first in the document so they are read first. Outside the release channel it says so
+ * and drops the sandbox link.
  */
 export async function MarketsSection() {
   const t = await getTranslations();
+  const comingSoon = isComingSoon("markets");
 
   return (
     <section id="markets" data-ground="panel" className={styles.section}>
       <div className={cn(shared.wrap, styles.layout)}>
         <Rise index={1} className={styles.head}>
+          {comingSoon ? (
+            <ComingSoon label={t("Homepage.comingSoon")} className={shared.soonHead} />
+          ) : null}
           <FormHeadline
             as="h2"
             className={styles.title}
@@ -30,9 +37,11 @@ export async function MarketsSection() {
             ]}
           />
           <p className={styles.body}>{t("Homepage.markets.body")}</p>
-          <MoreLink href={SECTION_LINKS.markets} className={styles.link}>
-            {t("Homepage.markets.sandboxLink")}
-          </MoreLink>
+          {comingSoon ? null : (
+            <MoreLink href={SECTION_LINKS.markets} className={styles.link}>
+              {t("Homepage.markets.sandboxLink")}
+            </MoreLink>
+          )}
         </Rise>
         <Rise index={0} className={styles.chartBlock}>
           <MarketsChart />

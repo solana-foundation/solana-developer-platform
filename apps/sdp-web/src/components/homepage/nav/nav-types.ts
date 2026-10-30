@@ -9,6 +9,8 @@ export type NavLink = {
   external?: boolean;
   /** The accessible name, when the label alone does not say the link opens a new tab. */
   ariaLabel?: string;
+  /** The "Coming soon" pill's label, set only when the release channel holds the link's module back. */
+  comingSoon?: string;
 };
 
 type NavFeature = NavLink & { body: string };

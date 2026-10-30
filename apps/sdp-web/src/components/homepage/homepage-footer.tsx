@@ -3,14 +3,16 @@ import { cn } from "@sdp/ui/cn";
 import Image from "next/image";
 import Link from "next/link";
 import { getTranslations } from "@/i18n/server";
+import { ComingSoon } from "./coming-soon";
 import shared from "./homepage.module.css";
 import styles from "./homepage-footer.module.css";
 import type { HomepageLinks } from "./homepage-links";
+import { isComingSoon } from "./release-gate";
 
 /** Who provides the platform, named in the footer's last line. */
 const FOOTER_ORGANIZATION = "Solana Foundation";
 
-type FooterLink = { label: string; href: string };
+type FooterLink = { label: string; href: string; comingSoon?: boolean };
 type FooterColumn = { id: string; title: string; links: FooterLink[] };
 
 /**
@@ -19,15 +21,28 @@ type FooterColumn = { id: string; title: string; links: FooterLink[] };
  */
 export async function HomepageFooter({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
+  const comingSoonLabel = t("Homepage.comingSoon");
   const columns: FooterColumn[] = [
     {
       id: "platform",
       title: t("Homepage.footer.columns.platform"),
       links: [
-        { label: t("Homepage.footer.links.issuance"), href: "#issuance" },
+        {
+          label: t("Homepage.footer.links.issuance"),
+          href: "#issuance",
+          comingSoon: isComingSoon("issuance"),
+        },
         { label: t("Homepage.footer.links.payments"), href: "#payments-api" },
-        { label: t("Homepage.footer.links.markets"), href: "#markets" },
-        { label: t("Homepage.footer.links.privacy"), href: "#privacy" },
+        {
+          label: t("Homepage.footer.links.markets"),
+          href: "#markets",
+          comingSoon: isComingSoon("markets"),
+        },
+        {
+          label: t("Homepage.footer.links.privacy"),
+          href: "#privacy",
+          comingSoon: isComingSoon("privacy"),
+        },
       ],
     },
     {
@@ -68,6 +83,9 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
                   <li key={link.label}>
                     <a className={styles.link} href={link.href}>
                       {link.label}
+                      {link.comingSoon ? (
+                        <ComingSoon label={comingSoonLabel} className={shared.soonInline} />
+                      ) : null}
                     </a>
                   </li>
                 ))}

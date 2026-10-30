@@ -336,3 +336,32 @@
     animation: none;
   }
 }
+
+/*
+ * The "Coming soon" pill (coming-soon.tsx): drawn from the text colour around it, so the same pill
+ * reads on paper, on a dark panel and in the bar's panels.
+ */
+.soon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 999px;
+  font: 500 11px / 1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* the pill over a section's headline, when the whole section is held back */
+.soonHead {
+  margin-bottom: 18px;
+}
+
+/* the pill after a link's or an item's words, when only that item is held back */
+.soonInline {
+  margin-left: 8px;
+}

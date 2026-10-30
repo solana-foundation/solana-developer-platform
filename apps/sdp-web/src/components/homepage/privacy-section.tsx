@@ -1,24 +1,31 @@
 import { cn } from "@sdp/ui/cn";
 import { getTranslations } from "@/i18n/server";
+import { ComingSoon } from "./coming-soon";
 import { FormHeadline } from "./form-headline";
 import shared from "./homepage.module.css";
 import { SECTION_LINKS } from "./homepage-links";
 import { MoreLink } from "./more-link";
 import styles from "./privacy/privacy.module.css";
 import { PrivacyBubble } from "./privacy/privacy-bubble";
+import { isComingSoon } from "./release-gate";
 import { Rise } from "./rise";
 
 /**
  * The privacy deep dive: the words beside a green bubble that folds into a switch and turns on. It
- * closes the dark panel it shares with markets.
+ * closes the dark panel it shares with markets. Outside the release channel it says so; the policies
+ * link stays, since it is not the module's own page.
  */
 export async function PrivacySection() {
   const t = await getTranslations();
+  const comingSoon = isComingSoon("privacy");
 
   return (
     <section id="privacy" data-ground="panel" className={styles.section}>
       <div className={cn(shared.wrap, styles.layout)}>
         <Rise index={0} className={styles.text}>
+          {comingSoon ? (
+            <ComingSoon label={t("Homepage.comingSoon")} className={shared.soonHead} />
+          ) : null}
           <FormHeadline
             as="h2"
             className={styles.title}

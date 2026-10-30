@@ -2,6 +2,7 @@
 
 import { cn } from "@sdp/ui/cn";
 import { type RefObject, useEffect, useRef } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
 import shared from "@/components/homepage/homepage.module.css";
 import { externalLinkProps, type SignupLink } from "@/components/homepage/homepage-links";
 import styles from "./nav.module.css";
@@ -90,6 +91,9 @@ export function MobileMenu({
           onClick={() => onClose(true)}
         >
           {link.label}
+          {link.comingSoon ? (
+            <ComingSoon label={link.comingSoon} className={shared.soonInline} />
+          ) : null}
         </a>
       ))}
       <div className={styles.mobileCta}>

@@ -3,6 +3,7 @@ import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { formatNumber } from "@/lib/number-format";
 import { FormHeadline } from "./form-headline";
 import shared from "./homepage.module.css";
+import { isComingSoon } from "./release-gate";
 import { Rise } from "./rise";
 import { PartnerMarquee } from "./stack/partner-marquee";
 import styles from "./stack/stack.module.css";
@@ -13,6 +14,9 @@ import { RECEIVED_AMOUNTS } from "./stack/stack-timeline";
 export async function StackSection() {
   const t = await getTranslations();
   const locale = await getRequestLocale();
+  const comingSoonServices = (["compliance", "ramps"] as const).filter((service) =>
+    isComingSoon(service)
+  );
   const copy: StackDrawingCopy = {
     labels: {
       partners: t("Homepage.stack.labels.partners"),
@@ -31,6 +35,8 @@ export async function StackSection() {
       nodes: t("Homepage.stack.services.nodes"),
       wallets: t("Homepage.stack.services.wallets"),
     },
+    comingSoonServices,
+    comingSoon: t("Homepage.comingSoon"),
     products: {
       wallet: t("Homepage.stack.products.wallet"),
       checkout: t("Homepage.stack.products.checkout"),

@@ -226,7 +226,7 @@
   color: var(--ink);
 }
 
-.feature span {
+.feature > span {
   font-size: 13px;
   line-height: 18px;
   color: var(--ink4);
@@ -486,7 +486,7 @@
   color: var(--night-ink);
 }
 
-.root[data-ground="night"] .feature span {
+.root[data-ground="night"] .feature > span {
   color: var(--night-ink3);
 }
 

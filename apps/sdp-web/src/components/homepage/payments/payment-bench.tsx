@@ -3,13 +3,15 @@
 import { cn } from "@sdp/ui/cn";
 import { useReducedMotion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
+import shared from "@/components/homepage/homepage.module.css";
 import { useRiseArrived } from "@/components/homepage/rise";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatNumber } from "@/lib/number-format";
 import { type BenchController, createBenchController } from "./bench-controller";
 import type { FigFonts } from "./figures/make-fig";
 import { FIGURE_WORDS, type FigureCopy } from "./figures/scene-input";
-import { PAYMENT_KINDS } from "./kinds";
+import { PAYMENT_KINDS, type PaymentKind } from "./kinds";
 import styles from "./payment-bench.module.css";
 import { usePaymentKind } from "./payment-kind-context";
 
@@ -29,8 +31,12 @@ function resolveFigureFonts(el: Element): FigFonts {
 /**
  * The payment kinds as one bench: an index of tabs beside a stage that draws and plays the
  * chosen kind's figure, walking through them by itself while it is on screen.
+ *
+ * @param props.comingSoonKinds - The kinds the deployment's release channel holds back; their tabs
+ *   carry the "Coming soon" pill.
+ * @returns The bench.
  */
-export function PaymentBench() {
+export function PaymentBench({ comingSoonKinds }: { comingSoonKinds: readonly PaymentKind[] }) {
   const t = useTranslations();
   const locale = useLocale();
   const { kind: current, show } = usePaymentKind();
@@ -177,6 +183,9 @@ export function PaymentBench() {
                 </span>
                 <span id={`${tabId(index)}-name`} className={styles.name}>
                   {t(`Homepage.payments.kinds.${id}.name`)}
+                  {comingSoonKinds.includes(id) ? (
+                    <ComingSoon label={t("Homepage.comingSoon")} className={shared.soonInline} />
+                  ) : null}
                 </span>
                 <span id={`${tabId(index)}-body`} className={styles.body}>
                   {t(`Homepage.payments.kinds.${id}.body`)}

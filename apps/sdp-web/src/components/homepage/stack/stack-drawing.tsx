@@ -3,6 +3,7 @@
 import { useInView, useReducedMotion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
+import { ComingSoon } from "@/components/homepage/coming-soon";
 import { NARROW_QUERY } from "@/components/homepage/layout";
 import { restartAttribute } from "@/components/homepage/restart-animation";
 import { useRiseArrived } from "@/components/homepage/rise";
@@ -33,6 +34,9 @@ export type StackDrawingCopy = {
   labels: { partners: string; sdp: string; product: string };
   aria: { partners: string; sdp: string; product: string };
   services: Record<StackService, string>;
+  /** The services the deployment's release channel holds back, each carrying the pill. */
+  comingSoonServices: readonly StackService[];
+  comingSoon: string;
   products: Record<StackProduct, string>;
   /** The received note for each of `RECEIVED_AMOUNTS`, in order. */
   received: readonly string[];
@@ -269,6 +273,9 @@ export function StackDrawing({ copy }: { copy: StackDrawingCopy }) {
           <ServiceIcon service={service} />
         </span>
         {copy.services[service]}
+        {copy.comingSoonServices.includes(service) ? (
+          <ComingSoon label={copy.comingSoon} className={styles.wordSoon} />
+        ) : null}
       </>
     ),
   }));
