@@ -1,6 +1,6 @@
 "use client";
 
-import { COUNTRIES } from "@sdp/types/countries";
+import { COUNTRIES, COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
@@ -10,8 +10,10 @@ import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { CheckCircle2Icon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useState, useTransition } from "react";
+import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { SDP_TERMS_DOCUMENT } from "@/lib/sdp-terms";
+import { useZodForm } from "@/lib/use-zod-form";
 import { requestMainnetAccessAction } from "./mainnet-access-actions";
 
 const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
@@ -23,6 +25,13 @@ const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
 const READ_TO_END_SLACK_PX = 8;
 
 type Step = "jurisdiction" | "terms" | "sent";
+
+/** Step 1: the picker answers with any string, so the form parses it into a known country. */
+const JURISDICTION_SCHEMA = z.object({
+  countryCode: z.string().nullable().pipe(z.enum(COUNTRY_CODES)),
+});
+/** Step 2: the admin accepts the terms on the organization's behalf. */
+const TERMS_SCHEMA = z.object({ accepted: z.boolean().refine((accepted) => accepted) });
 
 interface RequestProps {
   organizationName: string;
@@ -45,12 +54,9 @@ export function MainnetAccessRequestHost({
   return (
     <>
       {canRequest ? (
-        <div className="flex flex-col items-start gap-4">
-          <p className="text-sm text-secondary">{t("Shared.mainnetAccess.notRequestedBody")}</p>
-          <Button type="button" onClick={() => setOpen(true)}>
-            {t("Shared.mainnetAccess.requestButton")}
-          </Button>
-        </div>
+        <Button type="button" onClick={() => setOpen(true)}>
+          {t("Shared.mainnetAccess.requestButton")}
+        </Button>
       ) : (
         record
       )}
@@ -72,8 +78,8 @@ function MainnetAccessRequestModal({
   const t = useTranslations();
   const router = useRouter();
   const [step, setStep] = useState<Step>("jurisdiction");
-  const [countryCode, setCountryCode] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
+  const jurisdiction = useZodForm(JURISDICTION_SCHEMA, { countryCode: null });
+  const terms = useZodForm(TERMS_SCHEMA, { accepted: false });
   const [error, setError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
   // The API accepts one version; a reader holding another would show text the admin is not
@@ -81,23 +87,36 @@ function MainnetAccessRequestModal({
   const document = SDP_TERMS_DOCUMENT.version === termsVersion ? SDP_TERMS_DOCUMENT : null;
   const [readToEnd, setReadToEnd] = useState(document === null);
 
+  // A failed submit may still have recorded the request (its email did not go out), so the
+  // card behind the dialog is refreshed after any attempt, not only a sent one.
+  const [attempted, setAttempted] = useState(false);
   const close = () => {
     onClose();
-    if (step === "sent") router.refresh();
+    if (attempted) router.refresh();
   };
 
   const steps = [t("Shared.mainnetAccess.stepJurisdiction"), t("Shared.mainnetAccess.stepTerms")];
   const stepIndex = step === "jurisdiction" ? 0 : 1;
 
+  const continueToTerms = () => {
+    if (jurisdiction.validate().ok) setStep("terms");
+  };
+
   const submit = () => {
-    if (!countryCode || !accepted) return;
+    const country = jurisdiction.validate();
+    if (!country.ok || !terms.validate().ok) return;
     setError(null);
     startSubmit(async () => {
-      const result = await requestMainnetAccessAction({ countryCode, termsVersion });
+      const result = await requestMainnetAccessAction({
+        countryCode: country.data.countryCode,
+        termsVersion,
+      });
+      setAttempted(true);
       if (result.ok) {
         setStep("sent");
       } else {
         setError(result.error);
+        router.refresh();
       }
     });
   };
@@ -130,7 +149,10 @@ function MainnetAccessRequestModal({
           </div>
 
           {step === "jurisdiction" ? (
-            <JurisdictionStep countryCode={countryCode} onChange={setCountryCode} />
+            <JurisdictionStep
+              countryCode={jurisdiction.values.countryCode}
+              onChange={(code) => jurisdiction.setField("countryCode", code)}
+            />
           ) : (
             <TermsStep
               organizationName={organizationName}
@@ -139,8 +161,8 @@ function MainnetAccessRequestModal({
               document={document}
               readToEnd={readToEnd}
               onReadToEnd={() => setReadToEnd(true)}
-              accepted={accepted}
-              onAcceptedChange={setAccepted}
+              accepted={terms.values.accepted}
+              onAcceptedChange={(accepted) => terms.setField("accepted", accepted)}
               disabled={submitting}
             />
           )}
@@ -153,11 +175,11 @@ function MainnetAccessRequestModal({
 
           <RequestFooter
             step={step}
-            canContinue={countryCode !== null}
-            canSubmit={accepted}
+            canContinue={jurisdiction.values.countryCode !== null}
+            canSubmit={terms.values.accepted}
             submitting={submitting}
             onCancel={onClose}
-            onContinue={() => setStep("terms")}
+            onContinue={continueToTerms}
             onBack={() => setStep("jurisdiction")}
             onSubmit={submit}
           />
@@ -385,7 +407,7 @@ export function MainnetAccessResendButton({
   countryCode,
   termsVersion,
 }: {
-  countryCode: string;
+  countryCode: CountryCode;
   termsVersion: string;
 }) {
   const t = useTranslations();

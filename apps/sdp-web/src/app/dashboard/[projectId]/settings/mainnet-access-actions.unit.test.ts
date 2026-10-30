@@ -4,15 +4,18 @@ import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+// `next/cache` is an ES module namespace, which `vi.spyOn` cannot redefine; the other action
+// tests mock it the same way.
+const nextCache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => nextCache);
 
-vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import { loadMainnetAccess, requestMainnetAccessAction } from "./mainnet-access-actions";
 
 const fetchMock = vi.spyOn(globalThis, "fetch");
+const { revalidatePath } = nextCache;
 
 const PENDING = {
   state: "pending",
@@ -92,7 +95,7 @@ describe("mainnet access actions", () => {
       termsVersion: SDP_TERMS.version,
       acceptTerms: true,
     });
-    expect(mocks.revalidatePath).toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalled();
   });
 
   it("returns the API's refusal", async () => {
@@ -102,5 +105,7 @@ describe("mainnet access actions", () => {
       termsVersion: SDP_TERMS.version,
     });
     expect(result.ok).toBe(false);
+    // A refused submit may have recorded the request, so the settings page re-reads it.
+    expect(revalidatePath).toHaveBeenCalled();
   });
 });

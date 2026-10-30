@@ -3,6 +3,7 @@
  * the provider other Foundation apps on solana.com already send with. Approval stays manual:
  * the email only asks an operator to look.
  */
+import type { CountryCode } from "@sdp/types/countries";
 import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
 import { fetchProviderJson } from "@/lib/provider-json";
@@ -17,7 +18,7 @@ export interface MainnetAccessRequestEmail {
   organizationId: string;
   organizationName: string;
   requester: { userId: string; email: string | null; name: string | null };
-  countryCode: string;
+  countryCode: CountryCode;
   countryName: string;
   termsVersion: string;
   termsAcceptedAt: string;
@@ -70,6 +71,19 @@ export async function sendMainnetAccessRequestEmail(
     throw serviceUnavailable("Mainnet access requests are not available on this deployment");
   }
   const baseUrl = env.RESEND_API_URL?.trim() || DEFAULT_RESEND_API_URL;
+  const message: {
+    from: string;
+    to: string[];
+    reply_to?: string;
+    subject: string;
+    text: string;
+  } = {
+    from: config.from,
+    to: [config.to],
+    subject: `Mainnet access request: ${request.organizationName}`,
+    text: mainnetAccessRequestEmailText(request),
+  };
+  if (request.requester.email) message.reply_to = request.requester.email;
   await fetchProviderJson(
     "Resend",
     `${baseUrl.replace(/\/+$/, "")}/emails`,
@@ -81,13 +95,7 @@ export async function sendMainnetAccessRequestEmail(
         "content-type": "application/json",
         "idempotency-key": `mainnet-access/${request.organizationId}/${request.requestedAt}`,
       },
-      body: JSON.stringify({
-        from: config.from,
-        to: [config.to],
-        ...(request.requester.email ? { reply_to: request.requester.email } : {}),
-        subject: `Mainnet access request: ${request.organizationName}`,
-        text: mainnetAccessRequestEmailText(request),
-      }),
+      body: JSON.stringify(message),
       timeoutMs: 10_000,
       maxBytes: 16_384,
     }

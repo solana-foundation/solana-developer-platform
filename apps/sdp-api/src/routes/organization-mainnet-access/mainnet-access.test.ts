@@ -1,6 +1,7 @@
 import { hashString } from "@sdp/payments/hash";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { correctMainnetAccess } from "@/services/mainnet-access.service";
@@ -93,8 +94,8 @@ function sentEmails(): Array<{ headers: Record<string, string>; body: Record<str
   return resend.mock.calls
     .filter(([url]) => String(url) === RESEND_URL)
     .map(([, init]) => ({
-      headers: init?.headers as Record<string, string>,
-      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      headers: z.record(z.string(), z.string()).parse(init?.headers),
+      body: z.record(z.string(), z.unknown()).parse(JSON.parse(String(init?.body))),
     }));
 }
 
@@ -226,6 +227,35 @@ describe("Organization mainnet access (HOO-2427)", () => {
     const emails = sentEmails();
     expect(emails).toHaveLength(2);
     expect(emails[0]?.headers["idempotency-key"]).toBe(emails[1]?.headers["idempotency-key"]);
+  });
+
+  it("resends an unsent request accepted under terms that have since changed", async () => {
+    const answer = resend.getMockImplementation();
+    if (!answer) throw new Error("the Resend stub is installed in beforeEach");
+    resend.mockImplementation(async (input, init) =>
+      String(input) === RESEND_URL ? new Response("down", { status: 500 }) : answer(input, init)
+    );
+    expect((await post(SUBMISSION)).status).toBe(503);
+    resend.mockImplementation(answer);
+    // The acceptance on record predates the current terms, as after a terms update.
+    await getDb(env)
+      .prepare("UPDATE organizations SET terms_accepted_version = ? WHERE id = ?")
+      .bind("2026-09-previous", ORGANIZATION_ID)
+      .run();
+
+    const retry = await post({ ...SUBMISSION, termsVersion: "2026-09-previous" });
+    expect(retry.status).toBe(201);
+    expect((await retry.json()).data).toMatchObject({
+      termsAcceptance: { version: "2026-09-previous" },
+      request: { notified: true },
+    });
+    expect(sentEmails().at(-1)?.body.text).toContain("version 2026-09-previous");
+  });
+
+  it("meters submits, since each may call Resend", async () => {
+    const statuses = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) statuses.push((await post(SUBMISSION)).status);
+    expect(statuses).toEqual([201, 409, 409, 409, 409, 429]);
   });
 
   it("rejects a half-written request at the database", async () => {

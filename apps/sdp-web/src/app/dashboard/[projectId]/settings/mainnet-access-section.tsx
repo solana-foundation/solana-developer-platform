@@ -1,4 +1,4 @@
-import { COUNTRIES } from "@sdp/types/countries";
+import { COUNTRIES, type CountryCode } from "@sdp/types/countries";
 import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { Badge } from "@sdp/ui/badge";
@@ -9,8 +9,10 @@ import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { loadMainnetAccess } from "./mainnet-access-actions";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
 
-function countryLabel(code: string): string {
-  const name = COUNTRIES.find((country) => country.code === code)?.name ?? code;
+function countryLabel(code: CountryCode): string {
+  const country = COUNTRIES.find((candidate) => candidate.code === code);
+  if (!country) throw new Error(`Country ${code} is missing from the country catalog`);
+  const name = country.name;
   const flag = regionFlagEmoji(code);
   return flag ? `${flag} ${name}` : name;
 }
@@ -93,9 +95,7 @@ function MainnetAccessRecord({
       ) : (
         <p className="text-sm text-secondary">
           {access.state === "approved"
-            ? access.request
-              ? t("Shared.mainnetAccess.approvedBody")
-              : t("Shared.mainnetAccess.approvedWithoutRequest")
+            ? t("Shared.mainnetAccess.approvedBody")
             : t("Shared.mainnetAccess.pendingBody")}
         </p>
       )}

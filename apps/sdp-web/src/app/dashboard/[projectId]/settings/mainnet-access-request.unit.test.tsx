@@ -55,26 +55,22 @@ describe("MainnetAccessRequestHost", () => {
 
     await user.click(screen.getByRole("button", { name: "Request mainnet access" }));
     const proceed = screen.getByRole("button", { name: "Continue" });
-    expect((proceed as HTMLButtonElement).disabled).toBe(true);
+    expect(proceed).toHaveProperty("disabled", true);
 
     await user.click(screen.getByRole("button", { name: /Country or region/ }));
     await user.type(screen.getByPlaceholderText("Search countries"), "Singa");
     await user.keyboard("{Enter}");
-    expect((proceed as HTMLButtonElement).disabled).toBe(false);
+    expect(proceed).toHaveProperty("disabled", false);
     await user.click(proceed);
 
     const accept = screen.getByRole("checkbox");
     scrollReader("top");
-    expect((accept as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Send request" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect(accept).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Send request" })).toHaveProperty("disabled", true);
 
     scrollReader("end");
-    await waitFor(() => expect((accept as HTMLButtonElement).disabled).toBe(false));
-    expect(
-      (screen.getByRole("button", { name: "Send request" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    await waitFor(() => expect(accept).toHaveProperty("disabled", false));
+    expect(screen.getByRole("button", { name: "Send request" })).toHaveProperty("disabled", true);
     expect(request).not.toHaveBeenCalled();
   });
 

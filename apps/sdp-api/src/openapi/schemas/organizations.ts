@@ -7,9 +7,9 @@ import {
   inviteSchema as inviteSchemaBase,
   updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
+import { requestMainnetAccessSchema as requestMainnetAccessSchemaBase } from "@/routes/organization-mainnet-access/schemas";
 import {
   createOrganizationSchema as createOrganizationSchemaBase,
-  requestMainnetAccessSchema as requestMainnetAccessSchemaBase,
   updateOrgSchema as updateOrgSchemaBase,
 } from "@/routes/organizations/schemas";
 import {

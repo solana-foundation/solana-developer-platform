@@ -1,6 +1,6 @@
 "use server";
 
-import { COUNTRY_CODES } from "@sdp/types/countries";
+import { COUNTRY_CODES, type CountryCode } from "@sdp/types/countries";
 import { MAINNET_ACCESS_STATES, type MainnetAccess } from "@sdp/types/mainnet-access";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -60,7 +60,7 @@ export async function loadMainnetAccess(): Promise<MainnetAccessLoad> {
  * did not go out is resent by submitting again.
  */
 export async function requestMainnetAccessAction(input: {
-  countryCode: string;
+  countryCode: CountryCode;
   termsVersion: string;
 }): Promise<RequestMainnetAccessResult> {
   try {
@@ -76,9 +76,11 @@ export async function requestMainnetAccessAction(input: {
         }),
       })
     );
-    revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
     return { ok: true, access };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
+  } finally {
+    // A refused submit may still have recorded the request when only its email failed.
+    revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
   }
 }
