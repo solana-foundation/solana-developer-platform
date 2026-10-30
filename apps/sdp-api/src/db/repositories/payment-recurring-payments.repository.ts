@@ -276,12 +276,15 @@ export interface ClaimPaymentRecurringPaymentCancelInput {
 
 /**
  * A cancel that definitely failed puts the schedule back from `canceling` to the status it claimed
- * it from, with the pause reason it had when that was `paused`.
+ * it from, with the pause reason it had when that was `paused`. It matches only its own claim
+ * (`claimedUpdatedAt`), so a run whose stale claim another run took over never releases the row
+ * that run may already have canceled on chain.
  */
 export type ReleasePaymentRecurringPaymentCancelClaimInput = {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  claimedUpdatedAt: string;
   updatedAt: string;
 } & (
   | { status: "active"; pausedReason: null }

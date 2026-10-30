@@ -1110,7 +1110,6 @@
       "editCurrency": "Edit currency",
       "editCurrencyDescription": "Choose a token balance from the funding wallet.",
       "cancelPaymentTitle": "Cancel recurring payment?",
-      "cancelPaymentDescription": "This stops future collections for {counterparty}. You can resume the payment later from the Actions menu.",
       "keepPayment": "Keep payment",
       "cancelPayment": "Cancel payment",
       "save": "Save",

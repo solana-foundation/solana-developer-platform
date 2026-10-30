@@ -2,6 +2,7 @@
 
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import {
+  assertNever,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttempt,
@@ -303,10 +304,8 @@ function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): s
       });
     case null:
       return t("DashboardPayments.recurring.statePausedBody");
-    default: {
-      const unreachable: never = reason;
-      throw new Error(`Unhandled pause reason ${String(unreachable)}`);
-    }
+    default:
+      return assertNever(reason);
   }
 }
 
@@ -827,7 +826,6 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const lastRun = latestAttempt(collectionAttempts);
   const lastRunFailed = status === "active" && lastRun?.status === "failed";
-  // SDP pauses a schedule on a failed run, so the latest run's error supports the reason.
   const lastRunError =
     status === "paused" && lastRun?.status === "failed" && lastRun.error !== null
       ? lastRun.error

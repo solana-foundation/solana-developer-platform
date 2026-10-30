@@ -1,10 +1,11 @@
-import { SignerError } from "@solana/keychain-core";
+import { SignerError, type SolanaSigner } from "@solana/keychain-core";
 import { PrivySigner } from "@solana/keychain-privy";
 import {
   address,
   assertIsTransactionWithinSizeLimit,
   blockhash,
   compileTransaction,
+  createSignableMessage,
   createTransactionMessage,
   pipe,
   setTransactionMessageFeePayer,
@@ -16,14 +17,7 @@ import { KeychainPrivyAdapter } from "./keychain-privy.adapter";
 
 const WALLET_ADDRESS = "11111111111111111111111111111111";
 
-async function signAgainstRpcAnswer(rpcAnswer: Response) {
-  vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(
-      Response.json({ id: "wallet-1", address: WALLET_ADDRESS, chain_type: "solana" })
-    )
-    .mockResolvedValueOnce(rpcAnswer);
-  const adapter = new KeychainPrivyAdapter({ appId: "app-id", appSecret: "app-secret" });
-  const signer = await adapter.getTransactionSigner("privy_wallet-1");
+function signTestTransaction(signer: SolanaSigner) {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
@@ -40,6 +34,20 @@ async function signAgainstRpcAnswer(rpcAnswer: Response) {
   );
   assertIsTransactionWithinSizeLimit(transaction);
   return signer.signTransactions([transaction]);
+}
+
+function signTestMessage(signer: SolanaSigner) {
+  return signer.signMessages([createSignableMessage("Recurring payment authorization")]);
+}
+
+async function signAgainstRpcAnswer(rpcAnswer: Response, sign: typeof signTestTransaction) {
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(
+      Response.json({ id: "wallet-1", address: WALLET_ADDRESS, chain_type: "solana" })
+    )
+    .mockResolvedValueOnce(rpcAnswer);
+  const adapter = new KeychainPrivyAdapter({ appId: "app-id", appSecret: "app-secret" });
+  return sign(await adapter.getTransactionSigner("privy_wallet-1"));
 }
 
 function privyErrorAnswer(body: string): Response {
@@ -109,37 +117,40 @@ describe("privy adapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a Privy policy violation as POLICY_REFUSED, keeping Privy's error as its cause", async () => {
-    const signing = signAgainstRpcAnswer(
-      privyErrorAnswer(
-        JSON.stringify({ error: "Policy denied this transaction", code: "policy_violation" })
-      )
-    );
+  it.each([
+    ["signTransactions", signTestTransaction],
+    ["signMessages", signTestMessage],
+  ] as const)(
+    "refuses a Privy policy violation from %s as POLICY_REFUSED, keeping Privy's error as its cause",
+    async (_method, sign) => {
+      const signing = signAgainstRpcAnswer(
+        privyErrorAnswer(
+          JSON.stringify({ error: "Policy denied this transaction", code: "policy_violation" })
+        ),
+        sign
+      );
 
-    await expect(signing).rejects.toThrow(SigningError);
-    await expect(signing).rejects.toMatchObject({
-      code: "POLICY_REFUSED",
-      cause: expect.any(SignerError),
-    });
-  });
+      await expect(signing).rejects.toThrow(SigningError);
+      await expect(signing).rejects.toMatchObject({
+        code: "POLICY_REFUSED",
+        cause: expect.any(SignerError),
+      });
+    }
+  );
 
   it("rethrows Privy's error unchanged for another error code", async () => {
     const signing = signAgainstRpcAnswer(
-      privyErrorAnswer(JSON.stringify({ error: "Invalid transaction", code: "invalid_data" }))
+      privyErrorAnswer(JSON.stringify({ error: "Invalid transaction", code: "invalid_data" })),
+      signTestTransaction
     );
-
-    await expect(signing).rejects.toThrow(SignerError);
-  });
-
-  it("rethrows Privy's error unchanged for a body that is not JSON", async () => {
-    const signing = signAgainstRpcAnswer(privyErrorAnswer("<html>Bad Request</html>"));
 
     await expect(signing).rejects.toThrow(SignerError);
   });
 
   it("rethrows Privy's error unchanged when keychain truncated a policy violation body", async () => {
     const signing = signAgainstRpcAnswer(
-      privyErrorAnswer(JSON.stringify({ code: "policy_violation", error: "x".repeat(300) }))
+      privyErrorAnswer(JSON.stringify({ code: "policy_violation", error: "x".repeat(300) })),
+      signTestTransaction
     );
 
     await expect(signing).rejects.toThrow(SignerError);

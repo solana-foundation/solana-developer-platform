@@ -1,5 +1,6 @@
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import {
+  isPendingActivationRecurringPaymentStatus,
   isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRampQuoteDeliveryMode,
   type PaymentRecurringPayment,
@@ -492,7 +493,7 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
       break;
     case "cancel":
       if (
-        schedule.status === "pending_activation" ||
+        isPendingActivationRecurringPaymentStatus(schedule.status) ||
         isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
       ) {
         schedule.status = "canceled";

@@ -193,10 +193,8 @@ describe("admittedSigner custody policy refusals (HOO-2333)", () => {
         CONTEXT
       );
 
-      const failure = await sign(signer).catch((error: unknown) => error);
-
-      expect(failure).toBeInstanceOf(AppError);
-      expect(failure).toMatchObject({
+      await expect(sign(signer)).rejects.toBeInstanceOf(AppError);
+      await expect(sign(signer)).rejects.toMatchObject({
         code: "CUSTODY_POLICY_REFUSED",
         statusCode: 422,
         cause: refusal,

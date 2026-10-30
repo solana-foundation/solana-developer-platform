@@ -1,4 +1,7 @@
-import type { PaymentSubscriptionCollectionAttemptMetadata } from "@sdp/types/payments";
+import {
+  type PaymentSubscriptionCollectionAttemptMetadata,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+} from "@sdp/types/payments";
 import { getBase58Decoder } from "@solana/codecs";
 import {
   generateKeyPairSigner,
@@ -303,6 +306,54 @@ export async function seedFailedCollectionAttempts(options: {
     db
       .prepare("UPDATE payment_recurring_payments SET failed_collection_attempts = ? WHERE id = ?")
       .bind(options.count, options.recurringPaymentId),
+  ]);
+}
+
+/**
+ * Leaves a schedule as a cancel run left it when it claimed the schedule from `active`, submitted
+ * its cancel and stopped, both last written at `staleAt`, so a later cancel takes the claim over.
+ *
+ * @param options.attemptId - The cancel attempt.
+ * @param options.organizationId - Tenant organization.
+ * @param options.projectId - Tenant project.
+ * @param options.recurringPaymentId - The schedule the cancel claimed.
+ * @param options.submittedSignature - The cancel's submitted signature.
+ * @param options.staleAt - When the claim and its attempt were last written.
+ */
+export async function seedStaleCancelAttempt(options: {
+  attemptId: string;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  submittedSignature: Signature;
+  staleAt: string;
+}): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db
+      .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+      .bind(
+        RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+        options.staleAt,
+        options.recurringPaymentId
+      ),
+    db
+      .prepare(
+        `INSERT INTO payment_recurring_payment_lifecycle_attempts (
+           id, organization_id, project_id, recurring_payment_id, operation,
+           status, stage, signature, metadata, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'cancel', 'processing', 'submit', ?, ?::jsonb, ?, ?)`
+      )
+      .bind(
+        options.attemptId,
+        options.organizationId,
+        options.projectId,
+        options.recurringPaymentId,
+        options.submittedSignature,
+        JSON.stringify({ claimedFrom: "active", pausedReason: null }),
+        options.staleAt,
+        options.staleAt
+      ),
   ]);
 }
 
