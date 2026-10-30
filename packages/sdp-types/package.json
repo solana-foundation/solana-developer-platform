@@ -199,6 +199,11 @@
       "import": "./src/roles.ts",
       "default": "./src/roles.ts"
     },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts",
+      "default": "./src/rpc.ts"
+    },
     "./site": {
       "types": "./src/site.ts",
       "import": "./src/site.ts",

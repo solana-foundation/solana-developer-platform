@@ -221,6 +221,7 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "payments POST /v1/payments/requests",
   "payments POST /v1/payments/requests/:paymentRequestId/cancel",
   "payments POST /v1/payments/transfer-batches",
+  "payments POST /v1/payments/transfer-batches/:batchId/retry",
   "payments POST /v1/payments/transfer-batches/estimate",
   "payments POST /v1/payments/transfers",
   "private_channels DELETE /v1/private-channels/channels/:channelId/principals/:principalId",

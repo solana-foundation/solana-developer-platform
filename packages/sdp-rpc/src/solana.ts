@@ -32,6 +32,7 @@ import {
 import { MinContextSlotNotReachedError, RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
 import { markRpcAttemptDeadline } from "./telemetry";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "./transaction-version";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
@@ -842,7 +843,7 @@ function fetchJsonParsedTransaction(
     .getTransaction(signature, {
       commitment,
       encoding: "jsonParsed",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     .send();
 }

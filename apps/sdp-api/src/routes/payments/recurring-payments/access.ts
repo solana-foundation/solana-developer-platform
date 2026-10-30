@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
@@ -191,7 +191,7 @@ export async function authorizeRecurringPayment(
 export async function authorizeRecurringPaymentStart(
   c: AppContext,
   input: AuthorizeInput,
-  movement: MovementId
+  movement: MovementOf<"recurring_payments">
 ): Promise<AuthorizedRecurringPayment> {
   const authorized = await authorizeRecurringPayment(c, input);
   if (authorized.sourceWallet !== null) {

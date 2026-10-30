@@ -417,7 +417,7 @@ async function prepareCustodyTransaction(
     );
   }
   const signer = await deadline.run("Resolving the queued withdrawal signer", () =>
-    createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet<"earn">(
       env,
       input.actor.organizationId,
       input.actor.projectId,
@@ -556,7 +556,7 @@ export async function createCustodyQueuedWithdrawal(
       );
     }
     const signer = await executionDeadline.run("Resolving the queued withdrawal signer", () =>
-      createOrgSignerForCustodyWallet(
+      createOrgSignerForCustodyWallet<"earn">(
         env,
         input.actor.organizationId,
         input.actor.projectId,

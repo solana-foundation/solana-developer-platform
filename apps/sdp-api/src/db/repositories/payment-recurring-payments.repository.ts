@@ -328,11 +328,14 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
 /**
  * A paused schedule's resume (HOO-2340): `paused` to `active` under compare-and-set, clearing its
  * pause reason and recording who resumed it as its activator and the due date it collects next.
+ * The set matches only the row the request read (`expectedUpdatedAt`), so a resume that read an
+ * earlier pause never clears a later one written on the same due date.
  */
 export interface ResumePausedRecurringPaymentInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  expectedUpdatedAt: string;
   currentCollectionDueAt: string;
   nextCollectionDueAt: string;
   activatedBy: RecurringPaymentActivator | null;

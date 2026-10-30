@@ -1,4 +1,5 @@
 import { apiTestSupport } from "@sdp/api/test-support";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SignerCheckApiResponse } from "#/helpers/api-types";
 import {
@@ -275,7 +276,11 @@ describe("Kora Fee Payment (Live Smoke)", () => {
       // wallet's signature is real, but no transaction may exist on chain.
       const onChain = await callSolanaRpc<ParsedTransactionResponse | null>("getTransaction", [
         signerCheck.signature,
-        { commitment: "confirmed", encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
+        {
+          commitment: "confirmed",
+          encoding: "jsonParsed",
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+        },
       ]);
       expect(onChain).toBeNull();
       signerCheckPassed = true;

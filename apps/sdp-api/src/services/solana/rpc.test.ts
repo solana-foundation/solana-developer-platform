@@ -1,4 +1,4 @@
-import { SdpRpcError, solanaRpcError } from "@sdp/rpc/errors";
+import { RpcTimeoutError, SdpRpcError } from "@sdp/rpc/errors";
 import {
   confirmTransaction,
   createRpc,
@@ -137,7 +137,7 @@ describe("confirmTransaction transient poll tolerance", () => {
   it("keeps polling through a transient poll failure and confirms", async () => {
     const send = vi
       .fn()
-      .mockRejectedValueOnce(solanaRpcError("RPC request timed out after 25ms"))
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
       .mockResolvedValueOnce({
         value: [{ confirmationStatus: "confirmed", slot: 42n, err: null }],
       });
@@ -166,7 +166,7 @@ describe("confirmTransaction transient poll tolerance", () => {
   });
 
   it("times out with the confirmation error when every poll fails transiently", async () => {
-    const send = vi.fn().mockRejectedValue(solanaRpcError("RPC request timed out after 25ms"));
+    const send = vi.fn().mockRejectedValue(new RpcTimeoutError(25));
     const rpc = { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
 
     const error = await captureRejection(
