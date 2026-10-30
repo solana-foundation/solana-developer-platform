@@ -7,7 +7,7 @@ import {
   PAYMENT_TRANSFER_STATUSES,
   type PaymentTransferBatchRecipientStatus,
 } from "@sdp/types/payments";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   createNoopSigner,
@@ -37,6 +37,7 @@ import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaSigner from "@/services/solana/signer";
@@ -407,6 +408,35 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
   return {
     Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), approverUserId, TEST_ORG.id)}`,
     "x-project-id": TEST_PROJECT.id,
+  };
+}
+
+const auditRowSchema = z.object({
+  resource_id: z.string(),
+  status: z.string(),
+  metadata: z.string().transform((raw) => z.record(z.string(), z.unknown()).parse(JSON.parse(raw))),
+});
+
+/** A chunk transfer's audit intent and outcome rows (APE-425); either may be missing. */
+async function readChunkAudit(transferId: string) {
+  const intent = await getDb(env)
+    .prepare(
+      `SELECT resource_id, status, metadata FROM audit_logs
+        WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+          AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+    )
+    .bind(transferId)
+    .first();
+  const outcome = await getDb(env)
+    .prepare(
+      `SELECT resource_id, status, metadata FROM audit_logs
+        WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+    )
+    .bind(transferId)
+    .first();
+  return {
+    intent: intent ? auditRowSchema.parse(intent) : null,
+    outcome: outcome ? auditRowSchema.parse(outcome) : null,
   };
 }
 
@@ -1502,12 +1532,101 @@ describe("payment transfer batches", () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      data: { transfers: Array<{ status: string; signature: string | null }> };
+      data: {
+        batch: { id: string };
+        recipients: Array<{ id: string }>;
+        transfers: Array<{ id: string; status: string; signature: string | null }>;
+      };
     };
     expect(body.data.transfers).toMatchObject([
       { status: "processing", signature: persistedSignature },
     ]);
     expect(sendTransactionMock).toHaveBeenCalledOnce();
+
+    // The ledger admitted the chunk before it was sent and closed it with the
+    // signature (APE-425), naming the batch and each recipient it paid.
+    const { intent, outcome } = await readChunkAudit(required(body.data.transfers[0]).id);
+    const recipient = {
+      recipientId: required(body.data.recipients[0]).id,
+      counterpartyId,
+      counterpartyAccountId,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      amount: "0.1",
+    };
+    expect(required(intent).metadata).toMatchObject({
+      auditPhase: "intent",
+      target: {
+        action: "transfer",
+        metadata: {
+          batchId: body.data.batch.id,
+          custodyWalletId: TEST_CUSTODY_WALLET_ID,
+          sourceAddress: sourceSigner.address,
+          tokenMint: SOL_MINT,
+          amount: "0.1",
+          recipients: [recipient],
+        },
+      },
+    });
+    expect(required(outcome).status).toBe("success");
+    expect(required(outcome).metadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: required(intent).resource_id,
+      signature: persistedSignature,
+      recipients: [recipient],
+    });
+  });
+
+  it("fails a batch chunk unsent when the audit ledger refuses its intent", async () => {
+    const beginSpy = vi
+      .spyOn(AuditService.prototype, "beginCritical")
+      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
+    try {
+      const counterpartyId = await seedCounterparty("batch_audit_refused_counterparty");
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: testRunId(),
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: {
+          batch: { status: string };
+          recipients: Array<{ status: string }>;
+          transfers: Array<{ id: string; status: string }>;
+        };
+      };
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      // Settled failed, not left processing: the retry route can resend the
+      // recipient, and nothing unaudited can land or replay.
+      expect(body.data.batch.status).toBe("failed");
+      expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
+      expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
+      expect(await readChunkAudit(required(body.data.transfers[0]).id)).toEqual({
+        intent: null,
+        outcome: null,
+      });
+    } finally {
+      beginSpy.mockRestore();
+    }
   });
 
   it("keeps a signed batch chunk processing when its first broadcast is ambiguous", async () => {
@@ -1591,6 +1710,10 @@ describe("payment transfer batches", () => {
       }),
       "sdp_api_payment_submission_unresolved"
     );
+    // The outcome is unknown, so the intent stays open for reconciliation to page on.
+    const audit = await readChunkAudit(required(body.data.transfers[0]).id);
+    expect(audit.intent).not.toBeNull();
+    expect(audit.outcome).toBeNull();
     warn.mockRestore();
   });
 
@@ -1637,13 +1760,16 @@ describe("payment transfer batches", () => {
       data: {
         batch: { status: string };
         recipients: Array<{ status: string }>;
-        transfers: Array<{ status: string; signature: string | null }>;
+        transfers: Array<{ id: string; status: string; signature: string | null }>;
       };
     };
     expect(body.data.batch.status).toBe("failed");
     expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
     expect(required(body.data.transfers[0]).signature).toBeTruthy();
+    const { intent, outcome } = await readChunkAudit(required(body.data.transfers[0]).id);
+    expect(required(outcome)).toMatchObject({ status: "failure" });
+    expect(required(outcome).metadata.auditIntentId).toBe(required(intent).resource_id);
   });
 
   it("admits runtime execution only for new transfer batches", async () => {
