@@ -44,11 +44,8 @@ const deliveryTargetSchema = z.object({
   alert_emails: z.string().nullable(),
 });
 
-/**
- * The dashboard every alert links to, held to the layout's own link rule. It is parsed as a URL
- * first: the layout's rule reads it with `new URL`, which throws on a placeholder.
- */
-const dashboardUrlSchema = z.string().trim().pipe(z.url()).pipe(actionUrlSchema);
+/** The dashboard every alert links to, held to the layout's own link rule. */
+const dashboardUrlSchema = z.string().trim().pipe(actionUrlSchema);
 
 /**
  * Alerts run only where Iterable is configured and the dashboard has a URL the email layout will
