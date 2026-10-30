@@ -401,7 +401,7 @@ describe("Recurring Payment lifecycle actions", () => {
   );
 
   it("a canceled schedule offers no lifecycle action", async () => {
-    renderDetail({ ...recurring, status: "canceled" }, [failedRun]);
+    renderDetail({ ...recurring, status: "canceled", subscriptionId: "psub_test" }, [failedRun]);
     expect(
       await screen.findByText("This schedule will not run again. Its past runs keep their record.")
     ).toBeTruthy();
