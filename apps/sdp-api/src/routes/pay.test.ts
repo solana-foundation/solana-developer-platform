@@ -50,12 +50,23 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
   TEST_MOCK_FEE_PAYER_KEY_PAIR,
 } from "@/test/helpers/sponsor-signing";
 import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import type { Env } from "@/types/env";
+
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelMaturity(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
+});
 
 interface RequestWallet {
   projectId: string;
@@ -121,6 +132,7 @@ describe("Public payment request routes", () => {
   const rpc = installClusterRpcResponder();
 
   beforeEach(() => {
+    providerMaturity.moduleEnvironmentMaturityOverride = null;
     rpc.answer("getSignaturesForAddress", []);
     rpc.answer("getBlockHeight", 900);
   });
@@ -201,6 +213,27 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("answers a production link as missing once the channel stops running Payments for production", async () => {
+    providerMaturity.moduleEnvironmentMaturityOverride = {
+      module: "payments",
+      environment: "production",
+      stage: "beta",
+    };
+    const stableDeployment: Env = { ...env, SDP_RELEASE_CHANNEL: "stable" };
+    const production = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
+    const sandbox = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+    const refused = await app.request(`/pay/${production.public_token}`, {}, stableDeployment);
+    expect(refused.status).toBe(404);
+    expect(await refused.json()).toEqual({
+      error: { code: "NOT_FOUND", message: "Payment request not found" },
+    });
+
+    const served = await app.request(`/pay/${sandbox.public_token}`, {}, stableDeployment);
+    expect(served.status).toBe(200);
+    await expect(served.json()).resolves.toMatchObject({ status: "awaiting_payment" });
+  });
 
   it("refuses to build a transaction for a canceled request", async () => {
     const sponsorship = stubSponsorship();
