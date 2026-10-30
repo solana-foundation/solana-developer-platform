@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { closeDatabasePools, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
@@ -34,7 +35,30 @@ function parseNetwork(): SponsorshipNetwork {
   return parseSponsorshipNetwork(readArg("network"));
 }
 
-async function persistGlobalEnabled(enabled: boolean) {
+// kill must stay dispatchable from memory in an emergency; resume (and set) are
+// deliberate writes that must lose to a newer stop, so they carry the version
+// read from `status` and the repository compare-and-swaps on it.
+const expectedVersionSchema = z
+  .string()
+  .regex(/^\d{1,9}$/)
+  .transform(Number);
+
+function parseExpectedVersion(command: "kill" | "resume" | "set"): number | undefined {
+  const text = readArg("expected-version");
+  if (command === "kill") {
+    if (text !== undefined) throw new Error("kill does not accept --expected-version");
+    return undefined;
+  }
+  const expectedVersion = expectedVersionSchema.safeParse(text);
+  if (!expectedVersion.success) {
+    throw new Error(
+      `${command} requires a non-negative integer --expected-version (the version shown by status; 0 if no policy exists)`
+    );
+  }
+  return expectedVersion.data;
+}
+
+async function persistGlobalEnabled(enabled: boolean, expectedVersion: number | undefined) {
   const env = getProcessEnv();
   const repository = new SponsorshipBudgetRepository(getDb(env));
   const network = parseNetwork();
@@ -45,6 +69,7 @@ async function persistGlobalEnabled(enabled: boolean) {
     enabled,
     operator: requireArg("operator"),
     reason: requireArg("reason"),
+    expectedVersion,
   });
   if (!policy) {
     const current = (await repository.listPolicies(network)).find(
@@ -52,6 +77,12 @@ async function persistGlobalEnabled(enabled: boolean) {
     );
     if (!current) {
       throw new Error("No matching policy exists; use `set` with explicit limits first");
+    }
+    if (expectedVersion !== undefined && current.version !== expectedVersion) {
+      throw new Error(
+        `Policy version is ${current.version}, not ${expectedVersion}: it changed after ` +
+          "the version was read. Re-run status and re-dispatch against the current version."
+      );
     }
     console.log(JSON.stringify(current, null, 2));
     return;
@@ -84,11 +115,11 @@ async function main() {
     return;
   }
   if (command === "kill") {
-    await persistGlobalEnabled(false);
+    await persistGlobalEnabled(false, parseExpectedVersion("kill"));
     return;
   }
   if (command === "resume") {
-    await persistGlobalEnabled(true);
+    await persistGlobalEnabled(true, parseExpectedVersion("resume"));
     return;
   }
   if (command !== "set") {
@@ -116,6 +147,7 @@ async function main() {
     ...limits,
     operator: requireArg("operator"),
     reason: requireArg("reason"),
+    expectedVersion: parseExpectedVersion("set"),
   });
   await new SponsorshipBudgetRedis(env).syncPolicy(policy);
   console.log(JSON.stringify(policy, null, 2));
