@@ -3,23 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { ApiKeyContext } from "@/lib/auth";
 import * as solanaSigner from "@/services/solana/signer";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
+import * as authorityResolution from "./authority-resolution";
 import {
   createLegacyResolvedAuthoritySigner,
   createResolvedAuthoritySigner,
   getInitialPermanentDelegateAuthority,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
-  resolveCurrentAuthorityForRole,
   resolveDirectIssuanceReplay,
-  resolveFreezeOperationAuthority,
   resolveIssuanceWallet,
-  resolveMetadataAuthority,
-  resolvePermanentDelegateAuthority,
 } from "./authority-resolution";
 
 const { fetchMaybeMintMock, getTokenAclMintConfigMock } = vi.hoisted(() => ({
@@ -223,7 +221,22 @@ function createDecodedMint(input: {
   };
 }
 
+const resolveCurrentAuthorityForRole = (
+  ...args: Parameters<typeof authorityResolution.resolveCurrentAuthorityForRole>
+) => inSandboxScope(() => authorityResolution.resolveCurrentAuthorityForRole(...args));
+const resolveFreezeOperationAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolveFreezeOperationAuthority>
+) => inSandboxScope(() => authorityResolution.resolveFreezeOperationAuthority(...args));
+const resolveMetadataAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolveMetadataAuthority>
+) => inSandboxScope(() => authorityResolution.resolveMetadataAuthority(...args));
+const resolvePermanentDelegateAuthority = (
+  ...args: Parameters<typeof authorityResolution.resolvePermanentDelegateAuthority>
+) => inSandboxScope(() => authorityResolution.resolvePermanentDelegateAuthority(...args));
+
 describe("authority-resolution", () => {
+  installClusterRpcStub();
+
   beforeEach(() => {
     vi.clearAllMocks();
     getTokenAclMintConfigMock.mockResolvedValue({ exists: false });
@@ -242,10 +255,6 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveCurrentAuthorityForRole(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
         { updateTokenAuthorities: vi.fn() } as never,
         createToken(),
         "mint"
@@ -260,15 +269,7 @@ describe("authority-resolution", () => {
       data: { freezeAuthority: AUTHORITY },
     });
 
-    await expect(
-      resolveFreezeOperationAuthority(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
-        createToken()
-      )
-    ).resolves.toBe(AUTHORITY);
+    await expect(resolveFreezeOperationAuthority(createToken())).resolves.toBe(AUTHORITY);
     expect(getTokenAclMintConfigMock).toHaveBeenCalledOnce();
     expect(fetchMaybeMintMock).not.toHaveBeenCalled();
   });
@@ -281,10 +282,6 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveCurrentAuthorityForRole(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
         { updateTokenAuthorities: vi.fn() } as never,
         createToken({ freezeAuthority: AUTHORITY }),
         "freeze"
@@ -297,30 +294,17 @@ describe("authority-resolution", () => {
   it("keeps the base freeze authority for non-Token ACL mints", async () => {
     fetchMaybeMintMock.mockResolvedValue(createDecodedMint({ freezeAuthority: AUTHORITY }));
 
-    await expect(
-      resolveFreezeOperationAuthority(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
-        createToken()
-      )
-    ).resolves.toBe(AUTHORITY);
+    await expect(resolveFreezeOperationAuthority(createToken())).resolves.toBe(AUTHORITY);
     expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
   });
 
   it("fails closed when the Token ACL controller cannot be read", async () => {
     getTokenAclMintConfigMock.mockRejectedValue(new Error("RPC returned invalid mint config"));
 
-    await expect(
-      resolveFreezeOperationAuthority(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
-        createToken()
-      )
-    ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
+    await expect(resolveFreezeOperationAuthority(createToken())).rejects.toMatchObject({
+      code: "SOLANA_RPC_ERROR",
+      statusCode: 502,
+    });
     expect(fetchMaybeMintMock).not.toHaveBeenCalled();
   });
 
@@ -337,14 +321,7 @@ describe("authority-resolution", () => {
       updateTokenAuthorities: ReturnType<typeof vi.fn>;
     };
 
-    const delegate = await resolvePermanentDelegateAuthority(
-      {
-        SOLANA_RPC_URL: "https://rpc.example.test",
-        SOLANA_NETWORK: "devnet",
-      } as never,
-      tokenService as never,
-      createToken()
-    );
+    const delegate = await resolvePermanentDelegateAuthority(tokenService as never, createToken());
 
     expect(delegate).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
     expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
@@ -390,10 +367,6 @@ describe("authority-resolution", () => {
       };
 
       const authority = await resolveMetadataAuthority(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
         tokenService as never,
         createToken({
           metadataAuthority: "73ScTjQ3uVNHGF36yoaseFCVUYEoLhZwxvJ9z7CVseod",
@@ -412,14 +385,10 @@ describe("authority-resolution", () => {
       createDecodedMint({ mintAuthority: OTHER_AUTHORITY, freezeAuthority: AUTHORITY })
     );
     const tokenService = { updateTokenAuthorities: vi.fn() };
-    const env = {
-      SOLANA_RPC_URL: "https://rpc.example.test",
-      SOLANA_NETWORK: "devnet",
-    } as never;
     const token = createToken({ mintAuthority: AUTHORITY });
 
     await expect(
-      resolveCurrentAuthorityForRole(env, tokenService as never, token, "mint", AUTHORITY)
+      resolveCurrentAuthorityForRole(tokenService as never, token, "mint", AUTHORITY)
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(tokenService.updateTokenAuthorities).not.toHaveBeenCalled();
   });
@@ -429,10 +398,6 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveCurrentAuthorityForRole(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
         { updateTokenAuthorities: vi.fn() } as never,
         createToken(),
         "mint"
@@ -444,7 +409,7 @@ describe("authority-resolution", () => {
     const unavailable = rpcHttpError(503);
     getTokenAclMintConfigMock.mockRejectedValue(unavailable);
 
-    await expect(resolveFreezeOperationAuthority(testEnv, createToken())).rejects.toBe(unavailable);
+    await expect(resolveFreezeOperationAuthority(createToken())).rejects.toBe(unavailable);
   });
 
   it("fails closed when the mint account cannot be found", async () => {
@@ -452,10 +417,6 @@ describe("authority-resolution", () => {
 
     await expect(
       resolveCurrentAuthorityForRole(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
         { updateTokenAuthorities: vi.fn() } as never,
         createToken(),
         "mint"

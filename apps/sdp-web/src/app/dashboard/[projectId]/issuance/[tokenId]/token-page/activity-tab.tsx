@@ -24,6 +24,8 @@ import { useMemo } from "react";
 import { ISSUANCE_TOOLBAR_CONTROLS } from "@/app/dashboard/[projectId]/issuance/issuance-toolbar";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import {
   ACTIVITY_ACTIONS,
   activityActorType,
@@ -33,7 +35,6 @@ import {
   useTokenActivityFeed,
   type useTokenActivityWindows,
 } from "./token-activity";
-import { transactionExplorerHref } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 
 // The history is read 100 events at a time and searched and paged here: the audit API filters
@@ -195,6 +196,7 @@ function ActivityTable({
   formatter: Intl.DateTimeFormat;
 }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   return (
     // 28px under the toolbar, 8px more than the chips and notes between them.
     <TokenTable
@@ -232,7 +234,7 @@ function ActivityTable({
             <TableCell className={`${PAYMENTS_TABLE_CELL} text-right`}>
               {signature ? (
                 <a
-                  href={transactionExplorerHref(signature)}
+                  href={explorerTxUrl(signature, cluster)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-secondary hover:text-primary"

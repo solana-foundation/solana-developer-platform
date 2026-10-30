@@ -1,7 +1,12 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
-import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
+import {
+  isCanceledRecurringPaymentStatus,
+  type PaymentRecurringPaymentStatus,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  type RecurringPaymentTokenApproval,
+} from "@sdp/types/payments";
 import type { Address, MaybeAccount, Signature } from "@solana/kit";
 import {
   fetchMaybeSubscriptionAuthority,
@@ -10,14 +15,16 @@ import {
   type SubscriptionAuthority,
 } from "@solana/subscriptions";
 import { getDb } from "@/db/client";
+import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import {
   createPostgresSubscriptionAuthorityRevocationsRepository,
   type RevocableSubscriptionAuthority,
   type SubscriptionAuthorityRevocationRow,
   type SubscriptionAuthorityRevocationsRepository,
 } from "@/db/repositories/subscription-authority-revocations.repository";
-import { badRequest, conflict } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { loadPaymentMintFacts } from "@/services/payments/token-amount";
@@ -38,17 +45,22 @@ import {
 } from "./shared";
 
 /**
- * Revoking a wallet's per-mint Subscriptions authority once nothing needs it (HOO-2210).
+ * Revoking a wallet's per-mint Subscriptions authority once nothing needs it (HOO-2210, HOO-2339).
  *
- * Activation approves the authority PDA as the SPL delegate on the wallet's token account for
- * u64::MAX. Cancel leaves it, because a canceled subscription stays resumable until the end of its
- * billing period and resume needs the same authority. Once every subscription and recurring
- * payment on an authority has ended and that period is over, this revokes the delegate and closes
- * the PDA, refunding its rent to whoever paid it.
+ * Activation makes the authority PDA the SPL delegate on the wallet's token account; its allowance
+ * is 0 between collections, each approving its own amount ({@link approveSubscriptionAuthority}).
+ * A recurring payment's cancel is terminal, so the cancel revokes the authority itself
+ * when it was the last use of it ({@link revokeSubscriptionAuthorityAfterCancel}). The sweep revokes
+ * everything else once every subscription and recurring payment on an authority has ended (a
+ * standalone subscription after its billing period, since its subscriber can still resume it), and
+ * finishes any revoke a cancel left. A revoke closes the PDA, refunding its rent to whoever paid it.
  *
- * The revoke is an exit (`recurring.revoke_authority`), signed with no money principal: no API key
- * or member is asked, so revoking the key that set a schedule up never stops its cleanup, and an
- * organization's status never refuses it (ADR 0002).
+ * The revoke is an exit (`recurring.revoke_authority`); an organization's status never refuses it
+ * (ADR 0002). The sweep signs it with no money principal, so no API key or member is asked and
+ * revoking the key that set a schedule up never stops its cleanup. The inline revoke after a cancel
+ * inherits the request's principal and is admitted as an exit through `decidePrincipal`: the
+ * credential must still be live and hold the wallet in its scope, and a refusal leaves the revoke
+ * `failed` for the sweep.
  */
 
 const MOVEMENT = "recurring.revoke_authority";
@@ -161,6 +173,189 @@ export async function revokeIdleSubscriptionAuthorities(
   }
 
   return result;
+}
+
+/**
+ * Revokes the authority a recurring payment used, right after its cancel commits, when nothing else
+ * needs it (HOO-2339). It claims the revoke exactly as the sweep does, under the wallet's lock and
+ * the same idle predicate, so another live schedule on the authority, a revoke already holding it,
+ * or a sweep run that claimed it first leaves it alone. A revoke it cannot finish stays on its row,
+ * `processing` or `failed`, for the sweep; nothing here fails the cancel that already committed.
+ *
+ * @param env - Runtime environment for signer, sponsor and repository construction.
+ * @param authority - The canceled payment's authority and the custody wallet that signs its revoke.
+ * @returns Revoked, failed or pending (the sweep finishes it), or skipped (still needed, or held).
+ */
+export async function revokeSubscriptionAuthorityAfterCancel(
+  env: Env,
+  authority: RevocableSubscriptionAuthority
+): Promise<RevocationOutcome | "skipped"> {
+  const now = new Date();
+  const windows = {
+    idleBefore: now.toISOString(),
+    retryFailedBefore: new Date(now.getTime() - FAILED_RETRY_AFTER_MS).toISOString(),
+  };
+  const repo = createPostgresSubscriptionAuthorityRevocationsRepository(getDb(env));
+  return isolated(authority.subscription_authority_address, async () => {
+    const claimed = await claimCandidate(env, authority, windows);
+    return claimed
+      ? settleRevocation(createClusterSubscriptionAuthorityChain(env), repo, claimed, {
+          resumed: false,
+        })
+      : ("skipped" as const);
+  });
+}
+
+/**
+ * What became of the token approval a canceled recurring payment relied on (HOO-2339), from the
+ * database alone: `revoked` once a revoke of its authority confirmed at or after the cancel,
+ * `kept` while other recurring payments in any project still need the authority (`sharedWith`
+ * names the ones in this recurring payment's own project), else `revoking`, which the hourly
+ * sweep finishes. Two reads, no RPC.
+ *
+ * @param env - Runtime environment for repository construction.
+ * @param recurringPayment - The recurring payment as read.
+ * @returns The approval's state, or undefined unless the payment is canceled and recorded an
+ *   authority.
+ */
+export async function describeTokenApprovalAfterCancel(
+  env: Env,
+  recurringPayment: PaymentRecurringPaymentRow
+): Promise<RecurringPaymentTokenApproval | undefined> {
+  const delegate = recurringPayment.subscription_authority_address;
+  if (!isCanceledRecurringPaymentStatus(recurringPayment.status) || delegate === null) {
+    return undefined;
+  }
+  const repo = createPostgresSubscriptionAuthorityRevocationsRepository(getDb(env));
+  // A canceled row changes no more (migration 0199), so its updated_at is when the cancel landed.
+  if (
+    await repo.hasConfirmedRevocationSince({
+      environment: currentClusterScope().environment,
+      subscriptionAuthorityAddress: delegate,
+      since: recurringPayment.updated_at,
+    })
+  ) {
+    return { status: "revoked", delegate, sharedWith: [] };
+  }
+  const sharing = await repo.listRecurringPaymentsSharingAuthority({
+    environment: currentClusterScope().environment,
+    subscriptionAuthorityAddress: delegate,
+    excludeRecurringPaymentId: recurringPayment.id,
+  });
+  // The caller can read this project's schedules; one in another project still keeps the
+  // approval, but is not named.
+  const sharedWith = sharing
+    .filter(
+      (payment) =>
+        payment.organization_id === recurringPayment.organization_id &&
+        payment.project_id === recurringPayment.project_id
+    )
+    .map(({ id, status }) => ({ id, status }));
+  return { status: sharing.length > 0 ? "kept" : "revoking", delegate, sharedWith };
+}
+
+/** What an operator's incident revoke did, and the live schedules it leaves without an approval. */
+export interface OperatorRevokeResult {
+  outcome: RevocationOutcome | "held";
+  subscriptionAuthorityAddress: Address;
+  brokenRecurringPayments: {
+    id: string;
+    status: PaymentRecurringPaymentStatus;
+    projectId: string;
+  }[];
+}
+
+/**
+ * Revokes a wallet's per-mint Subscriptions authority now, during an incident, whatever still uses
+ * it (HOO-2339): unlike the sweep and the cancel's inline revoke it skips the idle predicate, so
+ * every live schedule on that wallet and token stops being able to collect. Their collections then
+ * fail on chain and pause them (HOO-2340); cancel them, or activate them again once the incident is
+ * over. It signs the `recurring.revoke_authority` exit with no money principal, as the sweep does,
+ * so neither an organization's status nor a disabled movement refuses it. Only a revoke already
+ * holding the authority stops it (`held`): that one finishes it. An activation or update that
+ * claimed first is fenced, not stopped: it refuses to send the setup that would recreate the
+ * authority, or a subscribe to one, once this revoke is claimed
+ * (`refuseIfSubscriptionAuthorityRevokedSince`). Its RPC is the sweep's: one
+ * authority read, the revoke's send and its confirmation.
+ *
+ * @param env - Runtime environment for signer, sponsor and repository construction.
+ * @param input.organizationId - The wallet's organization.
+ * @param input.projectId - The wallet's project.
+ * @param input.custodyWalletId - The custody wallet that granted the approval.
+ * @param input.token - The token mint, or a symbol SDP resolves.
+ * @param input.incident - Who ran it, why, and the incident ticket, logged with the outcome.
+ * @param chain - The chain; the cluster's unless a test supplies one.
+ * @returns The revoke's outcome and the schedules it broke.
+ * @throws AppError `NOT_FOUND` when the project or wallet is not live.
+ */
+export async function revokeSubscriptionAuthorityNow(
+  env: Env,
+  input: {
+    organizationId: string;
+    projectId: string;
+    custodyWalletId: string;
+    token: string;
+    incident: { operator: string; reason: string; ticket: string };
+  },
+  chain: SubscriptionAuthorityChain = createClusterSubscriptionAuthorityChain(env)
+): Promise<OperatorRevokeResult> {
+  const wallet = await new CustodyRuntimeTargets(
+    getDb(env),
+    env,
+    new Map()
+  ).findOperationalWalletById({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    custodyWalletId: input.custodyWalletId,
+  });
+  if (!wallet) throw notFound("Custody wallet");
+  const walletAddress = assertValidAddress(wallet.publicKey, "walletAddress");
+  const tokenMint = assertValidAddress(normalizePaymentToken(input.token), "token");
+  const [subscriptionAuthorityAddress] = await findSubscriptionAuthorityPda({
+    user: walletAddress,
+    tokenMint,
+  });
+  const repo = createPostgresSubscriptionAuthorityRevocationsRepository(getDb(env));
+  const claimed = await getDb(env).transaction(async (tx) => {
+    const txRepo = createPostgresSubscriptionAuthorityRevocationsRepository(tx);
+    await txRepo.lockWalletAuthorities(walletAddress);
+    return txRepo.claimRevocationNow({
+      id: `psar_${crypto.randomUUID()}`,
+      leaseId: `lease_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: currentClusterScope().environment,
+      custodyWalletId: wallet.id,
+      walletAddress,
+      tokenMint,
+      subscriptionAuthorityAddress,
+      now: new Date().toISOString(),
+    });
+  });
+  const outcome = claimed
+    ? await settleRevocation(chain, repo, claimed, { resumed: false })
+    : ("held" as const);
+  const brokenRecurringPayments = (
+    await repo.listRecurringPaymentsSharingAuthority({
+      environment: currentClusterScope().environment,
+      subscriptionAuthorityAddress,
+      excludeRecurringPaymentId: "",
+    })
+  ).map(({ id, status, project_id }) => ({ id, status, projectId: project_id }));
+  logEvent(outcome === "revoked" ? "warn" : "error", {
+    event: "sdp_subscription_authority_operator_revoke",
+    outcome,
+    operator: input.incident.operator,
+    reason: input.incident.reason,
+    ticket: input.incident.ticket,
+    organization_id: input.organizationId,
+    project_id: input.projectId,
+    custody_wallet_id: wallet.id,
+    subscription_authority_address: subscriptionAuthorityAddress,
+    revocation_id: claimed?.id ?? null,
+    broken_recurring_payment_ids: brokenRecurringPayments.map((payment) => payment.id),
+  });
+  return { outcome, subscriptionAuthorityAddress, brokenRecurringPayments };
 }
 
 /**

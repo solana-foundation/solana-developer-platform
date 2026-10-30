@@ -6,13 +6,12 @@
 
 import {
   confirmTransaction,
-  createRpcForSdk,
   type SimulationResult,
   type SolanaRpc,
   type SolanaRpcSdkBridge,
   simulateTransaction,
+  toSdkRpc,
 } from "@sdp/rpc/solana";
-import type { RpcEnv } from "@sdp/rpc/types";
 import {
   type Address,
   compileTransaction,
@@ -36,14 +35,6 @@ import { safeStringify } from "./token-2022.utils";
 // ═══════════════════════════════════════════════════════════════════════════
 
 type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
-
-/**
- * Environment bindings required by the Token-2022 service.
- *
- * Structural subset of the API app's `Env`; the package never reads
- * `process.env` directly.
- */
-export type Token2022Env = RpcEnv;
 
 /**
  * The fee sponsor the API hands issuance: the fee-payer address a transaction names, and the
@@ -91,12 +82,12 @@ export interface BurnResult {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class Token2022Service {
-  private env: Token2022Env;
+  private rpc: SolanaRpcSdkBridge<MosaicSdkRpc>;
   private signer: TransactionSigner;
   private feePayment?: SponsoredSubmitter;
 
-  constructor(env: Token2022Env, signer: TransactionSigner, feePayment?: SponsoredSubmitter) {
-    this.env = env;
+  constructor(rpc: SolanaRpc, signer: TransactionSigner, feePayment?: SponsoredSubmitter) {
+    this.rpc = toSdkRpc<MosaicSdkRpc>(rpc);
     this.signer = signer;
     this.feePayment = feePayment;
   }
@@ -167,7 +158,7 @@ export class Token2022Service {
    * Burn tokens from a token account
    */
   async burn(options: BurnOptions): Promise<BurnResult> {
-    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
+    const rpc = this.rpc;
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority.address, options.mint);
     const normalizedSource =
@@ -203,7 +194,7 @@ export class Token2022Service {
     options: Omit<BurnOptions, "authority"> & { authority: Address },
     requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
-    const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
+    const rpc = this.rpc;
     const authority = createNoopSigner(options.authority);
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);

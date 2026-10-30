@@ -237,6 +237,15 @@ export interface PaymentSubscriptionsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentSubscriptionRow | null>;
+  /**
+   * Whether a recurring payment owns the subscription: it names it, or an update attempt created
+   * or replaced it. SDP signs for those; the standalone routes do not.
+   */
+  isRecurringPaymentSubscription(params: {
+    subscriptionId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<boolean>;
   listSubscriptions(params: ListPaymentSubscriptionsInput): Promise<ListPaymentSubscriptionsResult>;
   getCollectionAttemptByDue(
     params: GetPaymentSubscriptionCollectionAttemptByDueInput

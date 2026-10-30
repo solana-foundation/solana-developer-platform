@@ -1,4 +1,5 @@
-import { createRpcForSdk } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { toSdkRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { FrozenAccount, FrozenAccountResponse, TokenTransaction } from "@sdp/types/tokens";
 import type { Address } from "@solana/addresses";
@@ -172,12 +173,11 @@ function readParsedTokenAccountOwner(data: unknown): string | null {
 }
 
 async function resolveFreezeTarget(
-  env: Env,
   requestedAddress: Address,
   mintAddress: Address,
   accessControlMode: TokenAccessControlMode
 ): Promise<{ tokenAccount: Address }> {
-  const rpc = createRpcForSdk<MosaicSdkRpc>(env);
+  const rpc = toSdkRpc<MosaicSdkRpc>(createClusterRpc());
   const resolved = await resolveTokenAccount(rpc, requestedAddress, mintAddress);
 
   if (!resolved.isInitialized) {
@@ -286,7 +286,7 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");
@@ -300,7 +300,6 @@ export const freezeAccount = async (c: ValidatedBodyContext<typeof freezeSchema>
   });
   const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
-    c.env,
     requestedAddress,
     mintAddress,
     accessControlMode
@@ -531,7 +530,7 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
 
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const accessControlMode = getTokenAccessControlMode(token);
-  const currentAuthorityRaw = await resolveFreezeOperationAuthority(c.env, token);
+  const currentAuthorityRaw = await resolveFreezeOperationAuthority(token);
 
   if (!currentAuthorityRaw) {
     throw badRequest("Current freeze authority is not available for this token");
@@ -539,7 +538,6 @@ export const unfreezeAccount = async (c: ValidatedBodyContext<typeof unfreezeSch
 
   const requestedAddress = assertValidAddress(body.accountAddress, "accountAddress");
   const { tokenAccount } = await resolveFreezeTarget(
-    c.env,
     requestedAddress,
     mintAddress,
     accessControlMode

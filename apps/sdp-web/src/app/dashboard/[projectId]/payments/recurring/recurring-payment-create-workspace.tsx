@@ -1,7 +1,10 @@
 "use client";
 
 import { isDecimalString } from "@sdp/solana/amount";
-import { PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS } from "@sdp/types/payments";
+import {
+  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+} from "@sdp/types/payments";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DateField } from "@sdp/ui/date-field";
@@ -415,7 +418,9 @@ function ReviewStep({ form }: StepProps) {
         />
         <ReviewRow
           label={t("DashboardPayments.recurring.ifRunFails")}
-          value={t("DashboardPayments.recurring.staysActive")}
+          value={t("DashboardPayments.recurring.pausesAfterFailures", {
+            count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+          })}
           details={[t("DashboardPayments.recurring.failedRunDetail")]}
         />
       </dl>

@@ -49,6 +49,7 @@ export type ErrorCode =
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
+  | "CUSTODY_POLICY_REFUSED"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_RESPONSE_INVALID"
@@ -122,6 +123,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
+  // 422 like SIGNING_REJECTED: nothing was signed and the same request is
+  // refused again until the wallet's policy changes.
+  CUSTODY_POLICY_REFUSED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   // 502, never 503: the provider answered success, so the action may have
@@ -192,6 +196,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
+  CUSTODY_POLICY_REFUSED:
+    "Your custody provider's policy refused to sign this request. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
@@ -231,8 +237,13 @@ export class AppError extends Error {
   public readonly statusCode: number;
   public readonly details?: Record<string, unknown>;
 
-  constructor(code: ErrorCode, message?: string, details?: Record<string, unknown>) {
-    super(message || DEFAULT_ERROR_MESSAGES[code]);
+  constructor(
+    code: ErrorCode,
+    message?: string,
+    details?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message || DEFAULT_ERROR_MESSAGES[code], options);
     this.code = code;
     this.statusCode = ERROR_STATUS_CODES[code];
     this.details = details;
@@ -307,6 +318,17 @@ export function conflict(message?: string, details?: Record<string, unknown>): A
 /** A signed transaction whose blockhash window closed before submission. */
 export function transactionExpired(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("TRANSACTION_EXPIRED", message, details);
+}
+
+/**
+ * A signature the custody provider's own policy declined (HOO-2333): nothing was signed. The
+ * custody signer raises it once, at the signer waist, for every flow that signs.
+ *
+ * @param cause - The provider's refusal, kept for logs; its wording never reaches the response.
+ * @returns The 422 `CUSTODY_POLICY_REFUSED` error.
+ */
+export function custodyPolicyRefused(cause: Error): AppError {
+  return new AppError("CUSTODY_POLICY_REFUSED", undefined, undefined, { cause });
 }
 
 export function rateLimited(message?: string): AppError {

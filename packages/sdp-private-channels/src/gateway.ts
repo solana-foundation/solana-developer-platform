@@ -7,8 +7,8 @@
  * (e.g. `getVersion`) return "Method not found" — don't call them.
  *
  * Because it is Solana-JSON-RPC-compatible, we reuse `@sdp/rpc`'s Kit client,
- * just re-pointed at the gateway URL. The engine passes a structural env in
- * (never `process.env`), the same discipline as `config.ts`.
+ * pointed at the gateway URL. It is never the cluster pool: burn signatures
+ * and channel balances live on the gateway, not on devnet or mainnet.
  */
 
 import {
@@ -19,7 +19,6 @@ import {
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { isForbiddenRpcError } from "@sdp/rpc/transient";
-import type { RpcEnv } from "@sdp/rpc/types";
 import type { Address, RpcTransport } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
@@ -41,19 +40,23 @@ export interface GatewayClientOptions {
 }
 
 /**
- * Build a Solana-Kit RPC client pointed at the SPC gateway. This is `@sdp/rpc`'s
- * standard client with the URL overridden; every read/write helper in
- * `@sdp/rpc/solana` works against the returned client.
+ * The Solana-Kit RPC client for a Private Channel's own gateway, never the cluster pool. Every
+ * read/write helper in `@sdp/rpc/solana` works against it, within the gateway's method subset.
+ *
+ * @param gatewayUrl - The instance's gateway URL.
+ * @param options - How to reach the gateway.
+ * @param options.headers - Request headers, such as the bearer token JWT-gated methods take.
+ * @param options.transportFactory - An egress-guarded transport that replaces kit's default one.
+ * @returns The gateway's RPC client.
  */
-export function createChannelGatewayRpc(
-  env: RpcEnv,
+export function createPrivateChannelLocalRpc(
   gatewayUrl: string,
   options?: GatewayClientOptions
 ): SolanaRpc {
   if (options?.transportFactory) {
     return createRpcFromTransport(options.transportFactory(options.headers ?? {}));
   }
-  return createRpc(env, { rpcUrl: gatewayUrl, headers: options?.headers });
+  return createRpc(gatewayUrl, { headers: options?.headers });
 }
 
 /** A channel token-account balance as reported by the gateway. */

@@ -50,6 +50,23 @@ function submittedKey(call: number): string {
   return String(formData.get("idempotencyKey"));
 }
 
+/** Renders the SWR read of `cacheKey` in an `<output>` with test id `name`. */
+function Inventory({
+  cacheKey,
+  name,
+  fetcher,
+}: {
+  cacheKey: string | readonly string[];
+  name: string;
+  fetcher: () => Promise<string>;
+}) {
+  const { data } = useSWR(cacheKey, fetcher, {
+    fallbackData: "Previous data",
+    revalidateOnMount: false,
+  });
+  return <output data-testid={name}>{data}</output>;
+}
+
 describe("ByokCredentialForm", () => {
   beforeEach(() => {
     vi.spyOn(byokActions, "submitPrivyCredentialAction");
@@ -290,21 +307,6 @@ describe("ByokCredentialForm", () => {
     const walletRead = vi.fn(async () => "New Connection wallet");
     const otherProjectRead = vi.fn(async () => "Other project changed");
     const command = vi.fn(async () => "Replayed command");
-    function Inventory({
-      cacheKey,
-      name,
-      fetcher,
-    }: {
-      cacheKey: string | readonly string[];
-      name: string;
-      fetcher: () => Promise<string>;
-    }) {
-      const { data } = useSWR(cacheKey, fetcher, {
-        fallbackData: "Previous data",
-        revalidateOnMount: false,
-      });
-      return <output data-testid={name}>{data}</output>;
-    }
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>

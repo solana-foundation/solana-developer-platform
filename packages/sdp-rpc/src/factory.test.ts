@@ -1226,31 +1226,13 @@ describe("createClusterRpc with a deadline", () => {
 });
 
 describe("Earn's URL helpers", () => {
-  const processDefault = { SOLANA_NETWORK: undefined, SOLANA_RPC_URL: undefined } as Record<
-    string,
-    string | undefined
-  >;
+  beforeEach(isolateRpcEnv);
+  afterEach(restoreRpcEnv);
 
-  beforeEach(() => {
-    isolateRpcEnv();
-    processDefault.SOLANA_NETWORK = process.env.SOLANA_NETWORK;
-    processDefault.SOLANA_RPC_URL = process.env.SOLANA_RPC_URL;
-  });
-
-  afterEach(() => {
-    restoreRpcEnv();
-    for (const [envKey, value] of Object.entries(processDefault)) {
-      if (value === undefined) delete process.env[envKey];
-      else process.env[envKey] = value;
-    }
-  });
-
-  it("list the scope's own pool on a devnet-default process, or none", () => {
-    const processUrl = "https://devnet-earn-process-default.example.test";
+  it("list the scope's own pool, or none", () => {
+    const devnet = "https://devnet-earn-pool.example.test";
     const mainnet = "https://mainnet-earn-pool.example.test";
-    process.env.SOLANA_NETWORK = "devnet";
-    process.env.SOLANA_RPC_URL = processUrl;
-    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: processUrl });
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet });
 
     assert.deepEqual(
       runInClusterScope(PRODUCTION, () => earnClusterEndpointUrls("mainnet-beta")),
@@ -1258,7 +1240,7 @@ describe("Earn's URL helpers", () => {
     );
 
     configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: processUrl,
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet,
       SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnet,
     });
     assert.deepEqual(

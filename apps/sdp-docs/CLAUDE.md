@@ -5,7 +5,7 @@
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
 - **Tailwind v4**, imported at the top of `src/app/globals.css`; `dark:` follows the `.dark` class the theme switch sets
 - **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
-- **Custom CSS** in `src/app/globals.css`: all layout classes are prefixed `launch-docs-*`
+- **Custom CSS** in `src/app/globals.css`: shell classes use `launch-docs-*`; home sections use `launch-home-*`
 - **Lucide React** for icons
 - **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
 
@@ -59,8 +59,7 @@ Transition durations and easing come from the package: `--motion-duration-fast` 
   <DocsSidebar />                      ← 320px fixed left, --paper-side bg
   <main class="launch-docs-main">      ← margin-left: 320px on desktop
     <div class="launch-docs-main-inner"> ← max-width 1120px (1240px at 1180px+), centered, padded
-      <DocsBreadcrumb />
-      {children}                       ← page content goes here
+      {children}                       ← page renders breadcrumbs and content
     </div>
   </main>
 </div>
@@ -120,15 +119,20 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 | `.launch-mdx-td`            | Table cell: 14px                                                                                                                                         |
 | `.launch-docs-action-links` | `<ActionLinks>`: a page's action links as raised chips (`--chip` + `--chip-ring`); a `download` link leads with a download icon, a JSON link with braces |
 
-`DocsBreadcrumb` (`breadcrumb.tsx`) links each folder above the page to its landing page: its index, or else its first page, so a section whose meta lists its overview as a child still links. A folder whose index is the page ends the trail (an API family's table shows Reference > API > Payments), and a step that is the page itself, or a folder with no page, is a quieter label.
+`DocsBreadcrumb` (`breadcrumb.tsx`) follows the root navigation: the home page and direct sidebar pages have no breadcrumb, and detail pages link back through their section pages. A page whose file folder is not its navigation parent sets `breadcrumbParent` in frontmatter; Create a wallet points to Wallets. Breadcrumbs never show unlinked folder labels.
 
 ---
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree), optional `dashboardUrl` and `agentSetup`. The header chips are Platform, Dashboard and the **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds the network status rows, an `llms.txt` link and the Fumadocs `ThemeSwitch` (light, dark, system).
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree), optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`.
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
+
+The root `meta.json` keeps Get started first, then groups direct links under
+Learn, Modules and Resources. Keep detailed guides linked from their section
+landing pages and searchable; `generate:ai` includes every published page in
+`llms-full.txt` whether or not it appears in the sidebar.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
@@ -148,8 +152,8 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-sidebar-header`     | Logo, action chips and search, border-bottom                                                                                      |
 | `.launch-docs-brand`              | Logo link (flex, gap 12px)                                                                                                        |
 | `.launch-docs-brand-mark`         | 36×36px icon box, `--paper` bg, border-radius 10px                                                                                |
-| `.launch-docs-sidebar-actions`    | Two equal columns; an odd last chip (Agent setup beside Platform and Dashboard) takes a full row                                  |
-| `.launch-docs-sidebar-action`     | Chip links (`--chip` + `--chip-ring`), `--control-height-sm`, `--font-size-meta`                                                  |
+| `.launch-docs-sidebar-actions`    | Compact Dashboard and Agent setup links below search                                                                              |
+| `.launch-docs-sidebar-action`     | Text link to the dashboard                                                                                                        |
 | `.launch-docs-sidebar-search`     | Search trigger, `--control-height-md`, `--wash` fill; the `⌘K` keys are chips                                                     |
 | `.launch-docs-sidebar-nav`        | Scrollable nav area                                                                                                               |
 | `.launch-docs-nav-item`           | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover                                                               |
@@ -162,37 +166,32 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-nav-children`       | Children container, 14px further in per level, highlights included                                                                |
 | `.launch-docs-sidebar-section`    | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case                                                                |
 | `.launch-docs-sidebar-separator`  | Plain 1px `--rule-faint` rule                                                                                                     |
-| `.launch-docs-sidebar-status`     | Footer: status rows (`.launch-docs-status-list`, ending in the `llms.txt` link) and the theme switch                              |
+| `.launch-docs-sidebar-status`     | Footer: one environment line and the theme switch                                                                                 |
 
 ---
 
 ## Creating a New Page
 
-1. Add an MDX file to `content/docs/<section>/my-page.mdx`
-2. Update `content/docs/meta.json` (and section `meta.json`) to include it
-3. Create a route in `src/app/docs/<section>/my-page/page.tsx`:
+1. Add an MDX file to `content/docs/<section>/my-page.mdx`. The catch-all docs
+   route serves it; no page component is needed.
+2. Link it from the section landing page. Add it to `meta.json` only if it
+   belongs in the sidebar.
+3. Run `pnpm --filter sdp-docs check:prose` and `check:links`.
 
-```tsx
-import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/docs-shell/page";
-import { getMDXContent } from "@/lib/source"; // or use getPage() from fumadocs
+## Prose density
 
-export default function MyPage() {
-  return (
-    <DocsPage>
-      <DocsTitle>My Page</DocsTitle>
-      <DocsDescription>Brief subtitle here.</DocsDescription>
-      <DocsBody>{/* content */}</DocsBody>
-    </DocsPage>
-  );
-}
-```
-
-4. For full-width layout (no TOC): `<DocsPage full>`
-5. For TOC: pass `toc` array of `{ title, url, depth }` to `<DocsPage toc={toc}>`
+Keep frontmatter descriptions at 130 characters or fewer and prose paragraphs
+at 80 words or fewer. `check:prose` enforces both on hand-authored MDX; generated
+API reference text stays owned by OpenAPI. Break up long explanations around
+decisions and outcomes. Keep safety conditions, retry behavior, and exact error
+codes even when shortening a page.
 
 ## Unpublishing a Page
 
-Every MDX under `content/docs/` is built and served (static params) and indexed for search whether or not `meta.json` lists it. Removing the nav entry hides the sidebar link and drops the page from the navigation-driven `llms-full.txt`, but the URL keeps serving. To take a page down while keeping it in the repo:
+Every MDX under `content/docs/` is built, served, indexed for search, and
+included in `llms-full.txt` when its release channel publishes it. Removing a
+nav entry only hides the sidebar link. To take a page down while keeping it in
+the repo:
 1. `git mv` it under `content/unpublished/` (same relative path). Nothing reads that directory.
 2. Remove it from the section `meta.json`.
 3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
@@ -209,11 +208,17 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
+- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
 - `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
+- A guide request that matches the public operation's example uses
+  `<ApiExample operation="create-wallet" />` (or `language="ts"` / `"py"`).
+  `generate:api` writes `src/generated/api-examples.json` from the channel's
+  public reference and shared snippet model. Keep a hand-written call only when
+  it teaches a different body, query, retry key or multi-step flow.
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
-- Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
+- `src/components/docs-shell/home.tsx` lists custody, ramp, compliance and RPC partners from the shared provider registries. Custody and ramp logos follow their release-channel gates; compliance appears only when its module is published. Add a logo mapping when a provider is added.
+- Committed generated files (`public/llms*.txt`, Postman, `reference/api/index.mdx`, `src/generated/public-surface.json`, `src/generated/api-examples.json`) are built at `experimental`; the deployment's build regenerates them for its channel. The root `content/docs/meta.json` is hand-maintained.
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
 API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
@@ -222,12 +227,13 @@ after `generate:api`. `@sdp/api-catalog/ai-discovery` renders both the docs
 `llms.txt` and API `/llms.txt`, so their public endpoint family lists come from
 the same tags, including the Earn publication hold. Change that shared
 generator when changing family discovery, not either output alone.
-The generated API Reference index lists every published operation, grouped by
-family, with a direct link to its operation page. It reuses the family page's
-`<ApiOperationTable>` renderer, so both tables have the same responsive layout
-and Markdown form. The generator checks that every operation appears in the
-index. The canonical stable API's `/docs` redirects here; other API hosts keep
-Swagger UI for their own release channel.
+The generated API Reference index is a directory of published families: one
+link and description per family in `<ApiFamilyList>`. Shared API conventions
+and Postman resources stay on this parent page. Each family's own page holds
+its only operation table, with links to the dedicated operation pages. The
+generator checks directory coverage and each family's operation coverage.
+The canonical stable API's `/docs` redirects to the directory; other API hosts
+keep Swagger UI for their own release channel.
 - `openapi:generate` also writes the channel's reference model (`apps/sdp-api/generated/api-reference.json`, gitignored; the contract is `@sdp/api-catalog/reference`, built by `apps/sdp-api/src/openapi/reference.ts`). A schema keyword the model cannot carry fails the build there, and so does a `oneOf` or `anyOf` variant it cannot title (no property each variant pins to its own value, no description, no type): give that variant a `description` in its zod schema.
 - `@sdp/api-catalog/catalog` lists every operation in that reference,
   including Health and Projects. `playground:generate` projects the existing
@@ -244,13 +250,14 @@ Swagger UI for their own release channel.
   preview. A preview without pairing hides the action. Production falls back to
   the canonical platform origin, and local development uses `localhost:3000`.
   Malformed configured URLs fail the build.
-- `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`, sending an `Idempotency-Key` only where the route declares one) and an example per status. Under Responses, each JSON body's fields nest under its status, written by the request body's field renderer; a status whose fields an earlier status already lists (most errors share one envelope) says "Same fields as `400`." instead. The envelope's `code` lists no values: the document's list names held modules' codes on every channel, so the builder drops it, as Conventions > Errors names only the common ones. The generator fails if a table misses an operation or a page misses a sample.
+- `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, cURL, TypeScript and Python samples, success examples and one route-specific error example when available. The shared Idempotency-Key contract is summarized with a link to its guide; OpenAPI retains the full contract. Under Responses, each JSON body's fields nest under its status; a status whose fields an earlier status already lists says "Same fields as `400`." The generator fails if a table misses an operation or a page misses a sample.
 - A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
 - Reference content is Markdown, so `.md`, `llms-full.txt` and search carry
   its text. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in
   a code span (search gets the same text); the dashboard action appears only
   in the browser. It unwraps the wrappers to their content:
-  `<ApiOperationTable>` also points each row at its operation's `.md`, while
+  `<ApiFamilyList>` points each entry at its family's `.md`, and
+  `<ApiOperationTable>` points each row at its operation's `.md`, while
   `<ActionLinks>` (a page's action links as chips, the Postman download),
   `<ApiOperation>` and `<ApiPanel>` only lay a page out. A new reference
   component needs both forms. `check:links` accepts a page's `.md`, and

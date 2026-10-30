@@ -5,9 +5,9 @@ import { listApiCatalogOperations } from "@sdp/api-catalog/catalog";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import {
   operationGroups,
+  renderApiIndex,
   renderFamilyIndex,
   renderOperationPage,
-  renderOperationTable,
   SAMPLE_TAB_MARKERS,
 } from "./lib/api-reference-page.ts";
 import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
@@ -25,7 +25,6 @@ const generatedReferencePath = path.resolve(
 const generatedSurfacePath = path.resolve(__dirname, "../../sdp-api/generated/public-surface.json");
 const surfacePath = path.resolve(__dirname, "../src/generated/public-surface.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
-const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
 const SOURCE_PATH = "apps/sdp-api/generated/api-reference.json";
 
@@ -42,41 +41,15 @@ const loadReference = async () => {
   return apiReferenceSchema.parse(JSON.parse(json));
 };
 
-const renderIndexPage = ({ families, operationCount }) => {
-  const sections = families
-    .map((family) => {
-      const slug = slugify(family.name);
-      const table = renderOperationTable(family.operations, (operation) =>
-        operationHref(slug, operation)
-      );
-      return `## ${family.name}\n\n${table}`;
-    })
-    .join("\n\n");
-
-  return `---
-title: API Reference
-description: Every public API endpoint, grouped by family and generated from OpenAPI.
----
-
-<ActionLinks>
-  <a href="${POSTMAN_COLLECTION_ROUTE}" download>Download Postman collection</a>
-  <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
-</ActionLinks>
-
-Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
-
-Browse ${operationCount} endpoints across ${families.length} API families. Select an operation to see its parameters, request body, responses and examples.
-
-${sections}
-`;
-};
-
 const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
 // Families every release channel runs, so every build must render them.
 const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
+
+/** The dedicated page for one API family. */
+const familyHref = (family) => `/docs/reference/api/${slugify(family.name)}`;
 
 /** An operation's page, beside its family's table: `/docs/reference/api/<family>/<endpointId>`. */
 const operationHref = (familySlug, operation) =>
@@ -102,8 +75,8 @@ const familyLayout = (family) => {
 };
 
 /**
- * Every family's table links each of its operations, and every operation has its page with the
- * three request samples: the reference's coverage, checked on what was written.
+ * The directory links every family, each family's table links all its operations, and every
+ * operation has its three request samples: coverage checked on what was written.
  */
 const validateGeneratedTagPages = async ({ outputDir, families }) => {
   const index = await fs.readFile(path.join(outputDir, "index.mdx"), "utf8");
@@ -116,11 +89,8 @@ const validateGeneratedTagPages = async ({ outputDir, families }) => {
   }
 
   for (const family of families) {
-    const slug = slugify(family.name);
-    for (const operation of family.operations) {
-      if (!index.includes(`](${operationHref(slug, operation)})`)) {
-        throw new Error(`The all-endpoints index does not link ${operation.operationId}`);
-      }
+    if (!index.includes(`](${familyHref(family)})`)) {
+      throw new Error(`The API directory does not link the ${family.name} family`);
     }
   }
 
@@ -235,87 +205,13 @@ const run = async () => {
   );
   const exposedOperationsCount = listApiCatalogOperations({ families }).length;
 
-  const indexContent = renderIndexPage({ families, operationCount: exposedOperationsCount });
+  const indexContent = renderApiIndex(families, familyHref, POSTMAN_COLLECTION_ROUTE);
 
   await fs.writeFile(path.join(outputDir, "index.mdx"), indexContent, "utf8");
 
   await writeJson(path.join(outputDir, "meta.json"), {
     title: "API",
     pages: ["index", ...tagPages.map((tagPage) => tagPage.slug)],
-  });
-
-  // Preserve non-API sections from the existing root meta.json, only replacing
-  // the API reference entries (everything after "reference/api/index").
-  let existingMeta;
-  try {
-    existingMeta = JSON.parse(await fs.readFile(rootMetaPath, "utf8"));
-  } catch {
-    existingMeta = null;
-  }
-
-  const apiPages = [
-    "reference/api/index",
-    ...tagPages.map((tagPage) => `reference/api/${tagPage.slug}`),
-  ];
-
-  let newPages;
-  if (existingMeta?.pages) {
-    // Find where the API reference entries start and replace from there.
-    const apiStartIndex = existingMeta.pages.indexOf("reference/api/index");
-    if (apiStartIndex !== -1) {
-      newPages = [...existingMeta.pages.slice(0, apiStartIndex), ...apiPages];
-    } else {
-      // No existing API entries — append after the last entry.
-      newPages = [...existingMeta.pages, ...apiPages];
-    }
-  } else {
-    newPages = [
-      "what-is-solana-developer-platform",
-      "getting-started",
-      "---Platform Setup---",
-      "guides/setup-organization",
-      "guides/setup-wallets",
-      "guides/manage-api-keys",
-      "---Tokens---",
-      "guides/tokenize-an-asset",
-      "guides/create-a-token",
-      "guides/deploy-a-token",
-      "guides/mint-and-burn",
-      "guides/manage-allowlists",
-      "guides/freeze-and-compliance",
-      "guides/prepare-vs-execute",
-      "reference/issuance-token-types",
-      "---Payments---",
-      "payments/index",
-      "payments/concepts",
-      "---Send Payments---",
-      "payments/send-basic-payment",
-      "payments/send-payment-with-memo",
-      "payments/send-payouts",
-      "---Accept Payments---",
-      "payments/accept-overview",
-      "payments/accept-verification",
-      "payments/accept-indexing",
-      "---Ramps---",
-      "payments/ramps",
-      "payments/ramps-providers",
-      "---Wallet Operations---",
-      "wallet-operations/index",
-      "wallet-operations/balances",
-      "---Tutorials---",
-      "tutorials/end-to-end-payment-flow",
-      "---Integrations---",
-      "reference/provider-onboarding",
-      "reference/docs-for-ai",
-      "reference/postman-collection",
-      "---API---",
-      ...apiPages,
-    ];
-  }
-
-  await writeJson(rootMetaPath, {
-    title: existingMeta?.title || "Solana Developer Platform Docs",
-    pages: newPages,
   });
 
   await validateGeneratedTagPages({ outputDir, families });

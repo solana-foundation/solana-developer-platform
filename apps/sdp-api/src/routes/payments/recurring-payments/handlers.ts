@@ -39,6 +39,7 @@ import {
 } from "@/routes/payments/context";
 import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
+import { describeTokenApprovalAfterCancel } from "@/services/payments/recurring-payments/authority-revocation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
   createRecurringPayment as createRecurringPaymentRecord,
@@ -91,6 +92,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     subscriptionAuthorityAddress: row.subscription_authority_address,
     authorizationSignature: row.authorization_signature,
     status: row.status,
+    pausedReason: row.paused_reason,
     metadataUri: row.metadata_uri,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -150,11 +152,11 @@ function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWall
  * or none runs the handler. The same key on another schedule is refused (422).
  * No RPC, no signing: it reads rows only.
  */
-function answerFromAttempt(
+async function answerFromAttempt(
   c: AppContext,
   recurringPayment: PaymentRecurringPaymentRow,
   attempt: { recurring_payment_id: string; idempotency_fingerprint?: string | null } | null
-): RecordAnswer | null {
+): Promise<RecordAnswer | null> {
   if (attempt === null) return null;
   // Activation, lifecycle and collection attempts record no fingerprint: the
   // schedule they name is the request (the path's id, an empty body).
@@ -164,13 +166,29 @@ function answerFromAttempt(
     markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(recurringPayment),
-  };
+  const response = await recurringPaymentResponse(c, recurringPayment);
   return {
     fingerprint: attempt.idempotency_fingerprint ?? null,
     respond: () => success(c, response),
   };
+}
+
+/**
+ * A single recurring payment's response: a canceled one also says what became of the token
+ * approval it relied on (HOO-2339), from two database reads.
+ */
+async function recurringPaymentResponse(
+  c: AppContext,
+  recurringPayment: PaymentRecurringPaymentRow
+): Promise<PaymentRecurringPaymentResponse> {
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(recurringPayment),
+  };
+  const tokenApproval = await describeTokenApprovalAfterCancel(c.env, recurringPayment);
+  if (tokenApproval !== undefined) {
+    response.tokenApproval = tokenApproval;
+  }
+  return response;
 }
 
 function tenant(c: AppContext): { organizationId: string; projectId: string } {
@@ -423,6 +441,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           sourceWallet,
           recurringPayment,
           idempotencyKey: requiredIdempotency(c).key,
+          releaseAuthority: "inline",
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
@@ -443,11 +462,8 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
             ),
           idempotencyKey: requiredIdempotency(c).key,
         });
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(updated),
-  };
 
-  return success(c, response);
+  return success(c, await recurringPaymentResponse(c, updated));
 }
 
 export const cancelRecurringPayment = async (c: AppContext) =>
@@ -540,8 +556,5 @@ export const getRecurringPayment = async (c: AppContext) => {
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
 
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(recurringPayment),
-  };
-  return success(c, response);
+  return success(c, await recurringPaymentResponse(c, recurringPayment));
 };

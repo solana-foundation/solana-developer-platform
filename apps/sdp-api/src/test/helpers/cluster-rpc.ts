@@ -80,6 +80,17 @@ function clusterForUrl(endpointUrl: string): SolanaCluster {
   return cluster;
 }
 
+/**
+ * Run `operation` in the cluster scope a sandbox request or cron opens, so `createClusterRpc()`
+ * resolves devnet.
+ *
+ * @param operation - The work to run.
+ * @returns Whatever `operation` returns.
+ */
+export function inSandboxScope<TResult>(operation: () => TResult): TResult {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
+}
+
 /** Each environment with the cluster its projects' chain reads and sends must land on. */
 export const ENVIRONMENT_CLUSTER_CASES = [
   { environment: "sandbox", cluster: "devnet" },

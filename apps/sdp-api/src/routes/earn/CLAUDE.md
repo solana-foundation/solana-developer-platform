@@ -21,7 +21,6 @@ custodial position is the link row between the two, minted when the program wall
 is linked.
 
 Things worth knowing before changing a movement path:
-
 - **The shared matrix owns initiated movement transitions.** Legal source states
   come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`), never from the caller, so
   terminal regression is unrepresentable rather than merely refused. A transition
@@ -97,7 +96,6 @@ criterion, not a style choice. The `earn_provider_wallets` row is the link
 record, not state: a route may resolve which provider wallet a program is and
 then read all of its money live — what it may never do is mix a persisted
 balance with a live one.
-
 - The `/button-configurations/*` routes (saved builder styling + the public
   engineering-handoff token) were removed with the dashboard UI builder;
   migration 0074 dropped `earn_button_configurations`. The retired-surfaces
@@ -231,7 +229,6 @@ contract; custody queue routes remain internal. Any future route or
 security-declaration change remains an EARN-027 security-scope change and
 requires named security sign-off plus the pinned public-operation update; do not
 widen the surface just to make a test pass.
-
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
@@ -329,7 +326,6 @@ be captured as an id. Uniqueness moved to a GLOBAL `UNIQUE (provider,
 provider_wallet_ref)` (migration 0056) — one link row may claim a provider wallet
 platform-wide, because two orgs pointing at one wallet would each read the
 other's balance.
-
 - `GET /programs` — **DB list** (`earn_provider_wallets`) + a **live provider**
   wallet snapshot per row, `{programs, total, page, pageSize}`. Optional
   `provider` filter and page window. Ordered **oldest first** (`created_at ASC,
@@ -398,7 +394,7 @@ other's balance.
     would pass on provider scoping alone and prove nothing.
   - **Browse policy is deliberately NOT one of its gates — neither half.**
     `/strategies` list/detail hide Aave/Morpho-related rows
-    (`HIDDEN_STRATEGY_TERMS`) *and* every row of an un-surfaced provider
+    (`HIDDEN_STRATEGY_TERMS`) _and_ every row of an un-surfaced provider
     (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both, so the DB
     stays a truthful provider inventory. This gate reads the STORED catalogue,
     so a hidden row is still a valid allocation target — correct, because hiding
@@ -448,7 +444,7 @@ other's balance.
   has no weight authoring or share display (removed by design), and the cap is
   what keeps the API from accepting portfolios the dashboard cannot manage until
   that work returns. Concurrent exposure to several strategies is what the
-  *programs* are for. Every `yieldSourceId` must exist as an **active** synced
+  _programs_ are for. Every `yieldSourceId` must exist as an **active** synced
   strategy for that provider+environment.
 - `GET /programs/:programId` — **live provider** snapshot (+ best-effort yield);
   balances/positions/yield are never persisted. A miss is 404 in every case — a
@@ -562,7 +558,6 @@ custodies nothing: the position may be vault shares, a market receipt token, or
 a yield-bearing token, but there is no provider-managed wallet to provision or
 generic deposit address to fund. Money moves only through a provider-built
 transaction signed by the organization custody wallet or external owner.
-
 - `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
   required `Idempotency-Key` header; body `requestId` is rejected.
@@ -744,7 +739,7 @@ transaction signed by the organization custody wallet or external owner.
     check in `lib/feature-flags.ts`): its `KORA_<CLUSTER>_URL`, with the boot
     check guaranteeing `KORA_<CLUSTER>_RPC_URL` beside it; there is no built-in
     default URL and no unsuffixed fallback, so a deployment wires BOTH cluster
-    trios (PRO-2007) and never relies on `SOLANA_NETWORK` to pick a paymaster.
+    trios (PRO-2007).
     The sponsor reads the movement's cluster from the open cluster scope, so
     the matching Kora signs, the matching budget network is charged and the fee
     is priced on that cluster's Kora upstream (`priceSponsoredTransaction`). Opening mainnet is wiring
@@ -1051,7 +1046,6 @@ event and `NodeBackgroundRunner.run` attaches its own catch, so later slots
 still run. Do not "helpfully" swallow it.
 
 Three details that look like bugs and are not:
-
 - **The block-height read is gated on rows that can CONSUME a height**: a null
   RPC status on a row not already `confirmed`. A `confirmed` row whose
   signature aged out of RPC history short-circuits to `unchanged` before the
@@ -1155,7 +1149,7 @@ expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
 
 ### External-wallet (caller-signed) routes — the B2B2C money path (PRO-1722)
 
-A third signer, not a third model. An *external wallet* is a NON-CUSTODIAL
+A third signer, not a third model. An _external wallet_ is a NON-CUSTODIAL
 wallet the partner's platform connects — SDP holds no key for it and its owner
 is not an SDP tenant. Its movements are `vault_direct` rows in the same ledger:
 one signed transaction, recorded before broadcast, settled by the same
@@ -1178,7 +1172,6 @@ Every direction is BUILD then SUBMIT, so SDP records each movement or queued
 request before broadcast and can guarantee durable status and recovery
 (`handlers/external-wallet.ts`, `handlers/queued-withdrawals.ts`,
 `services/earn/vault-external-wallet.service.ts`):
-
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
   minSharesOut?}`. It enforces environment capability, the share floor
@@ -1367,7 +1360,6 @@ the movements collection keeps its `:movementId` detail route unambiguous. The
 retired path-addressed shapes (`positions/:ownerAddress`,
 `earnings/:ownerAddress`) are pinned 404 in
 `../earn.external-wallet-positions.test.ts`.
-
 - `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
   `direction`/`status` equality filters. `amount`/`denomination` preserves the
@@ -1462,8 +1454,7 @@ each provider is deployed on; withdrawals remain open independently.
 goes to that scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`):
 a request in its project's scope (every Earn route takes an API key), a cron
 in its registration's, the catalogue sync in each lane's. Nothing in Earn takes a cluster to pick an RPC,
-and nothing reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or
-`SOLANA_NETWORK`: a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
+and a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
 the pooled client, `PROVIDER_NOT_CONFIGURED` on a provider operation) and never
 reads the other cluster. One-shot reads, simulation and broadcast use
 `createClusterRpc()`, or `createClusterRpc({ timeoutMs })` for a client handed
@@ -1563,7 +1554,7 @@ violation reads as "already audited". A failed exit audit logs
 `earn_audit_write_failed` and the movement row stays the authoritative money
 record. Each seam's suite pins its half: parity rows in all four route files,
 fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
-+ replay backfill in `../earn.vault-withdrawals.test.ts`.
+- replay backfill in `../earn.vault-withdrawals.test.ts`.
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
@@ -1575,7 +1566,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   Surfacing gates the way IN and nothing else — every read, every money-out
   route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
   strand a position taken while it was offered. `POST /programs` is the only
-  route that opens a *new* commitment, which is why it is the only one that
+  route that opens a _new_ commitment, which is why it is the only one that
   refuses. Pinned by the "un-surfaced provider" describe in
   `../earn-program.test.ts`, whose second test asserts read/re-target/withdraw
   all still work.

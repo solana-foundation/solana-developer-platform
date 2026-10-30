@@ -1,6 +1,19 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
+import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
+import { z } from "zod";
 
 const { getDb } = apiTestSupport;
+
+/**
+ * The harness's own test chain, set by the CI scripts; the API never reads these.
+ * `vitest.config.ts` defaults `KORA_SURFPOOL_CLUSTER` to devnet.
+ */
+const testChainEnvSchema = z.object({
+  SOLANA_RPC_URL: z.url().optional(),
+  KORA_SURFPOOL_CLUSTER: z.enum(SOLANA_CLUSTERS),
+});
+
+const testChainEnv = testChainEnvSchema.parse(process.env);
 
 function readEnvFromProcess(): ApiTestEnv {
   const proc: Record<string, string | undefined> = { ...process.env };
@@ -26,5 +39,9 @@ if (!providedEnv.DATABASE_URL) {
 
 export const env = {
   ...providedEnv,
+  ...testChainEnv,
   db: getDb(providedEnv),
 };
+
+/** The cluster the test chain stands in for. */
+export const testChainCluster = testChainEnv.KORA_SURFPOOL_CLUSTER;

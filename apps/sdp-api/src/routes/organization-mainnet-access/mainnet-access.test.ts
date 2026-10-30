@@ -452,6 +452,37 @@ describe("Organization mainnet access (HOO-2427)", () => {
       expect(sentEmails()).toHaveLength(2);
     });
 
+    it("keeps who accepted which terms, and when, in the audit entry of a reset", async () => {
+      expect((await post(SUBMISSION)).status).toBe(201);
+      const requested = await storedRow();
+      await correctMainnetAccess(env, {
+        organizationId: ORGANIZATION_ID,
+        operation: "reset",
+        ...operator,
+      });
+      const entries = await getDb(env)
+        .prepare(
+          "SELECT metadata FROM audit_logs WHERE resource_type = 'organization' AND resource_id = ? ORDER BY ledger_sequence"
+        )
+        .bind(ORGANIZATION_ID)
+        .all<{ metadata: string }>();
+      expect(entries.results.map((entry) => JSON.parse(entry.metadata))).toEqual([
+        expect.objectContaining({ event: "mainnet_access_requested" }),
+        expect.objectContaining({
+          event: "mainnet_access_corrected",
+          operation: "reset",
+          before: {
+            countryCode: "SG",
+            termsVersion: SDP_TERMS.version,
+            requestedAt: requested?.requested_at,
+            requestedByUserId: TEST_USER.id,
+            notifiedAt: requested?.notified_at,
+          },
+          ticket: "HOO-2427",
+        }),
+      ]);
+    });
+
     it("refuses to correct an organization that never asked", async () => {
       await expect(
         correctMainnetAccess(env, {

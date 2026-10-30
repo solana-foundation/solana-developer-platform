@@ -9,11 +9,6 @@
       "import": "./src/blocked-address.ts",
       "default": "./src/blocked-address.ts"
     },
-    "./config": {
-      "types": "./src/config.ts",
-      "import": "./src/config.ts",
-      "default": "./src/config.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",

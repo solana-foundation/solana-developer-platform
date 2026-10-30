@@ -15,9 +15,10 @@
 import {
   type ConfirmTransactionOptions,
   confirmTransaction,
-  createRpcForSdk,
+  type SolanaRpc,
+  type SolanaRpcSdkBridge,
+  toSdkRpc,
 } from "@sdp/rpc/solana";
-import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import {
@@ -32,9 +33,7 @@ import {
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
   pipe,
-  type Rpc,
   type Signature,
-  type SolanaRpcApi,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
@@ -107,7 +106,7 @@ type MosaicSdkRpc = Parameters<typeof resolveTokenAccount>[0];
  * Structural subset of the API app's `Env`; the package never reads
  * `process.env` directly (env is doppler-injected into the app at runtime).
  */
-export type MosaicIssuanceEnv = RpcEnv & {
+export type MosaicIssuanceEnv = {
   /** When "true", confirmations use processed commitment with a fixed timeout. */
   KORA_SURFPOOL_SHIM?: string;
 };
@@ -160,12 +159,13 @@ export class MosaicService {
   private env: MosaicIssuanceEnv;
   private signer: TransactionSigner;
   private feePayment?: SponsoredSubmitter;
-  private rpc: Rpc<SolanaRpcApi> & MosaicSdkRpc;
+  private rpc: SolanaRpcSdkBridge<MosaicSdkRpc>;
   private transactionFailedError: (message: string) => Error;
   private invalidArgumentError: (message: string) => Error;
 
   constructor(
     env: MosaicIssuanceEnv,
+    rpc: SolanaRpc,
     signer: TransactionSigner,
     feePayment?: SponsoredSubmitter,
     options?: MosaicServiceOptions
@@ -173,7 +173,7 @@ export class MosaicService {
     this.env = env;
     this.signer = signer;
     this.feePayment = feePayment;
-    this.rpc = createRpcForSdk<MosaicSdkRpc>(env) as unknown as Rpc<SolanaRpcApi> & MosaicSdkRpc;
+    this.rpc = toSdkRpc<MosaicSdkRpc>(rpc);
     this.transactionFailedError =
       options?.transactionFailedError ?? ((message: string) => new Error(message));
     this.invalidArgumentError = options?.invalidArgumentError ?? ((message) => new Error(message));

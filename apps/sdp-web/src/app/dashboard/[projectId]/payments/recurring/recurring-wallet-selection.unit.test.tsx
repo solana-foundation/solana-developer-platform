@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type { PaymentRecurringPayment, PaymentsDashboardWallet } from "@sdp/types/payments";
+import {
+  type PaymentRecurringPayment,
+  type PaymentSubscriptionCollectionAttempt,
+  type PaymentsDashboardWallet,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  RECURRING_PAYMENT_PAUSE_REASONS,
+  type RecurringPaymentPauseReason,
+} from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -66,6 +73,7 @@ const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   subscriptionAuthorityAddress: null,
   authorizationSignature: null,
   status: "active",
+  pausedReason: null,
   metadataUri: null,
   createdBy: null,
   createdAt: "2026-09-14T00:00:00.000Z",
@@ -327,5 +335,77 @@ describe("Recurring Payment exact source selection", () => {
     );
     expect(await screen.findAllByText("Select a currency.")).toHaveLength(2);
     expect(writes).toEqual([]);
+  });
+});
+
+describe("Recurring Payment lifecycle actions", () => {
+  const lastRunError = "The custody provider's policy refused to sign.";
+  const pausedCopy = {
+    failed_attempts: `SDP paused this schedule because its runs kept failing: one run failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`,
+    custody_policy_refused:
+      "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Change the wallet's policy with your custody provider, then resume it, or cancel it.",
+  } satisfies Record<RecurringPaymentPauseReason, string>;
+  const failedRun: PaymentSubscriptionCollectionAttempt = {
+    id: "pcat_failed",
+    organizationId: "org_test",
+    projectId: "proj_test",
+    subscriptionId: "psub_test",
+    transferId: null,
+    token: MINT,
+    amount: "1",
+    dueAt: "2026-09-20T00:00:00.000Z",
+    attemptedAt: "2026-09-20T00:05:00.000Z",
+    status: "failed",
+    signature: null,
+    error: lastRunError,
+    metadata: { source: "automated", recurringPaymentId: recurring.id, initiatedByKeyId: null },
+    createdAt: "2026-09-20T00:05:00.000Z",
+    updatedAt: "2026-09-20T00:05:00.000Z",
+  };
+
+  function renderDetail(
+    recurringPayment: typeof recurring,
+    collectionAttempts: PaymentSubscriptionCollectionAttempt[]
+  ) {
+    vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [source] } }));
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurringPayment}
+        wallet={source}
+        wallets={[source]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={collectionAttempts}
+        collectionAttemptsTotal={collectionAttempts.length}
+      />,
+      { wrapper }
+    );
+  }
+
+  it.each(RECURRING_PAYMENT_PAUSE_REASONS)(
+    "leads with Resume and offers Cancel on a schedule paused for %s, naming its reason and last failure",
+    async (pausedReason) => {
+      renderDetail({ ...recurring, status: "paused", pausedReason, subscriptionId: "psub_test" }, [
+        failedRun,
+      ]);
+      expect(await screen.findByText(pausedCopy[pausedReason])).toBeTruthy();
+      expect(screen.getByText(`Last run: ${lastRunError}`)).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
+      ).toBe("default");
+      expect(
+        screen.getByRole("button", { name: "Cancel schedule" }).getAttribute("data-variant")
+      ).toBe("outline");
+    }
+  );
+
+  it("a canceled schedule offers no lifecycle action", async () => {
+    renderDetail({ ...recurring, status: "canceled", subscriptionId: "psub_test" }, [failedRun]);
+    expect(
+      await screen.findByText("This schedule will not run again. Its past runs keep their record.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume schedule" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel schedule" })).toBeNull();
   });
 });

@@ -34,7 +34,11 @@ describe.skipIf(koraSurfpoolShim !== "true" || !RUN_INTEGRATION_TESTS)("Kora Sur
     });
     const config = await new KoraClient({ rpcUrl }).getConfig();
     expect(config.validation_config.allowed_programs).toContain(DVP_SWAP_PROGRAM_PROGRAM_ADDRESS);
-    const rpc = createRpc(env);
+    const solanaRpcUrl = env.SOLANA_RPC_URL;
+    if (!solanaRpcUrl) {
+      throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
+    }
+    const rpc = createRpc(solanaRpcUrl);
     const feePayer = await adapter.getFeePayer();
     const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
     const instruction = {

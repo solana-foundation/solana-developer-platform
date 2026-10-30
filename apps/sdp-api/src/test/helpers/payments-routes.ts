@@ -35,8 +35,6 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
-
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
 export const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
@@ -84,7 +82,7 @@ export const createOrgSignerForCustodyWalletMock: MockInstance<
 
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
-const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
+export const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
   subscriptionsProgram,
   "fetchMaybeSubscriptionAuthority"
 );
@@ -500,11 +498,6 @@ export function installPaymentsRouteTestHooks(): void {
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    createRpcMock.mockReturnValue({
-      getTokenSupply: () => ({
-        send: async () => ({ value: { decimals: 6 } }),
-      }),
-    } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
@@ -563,7 +556,7 @@ export function installPaymentsRouteTestHooks(): void {
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: { expiresAtTs: 1_800_000_000n },
+      data: { expiresAtTs: 1_800_000_000n, currentPeriodStartTs: 1_770_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createKoraAdapterMock.mockReturnValue(
       testKoraAdapter({

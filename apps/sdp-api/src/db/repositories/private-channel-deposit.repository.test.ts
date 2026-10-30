@@ -7,6 +7,7 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type {
   CreateDepositInput,
@@ -161,8 +162,33 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
       expectedStatus: "pending",
     });
 
-    const rows = await repo.listNonTerminal(10);
+    const rows = await repo.listNonTerminal({ environment: "sandbox", limit: 10 });
     expect(rows.map((r) => r.id)).toEqual([pending?.id ?? ""]);
+  });
+
+  it("listNonTerminal sweeps only projects in the given environment", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES ('inst_pcd_production', ?, ?, 'https://gateway.example',
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+      )
+      .bind(TEST_ORG.id, projects.production.id)
+      .run();
+    const sandbox = required(await repo.createDeposit(makeInput()));
+    const production = required(
+      await repo.createDeposit(
+        makeInput({ projectId: projects.production.id, instanceId: "inst_pcd_production" })
+      )
+    );
+
+    const sandboxRows = await repo.listNonTerminal({ environment: "sandbox", limit: 10 });
+    const productionRows = await repo.listNonTerminal({ environment: "production", limit: 10 });
+
+    expect(sandboxRows.map((row) => row.id)).toEqual([sandbox.id]);
+    expect(productionRows.map((row) => row.id)).toEqual([production.id]);
   });
 
   it("patchContext merges into the JSONB atomically without touching other fields", async () => {

@@ -161,7 +161,14 @@ export async function correctMainnetAccess(
     const metadata: Record<string, unknown> = {
       event: "mainnet_access_corrected",
       operation: input.operation,
-      before: { countryCode: before.country_code, termsVersion: before.terms_version },
+      // The whole request as it stood, so a reset keeps who accepted which terms, and when.
+      before: {
+        countryCode: before.country_code,
+        termsVersion: before.terms_version,
+        requestedAt: before.requested_at,
+        requestedByUserId: before.requested_by_user_id,
+        notifiedAt: before.notified_at,
+      },
       operator: input.operator,
       reason: input.reason,
       ticket: input.ticket,
