@@ -270,6 +270,29 @@ describe("Organization mainnet access (HOO-2427)", () => {
     expect(sentEmails()).toHaveLength(0);
   });
 
+  it("refuses an admin naming another organization, recording nothing on either", async () => {
+    const foreign = "org_mainnet_foreign";
+    await getDb(env)
+      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .bind(foreign, "Foreign", "foreign-org", TEST_ORG.tier, TEST_ORG.status)
+      .run();
+    const path = `/v1/organizations/${foreign}/mainnet-access`;
+    const headers = { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" };
+
+    expect((await app.request(path, { headers }, env)).status).toBe(403);
+    const write = await app.request(
+      path,
+      { method: "POST", headers, body: JSON.stringify(SUBMISSION) },
+      env
+    );
+    expect(write.status).toBe(403);
+    const requested = await getDb(env)
+      .prepare("SELECT id FROM organizations WHERE mainnet_requested_at IS NOT NULL")
+      .all();
+    expect(requested.results).toEqual([]);
+    expect(sentEmails()).toHaveLength(0);
+  });
+
   it("refuses a member who is not an admin", async () => {
     expect((await get(memberToken)).status).toBe(403);
     expect((await post(SUBMISSION, `Bearer ${memberToken}`)).status).toBe(403);
