@@ -26,7 +26,7 @@ export const BLANK_MANAGED_POOL_ENV = {
 
 /**
  * The vitest setup blanks these so a suite that reaches the door without `installClusterRpcStub()`
- * fails with `RPC_NOT_CONFIGURED` instead of calling whatever pool the CI environment injects.
+ * fails with `RPC_UNAVAILABLE` (`not_configured`) instead of calling whatever pool the CI environment injects.
  */
 export const MANAGED_POOL_ENV_KEYS = Object.keys(BLANK_MANAGED_POOL_ENV);
 
@@ -38,6 +38,6 @@ const BLANK_KORA_UPSTREAM_ENV = {
 
 /**
  * The vitest setup blanks these so a sponsorship price or settlement read a suite left unstubbed
- * fails with `RPC_NOT_CONFIGURED` instead of calling the Kora upstream the CI environment injects.
+ * fails with `RPC_UNAVAILABLE` (`not_configured`) instead of calling the Kora upstream the CI environment injects.
  */
 export const KORA_UPSTREAM_ENV_KEYS = Object.keys(BLANK_KORA_UPSTREAM_ENV);

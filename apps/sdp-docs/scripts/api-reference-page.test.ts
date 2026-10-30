@@ -120,6 +120,7 @@ const CREATE_WIDGET: ApiOperation = {
       required: true,
       description: "Widget ID.",
       schema: schema({ example: "wdg_1", constraints: [{ kind: "minLength", value: 1 }] }),
+      sample: "wdg_1",
     },
     {
       name: "page",
@@ -131,6 +132,7 @@ const CREATE_WIDGET: ApiOperation = {
         constraints: [{ kind: "exclusiveMinimum", value: 0 }],
         default: 1,
       }),
+      sample: 1,
     },
   ],
   requestBody: {

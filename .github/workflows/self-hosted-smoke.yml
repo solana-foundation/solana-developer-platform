@@ -144,6 +144,7 @@ jobs:
           CLERK_SECRET_KEY=unused
           CLERK_ISSUER=https://clerk.smoke.invalid
           CLERK_JWKS_URL=http://smoke-jwks:8080/jwks.json
+          FRONTEND_URL=http://localhost:3000
           EOF
 
       - name: Start the stack
@@ -215,6 +216,7 @@ jobs:
           const header = b64({ alg: "RS256", kid: "smoke", typ: "JWT" });
           const payload = b64({
             iss: "https://clerk.smoke.invalid",
+            azp: "http://localhost:3000",
             sub: "user_smoke",
             iat: now,
             nbf: now - 5,

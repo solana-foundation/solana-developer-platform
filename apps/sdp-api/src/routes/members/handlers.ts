@@ -381,20 +381,10 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       }
       await tx
         .prepare(
-          `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
+          `INSERT INTO invitations (id, organization_id, email, role, invited_by, expires_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`
         )
-        .bind(
-          invitationId,
-          organizationId,
-          normalizedEmail,
-          role,
-          userId,
-          // Nothing redeems a token since the accept route went; the NOT NULL
-          // UNIQUE column takes the invitation id until the cleanup migration drops it.
-          invitationId,
-          expiresAt
-        )
+        .bind(invitationId, organizationId, normalizedEmail, role, userId, expiresAt)
         .run();
       return {
         entry: {

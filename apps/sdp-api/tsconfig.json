@@ -7,6 +7,6 @@
       "@/*": ["./src/*", "./*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "scripts/verify-v1-surfpool.ts"],
   "exclude": ["node_modules", "dist"]
 }

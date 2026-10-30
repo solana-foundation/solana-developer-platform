@@ -37,10 +37,55 @@ describe("server boot checks", () => {
     expect(() => assertRequiredEnv(withoutPepper)).toThrow(/API_KEY_PEPPER is required/);
   });
 
+  it("refuses to boot production Clerk auth without an http(s) dashboard URL", () => {
+    const clerkIssuer = "https://clerk.platform.example";
+    expect(() => assertRequiredEnv(makeEnv({ CLERK_ISSUER: clerkIssuer }))).toThrow(/FRONTEND_URL/);
+    expect(() =>
+      assertRequiredEnv(makeEnv({ CLERK_ISSUER: clerkIssuer, FRONTEND_URL: "file:///dashboard" }))
+    ).toThrow(/FRONTEND_URL/);
+    expect(() =>
+      assertRequiredEnv(
+        makeEnv({ CLERK_ISSUER: clerkIssuer, FRONTEND_URL: "https://platform.example" })
+      )
+    ).not.toThrow();
+  });
+
   it("refuses a DATABASE_PREPARED_STATEMENTS value other than on or off", () => {
     expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "off" }))).not.toThrow();
     expect(() => assertRequiredEnv(makeEnv({ DATABASE_PREPARED_STATEMENTS: "of" }))).toThrow(
       /DATABASE_PREPARED_STATEMENTS/
     );
+  });
+
+  describe("Kora Cloud Run audience", () => {
+    const mainnetKora = {
+      KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
+      KORA_MAINNET_RPC_URL: "https://kora-mainnet-upstream.mock.invalid",
+    };
+
+    it("refuses managed stage and prod with a Kora URL but no audience", () => {
+      expect(() => assertRequiredEnv(makeEnv(mainnetKora))).toThrow(
+        /set KORA_MAINNET_CLOUD_RUN_AUDIENCE/
+      );
+      expect(() =>
+        assertRequiredEnv(
+          makeEnv({
+            ...mainnetKora,
+            KORA_MAINNET_CLOUD_RUN_AUDIENCE: "https://kora-mainnet.mock.invalid",
+          })
+        )
+      ).not.toThrow();
+    });
+
+    it("boots dev and self-hosted without an audience", () => {
+      expect(() =>
+        assertRequiredEnv(makeEnv({ ...mainnetKora, ENVIRONMENT: "development" }))
+      ).not.toThrow();
+      expect(() =>
+        assertRequiredEnv(
+          makeEnv({ ...mainnetKora, SDP_DEPLOYMENT_MODE: "self_hosted", SIGNING_PROVIDER: "local" })
+        )
+      ).not.toThrow();
+    });
   });
 });

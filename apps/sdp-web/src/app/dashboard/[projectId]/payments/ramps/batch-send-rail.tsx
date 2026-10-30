@@ -2,6 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { BatchSendStepContent } from "./components/batch-send-step-content";
@@ -58,7 +59,7 @@ export function BatchSendRail({
     <RampWizardShell
       steps={steps}
       stepIndex={finished ? wizard.stepIndex + 1 : wizard.stepIndex}
-      primaryDisabled={wizard.submitting || !wizard.canProceed}
+      primaryDisabled={wizard.submitting || wizard.retrying || !wizard.canProceed}
       primaryLabel={batchPrimaryLabel(wizard, t)}
       secondaryDisabled={wizard.submitting}
       hideSecondary={finished}
@@ -70,6 +71,20 @@ export function BatchSendRail({
         wizard.stepIndex === 0 && wizard.recipients.length === 0
           ? t("DashboardPayments.batchSend.addRowsHint")
           : undefined
+      }
+      footerActions={
+        finished && wizard.failedRecipientCount > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={wizard.retrying}
+            onClick={() => void wizard.retryFailedRecipients()}
+          >
+            {wizard.retrying
+              ? t("DashboardPayments.batchSend.retryingFailedRecipients")
+              : t("DashboardPayments.batchSend.retryFailedRecipients")}
+          </Button>
+        ) : null
       }
       counterpartyDialog={null}
     >

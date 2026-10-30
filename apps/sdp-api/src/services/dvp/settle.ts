@@ -169,7 +169,7 @@ export async function closeDvpTrade(
 
   // Cancel only refunds each party to its own token account, so it is an exit.
   const movement = action === "settle" ? "dvp.settle" : "dvp.cancel";
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"dvp">(
     env,
     trade.organizationId,
     trade.projectId,
@@ -191,7 +191,7 @@ export async function closeDvpTrade(
   });
 
   // Sponsorship is resolved only after every local refusal above, as in create.
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"dvp">(
     c.env,
     resolveRequestSponsorshipScope(c),
     movement,
