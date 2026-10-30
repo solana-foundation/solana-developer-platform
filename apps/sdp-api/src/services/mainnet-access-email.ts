@@ -3,6 +3,7 @@
  * (`iterable-email.ts`). Approval stays manual: the email only asks an operator to look.
  */
 import type { CountryCode } from "@sdp/types/countries";
+import { z } from "zod";
 import { serviceUnavailable } from "@/lib/errors";
 import {
   type IterableEmailConfig,
@@ -21,11 +22,17 @@ export interface MainnetAccessRequestEmail {
   requestedAt: string;
 }
 
-/** Email configured and an alias to send to; either missing means the deployment takes no requests. */
+const aliasSchema = z.string().trim().pipe(z.email());
+
+/**
+ * Email configured and an alias to send to; either missing means the deployment takes no requests.
+ * An alias that is not an address (a deployment's `placeholder` before the real one is set) is
+ * missing too.
+ */
 export function mainnetAccessEmailConfig(env: Env): (IterableEmailConfig & { to: string }) | null {
   const email = iterableEmailConfig(env);
-  const to = env.MAINNET_ACCESS_EMAIL_TO?.trim();
-  return email && to ? { ...email, to } : null;
+  const to = aliasSchema.safeParse(env.MAINNET_ACCESS_EMAIL_TO);
+  return email && to.success ? { ...email, to: to.data } : null;
 }
 
 function requesterLabel(requester: MainnetAccessRequestEmail["requester"]): string {

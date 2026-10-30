@@ -332,17 +332,23 @@ describe("Organization mainnet access (HOO-2427)", () => {
   });
 
   it.each([
-    ["no alias", "MAINNET_ACCESS_EMAIL_TO"],
-    ["no Iterable API URL", "ITERABLE_API_URL"],
-    ["no campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID"],
-  ] as const)("reads unavailable and refuses before recording anything with %s", async (_, key) => {
-    env[key] = undefined;
-    expect((await (await get()).json()).data).toMatchObject({ available: false });
-    expect((await post(SUBMISSION)).status).toBe(503);
-    expect((await notify()).status).toBe(503);
-    expect(await storedRow()).toBeNull();
-    expect(sentEmails()).toHaveLength(0);
-  });
+    ["no alias", "MAINNET_ACCESS_EMAIL_TO", undefined],
+    // A deployment mounts `placeholder` until the real alias is set.
+    ["an alias that is not an address", "MAINNET_ACCESS_EMAIL_TO", "placeholder"],
+    ["no Iterable API URL", "ITERABLE_API_URL", undefined],
+    ["no campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", undefined],
+    ["a placeholder campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID", "placeholder"],
+  ] as const)(
+    "reads unavailable and refuses before recording anything with %s",
+    async (_, key, value) => {
+      env[key] = value;
+      expect((await (await get()).json()).data).toMatchObject({ available: false });
+      expect((await post(SUBMISSION)).status).toBe(503);
+      expect((await notify()).status).toBe(503);
+      expect(await storedRow()).toBeNull();
+      expect(sentEmails()).toHaveLength(0);
+    }
+  );
 
   it("reads approved once an operator sets enableProductionProject in Clerk", async () => {
     expect((await post(SUBMISSION)).status).toBe(201);
