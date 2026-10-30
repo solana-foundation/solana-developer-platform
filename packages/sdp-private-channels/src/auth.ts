@@ -65,7 +65,12 @@ export interface VerifyWalletInput {
 
 /** Transport options shared by the standalone functions and {@link createAuthClient}. */
 export interface SpcAuthClientOptions {
-  /** Injectable `fetch` (for tests); defaults to the global. */
+  /**
+   * Injectable `fetch` (for tests). There is no default: the auth URL is
+   * project input, so a caller that dialed the global `fetch` directly would
+   * be an SSRF primitive — every caller must hand in the egress-guarded
+   * transport (`apps/sdp-api/src/services/private-channels/egress.ts`).
+   */
   fetchImpl?: typeof fetch;
   /** Per-request timeout in ms; defaults to `DEFAULT_TIMEOUT_MS` (15s). */
   timeoutMs?: number;
@@ -113,11 +118,20 @@ async function authRequest<T>(
   init: AuthRequestInit,
   options: SpcAuthClientOptions = {}
 ): Promise<T> {
-  const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const normalized = normalizeHttpBase(authBaseUrl, "Auth URL");
   if ("error" in normalized) throw badRequest(normalized.error);
+
+  // Refused before the network try-block, so a caller that forgot the guarded
+  // transport sees the configuration error instead of a simulated outage.
+  const fetchImpl = options.fetchImpl;
+  if (fetchImpl === undefined) {
+    throw new PrivateChannelError(
+      "AUTH_UNAVAILABLE",
+      `The auth client dials ${path} with no guarded fetchImpl; pass the egress-guarded transport instead of dialing the global fetch`
+    );
+  }
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";

@@ -115,6 +115,17 @@ describe("createAuthClient", () => {
       code: "BAD_REQUEST",
     });
   });
+
+  // The auth URL is project input, so there is no fallback to the global
+  // fetch: a caller that forgot the guarded transport is refused instead of
+  // dialing with no allowlist and no DNS guard.
+  it("refuses to dial when no fetchImpl was handed in", async () => {
+    const client = createAuthClient(BASE);
+    await expect(client.login({ username: "u", password: "p" })).rejects.toMatchObject({
+      code: "AUTH_UNAVAILABLE",
+      message: expect.stringContaining("no guarded fetchImpl"),
+    });
+  });
 });
 
 describe("spcRegister / spcLogin", () => {

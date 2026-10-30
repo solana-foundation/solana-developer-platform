@@ -21,6 +21,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { isBlockedAddress } from "@sdp/rpc/blocked-address";
+import { Agent, type Dispatcher } from "undici";
 
 export class EgressResponseTooLargeError extends Error {
   constructor(host: string) {
@@ -300,4 +301,52 @@ export function createGuardedFetch(options?: {
         : { maxResponseBytes: options.maxResponseBytes }),
     });
   };
+}
+
+/**
+ * What a dispatch through {@link createGuardedDispatcher} may dial. The checks
+ * from `guardedFetch` that a `dispatcher_NODE_ONLY` can carry: https-only, and
+ * a host written as an address classified before the socket exists. A name is
+ * left to `guardedLookup`, which runs at connect time inside the agent.
+ */
+function assertDispatchableTenantOrigin(origin: string | URL | undefined): void {
+  if (origin === undefined) {
+    throw new EgressBlockedError("(no origin)");
+  }
+  const url = origin instanceof URL ? origin : new URL(origin);
+  if (url.protocol !== "https:") {
+    throw new EgressBlockedError(url.hostname);
+  }
+
+  const literalHost = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(literalHost) && isBlockedAddress(literalHost)) {
+    throw new EgressBlockedError(url.hostname);
+  }
+}
+
+/**
+ * The egress guard behind undici's `dispatcher_NODE_ONLY`, for libraries that
+ * build their own HTTP transport from a tenant-supplied URL and accept a
+ * dispatcher but know nothing about the guard. The Zolana client's Solana RPC
+ * leg is the one such transport.
+ *
+ * A dispatcher cannot check a redirect's destination the way `guardedFetch`
+ * re-guards every hop, but it sees every dispatch: undici's `fetch` follows a
+ * redirect by re-dispatching through the same dispatcher, so the origin check
+ * above runs per hop, and the agent resolves every name — the redirected one
+ * included — through `guardedLookup` as the socket is built.
+ *
+ * One instance for the process: an agent owns connection pools, and the
+ * gateways that would hold one resolve per request.
+ */
+let guardedDispatcher: Dispatcher | undefined;
+
+export function createGuardedDispatcher(): Dispatcher {
+  guardedDispatcher ??= new Agent({ connect: { lookup: guardedLookup } }).compose(
+    (dispatch) => (options, handler) => {
+      assertDispatchableTenantOrigin(options.origin);
+      return dispatch(options, handler);
+    }
+  );
+  return guardedDispatcher;
 }

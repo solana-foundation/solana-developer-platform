@@ -88,6 +88,16 @@ describe("createConfiguredRingsGateway", () => {
     expect(captured[0]?.fetch).toBeTypeOf("function");
   });
 
+  it("guards the SDK's own Solana RPC transport outside development", () => {
+    const { captured, createGateway } = capturingCreate();
+    createConfiguredRingsGateway({ ENVIRONMENT: "production" } as Env, tenant, connection, {
+      createGateway,
+    });
+
+    const transportConfig = captured[0]?.solanaRpcTransportConfig;
+    expect(transportConfig).toMatchObject({ dispatcher_NODE_ONLY: expect.anything() });
+  });
+
   it("keeps plain transports in development, where endpoints resolve to loopback", () => {
     const { captured, createGateway } = capturingCreate();
     createConfiguredRingsGateway({ ENVIRONMENT: "development" } as Env, tenant, connection, {
@@ -95,6 +105,7 @@ describe("createConfiguredRingsGateway", () => {
     });
 
     expect(captured[0]?.fetch).toBeUndefined();
+    expect(captured[0]?.solanaRpcTransportConfig).toBeUndefined();
   });
 
   it.each([

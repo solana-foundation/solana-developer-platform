@@ -42,6 +42,13 @@ function toBufferBE(value, width) {
   assertBigInt(value);
   assertWidth(width);
   const hex = value.toString(16);
+  // Zero encodes in any width, zero included. A non-zero value that does not
+  // fit `width` bytes must fail loudly: silently dropping the low-order hex
+  // digits would encode a smaller number than the caller asked for — exactly
+  // the wraparound an amount encoder must never survive quietly.
+  if (value !== 0n && hex.length > width * 2) {
+    throw new RangeError(`The bigint cannot be encoded in ${width} byte(s)`);
+  }
   return Buffer.from(hex.padStart(width * 2, "0").slice(0, width * 2), "hex");
 }
 

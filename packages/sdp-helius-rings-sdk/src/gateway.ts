@@ -69,11 +69,18 @@ export interface RingsGatewayConfig {
   readonly healthTimeoutMs?: number;
   /**
    * Carries every leg this package dials directly — health probes, the
-   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
-   * own Solana RPC transport cannot take one (upstream gap), so that leg
-   * stays on the library's plain transport.
+   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's own
+   * Solana RPC leg takes a transport config instead, through
+   * {@link solanaRpcTransportConfig}, so the same guard can cover it.
    */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Transport config for the Zolana client's own Solana RPC leg, forwarded to
+   * `createSolanaRpc`. On Node this carries a `dispatcher_NODE_ONLY`, which is
+   * how a tenant-supplied RPC URL is dialed through the caller's egress guard.
+   * Left out, that leg uses the library's plain transport.
+   */
+  readonly solanaRpcTransportConfig?: Record<string, unknown>;
 }
 
 const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };

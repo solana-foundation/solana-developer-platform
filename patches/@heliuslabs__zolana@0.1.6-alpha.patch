@@ -1,0 +1,58 @@
+diff --git a/dist/client/client.d.ts b/dist/client/client.d.ts
+index a696998ff6133e0a3f96c9d80317748274725792..641cdacc1817c53e013935e830171135985f773b 100644
+--- a/dist/client/client.d.ts
++++ b/dist/client/client.d.ts
+@@ -26,6 +26,13 @@ export interface ZolanaClientConfig {
+     readonly indexerConfig?: IndexerRpcConfig;
+     readonly proverAsyncPoll?: AsyncPollConfig;
+     readonly fetch?: typeof globalThis.fetch;
++    /**
++     * Extra transport config for the Solana JSON-RPC leg, forwarded to
++     * `createSolanaRpc`. On Node this carries a `dispatcher_NODE_ONLY`, so the
++     * host embedding the client can route every RPC dial through its own
++     * dispatcher (an egress guard, a proxy, connection tuning).
++     */
++    readonly solanaRpcTransportConfig?: Record<string, unknown>;
+     /**
+      * Permit plain http to non-loopback indexer and prover URLs.
+      *
+diff --git a/dist/client/client.js b/dist/client/client.js
+index 438e48a0ba270c513067b4998d5c6c258d3e3be2..279bcc112a56a5ef03bd1e5944c4da3176d05f73 100644
+--- a/dist/client/client.js
++++ b/dist/client/client.js
+@@ -53,6 +53,9 @@ export class ZolanaClient {
+             ...(endpoints.solanaRpcSubscriptions === undefined
+                 ? {}
+                 : { solanaRpcSubscriptionsUrl: endpoints.solanaRpcSubscriptions }),
++            ...(input.solanaRpcTransportConfig === undefined
++                ? {}
++                : { solanaRpcTransportConfig: input.solanaRpcTransportConfig }),
+         });
+         const allowInsecureHttp = input.allowInsecureHttp ?? false;
+         const indexerUrl = checkedServiceUrl(endpoints.photon, endpoints.photonField, allowInsecureHttp);
+diff --git a/dist/client/kit.d.ts b/dist/client/kit.d.ts
+index edf206aafaabff0f6b9fbda5dd4a91e02671ce86..55998bc76c646f3f7bd122e47e380c7d4a139205 100644
+--- a/dist/client/kit.d.ts
++++ b/dist/client/kit.d.ts
+@@ -9,6 +9,8 @@ export interface LatestBlockhash {
+ export declare function createKitClients(input: Readonly<{
+     solanaRpcUrl: string | URL;
+     solanaRpcSubscriptionsUrl?: string | URL;
++    /** Forwarded to `createSolanaRpc` as its transport config (Node: `dispatcher_NODE_ONLY`). */
++    solanaRpcTransportConfig?: Record<string, unknown>;
+ }>): Readonly<{
+     solanaRpc: SolanaRpc;
+     solanaRpcSubscriptions: SolanaRpcSubscriptions;
+diff --git a/dist/client/kit.js b/dist/client/kit.js
+index 7a20f23728eaf16ee3bcf9cc23ebaef31f23262a..b54f81b91ac0983297f693e1978d321ff9b038f9 100644
+--- a/dist/client/kit.js
++++ b/dist/client/kit.js
+@@ -7,7 +7,7 @@ export function createKitClients(input) {
+         ? defaultSolanaRpcSubscriptionsUrl(rpcUrl)
+         : urlString(input.solanaRpcSubscriptionsUrl, "solanaRpcSubscriptionsUrl", ["ws:", "wss:"]);
+     return Object.freeze({
+-        solanaRpc: createSolanaRpc(rpcUrl),
++        solanaRpc: createSolanaRpc(rpcUrl, input.solanaRpcTransportConfig),
+         solanaRpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl),
+     });
+ }

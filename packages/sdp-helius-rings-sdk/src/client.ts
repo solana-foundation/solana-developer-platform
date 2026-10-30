@@ -16,10 +16,18 @@ export interface RingsClientConfig {
    */
   readonly allowInsecureHttp?: boolean;
   /**
-   * Carries the indexer and prover legs; the client's own Solana RPC leg
-   * builds its transport internally and cannot take one (upstream gap).
+   * Carries the indexer and prover legs; the Solana RPC leg is guarded through
+   * {@link solanaRpcTransportConfig} instead, which zolana forwards to
+   * `createSolanaRpc` as its transport config.
    */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Transport config for the client's own Solana RPC leg, forwarded to
+   * `createSolanaRpc` verbatim. On Node this carries a
+   * `dispatcher_NODE_ONLY`, which is how the egress guard reaches the one
+   * transport this package cannot hand a `fetch` to.
+   */
+  readonly solanaRpcTransportConfig?: Record<string, unknown>;
 }
 
 /**
@@ -35,5 +43,8 @@ export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClie
     tree: tree === undefined ? undefined : withConfiguredAddressErrorBridge(() => address(tree)),
     allowInsecureHttp: config.allowInsecureHttp ?? false,
     ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+    ...(config.solanaRpcTransportConfig === undefined
+      ? {}
+      : { solanaRpcTransportConfig: config.solanaRpcTransportConfig }),
   });
 }

@@ -7,8 +7,9 @@ import {
   type OuterTransactionPolicyInput,
   validateOuterTransaction as validateSdkOuterTransaction,
 } from "@sdp/helius-rings-sdk/outer-tx-policy";
+import type { Dispatcher } from "undici";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
-import { createGuardedFetch } from "@/services/guarded-egress";
+import { createGuardedDispatcher, createGuardedFetch } from "@/services/guarded-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
@@ -62,14 +63,27 @@ export async function resolvePersistedRingsGateway(
  * hostname cannot rebind or bounce the API into a private or metadata address
  * after passing the literal write-time check. Development returns undefined —
  * local endpoints legitimately resolve to loopback, which the guard exists to
- * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
- * transport, which the library builds internally (upstream gap).
+ * refuse. The Zolana client's own Solana RPC transport cannot take a `fetch`;
+ * it takes {@link ringsEgressDispatcher} instead, which carries the same guard.
  */
 export function ringsEgressFetch(
   env: Env,
   options?: { maxResponseBytes?: number }
 ): typeof globalThis.fetch | undefined {
   return env.ENVIRONMENT === "development" ? undefined : createGuardedFetch(options);
+}
+
+/**
+ * The egress guard for the Zolana client's own Solana RPC transport, which
+ * builds it from `createSolanaRpc` and cannot take a `fetch`. Passed as
+ * `dispatcher_NODE_ONLY` transport config, so the tenant-supplied RPC URL —
+ * including every redirect undici follows — is classified per dispatch and
+ * resolved through `guardedLookup` at connect time. Development returns
+ * undefined, like {@link ringsEgressFetch}: local endpoints resolve to
+ * loopback.
+ */
+export function ringsEgressDispatcher(env: Env): Dispatcher | undefined {
+  return env.ENVIRONMENT === "development" ? undefined : createGuardedDispatcher();
 }
 
 /**
@@ -104,6 +118,7 @@ export function createConfiguredRingsGateway(
   const create = dependencies.createGateway ?? createRingsGateway;
   const recordRingLookupTable = dependencies.recordRingLookupTable;
   const egressFetch = ringsEgressFetch(env);
+  const egressDispatcher = ringsEgressDispatcher(env);
 
   const gatewayConfig = {
     solanaRpcUrl: connection.solanaRpcUrl,
@@ -112,6 +127,9 @@ export function createConfiguredRingsGateway(
     ...(connection.ringRpcUrl ? { ringRpcUrl: connection.ringRpcUrl } : {}),
     ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
     ...(egressFetch ? { fetch: egressFetch } : {}),
+    ...(egressDispatcher
+      ? { solanaRpcTransportConfig: { dispatcher_NODE_ONLY: egressDispatcher } }
+      : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,

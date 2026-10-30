@@ -640,6 +640,25 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(byAddress.total).toBe(0);
     });
 
+    // A search term is a name fragment, not a pattern: `%` and `_` must match
+    // themselves, the way every sibling search path escapes them.
+    it("treats LIKE wildcards in the search term literally", async () => {
+      const plain = await seedNamed("Aaa", "ext_plain");
+      const scored = await seedNamed("A_a", "ext_scored");
+      await seedSolanaAccount(plain.id, TEST_SOLANA_ADDRESSES.wallet1, null);
+      await seedSolanaAccount(scored.id, TEST_SOLANA_ADDRESSES.wallet2, null);
+
+      const matches = await repo.listBatchRecipients({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        search: "a_a",
+        limit: 50,
+        offset: 0,
+      });
+      expect(matches.total).toBe(1);
+      expect(matches.rows[0].counterparty_display_name).toBe("A_a");
+    });
+
     it("paginates with limit/offset while reporting the full total", async () => {
       const a = await seedNamed("Aaa", "ext_a");
       const b = await seedNamed("Bbb", "ext_b");
