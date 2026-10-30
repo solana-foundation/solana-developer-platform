@@ -11,7 +11,8 @@ import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { createOrganization } from "./create";
 import { getOrganization, getOrganizationProviderAccess, updateOrganization } from "./handlers";
-import { createOrganizationSchema, updateOrgSchema } from "./schemas";
+import { getMainnetAccess, requestMainnetAccess } from "./mainnet-access";
+import { createOrganizationSchema, requestMainnetAccessSchema, updateOrgSchema } from "./schemas";
 
 export const organizations = new Hono<{ Bindings: Env }>();
 
@@ -44,4 +45,22 @@ organizations.patch(
   requireAction("organizations.manage"),
   validateBody(updateOrgSchema),
   updateOrganization
+);
+
+// Mainnet access (HOO-2427) is asked for from the dashboard's organization
+// settings: an admin's own act, binding the organization to the Terms and
+// Conditions, so never an API key. Only admins see the settings card, so its
+// read is administration too.
+organizations.get(
+  "/:orgId/mainnet-access",
+  requireHumanSession(),
+  requireAction("organizations.manage"),
+  getMainnetAccess
+);
+organizations.post(
+  "/:orgId/mainnet-access",
+  requireHumanSession(),
+  requireAction("organizations.manage"),
+  validateBody(requestMainnetAccessSchema),
+  requestMainnetAccess
 );

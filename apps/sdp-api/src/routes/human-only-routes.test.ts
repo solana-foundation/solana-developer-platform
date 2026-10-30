@@ -20,7 +20,11 @@ const HUMAN_ONLY_PATHS = [
   /^\/v1\/members(\/|$)/,
   /^\/v1\/projects\/:projectId\/(members|api-keys)(\/|$)/,
 ];
-const HUMAN_ONLY_ROUTES = new Set(["PATCH /v1/organizations/:orgId"]);
+const HUMAN_ONLY_ROUTES = new Set([
+  "PATCH /v1/organizations/:orgId",
+  "GET /v1/organizations/:orgId/mainnet-access",
+  "POST /v1/organizations/:orgId/mainnet-access",
+]);
 
 function humanOnlyRoutes(): string[] {
   const routes = new Set<string>();
@@ -59,6 +63,7 @@ describe("human-only routes", () => {
       "GET /v1/members",
       "GET /v1/members/:memberId/api-keys",
       "GET /v1/members/me",
+      "GET /v1/organizations/:orgId/mainnet-access",
       "GET /v1/projects/:projectId/api-keys",
       "GET /v1/projects/:projectId/members",
       "PATCH /v1/api-keys/:keyId",
@@ -67,6 +72,7 @@ describe("human-only routes", () => {
       "POST /v1/api-keys",
       "POST /v1/api-keys/:keyId/rotate",
       "POST /v1/members/invite",
+      "POST /v1/organizations/:orgId/mainnet-access",
       "POST /v1/projects/:projectId/api-keys",
     ]);
   });

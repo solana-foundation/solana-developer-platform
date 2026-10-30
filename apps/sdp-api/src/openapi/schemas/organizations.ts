@@ -1,3 +1,5 @@
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { MAINNET_ACCESS_STATES } from "@sdp/types/mainnet-access";
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
@@ -7,6 +9,7 @@ import {
 } from "@/routes/members/schemas";
 import {
   createOrganizationSchema as createOrganizationSchemaBase,
+  requestMainnetAccessSchema as requestMainnetAccessSchemaBase,
   updateOrgSchema as updateOrgSchemaBase,
 } from "@/routes/organizations/schemas";
 import {
@@ -271,3 +274,40 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
+
+export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.openapi(
+  "RequestMainnetAccessRequest",
+  {
+    description:
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
+    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+  }
+);
+
+export const mainnetAccessSchema = z
+  .object({
+    state: z.enum(MAINNET_ACCESS_STATES).openapi({
+      description:
+        "`approved` once an operator enables production for the organization; `pending` after a request; otherwise `not_requested`.",
+    }),
+    countryCode: z.enum(COUNTRY_CODES).nullable(),
+    termsAcceptance: z
+      .object({
+        version: z.string(),
+        acceptedAt: isoDateTimeSchema,
+        acceptedByUserId: userIdSchema,
+      })
+      .nullable(),
+    request: z
+      .object({
+        requestedAt: isoDateTimeSchema,
+        requestedByUserId: userIdSchema,
+        notified: z.boolean().openapi({
+          description: "False until the SDP alias received the request; submitting again sends it.",
+        }),
+      })
+      .nullable(),
+    currentTerms: z.object({ version: z.string(), url: z.string().url() }),
+    contactEmail: z.string().nullable(),
+  })
+  .openapi("MainnetAccess", { description: "The organization's mainnet access request." });

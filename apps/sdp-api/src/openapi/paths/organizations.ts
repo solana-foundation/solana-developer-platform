@@ -3,10 +3,15 @@ import { z } from "zod";
 import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
 import {
   createOrganizationRequestSchema,
+  requestMainnetAccessRequestSchema,
   updateOrganizationRequestSchema,
 } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent } from "./helpers";
-import { createOrganizationResponse, organizationResponse } from "./responses";
+import {
+  createOrganizationResponse,
+  mainnetAccessResponse,
+  organizationResponse,
+} from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -75,6 +80,41 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
         content: jsonContent(organizationResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/organizations/{orgId}/mainnet-access",
+    tags: ["Organizations"],
+    summary: "Get mainnet access",
+    operationId: "getMainnetAccess",
+    description:
+      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance. A signed-in admin only, never an API key.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { params: z.object({ orgId: orgIdParamSchema }) },
+    responses: {
+      200: { description: "Mainnet access", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations/{orgId}/mainnet-access",
+    tags: ["Organizations"],
+    summary: "Request mainnet access",
+    operationId: "requestMainnetAccess",
+    description:
+      "Records the organization's jurisdiction and its acceptance of the current SDP Terms and Conditions, and asks SDP to enable mainnet. Once per organization; an operator approves it. A signed-in admin only, never an API key. Refused with 409 once sent, when mainnet is already enabled, or when the terms version is not the current one.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      params: z.object({ orgId: orgIdParamSchema }),
+      body: { required: true, content: jsonContent(requestMainnetAccessRequestSchema) },
+    },
+    responses: {
+      201: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
     },
   });
 }

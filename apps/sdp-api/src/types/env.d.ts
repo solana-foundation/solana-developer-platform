@@ -93,6 +93,11 @@ export interface Env extends ManagedRpcEnv {
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
 
+  // Mainnet access requests (HOO-2427): Resend sends the request email to the SDP alias
+  RESEND_API_KEY?: string;
+  MAINNET_ACCESS_EMAIL_FROM?: string;
+  MAINNET_ACCESS_EMAIL_TO?: string;
+
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;
   ALLOWLIST_ADMIN_ORG_ID?: string;
