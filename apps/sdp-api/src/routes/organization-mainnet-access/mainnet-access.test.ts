@@ -133,7 +133,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     await seedOrganization();
     env.ITERABLE_API_URL = ITERABLE_API_URL;
     env.ITERABLE_API_KEY = "iterable_test";
-    env.MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID = "4242";
+    env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = "4242";
     env.MAINNET_ACCESS_EMAIL_TO = "mainnet@example.org";
     const realFetch = globalThis.fetch;
     iterable = vi
@@ -149,7 +149,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
     vi.restoreAllMocks();
     env.ITERABLE_API_URL = undefined;
     env.ITERABLE_API_KEY = undefined;
-    env.MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID = undefined;
+    env.ITERABLE_TRANSACTIONAL_CAMPAIGN_ID = undefined;
     env.MAINNET_ACCESS_EMAIL_TO = undefined;
     await clearKVStores(env);
   });
@@ -325,7 +325,7 @@ describe("Organization mainnet access (HOO-2427)", () => {
   it.each([
     ["no alias", "MAINNET_ACCESS_EMAIL_TO"],
     ["no Iterable API URL", "ITERABLE_API_URL"],
-    ["no campaign", "MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID"],
+    ["no campaign", "ITERABLE_TRANSACTIONAL_CAMPAIGN_ID"],
   ] as const)("reads unavailable and refuses before recording anything with %s", async (_, key) => {
     env[key] = undefined;
     expect((await (await get()).json()).data).toMatchObject({ available: false });

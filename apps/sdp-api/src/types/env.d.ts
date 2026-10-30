@@ -93,12 +93,13 @@ export interface Env extends ManagedRpcEnv {
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
 
-  // Mainnet access requests (HOO-2427): an Iterable campaign sends the request email to the SDP alias
+  // Email (`services/iterable-email.ts`): one Iterable campaign sends every SDP email
   ITERABLE_API_KEY?: string;
   /** https://api.iterable.com on deployments; local development points it at a stub. */
   ITERABLE_API_URL?: string;
-  /** The triggered campaign whose template passes `subject` and `body` through. */
-  MAINNET_ACCESS_ITERABLE_CAMPAIGN_ID?: string;
+  /** The triggered campaign whose template passes `subject`, `body` and `replyTo` through. */
+  ITERABLE_TRANSACTIONAL_CAMPAIGN_ID?: string;
+  /** Mainnet access requests (HOO-2427) email this SDP alias. */
   MAINNET_ACCESS_EMAIL_TO?: string;
 
   // Allowlist configuration
