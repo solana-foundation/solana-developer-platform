@@ -2,7 +2,7 @@ import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-c
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { privateChannels } from "@/flags/project-modules";
+import { privateChannels } from "@/flags";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import {
   fetchProviderAvailability,

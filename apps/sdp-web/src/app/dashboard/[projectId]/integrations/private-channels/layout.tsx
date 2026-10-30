@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { privateChannels } from "@/flags/project-modules";
+import { privateChannels } from "@/flags";
 
 export default async function PrivateChannelsLayout({ children }: { children: ReactNode }) {
   // Every leaf page checks the flag too, but gating the shared layout avoids

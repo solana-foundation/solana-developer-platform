@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { RecordStack } from "@/components/refresh-record";
 import { ActionTile } from "@/components/ui/action-tile";
-import { dvp, earn } from "@/flags/project-modules";
+import { dvp, earn } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { requestProjectHref } from "@/lib/sdp-api";

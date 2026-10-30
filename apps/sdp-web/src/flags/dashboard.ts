@@ -1,5 +1,5 @@
-import type { SdpReleaseChannel } from "@sdp/types/release-channels";
-import { paymentsDemoMode } from "@/flags";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { SdpModule, SdpReleaseChannel } from "@sdp/types/release-channels";
 import {
   assetProfiles,
   dvp,
@@ -7,10 +7,14 @@ import {
   heliusRings,
   issuance,
   markets,
+  paymentsDemoMode,
   privateChannels,
-} from "@/flags/project-modules";
-import { deploymentReleaseChannel } from "@/flags/release-channel";
-import { isModuleInProjectReleaseChannel } from "./project-release-channel";
+} from "@/flags";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+  isModuleInEnvironmentReleaseChannel,
+} from "@/flags/release-channel";
 import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
@@ -53,9 +57,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
-    complianceInChannel,
-    custodyInChannel,
-    paymentsInChannel,
   ] = await Promise.all([
     assetProfiles(),
     dvp(),
@@ -66,25 +67,53 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
-    isModuleInProjectReleaseChannel("compliance"),
-    isModuleInProjectReleaseChannel("custody"),
-    isModuleInProjectReleaseChannel("payments"),
   ]);
 
   return {
     assetProfiles: assetProfilesEnabled,
-    compliance: complianceInChannel,
+    compliance: isModuleInDeploymentReleaseChannel("compliance"),
     // Custody and Payments are `stable` and have no flag of their own: the release channel alone decides (HOO-1956).
-    custody: custodyInChannel,
+    custody: isModuleInDeploymentReleaseChannel("custody"),
     dvp: dvpEnabled,
     earn: earnEnabled,
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
-    payments: paymentsInChannel,
+    payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
     releaseChannel: deploymentReleaseChannel(),
+  };
+}
+
+/**
+ * The layout's flags for one Project: each module also needs the release channel to run it for
+ * the Project's environment, the check the API's project context makes, so the sidebar, home and
+ * playground hide what the API would refuse. Pure: the layout already holds the environment.
+ *
+ * @param flags - The deployment's dashboard flags.
+ * @param environment - The Project's environment.
+ * @returns The flags capped at that environment.
+ */
+export function capDashboardFlagsToEnvironment(
+  flags: DashboardFlags,
+  environment: SdpEnvironment
+): DashboardFlags {
+  const inEnvironment = (module: SdpModule) =>
+    isModuleInEnvironmentReleaseChannel(module, environment);
+  return {
+    ...flags,
+    assetProfiles: flags.assetProfiles && inEnvironment("issuance"),
+    compliance: flags.compliance && inEnvironment("compliance"),
+    custody: flags.custody && inEnvironment("custody"),
+    dvp: flags.dvp && inEnvironment("dvp"),
+    heliusRings: flags.heliusRings && inEnvironment("helius_rings"),
+    issuance: flags.issuance && inEnvironment("issuance"),
+    payments: flags.payments && inEnvironment("payments"),
+    privateChannels: flags.privateChannels && inEnvironment("private_channels"),
+    ramps: flags.ramps && inEnvironment("ramps"),
+    // Earn (and Markets, its parent) stays visible: its withdrawals stay open when it is
+    // demoted for an environment (`allowExits`), so their screens must stay reachable.
   };
 }

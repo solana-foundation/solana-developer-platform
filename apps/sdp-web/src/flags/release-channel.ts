@@ -39,8 +39,8 @@ export function deploymentReleaseChannel(): SdpReleaseChannel {
 }
 
 /**
- * Whether this deployment runs `module` in either environment. Only for screens with no
- * Project yet (loading skeletons); Project pages use `isModuleInEnvironmentReleaseChannel`.
+ * Whether this deployment runs `module` at all, the same check the API makes.
+ * Unlike a module's dashboard flag it ignores per-user Vercel targeting.
  */
 export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
   return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_MATURITY);

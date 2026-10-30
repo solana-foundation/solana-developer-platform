@@ -27,8 +27,8 @@ import {
   resolveRampIntegrations,
 } from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
 import { getOfferedRampProviders } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
@@ -253,10 +253,10 @@ export default async function IntegrationDetailPage({
     notFound();
   }
   const [custodyEnabled, rampProviders] = await Promise.all([
-    isModuleInProjectReleaseChannel("custody"),
+    isModuleInDeploymentReleaseChannel("custody"),
     getOfferedRampProviders(),
   ]);
-  const complianceEnabled = await isModuleInProjectReleaseChannel("compliance");
+  const complianceEnabled = isModuleInDeploymentReleaseChannel("compliance");
   if (
     !isIntegrationProviderEnabled(provider, {
       custody: custodyEnabled,

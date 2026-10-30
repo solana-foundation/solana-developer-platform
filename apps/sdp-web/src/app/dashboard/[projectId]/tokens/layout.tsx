@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 
 export default async function TokensLayout({ children }: { children: ReactNode }) {
-  if (!(await isModuleInProjectReleaseChannel("custody"))) {
+  if (!isModuleInDeploymentReleaseChannel("custody")) {
     notFound();
   }
 

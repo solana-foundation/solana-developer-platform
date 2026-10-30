@@ -87,8 +87,11 @@ export function DashboardWorkspaceProvider({
   );
 
   const selectedProjectId = useProjectId();
-  const sdpEnvironment: SdpEnvironment =
-    selectedProjectId === productionProject?.id ? "production" : "sandbox";
+  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  if (!selectedProject) {
+    throw new Error(`Project ${selectedProjectId} is not in the signed-in organization`);
+  }
+  const sdpEnvironment: SdpEnvironment = selectedProject.environment;
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
       auth.isLoaded && auth.orgId && auth.userId

@@ -5,7 +5,7 @@ import { DashboardScopeLoadingScreen } from "@/components/dashboard-loading-scre
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
-import { getDashboardFlags } from "@/flags/dashboard";
+import { capDashboardFlagsToEnvironment, getDashboardFlags } from "@/flags/dashboard";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
@@ -37,13 +37,18 @@ export default async function ProjectLayout({
 }) {
   const [{ projectId }, projects, { orgId, userId }, cookieStore, initialQuickStartStatus] =
     await Promise.all([params, listSdpProjects(), getSdpAuth(), cookies(), loadQuickStartStatus()]);
-  if (projects.some((project) => project.id === projectId)) {
+  const project = projects.find((candidate) => candidate.id === projectId);
+  if (project) {
     if (!orgId || !userId) {
       throw new Error("The dashboard layout admits only signed-in members of an organization");
     }
     const dashboardCacheScope = { orgId, userId } satisfies DashboardCacheScope;
-    const [memberRole, flags] = await Promise.all([requestMemberRole(), getDashboardFlags()]);
+    const [memberRole, deploymentFlags] = await Promise.all([
+      requestMemberRole(),
+      getDashboardFlags(),
+    ]);
     const dashboardAccess = resolveDashboardAccess(memberRole);
+    const flags = capDashboardFlagsToEnvironment(deploymentFlags, project.environment);
     return (
       <DashboardWorkspaceProvider
         key={getDashboardCacheScopeKey(dashboardCacheScope)}

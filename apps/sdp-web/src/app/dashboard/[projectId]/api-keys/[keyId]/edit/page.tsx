@@ -6,15 +6,10 @@ import {
   fetchApiKeyForAuthoring,
 } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "@/app/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
-import { isModuleInEnvironmentReleaseChannel } from "@/flags/release-channel";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import {
-  createSdpApiClient,
-  requestMemberRole,
-  requestProjectEnvironment,
-  requestProjectHref,
-} from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +34,11 @@ export default async function EditApiKeyPage({ params }: { params: Promise<{ key
     notFound();
   }
 
-  const environment = await requestProjectEnvironment();
   return (
     <ApiKeyAuthoringWorkspace
       mode="edit"
       wallets={wallets}
-      offeredActions={grantableActionsInChannel((module) =>
-        isModuleInEnvironmentReleaseChannel(module, environment)
-      )}
+      offeredActions={grantableActionsInChannel(isModuleInDeploymentReleaseChannel)}
       initialKey={apiKey}
     />
   );

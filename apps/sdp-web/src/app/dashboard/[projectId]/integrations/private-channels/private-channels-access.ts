@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
-import { privateChannels } from "@/flags/project-modules";
+import { privateChannels } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 
 /**

@@ -7,8 +7,8 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { issuance } from "@/flags/project-modules";
-import { isModuleInProjectReleaseChannel } from "@/flags/project-release-channel";
+import { issuance } from "@/flags";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -18,7 +18,7 @@ export default async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
-    isModuleInProjectReleaseChannel("custody"),
+    isModuleInDeploymentReleaseChannel("custody"),
     issuance(),
   ]);
   if (!userId) {

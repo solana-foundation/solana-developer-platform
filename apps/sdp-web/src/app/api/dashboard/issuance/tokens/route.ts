@@ -9,7 +9,7 @@ import {
   fetchIssuanceTokensPage,
   type IssuanceTokensPage,
 } from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
-import { assetProfiles } from "@/flags/project-modules";
+import { assetProfiles } from "@/flags";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 

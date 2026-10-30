@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { earn } from "@/flags/project-modules";
+import { earn } from "@/flags";
 
 /**
  * The Earn half of what used to be the shared Markets gate.

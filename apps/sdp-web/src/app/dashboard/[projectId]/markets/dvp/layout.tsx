@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { dvp } from "@/flags/project-modules";
+import { dvp } from "@/flags";
 
 /**
  * The DvP sub-module gate. Markets is gated one level up.

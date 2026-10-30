@@ -1,5 +1,4 @@
-import type { CustodyProviderUseCase, CustodyWalletSummary } from "@sdp/types/custody";
-import type { SdpModule } from "@sdp/types/release-channels";
+import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
@@ -16,12 +15,12 @@ import {
   CustodyConnectionsSection,
 } from "@/app/dashboard/[projectId]/integrations/custody-connections-section";
 import type { IntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
+import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
 import { docsHref } from "@/components/dashboard-nav";
-import { isModuleInEnvironmentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
 import { RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
-import { requestProjectEnvironment, requestProjectHref } from "@/lib/sdp-api";
+import { requestProjectHref } from "@/lib/sdp-api";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
@@ -255,31 +254,7 @@ function CustodyConnectionsBlock({
   );
 }
 
-/** The module that delivers each custody use case. Transfers are custody wallets' own. */
-const CUSTODY_USE_CASE_MODULES = {
-  issuance: "issuance",
-  transfers: "custody",
-  compliance: "compliance",
-} as const satisfies Record<CustodyProviderUseCase, SdpModule>;
-
-/**
- * A custody provider's use cases the release channel runs for the request's Project
- * environment, so its Capabilities never advertise a module the API refuses (Issuance on
- * `stable`).
- *
- * @param useCases - The provider's use cases.
- * @returns The use cases whose module the channel runs, in their given order.
- */
-async function custodyUseCasesInProjectReleaseChannel(
-  useCases: readonly CustodyProviderUseCase[]
-): Promise<CustodyProviderUseCase[]> {
-  const environment = await requestProjectEnvironment();
-  return useCases.filter((useCase) =>
-    isModuleInEnvironmentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase], environment)
-  );
-}
-
-async function CapabilitiesSection({
+function CapabilitiesSection({
   entry,
   t,
 }: {
@@ -289,7 +264,7 @@ async function CapabilitiesSection({
   return (
     <Section title={t("Shared.integrations.detailCapabilities")}>
       <ul className="flex flex-wrap gap-2">
-        {(await custodyUseCasesInProjectReleaseChannel(entry.useCases)).map((useCase) => (
+        {custodyUseCasesInDeploymentReleaseChannel(entry.useCases).map((useCase) => (
           <li
             key={useCase}
             className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
