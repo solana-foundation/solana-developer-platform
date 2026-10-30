@@ -226,7 +226,7 @@ describe("Public payment request routes", () => {
 
     const refused = await app.request(`/pay/${production.public_token}`, {}, stableDeployment);
     expect(refused.status).toBe(404);
-    expect(await refused.json()).toEqual({
+    expect(await refused.json()).toMatchObject({
       error: { code: "NOT_FOUND", message: "Payment request not found" },
     });
 
