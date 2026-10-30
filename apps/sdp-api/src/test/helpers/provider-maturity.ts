@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type * as ProviderAccess from "@sdp/types/provider-access";
 import type { EarnProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type * as ReleaseChannels from "@sdp/types/release-channels";
@@ -30,9 +31,17 @@ interface ModuleMaturityOverride {
   stage: SdpReleaseChannel;
 }
 
+/** One module whose stage for one environment's projects a test replaces. */
+interface ModuleEnvironmentMaturityOverride {
+  module: SdpModule;
+  environment: SdpEnvironment;
+  stage: SdpReleaseChannel;
+}
+
 export interface ProviderMaturityToggle {
   rampMaturityOverride: RampMaturityOverride | null;
   moduleMaturityOverride: ModuleMaturityOverride | null;
+  moduleEnvironmentMaturityOverride: ModuleEnvironmentMaturityOverride | null;
   surfacedEarnProvider: EarnProviderId | null;
 }
 
@@ -41,25 +50,43 @@ export interface ProviderMaturityToggle {
  * {@link mockEarnProviderSurfacing}. A test file sets `rampMaturityOverride` to
  * give one ramp provider another stage, or
  * `moduleMaturityOverride` to give one module another stage, or
+ * `moduleEnvironmentMaturityOverride` to give one module another stage for one
+ * environment's projects, or
  * `surfacedEarnProvider` to surface one Earn provider the real surfacing table
  * hides, and resets whichever it sets to `null` in its `beforeEach`.
  */
 export const providerMaturity: ProviderMaturityToggle = {
   rampMaturityOverride: null,
   moduleMaturityOverride: null,
+  moduleEnvironmentMaturityOverride: null,
   surfacedEarnProvider: null,
 };
+
+/** Whether a release channel runs something staged at `stage`. */
+function isStageInReleaseChannel(
+  original: ReleaseChannelsModule,
+  stage: SdpReleaseChannel,
+  releaseChannel: SdpReleaseChannel
+): boolean {
+  return (
+    original.SDP_RELEASE_CHANNEL_NAMES.indexOf(stage) >=
+    original.SDP_RELEASE_CHANNEL_NAMES.indexOf(releaseChannel)
+  );
+}
 
 /**
  * Build the `@sdp/types/release-channels` mock whose `SDP_RAMP_PROVIDER_MATURITY`
  * reads the overridden provider's stage from `providerMaturity.rampMaturityOverride`,
- * and whose `isModuleInReleaseChannel` reads the overridden module's stage from
- * `providerMaturity.moduleMaturityOverride`; everything else is the real module.
+ * whose `isModuleInReleaseChannel` reads the overridden module's stage from
+ * `providerMaturity.moduleMaturityOverride`, and whose
+ * `isModuleInReleaseChannelForEnvironment` reads the overridden (module, environment)
+ * stage from `providerMaturity.moduleEnvironmentMaturityOverride`; everything else is
+ * the real module.
  * Load it with `await import()` inside the test file's `vi.mock` factory, so the
  * factory and the test share this module's toggle.
  * @param original - The real module, from the factory's `importOriginal`.
  * @param rampProviders - `RAMP_PROVIDERS` from `@sdp/types/provider-access`.
- * @returns The module with its ramp stage manifest and module predicate overridden.
+ * @returns The module with its ramp stage manifest and module predicates overridden.
  */
 export function mockReleaseChannelMaturity(
   original: ReleaseChannelsModule,
@@ -84,17 +111,28 @@ export function mockReleaseChannelMaturity(
   ) => {
     const override = providerMaturity.moduleMaturityOverride;
     if (override !== null && override.module === module) {
-      return (
-        original.SDP_RELEASE_CHANNEL_NAMES.indexOf(override.stage) >=
-        original.SDP_RELEASE_CHANNEL_NAMES.indexOf(releaseChannel)
-      );
+      return isStageInReleaseChannel(original, override.stage, releaseChannel);
     }
     return original.isModuleInReleaseChannel(releaseChannel, module, stages);
   };
+  const isModuleInReleaseChannelForEnvironment: ReleaseChannelsModule["isModuleInReleaseChannelForEnvironment"] =
+    (releaseChannel, module, environment, stages) => {
+      const override = providerMaturity.moduleEnvironmentMaturityOverride;
+      if (override !== null && override.module === module && override.environment === environment) {
+        return isStageInReleaseChannel(original, override.stage, releaseChannel);
+      }
+      return original.isModuleInReleaseChannelForEnvironment(
+        releaseChannel,
+        module,
+        environment,
+        stages
+      );
+    };
   return {
     ...original,
     SDP_RAMP_PROVIDER_MATURITY: rampProviderMaturity,
     isModuleInReleaseChannel,
+    isModuleInReleaseChannelForEnvironment,
   };
 }
 

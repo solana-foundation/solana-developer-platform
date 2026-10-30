@@ -1,7 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
+import { type Context, Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
@@ -16,22 +17,39 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 import { projectContextMiddleware } from "./project-context";
 
+vi.mock("@sdp/types/release-channels", async (importOriginal) => {
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
+  const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
+  return mockReleaseChannelMaturity(
+    await importOriginal<typeof import("@sdp/types/release-channels")>(),
+    RAMP_PROVIDERS
+  );
+});
+
+function probe(c: Context<{ Bindings: Env }>) {
+  return c.json({
+    projectId: c.get("projectId"),
+    projectEnvironment: c.get("projectEnvironment"),
+  });
+}
+
 function buildApp() {
   const app = new Hono<{ Bindings: Env }>();
+  app.use("*", async (c, next) => {
+    c.set("rampProviderMaturity", SDP_RAMP_PROVIDER_MATURITY);
+    await next();
+  });
   app.use("*", kvStoreMiddleware());
   app.use("*", unifiedAuthMiddleware());
   app.use("*", projectContextMiddleware());
-  app.get("/probe", (c) =>
-    c.json({
-      projectId: c.get("projectId"),
-      projectEnvironment: c.get("projectEnvironment"),
-    })
-  );
+  app.get("/probe", probe);
+  app.get("/v1/payments/probe", probe);
   app.get("/scope", (c) => c.json(currentClusterScope()));
   app.onError((error, c) => {
     if (error instanceof AppError) {
@@ -48,6 +66,7 @@ describe("projectContextMiddleware", () => {
   let actor: Awaited<ReturnType<typeof authenticateTestClerkUser>>;
 
   beforeEach(async () => {
+    providerMaturity.moduleEnvironmentMaturityOverride = null;
     await issuerReady;
     await seedTestDatabase(env);
     const db = getDb(env);
@@ -279,6 +298,41 @@ describe("projectContextMiddleware", () => {
         (await buildApp().request("/probe", { headers: actor.headers(PRODUCTION_PROJECT_ID) }, env))
           .status
       ).toBe(500);
+    });
+
+    it("refuses a module route for the environment whose maturity is outside the release channel", async () => {
+      providerMaturity.moduleEnvironmentMaturityOverride = {
+        module: "payments",
+        environment: "production",
+        stage: "beta",
+      };
+      await setOrganizationSettings(entitled);
+      const stableDeployment: Env = { ...env, SDP_RELEASE_CHANNEL: "stable" };
+
+      const production = await buildApp().request(
+        "/v1/payments/probe",
+        { headers: actor.headers(PRODUCTION_PROJECT_ID) },
+        stableDeployment
+      );
+      expect(production.status).toBe(403);
+      expect(await production.json()).toEqual({
+        error: {
+          code: "FORBIDDEN",
+          message:
+            "The payments module is not available for production projects in this release channel.",
+        },
+      });
+
+      const sandbox = await buildApp().request(
+        "/v1/payments/probe",
+        { headers: actor.headers(TEST_PROJECT.id) },
+        stableDeployment
+      );
+      expect(sandbox.status).toBe(200);
+      expect(await sandbox.json()).toEqual({
+        projectId: TEST_PROJECT.id,
+        projectEnvironment: "sandbox",
+      });
     });
 
     it("leaves sandbox projects alone without the entitlement", async () => {
