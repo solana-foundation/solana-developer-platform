@@ -23,7 +23,7 @@ import type { DvpTradesFilters } from "./dvp-trades.data";
  * individually, and a nine-item dropdown for a list this size is a worse
  * answer than four.
  */
-export const STATUS_FILTERS = {
+const STATUS_FILTERS = {
   all: null,
   // Not a status the trade has: these belong to another organization and are
   // filtered by who they name, not by where they are in their lifecycle. It

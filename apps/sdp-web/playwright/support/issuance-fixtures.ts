@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export interface IssuanceFixtureWallet {
+interface IssuanceFixtureWallet {
   id: string;
   walletId: string;
   publicKey: string;
@@ -41,7 +41,7 @@ export interface IssuanceFixtures {
   };
 }
 
-export const issuanceFixturesPath = path.join(__dirname, "../.fixtures/issuance.json");
+const issuanceFixturesPath = path.join(__dirname, "../.fixtures/issuance.json");
 
 export function writeIssuanceFixtures(fixtures: IssuanceFixtures): void {
   fs.mkdirSync(path.dirname(issuanceFixturesPath), { recursive: true });

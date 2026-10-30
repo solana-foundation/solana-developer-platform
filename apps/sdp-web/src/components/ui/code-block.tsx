@@ -79,10 +79,3 @@ export function CodeBlock({
     </figure>
   );
 }
-
-export function JsonCodeBlock({
-  value,
-  ...props
-}: { value: unknown } & Omit<CodeBlockProps, "code">) {
-  return <CodeBlock code={JSON.stringify(value, null, 2)} language="json" {...props} />;
-}

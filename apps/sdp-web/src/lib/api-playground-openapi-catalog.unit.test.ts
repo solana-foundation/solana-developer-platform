@@ -40,12 +40,17 @@ describe("API playground module coverage", () => {
 
     for (const [module, configs] of Object.entries(configsByModule)) {
       const configuredKeys = new Set(configs.map(operationKey));
-      const publicKeys = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule).map(
-        operationKey
-      );
+      const publicEndpoints = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule);
+      const publicKeys = publicEndpoints.map(operationKey);
 
       expect(configuredKeys.size).toBe(configs.length);
       expect(publicKeys.every((key) => configuredKeys.has(key))).toBe(true);
+      for (const publicEndpoint of publicEndpoints) {
+        const form = configs.find(
+          (config) => operationKey(config) === operationKey(publicEndpoint)
+        );
+        expect(form?.referenceEndpointId ?? form?.id).toBe(publicEndpoint.id);
+      }
       for (const [otherModule, otherConfigs] of Object.entries(configsByModule)) {
         if (otherModule !== module) {
           const otherKeys = new Set(otherConfigs.map(operationKey));

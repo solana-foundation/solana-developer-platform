@@ -1,4 +1,4 @@
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import { getDb } from "@/db/client";
 import { type ApiKeyContext, authMayPerform } from "@/lib/auth";
 import {
@@ -71,11 +71,11 @@ export async function createPrivateChannelSigner(
   organizationId: string,
   projectId: string,
   wallet: CustodyWallet,
-  movement: MovementId
+  movement: MovementOf<"private_channels">
 ) {
   await createSigningService(env).admitRuntimeExecution(organizationId, projectId, wallet.id);
   try {
-    return await createOrgSignerForCustodyWallet(
+    return await createOrgSignerForCustodyWallet<"private_channels">(
       env,
       organizationId,
       projectId,

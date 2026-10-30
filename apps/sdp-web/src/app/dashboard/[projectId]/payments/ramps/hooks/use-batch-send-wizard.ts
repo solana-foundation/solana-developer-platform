@@ -1,7 +1,11 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CounterpartyAccountSummary,
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
   type SolanaCluster,
@@ -23,6 +27,8 @@ import {
   type CreateTransferBatchResult,
   estimateTransferBatch,
   fetchBatchRecipients,
+  fetchTransferBatch,
+  TransferBatchRequestError,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import";
 import {
@@ -33,11 +39,13 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -48,7 +56,7 @@ import type { RampWizardStep } from "./use-ramp-wizard";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
-export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
     // The rows form speaks for itself; the step header already says "Details".
     { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
@@ -88,7 +96,7 @@ export interface BatchRecipientDraft {
   amount: string;
 }
 
-export interface BatchRecipientEntry {
+interface BatchRecipientEntry {
   recipient: BatchEligibleRecipient;
   amount: string;
 }
@@ -99,6 +107,47 @@ export interface UseBatchSendWizardProps {
   issuedTokenSymbolsByMint: Record<string, string>;
   cluster: SolanaCluster;
   onExit: () => void;
+}
+
+/** Copy for the retry refusals the API names (HOO-2343); each sent nothing. */
+const RETRY_REFUSAL_COPY = {
+  TRANSFER_BATCH_RETRY_CLAIMED: {
+    title: "DashboardPayments.batchSend.retryAlreadyClaimed",
+    description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
+  },
+  TRANSFER_BATCH_NOTHING_TO_RETRY: {
+    title: "DashboardPayments.batchSend.nothingToRetry",
+    description: "DashboardPayments.batchSend.nothingToRetryDescription",
+  },
+  TRANSFER_BATCH_DESTINATION_CHANGED: {
+    title: "DashboardPayments.batchSend.retryDestinationChanged",
+    description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
+  },
+} as const satisfies Record<string, { title: MessageKey; description: MessageKey }>;
+
+type RetryRefusalCode = keyof typeof RETRY_REFUSAL_COPY;
+
+function isRetryRefusalCode(code: string | null): code is RetryRefusalCode {
+  return code !== null && Object.hasOwn(RETRY_REFUSAL_COPY, code);
+}
+
+/**
+ * What a failed retry request tells the user. A refusal the API names sent
+ * nothing, so it is said in our words; anything else shows its own message.
+ *
+ * @param failure - The caught value, narrowed: the API's refusal, another
+ *   error, or null for anything that is not an Error.
+ */
+function retryFailureCopy(
+  failure: TransferBatchRequestError | Error | null,
+  t: (key: MessageKey) => string
+): { title: string; description: string } {
+  if (failure instanceof TransferBatchRequestError && isRetryRefusalCode(failure.code)) {
+    const refusal = RETRY_REFUSAL_COPY[failure.code];
+    return { title: t(refusal.title), description: t(refusal.description) };
+  }
+  const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
+  return { title: fallback, description: failure === null ? fallback : failure.message };
 }
 
 /**
@@ -239,6 +288,43 @@ function batchCanProceed({
   );
 }
 
+/** How often an estimate with warnings is re-read while the review is open. */
+const ESTIMATE_WARNING_RECHECK_MS = 10_000;
+
+/**
+ * The minimum SOL amount of each recipient the estimate says create would
+ * refuse (HOO-2375), by counterparty account. Warnings name recipients by
+ * index into the canonical request, which may be reordered.
+ */
+export function belowRentMinimumByAccount(
+  warnings: readonly PaymentTransferBatchEstimateWarning[],
+  requestRecipients: readonly { counterpartyAccountId: string }[]
+): Map<string, string> {
+  const byAccount = new Map<string, string>();
+  for (const warning of warnings) {
+    if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
+    // The estimate is keyed by this exact request, so every index is in it.
+    const recipient = requestRecipients[warning.recipientIndex];
+    if (recipient === undefined) {
+      throw new Error(
+        `Estimate warning names recipient ${warning.recipientIndex}, not in the request`
+      );
+    }
+    byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+  }
+  return byAccount;
+}
+
+/** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
+export function sourceBelowRentMinimum(
+  warnings: readonly PaymentTransferBatchEstimateWarning[]
+): { sourceRemainder: string; minimumAmount: string } | null {
+  const warning = warnings.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
+    ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
+    : null;
+}
+
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
 function estimateErrorMessage(error: unknown, t: Translate): string | null {
   if (!error) {
@@ -265,6 +351,7 @@ export function useBatchSendWizard({
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -402,7 +489,8 @@ export function useBatchSendWizard({
 
   // Canonical form, not the order the recipients were assembled in: the API
   // fingerprints recipients IN ORDER, so a retry that reorders the same set
-  // has to send the same bytes or it is refused as a key conflict.
+  // has to send the same bytes or it is refused as a key conflict. A blank
+  // Reference is named at send time, durably (sendTransferBatchUnderKey).
   const request = useMemo(
     () =>
       canonicalTransferBatchRequest({
@@ -440,8 +528,39 @@ export function useBatchSendWizard({
       ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // Each estimate belongs to its own request: its warnings index that
+      // request's recipients, and Send waits for it. The dashboard default
+      // keeps the previous request's estimate while the next one loads.
+      keepPreviousData: false,
+      // A flagged address may be funded elsewhere: recheck until it clears,
+      // so Send re-enables without the request changing (HOO-2375).
+      refreshInterval: (latest) =>
+        latest !== undefined && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+    }
   );
+  // No estimate yet (loading or failed): nothing to flag.
+  const belowRentMinimum = useMemo(
+    () =>
+      estimate === undefined
+        ? new Map<string, string>()
+        : belowRentMinimumByAccount(estimate.warnings, request.recipients),
+    [estimate, request]
+  );
+  const sourceRentShortfall = useMemo(
+    () => (estimate === undefined ? null : sourceBelowRentMinimum(estimate.warnings)),
+    [estimate]
+  );
+  // Create would refuse the batch (409): nothing to send until it is fixed.
+  // Review sends only once the estimate has answered (or failed, as before)
+  // and named no recipient create would refuse.
+  const estimateSettled = estimate !== undefined || estimateError !== undefined;
+  const canSend =
+    canProceed &&
+    (currentStepId !== "REVIEW" ||
+      batchResult !== null ||
+      (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null));
 
   const submitBatch = async () => {
     setSubmitting(true);
@@ -482,6 +601,18 @@ export function useBatchSendWizard({
         });
       }
     } catch (error) {
+      // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
+      if (
+        error instanceof TransferBatchRequestError &&
+        error.code === "TRANSFER_BATCH_RUN_EXISTS"
+      ) {
+        toast.error(t("DashboardPayments.batchSend.referenceInUse"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.referenceInUseDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
       toast.error(t("DashboardPayments.batchSend.resultFailed"), {
         id: toastId,
         description:
@@ -493,8 +624,58 @@ export function useBatchSendWizard({
     }
   };
 
+  // The send answers before its chunks settle, so the batch is read until it
+  // is final: a recipient that fails later still offers Retry.
+  const { data: liveBatch, mutate: setLiveBatch } = useSWR(
+    batchResult ? paymentsQueryKeys.transferBatch({ batchId: batchResult.batch.id }) : null,
+    ([, batchId]) => fetchTransferBatch(batchId, t),
+    {
+      revalidateOnFocus: false,
+      refreshInterval: (latest) =>
+        isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
+          ? MOVEMENT_POLL_INTERVAL_MS
+          : 0,
+    }
+  );
+  const currentBatch = liveBatch ?? batchResult;
+  const failedRecipientIds =
+    currentBatch?.recipients
+      .filter((recipient) => recipient.status === "failed")
+      .map((recipient) => recipient.id) ?? [];
+  const failedRecipientCount = failedRecipientIds.length;
+
+  // Sends only the recipients the API still finds failed (HOO-2343); the rest
+  // of the batch is never sent again.
+  const retryFailedRecipients = async () => {
+    if (currentBatch === null || failedRecipientCount === 0 || retrying) {
+      return;
+    }
+    setRetrying(true);
+    const toastId = toast.loading(t("DashboardPayments.batchSend.retryingFailedRecipients"), {
+      position: "bottom-right",
+    });
+    try {
+      const result = await retryTransferBatchUnderKey(currentBatch.batch.id, failedRecipientIds, t);
+      setBatchResult(result);
+      await setLiveBatch(result, { revalidate: false });
+      toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
+        id: toastId,
+        description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
+        position: "bottom-right",
+      });
+    } catch (error) {
+      const { title, description } = retryFailureCopy(error instanceof Error ? error : null, t);
+      toast.error(title, { id: toastId, description, position: "bottom-right" });
+      // The API may have taken the retry even though its answer was lost: read
+      // the batch again, so a resend in flight resumes the poll.
+      void setLiveBatch();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const handlePrimary = async () => {
-    if (!canProceed) {
+    if (!canSend) {
       return;
     }
     if (isLastStep) {
@@ -527,7 +708,7 @@ export function useBatchSendWizard({
     stepIndex,
     currentStepId,
     isLastStep,
-    canProceed,
+    canProceed: canSend,
     liveWallets,
     walletsLoading,
     liveWalletsError,
@@ -563,9 +744,14 @@ export function useBatchSendWizard({
     setRecipientAmount,
     bulkImport,
     estimate: estimate ?? null,
+    belowRentMinimum,
+    sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
-    batchResult,
+    batchResult: currentBatch,
+    failedRecipientCount,
+    retrying,
+    retryFailedRecipients,
     handlePrimary,
     handleSecondary,
     handleBack,

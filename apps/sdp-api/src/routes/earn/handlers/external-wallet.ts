@@ -29,6 +29,7 @@ import type {
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
 } from "@sdp/types/earn";
+import { isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import {
   earnDepositStyle,
   earnProviderDepositSettlement,
@@ -1260,10 +1261,17 @@ function summarizeExternalWalletPositions(
   const strategies = new Map<string, MutableStrategyTotal>();
   const tokens = new Map<string, MutableTokenTotal>();
   let unavailablePositionCount = 0;
+  let positionCount = 0;
 
   for (const holding of holdings) {
+    const hydrated = live.get(holding.id);
+    // A holding the live read proves empty holds nothing to count: its first
+    // deposit has not landed, or it exited while a movement keeps the close-out
+    // waiting. An unreadable holding still counts, as unavailable, never as zero.
+    if (hydrated !== undefined && isEarnVaultHoldingEmpty(hydrated)) continue;
+    positionCount += 1;
     owners.add(holding.ownerAddress);
-    const value = hydratedHoldingTokenValue(live.get(holding.id));
+    const value = hydratedHoldingTokenValue(hydrated);
     if (value === undefined) unavailablePositionCount += 1;
 
     const strategyKey = JSON.stringify([holding.provider, holding.vaultAddress]);
@@ -1283,7 +1291,7 @@ function summarizeExternalWalletPositions(
       strategies.set(strategyKey, strategy);
     }
     strategy.owners.add(holding.ownerAddress);
-    strategy.positions?.push(toExternalWalletPositionWire(holding, live.get(holding.id)));
+    strategy.positions?.push(toExternalWalletPositionWire(holding, hydrated));
     strategy.positionCount += 1;
     addToTokenTotal(strategy.tokens, holding, value);
     addToTokenTotal(tokens, holding, value);
@@ -1291,7 +1299,7 @@ function summarizeExternalWalletPositions(
 
   return {
     walletCount: owners.size,
-    positionCount: holdings.length,
+    positionCount,
     unavailablePositionCount,
     totalsByStrategy: [...strategies.values()]
       .map((strategy) => ({

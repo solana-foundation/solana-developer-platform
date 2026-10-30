@@ -6,7 +6,7 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isPendingActivationRecurringPaymentStatus,
@@ -60,7 +60,7 @@ import {
 const LIFECYCLE_MOVEMENTS = {
   cancel: "recurring.cancel",
   resume: "recurring.resume",
-} as const satisfies Record<RecurringPaymentLifecycleOperation, MovementId>;
+} as const satisfies Record<RecurringPaymentLifecycleOperation, MovementOf<"recurring_payments">>;
 
 function lifecycleConfirmationMessage(operation: RecurringPaymentLifecycleOperation) {
   return operation === "cancel"
@@ -663,7 +663,7 @@ async function runRecurringPaymentLifecycle(
         await input.admitStart();
       }
     }
-    const sourceSigner = await createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,

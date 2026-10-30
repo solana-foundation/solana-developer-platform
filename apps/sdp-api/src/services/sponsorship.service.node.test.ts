@@ -113,7 +113,7 @@ describe("sponsorship identity boundary", () => {
   afterEach(() => vi.restoreAllMocks());
   it("builds a versioned tenant and actor scoped Kora user_id", () => {
     runInClusterScope({ projectId: "project/one", environment: "production" }, () =>
-      createSponsorshipFeePayment(
+      createSponsorshipFeePayment<"payments">(
         BOTH_CLUSTERS_ENV,
         {
           organizationId: "org:alpha",
@@ -132,7 +132,7 @@ describe("sponsorship identity boundary", () => {
   it("rejects an incomplete scope instead of emitting an unscoped identity", () => {
     expect(() =>
       runInClusterScope(SANDBOX, () =>
-        createSponsorshipFeePayment(
+        createSponsorshipFeePayment<"payments">(
           testEnv,
           {
             organizationId: "org_test_sponsorship",
@@ -162,7 +162,7 @@ describe("sponsorship identity boundary", () => {
     );
     const sponsorFor = (clusterScope: typeof SANDBOX | typeof PRODUCTION) =>
       runInClusterScope(clusterScope, () =>
-        createSponsorshipFeePayment(
+        createSponsorshipFeePayment<"payments">(
           BOTH_CLUSTERS_ENV,
           SPONSORED_WALLET,
           "payments.transfer",
@@ -179,7 +179,12 @@ describe("sponsorship identity boundary", () => {
   it("refuses a production scope before signing when the mainnet paymaster is not wired", () => {
     expect(() =>
       runInClusterScope(PRODUCTION, () =>
-        createSponsorshipFeePayment(testEnv, SPONSORED_WALLET, "payments.transfer", SIGNING_WALLET)
+        createSponsorshipFeePayment<"payments">(
+          testEnv,
+          SPONSORED_WALLET,
+          "payments.transfer",
+          SIGNING_WALLET
+        )
       )
     ).toThrow(expect.objectContaining({ code: "PROVIDER_NOT_AVAILABLE" }));
   });
@@ -199,7 +204,7 @@ describe("sponsorship identity boundary", () => {
     vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
     vi.spyOn(KoraAdapter.prototype, "signAsFeePayer").mockImplementation(signAsFeePayer);
     return runInClusterScope(SANDBOX, () =>
-      createSponsorshipFeePayment(
+      createSponsorshipFeePayment<"payments">(
         { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
         {
           organizationId: "org_test_sponsorship",
@@ -222,6 +227,35 @@ describe("sponsorship identity boundary", () => {
       code: "FORBIDDEN",
       reason: "organization_inactive",
     });
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
+  it("refuses `/pay` sponsorship when that project movement is disabled", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue(
+      admittedMoneyFacts({ disabledMovements: ["payments.pay_request"] })
+    );
+    vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
+    const signAsFeePayer = vi
+      .spyOn(KoraAdapter.prototype, "signAsFeePayer")
+      .mockImplementation(async (transaction) => transaction);
+    const feePayment = runInClusterScope(SANDBOX, () =>
+      createSponsorshipFeePayment<"payments">(
+        { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
+        SPONSORED_WALLET,
+        "payments.pay_request",
+        NO_CUSTODY_WALLET
+      )
+    );
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "movement_disabled",
+    });
+    expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(
+      expect.anything(),
+      { organizationId: SPONSORED_WALLET.organizationId, projectId: SPONSORED_WALLET.projectId },
+      "payments.pay_request",
+      NO_CUSTODY_WALLET
+    );
     expect(signAsFeePayer).not.toHaveBeenCalled();
   });
   // SOLA9-834: the sponsor names the custody wallet it pays for, so a key whose
@@ -253,6 +287,7 @@ describe("sponsorship identity boundary", () => {
     expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(
       expect.anything(),
       { organizationId: "org_test_sponsorship", projectId: "project_1" },
+      "payments.transfer",
       SIGNING_WALLET
     );
     expect(signAsFeePayer).not.toHaveBeenCalled();
@@ -273,7 +308,7 @@ describe("sponsorship identity boundary", () => {
       .spyOn(KoraAdapter.prototype, "signAsFeePayer")
       .mockImplementation(async (transaction) => transaction);
     const feePayment = runInClusterScope(SANDBOX, () =>
-      createSponsorshipFeePayment(
+      createSponsorshipFeePayment<"dvp">(
         { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
         SPONSORED_WALLET,
         "dvp.cancel",
@@ -296,9 +331,12 @@ describe("sponsorship identity boundary", () => {
     await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toStrictEqual(
       signedTransaction
     );
-    expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
-      custodyWalletId: null,
-    });
+    expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "payments.transfer",
+      { custodyWalletId: null }
+    );
   });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
     const feePayment = selfHostedFeePayment(async (transaction) => transaction, SIGNING_WALLET);

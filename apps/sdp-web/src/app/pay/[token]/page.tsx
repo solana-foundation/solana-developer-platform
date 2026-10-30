@@ -1,5 +1,7 @@
+import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
-import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
+import { Badge } from "@sdp/ui/badge";
+import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -8,8 +10,8 @@ import {
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
+import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
-import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +46,7 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       body: t("Shared.pay.linkExpiredDescription"),
     },
     canceled: {
-      icon: <XCircleIcon className="size-12 text-error" />,
+      icon: <XIcon className="size-12 text-error" />,
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
@@ -98,65 +100,49 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-surface to-surface-sunken px-4 py-12">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            "radial-gradient(rgba(28,28,29,0.09) 1.25px, transparent 1.25px), radial-gradient(rgba(28,28,29,0.05) 1.25px, transparent 1.25px)",
-          backgroundSize: "26px 26px",
-          backgroundPosition: "0 0, 13px 13px",
-          maskImage: "radial-gradient(ellipse 80% 62% at 50% 38%, #000 8%, transparent 78%)",
-          WebkitMaskImage: "radial-gradient(ellipse 80% 62% at 50% 38%, #000 8%, transparent 78%)",
-        }}
-      />
-
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-border-subtle bg-surface-raised shadow-[0_24px_70px_-24px_rgba(28,28,29,0.22)]">
+    <main
+      {...refreshThemeProps}
+      className="flex min-h-screen items-center justify-center bg-surface px-4 py-12"
+    >
+      <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
         <div className="p-8">
-          <div className="flex items-center justify-center border-b border-border-default pb-6">
-            <span className="text-sm font-semibold tracking-tight text-primary">
-              {t("Shared.pay.productName")}
-            </span>
+          <div className="flex items-center justify-center">
+            <span className="text-nav font-medium text-primary">{t("Shared.pay.productName")}</span>
           </div>
 
           <div className="mt-7 space-y-2.5 text-center">
             <div className="flex items-center justify-center gap-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-tertiary">
-                {t("Shared.pay.paymentRequest")}
-              </p>
-              <span className="inline-flex items-center rounded-full bg-info-bg px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-info">
-                {SOLANA_CLUSTER_LABELS[request.network]}
-              </span>
+              <p className="text-meta text-secondary">{t("Shared.pay.paymentRequest")}</p>
+              <Badge variant="info">{SOLANA_CLUSTER_LABELS[request.network]}</Badge>
             </div>
-            <p className="text-5xl font-medium tracking-tight text-primary">
+            <p className="text-amount font-medium tabular-nums text-primary">
               {formatDisplayAmount(request.amount, undefined, locale)}{" "}
-              <span className="text-2xl text-secondary">{request.tokenSymbol}</span>
+              <span className="text-secondary">{request.tokenSymbol}</span>
             </p>
           </div>
 
           {payUrl ? (
             <div className="mt-7 flex flex-col items-center gap-5">
-              <div className="rounded-2xl border border-border-default bg-[white] p-4 shadow-[0_2px_12px_rgba(28,28,29,0.05)]">
-                <PayQrCode url={payUrl} size={208} />
+              <div className="rounded-xs bg-white p-4">
+                <SolanaQrCode url={payUrl} size={208} label={t("Shared.pay.qrCode")} />
               </div>
-              <p className="text-sm text-secondary">{t("Shared.pay.scanWallet")}</p>
+              <p className="text-body text-secondary">{t("Shared.pay.scanWallet")}</p>
               <a
                 href={payUrl}
-                className="hidden h-12 w-full items-center justify-center rounded-full bg-primary text-sm font-semibold text-on-primary transition hover:opacity-90 pointer-coarse:flex"
+                className="hidden h-12 w-full items-center justify-center rounded-control bg-primary text-body font-medium text-on-primary transition hover:opacity-90 pointer-coarse:flex"
               >
                 {t("Shared.pay.openWallet")}
               </a>
             </div>
           ) : statusPanel ? (
-            <div className="mt-7 flex flex-col items-center gap-3 py-6 text-center">
+            <div className="mt-5 flex flex-col items-center gap-3 text-center">
               {statusPanel.icon}
-              <p className="text-lg font-medium tracking-tight text-primary">{statusPanel.title}</p>
-              <p className="max-w-xs text-sm text-secondary">{statusPanel.body}</p>
+              <p className="text-subheading font-medium text-primary">{statusPanel.title}</p>
+              <p className="max-w-xs text-body text-secondary">{statusPanel.body}</p>
             </div>
           ) : null}
 
-          <div className="mt-8 space-y-3 border-t border-border-default pt-6 text-sm">
+          <div className="mt-8 space-y-3 border-t border-border-default pt-6 text-body">
             <DetailRow label={t("Shared.pay.to")} value={shortenAddress(request.recipient)} />
             <DetailRow label={t("Shared.pay.token")} value={request.tokenSymbol} />
             <DetailRow
@@ -175,9 +161,10 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
             href="https://solana.com/docs/tools/solana-pay"
             target="_blank"
             rel="noreferrer"
-            className="text-xs text-tertiary transition-colors hover:text-secondary"
+            className="inline-flex items-center gap-1 text-meta text-tertiary underline underline-offset-4 transition-colors hover:text-secondary"
           >
             {t("Shared.pay.securedBySolanaPay")}
+            <ArrowUpRightIcon aria-hidden="true" className="size-3.5 shrink-0" />
           </a>
         </div>
       </div>

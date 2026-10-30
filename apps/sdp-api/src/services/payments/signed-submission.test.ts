@@ -1,3 +1,4 @@
+import { RpcTimeoutError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -15,6 +16,7 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { fetchFailedError } from "@/test/helpers/rpc-errors";
 import { createTransferSignedSubmissionStore } from "./signed-submission";
 
 const SIGNATURE =
@@ -109,7 +111,7 @@ describe("submitSponsoredTransaction", () => {
     };
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
-      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockRejectedValueOnce(fetchFailedError())
       .mockResolvedValueOnce(SIGNATURE);
 
     const result = submitSponsoredTransaction({
@@ -284,7 +286,7 @@ describe("submitSponsoredTransaction", () => {
       clearSigned: vi.fn(),
     };
     vi.spyOn(solanaRpc, "sendTransaction")
-      .mockRejectedValueOnce(new Error("RPC timed out"))
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
       .mockRejectedValueOnce(deterministicError);
 
     const result = expect(
@@ -309,7 +311,7 @@ describe("submitSponsoredTransaction", () => {
   it("returns the final transient error after retry exhaustion", async () => {
     vi.useFakeTimers();
     const signedTransaction = new Uint8Array([1, 2, 3]);
-    const finalError = new Error("RPC timed out for the fourth time");
+    const finalError = new RpcTimeoutError(25);
     const feePayment = {
       prepareOwnedSubmission: vi.fn(async () => ({
         signedTransaction,
@@ -324,9 +326,9 @@ describe("submitSponsoredTransaction", () => {
     };
     const send = vi
       .spyOn(solanaRpc, "sendTransaction")
-      .mockRejectedValueOnce(new Error("RPC timed out"))
-      .mockRejectedValueOnce(new Error("RPC timed out again"))
-      .mockRejectedValueOnce(new Error("RPC timed out for the third time"))
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
+      .mockRejectedValueOnce(new RpcTimeoutError(25))
       .mockRejectedValueOnce(finalError);
 
     const result = expect(

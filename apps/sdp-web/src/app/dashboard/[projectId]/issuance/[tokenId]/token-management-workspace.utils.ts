@@ -357,7 +357,7 @@ export function getRemainingMintableSupply(token: {
   return formatBaseUnitsAsTokenAmount(remaining, token.decimals);
 }
 
-export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
+function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
   if (!maxSupply) {
     return false;
   }
@@ -528,7 +528,7 @@ export function getTokenActionDisabledReasons(
   };
 }
 
-export function formatValue(value: string | null | undefined, t: Translate): string {
+function formatValue(value: string | null | undefined, t: Translate): string {
   if (!value) {
     return t("DashboardIssuance.wallet.none");
   }
@@ -805,7 +805,7 @@ export interface SignerSelectionState {
   unavailableReason: string | null;
 }
 
-export function getAvailableSignerWallets(
+function getAvailableSignerWallets(
   authorityWallets: PaymentsDashboardWallet[]
 ): PaymentsDashboardWallet[] {
   return authorityWallets.filter((wallet) => wallet.publicKey.trim());

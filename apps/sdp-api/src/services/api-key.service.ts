@@ -6,9 +6,17 @@
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
-import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import {
+  API_KEY_ENDED_STATUSES,
+  API_KEY_STATUSES,
+  type ApiKeyEnvironment,
+  type ApiKeyStatus,
+  type ApiKeyWalletScope,
+  SDP_ENVIRONMENTS,
+} from "@sdp/types/api-keys";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
+import type { DatabaseExecutor } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { hashApiKey } from "@/lib/api-key-hash";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
@@ -179,6 +187,74 @@ export function parseGrantsColumn(value: unknown): Action[] {
   return expandStoredGrants(storedGrantsSchema.parse(value));
 }
 
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  projectId: string;
+  projectName: string;
+  environment: ApiKeyEnvironment;
+  createdAt: string;
+}
+
+const createdApiKeyRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  key_prefix: z.string(),
+  project_id: z.string(),
+  project_name: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+  created_at: z.string(),
+  status: z.enum(API_KEY_STATUSES),
+  expires_at: z.string().nullable(),
+  rotation_deadline: z.string().nullable(),
+});
+
+/**
+ * The keys a person created that still work, across every project of the
+ * organization, so an admin removing them can decide what to revoke: keys are
+ * the organization's and outlive their creator (HOO-2301). A rotated key keeps
+ * its original creator. "Still work" is `apiKeyRowRefusal`, the check every
+ * request makes, so an expired or past-deadline key is not listed: it cannot
+ * authenticate and cannot be revoked.
+ *
+ * @param db - The database.
+ * @param params.organizationId - The organization.
+ * @param params.createdByUserId - The person, as `users.id`.
+ * @returns The keys, newest first.
+ */
+export async function listActiveApiKeysCreatedBy(
+  db: DatabaseExecutor,
+  params: { organizationId: string; createdByUserId: string }
+): Promise<CreatedApiKey[]> {
+  const result = await db
+    .prepare(
+      `SELECT ak.id, ak.name, ak.key_prefix, ak.project_id, p.name AS project_name,
+              p.environment, ak.created_at, ak.status, ak.expires_at, ak.rotation_deadline
+         FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+        WHERE ak.organization_id = ?
+          AND ak.created_by = ?
+        ORDER BY ak.created_at DESC`
+    )
+    .bind(params.organizationId, params.createdByUserId)
+    .all<Record<string, unknown>>();
+  const now = Date.now();
+  return z
+    .array(createdApiKeyRowSchema)
+    .parse(result.results)
+    .filter((row) => apiKeyRowRefusal(row, now) === null)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      keyPrefix: row.key_prefix,
+      projectId: row.project_id,
+      projectName: row.project_name,
+      environment: row.environment,
+      createdAt: row.created_at,
+    }));
+}
+
 type RotationTargetRow = {
   id: string;
   name: string;
@@ -220,10 +296,10 @@ export class ApiKeyService {
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
            AND ak.project_id = ?
-           AND ak.status NOT IN ('revoked', 'deactivated')
+           AND NOT (ak.status = ANY(?::text[]))
          ORDER BY ak.created_at DESC`
       )
-      .bind(this.scope.organizationId, this.scope.projectId)
+      .bind(this.scope.organizationId, this.scope.projectId, API_KEY_ENDED_STATUSES)
       .all<ApiKeyListRow>();
 
     return result.results.map((row) => this.mapListRow(row));

@@ -199,6 +199,11 @@
       "import": "./src/roles.ts",
       "default": "./src/roles.ts"
     },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts",
+      "default": "./src/rpc.ts"
+    },
     "./site": {
       "types": "./src/site.ts",
       "import": "./src/site.ts",
@@ -251,7 +256,7 @@
   },
   "dependencies": {
     "@solana/addresses": "catalog:",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "typescript": "6.0.3"

@@ -600,7 +600,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             maxLength={256}
             placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
             size="xl"
+            aria-describedby="batch-send-reference-hint"
           />
+          <p id="batch-send-reference-hint" className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.referenceHint")}
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -650,6 +654,75 @@ function RecipientRow({ children, trailing }: { children: ReactNode; trailing: R
     <div className="flex items-center justify-between gap-3 px-3 py-2.5">
       <div className="min-w-0">{children}</div>
       {trailing}
+    </div>
+  );
+}
+
+/** Why the review cannot send: what the chain would refuse for rent (HOO-2375). */
+function RentMinimumNotes({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const { belowRentMinimum, sourceRentShortfall } = wizard;
+  return (
+    <>
+      {belowRentMinimum.size > 0 ? (
+        <p role="alert" className="rounded-xl bg-fill-subtle px-4 py-3 text-sm text-error">
+          {t(
+            belowRentMinimum.size === 1
+              ? "DashboardPayments.batchSend.belowRentMinimumNoteSingular"
+              : "DashboardPayments.batchSend.belowRentMinimumNotePlural",
+            { count: belowRentMinimum.size }
+          )}
+        </p>
+      ) : null}
+      {sourceRentShortfall ? (
+        <p role="alert" className="rounded-xl bg-fill-subtle px-4 py-3 text-sm text-error">
+          {t("DashboardPayments.batchSend.sourceBelowRentMinimumNote", {
+            remainder: formatTokenAmount(sourceRentShortfall.sourceRemainder),
+            minimum: formatTokenAmount(sourceRentShortfall.minimumAmount),
+          })}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** The review's recipients, each with the rent minimum it misses, if any. */
+function ReviewRecipientList({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const { recipients, displayAsset, belowRentMinimum } = wizard;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {recipients.map((recipient) => {
+        const minimumAmount = belowRentMinimum.get(recipient.counterpartyAccountId);
+        const hasLabel = Boolean(recipient.label && recipient.label.trim().length > 0);
+        return (
+          <RecipientRow
+            key={recipient.counterpartyAccountId}
+            trailing={
+              <span className="flex shrink-0 flex-col items-end">
+                <span className="text-sm font-medium text-primary">
+                  {formatTokenAmount(recipient.amount)} {displayAsset}
+                </span>
+                {minimumAmount === undefined ? null : (
+                  <span className="text-xs text-error">
+                    {t("DashboardPayments.batchSend.belowRentMinimum", {
+                      minimum: formatTokenAmount(minimumAmount),
+                    })}
+                  </span>
+                )}
+              </span>
+            }
+          >
+            <p className="truncate text-sm font-medium text-primary">
+              {hasLabel ? recipient.label : recipient.name}
+            </p>
+            <p className="flex items-center gap-1.5 truncate text-xs text-tertiary">
+              {hasLabel ? <span>{recipient.name}</span> : null}
+              <span className="font-mono">{shortenAddress(recipient.address)}</span>
+            </p>
+          </RecipientRow>
+        );
+      })}
     </div>
   );
 }
@@ -737,30 +810,8 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
           </p>
         )}
       </section>
-      <div className="flex flex-col gap-0.5">
-        {recipients.map((recipient) => (
-          <RecipientRow
-            key={recipient.counterpartyAccountId}
-            trailing={
-              <span className="shrink-0 text-sm font-medium text-primary">
-                {formatTokenAmount(recipient.amount)} {displayAsset}
-              </span>
-            }
-          >
-            <p className="truncate text-sm font-medium text-primary">
-              {recipient.label && recipient.label.trim().length > 0
-                ? recipient.label
-                : recipient.name}
-            </p>
-            <p className="flex items-center gap-1.5 truncate text-xs text-tertiary">
-              {recipient.label && recipient.label.trim().length > 0 ? (
-                <span>{recipient.name}</span>
-              ) : null}
-              <span className="font-mono">{shortenAddress(recipient.address)}</span>
-            </p>
-          </RecipientRow>
-        ))}
-      </div>
+      <RentMinimumNotes wizard={wizard} />
+      <ReviewRecipientList wizard={wizard} />
     </div>
   );
 }
@@ -792,6 +843,14 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
             transactions: batchResult.batch.transactionCount,
           })}
         </p>
+        {wizard.failedRecipientCount > 0 ? (
+          <p className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.failedRecipientsNote", {
+              failed: wizard.failedRecipientCount,
+              count: batchResult.batch.recipientCount,
+            })}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col gap-0.5">
         {batchResult.recipients.map((recipient) => {

@@ -5,7 +5,8 @@ import {
   unifiedTransactionsListResponseSchema,
   unifiedTransactionsQuerySchema,
 } from "@/routes/transactions/schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import { DOCS_GROUP, errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import { PAYMENT_GROUPS } from "./payments";
 
 const responseSchema = z.object({ data: unifiedTransactionsListResponseSchema });
 
@@ -14,6 +15,7 @@ export function registerTransactionsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/transactions",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.balances,
     summary: "List transactions",
     operationId: "listUnifiedTransactions",
     description:

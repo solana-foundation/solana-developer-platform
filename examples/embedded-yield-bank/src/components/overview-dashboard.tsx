@@ -14,6 +14,7 @@ import {
   formatApy,
   formatDate,
   formatTime,
+  roundsToZero,
   shortAddress,
 } from "@/lib/format";
 import {
@@ -68,7 +69,7 @@ export function OverviewDashboard({
       <header className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-[28px]">
-            Good morning, Alex
+            Welcome back, Alex
           </h1>
           <p className="text-sm text-muted-foreground">
             Here is where your money stands today.
@@ -467,7 +468,7 @@ function savingsDetail(
         : "Earnings unavailable",
     };
   }
-  if (savings.earned === "0") return { detail: "Nothing earned yet" };
+  if (roundsToZero(savings.earned)) return { detail: "Nothing earned yet" };
   return {
     detail: `${formatAmount(savings.earned, symbol, { signed: true })} earned`,
     positive: !savings.earned.startsWith("-"),

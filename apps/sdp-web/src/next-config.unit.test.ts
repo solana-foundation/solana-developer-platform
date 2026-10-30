@@ -19,6 +19,7 @@ describe("Docs proxy rewrites", () => {
   it.each([
     ["/llms.txt", "/docs/ai/llms.txt"],
     ["/llms-full.txt", "/docs/ai/llms-full.txt"],
+    ["/SKILL.md", "/SKILL.md"],
     ["/docs.md", "/docs.md"],
   ])("serves %s from the docs app's %s", async (source, docsPath) => {
     const rewrites = await nextConfig.rewrites?.();

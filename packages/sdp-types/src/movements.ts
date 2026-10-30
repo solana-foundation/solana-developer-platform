@@ -223,6 +223,11 @@ export const MOVEMENTS = {
 
 export type MovementId = keyof typeof MOVEMENTS;
 
+/** Parse operator and stored movement ids against the signing-waist inventory. */
+export function isMovementId(value: string): value is MovementId {
+  return Object.hasOwn(MOVEMENTS, value);
+}
+
 /** The movements that start new exposure, each with the actions that may sign it. */
 export type StartMovementId = {
   [Id in MovementId]: (typeof MOVEMENTS)[Id]["kind"] extends "start" ? Id : never;
@@ -275,6 +280,17 @@ export const PAYMENT_REQUEST_MOVEMENT_STATUSES = {
 export type MovementOf<Module extends SdpModule> = {
   [Id in MovementId]: (typeof MOVEMENTS)[Id]["module"] extends Module ? Id : never;
 }[MovementId];
+
+/**
+ * The movement a signing waist takes (HOO-2098). Each waist is generic over
+ * the calling module, with no inference and a `never` default, so every call
+ * names its module (`createOrgSignerForCustodyWallet<"dvp">(…)`) and another
+ * module's id does not compile: an exit is never refused for the
+ * organization, so passing one module's exit from another would skip
+ * admission. `SdpModule` admits every movement, for code that serves no single
+ * module.
+ */
+export type WaistMovement<Module extends SdpModule> = NoInfer<MovementOf<Module>>;
 
 /**
  * The movement each Rings operation signs for. A new operation type does not

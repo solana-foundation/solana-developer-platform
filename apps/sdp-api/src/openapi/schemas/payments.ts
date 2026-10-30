@@ -1,13 +1,16 @@
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
+  PAYMENT_REQUEST_STATUSES,
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
+import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -455,7 +458,8 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: "prj_example",
     }),
     externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
-      description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
+      description:
+        "Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Required: it is what stops a resend under a new Idempotency-Key from paying the same recipients twice.",
       example: "payroll_2026_06_30",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {
@@ -493,7 +497,13 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
-  .extend(createTransferBatchRequestSchema.shape)
+  .extend({
+    ...createTransferBatchRequestSchema.shape,
+    externalId: createTransferBatchRequestSchema.shape.externalId.optional().openapi({
+      description:
+        "Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.",
+    }),
+  })
   .openapi({
     description: "Estimate transaction chunking and fees for a transfer batch.",
   });
@@ -630,6 +640,16 @@ const transferBatchEstimateSchema = z
         }),
       })
       .openapi({ description: "Estimated fee components." }),
+    warnings: z
+      .array(
+        paymentTransferBatchEstimateWarningSchema.describe(
+          "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed."
+        )
+      )
+      .openapi({
+        description:
+          "What would make the batch fail. Empty when the batch can be sent as estimated.",
+      }),
   })
   .openapi({ description: "Transfer batch estimate." });
 
@@ -664,6 +684,70 @@ export const paymentRecurringPaymentIdParamsSchema = recurringPaymentIdParamsSch
     }),
   })
   .openapi({ description: "Recurring payment path parameters." });
+
+export const paymentRequestIdParamsSchema = paymentRequestParamsSchemaBase
+  .extend({
+    paymentRequestId: withOpenApi(paymentRequestParamsSchemaBase.shape.paymentRequestId, {
+      description: "SDP payment request ID.",
+      example: "preq_example",
+    }),
+  })
+  .openapi({ description: "Payment request path parameters." });
+
+const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES).openapi({
+  description:
+    "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+  example: "canceled",
+});
+
+export const paymentRequestSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
+    organizationId: z.string().openapi({ description: "Organization ID." }),
+    projectId: z.string().nullable().openapi({ description: "Project ID." }),
+    walletId: z.string().openapi({ description: "Receiving custody wallet's provider ID." }),
+    destinationAddress: solanaAddressSchema.openapi({
+      description: "Address the payment is sent to.",
+    }),
+    token: z.string().openapi({ description: "Token mint address." }),
+    amount: tokenAmountSchema,
+    reference: solanaAddressSchema.openapi({
+      description: "Solana Pay reference account that identifies the payment on chain.",
+    }),
+    status: paymentRequestStatusSchema,
+    expiresAt: isoDateTimeSchema.nullable().openapi({ description: "Expiry, if any." }),
+    fulfilledByTransferId: z
+      .string()
+      .nullable()
+      .openapi({ description: "The inbound transfer that paid the request." }),
+    paidLate: z.boolean().openapi({
+      description:
+        "Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.",
+    }),
+    lastCheckedAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "When SDP last read the chain for the payment." }),
+    canceledByApiKeyId: z.string().nullable().openapi({
+      description:
+        "The API key that canceled the request; null when a member did, or it is not canceled.",
+    }),
+    canceledByUserId: z.string().nullable().openapi({
+      description:
+        "User ID of the member who canceled the request; null when an API key did, or it is not canceled.",
+    }),
+    canceledAt: isoDateTimeSchema.nullable().openapi({ description: "When it was canceled." }),
+    lifecycle: z
+      .array(z.object({ status: paymentRequestStatusSchema, at: isoDateTimeSchema }))
+      .openapi({ description: "Every status the request entered, oldest first." }),
+    createdBy: z.string().nullable().openapi({
+      description: "User ID of the member, or of the API key's creator, who created it.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({
+    description: "A payment request. Reads never carry its link token.",
+  });
 
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({

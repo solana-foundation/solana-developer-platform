@@ -70,7 +70,7 @@ export const SETTLED_PAYOUT_STATUSES: readonly PaymentTransferStatus[] = [
 ];
 
 /** The most settled payouts a contact's page reads to total what it has been paid. */
-export const COUNTERPARTY_PAYOUTS_CAP = 500;
+const COUNTERPARTY_PAYOUTS_CAP = 500;
 const PAYOUTS_PAGE_SIZE = 100;
 
 type PayoutsPage = { ok: boolean; data: PaymentTransferSummary[]; total: number };

@@ -1,20 +1,32 @@
 # @sdp/api-catalog
 
-What the dashboard's API playground and the docs both need to know about the public SDP API,
-kept in one place so the two never write a call differently. It ships TypeScript source with no
-React, so either app, a script or server code can import it.
+The public OpenAPI document produces one reference model for each release channel.
+The docs render that model; the dashboard uses a smaller generated projection for
+its existing playground sections. All three apps share the same operation IDs,
+parameters and examples.
+- `@sdp/api-catalog/reference` defines every public operation, including Health
+  and Projects, with request schemas and per-status response examples.
+- `@sdp/api-catalog/catalog` lists those operations in document order and
+  projects the existing dashboard playground forms from them.
+- `@sdp/api-catalog/ai-discovery` renders both docs and API `llms.txt` from
+  the release channel's public OpenAPI document. The docs build reads the
+  generated document after `generate:api`; the API uses its runtime document.
+- `@sdp/api-catalog/playground-catalog` is generated at `experimental` by
+  `pnpm generate:api-playground`. It carries the dashboard's four existing
+  sections and proxy allowlist. The dashboard filters them by release channel.
+- `@sdp/api-catalog/snippets` writes cURL, TypeScript and Python samples. It
+  reads the key from `SDP_API_KEY` and sends `Idempotency-Key` only when the
+  route declares it.
 
-| Subpath | What it holds |
-| -- | -- |
-| `@sdp/api-catalog/snippets` | `buildSnippets`: one call written as cURL, TypeScript and Python. The key is read from `SDP_API_KEY`, never inlined, and every write carries an `Idempotency-Key`. |
+The docs build gets its channel-specific reference from
+`apps/sdp-api/generated/api-reference.json`. The committed playground projection
+stays at `experimental` so CI can check drift across all sections.
 
-The playground's operation catalog, generated from the public OpenAPI document, moves here next
-(PRO-2298), so the docs reference can render from the same data.
-
-## Scripts
+## Checks
 
 ```sh
 pnpm --filter @sdp/api-catalog typecheck
 pnpm --filter @sdp/api-catalog test
 pnpm --filter @sdp/api-catalog lint
+pnpm check:api-playground
 ```

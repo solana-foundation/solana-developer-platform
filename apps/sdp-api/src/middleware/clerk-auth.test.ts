@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { InvitationStatus } from "@sdp/types/organizations";
-import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { getClerkAuth } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
-import { AppError } from "@/lib/errors";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { optionalClerkAuth } from "@/middleware/clerk-auth";
-import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requireAction } from "@/middleware/require-action";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -20,10 +17,10 @@ import {
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
+import { middlewareTestApp } from "@/test/helpers/middleware-app";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
 
 describe("Clerk auth request cache", () => {
   const issuerReady = ensureTestClerkIssuer(env);
@@ -97,11 +94,10 @@ describe("Clerk auth request cache", () => {
 
   async function createProtectedApp(payload: ClerkJwtPayload) {
     const token = await signTestClerkClaims(payload, 300);
-    const app = new Hono<{ Bindings: Env }>();
+    const app = middlewareTestApp("store");
     let cachedBeforeAuth: ClerkJwtPayload | undefined;
     let cachedAfterAuth: ClerkJwtPayload | undefined;
 
-    app.use("*", kvStoreMiddleware());
     app.use("*", skipRateLimitPaths());
     app.use("*", async (c, next) => {
       const verified = c.get("verifiedClerkJwt");
@@ -113,52 +109,43 @@ describe("Clerk auth request cache", () => {
       cachedAfterAuth = after.payload;
     });
     app.use("*", unifiedAuthMiddleware());
-    app.get("/protected", requireAction("organizations.read"), (c) => {
+    app.get("/v1/protected", requireAction("organizations.read"), (c) => {
       return c.json({
         organizationId: getClerkAuth(c).organizationId,
         email: getClerkAuth(c).email,
       });
     });
-    app.get("/admin", requireAction("organizations.manage"), (c) => {
-      return c.json({ role: getClerkAuth(c).role });
-    });
-    app.onError((error, c) => {
-      if (error instanceof AppError) {
-        return c.json(error.toResponse(), error.statusCode as 401 | 403);
-      }
-      throw error;
-    });
 
     return {
-      app,
-      token,
+      request: () =>
+        app.request("/v1/protected", { headers: { Authorization: `Bearer ${token}` } }, env),
       cachedPayloads: () => ({ before: cachedBeforeAuth, after: cachedAfterAuth }),
     };
   }
 
-  async function createStrictOptionalApp(payload: ClerkJwtPayload) {
-    const token = await signTestClerkClaims(payload, 300);
-    const app = new Hono<{ Bindings: Env }>();
-
+  function strictOptionalApp() {
+    const app = middlewareTestApp("none");
     app.use("*", optionalClerkAuth({ rejectInvalid: true }));
     app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
-    app.onError((error, c) => {
-      if (error instanceof AppError) {
-        return c.json(error.toResponse(), error.statusCode as 401);
-      }
-      throw error;
-    });
+    return app;
+  }
 
-    return { app, token };
+  function cachedUserPayload(): ClerkJwtPayload {
+    return {
+      sub: "clerk_user_cached",
+      v: 2,
+      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      email: TEST_USER.email,
+    };
   }
 
   it("strict optional auth rejects a verified Clerk token without an organization", async () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_without_org",
     };
-    const { app, token } = await createStrictOptionalApp(payload);
+    const token = await signTestClerkClaims(payload, 300);
 
-    const res = await app.request(
+    const res = await strictOptionalApp().request(
       "/optional",
       { headers: { Authorization: `Bearer ${token}` } },
       env
@@ -171,17 +158,7 @@ describe("Clerk auth request cache", () => {
   });
 
   it("strict optional auth returns unauthorized for a malformed bearer token", async () => {
-    const app = new Hono<{ Bindings: Env }>();
-    app.use("*", optionalClerkAuth({ rejectInvalid: true }));
-    app.get("/optional", (c) => c.json({ authenticated: Boolean(c.get("clerk")) }));
-    app.onError((error, c) => {
-      if (error instanceof AppError) {
-        return c.json(error.toResponse(), error.statusCode as 401);
-      }
-      throw error;
-    });
-
-    const res = await app.request(
+    const res = await strictOptionalApp().request(
       "/optional",
       { headers: { Authorization: "Bearer invalid" } },
       env
@@ -194,23 +171,9 @@ describe("Clerk auth request cache", () => {
   });
 
   it("reuses a cached Clerk JWT across rate limiting and auth in one request", async () => {
-    const payload: ClerkJwtPayload = {
-      sub: "clerk_user_cached",
-      v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
-      email: TEST_USER.email,
-    };
-    const { app, token, cachedPayloads } = await createProtectedApp(payload);
+    const { request, cachedPayloads } = await createProtectedApp(cachedUserPayload());
 
-    const res = await app.request(
-      "/protected",
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
-      env
-    );
+    const res = await request();
 
     expect(res.status).toBe(200);
     const cached = cachedPayloads();
@@ -223,43 +186,23 @@ describe("Clerk auth request cache", () => {
   });
 
   it("counts Clerk dashboard requests against a per-user per-org limit", async () => {
-    const payload: ClerkJwtPayload = {
-      sub: "clerk_user_cached",
-      v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
-      email: TEST_USER.email,
-    };
-    const { app, token } = await createProtectedApp(payload);
+    const { request } = await createProtectedApp(cachedUserPayload());
 
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const res = await request();
 
     expect(res.status).toBe(200);
     expect(await readRateLimitCount(env, `user:${TEST_USER.id}:org:${TEST_ORG.id}`)).toBe(1);
   });
 
   it("429s Clerk dashboard traffic once the per-user limit is exhausted", async () => {
-    const payload: ClerkJwtPayload = {
-      sub: "clerk_user_cached",
-      v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
-      email: TEST_USER.email,
-    };
-    const { app, token } = await createProtectedApp(payload);
+    const { request } = await createProtectedApp(cachedUserPayload());
     await seedRateLimit(
       env,
       `user:${TEST_USER.id}:org:${TEST_ORG.id}`,
       DASHBOARD_ACTOR_MAX_REQUESTS
     );
 
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const res = await request();
 
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).not.toBeNull();
@@ -273,19 +216,9 @@ describe("Clerk auth request cache", () => {
       .bind(TEST_ORG.id, TEST_USER.id)
       .run();
 
-    const payload: ClerkJwtPayload = {
-      sub: "clerk_user_cached",
-      v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
-      email: TEST_USER.email,
-    };
-    const { app, token } = await createProtectedApp(payload);
+    const { request } = await createProtectedApp(cachedUserPayload());
 
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const res = await request();
 
     expect(res.status).toBe(401);
     const membership = await getDb(env)
@@ -336,13 +269,9 @@ describe("Clerk auth request cache", () => {
       o: { id: "org_test_clerk_cached", rol: "member", slg: TEST_ORG.slug },
       email: "collision-target@example.com",
     };
-    const { app, token } = await createProtectedApp(payload);
+    const { request } = await createProtectedApp(payload);
 
-    const unverified = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const unverified = await request();
     expect(unverified.status).toBe(401);
 
     const missingIdentity = await getDb(env)
@@ -356,11 +285,7 @@ describe("Clerk auth request cache", () => {
     expect(missingIdentity).toBeNull();
 
     verificationStatus = "verified";
-    const verified = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const verified = await request();
     expect(verified.status).toBe(200);
 
     const linkedIdentity = await getDb(env)
@@ -387,15 +312,6 @@ describe("Clerk auth request cache", () => {
     });
   }
 
-  function cachedUserPayload(): ClerkJwtPayload {
-    return {
-      sub: "clerk_user_cached",
-      v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
-      email: TEST_USER.email,
-    };
-  }
-
   it("refuses to provision a membership when the invitation was revoked", async () => {
     await getDb(env)
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
@@ -403,12 +319,8 @@ describe("Clerk auth request cache", () => {
       .run();
     await seedOwnInvitation("revoked");
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
 
     expect(res.status).toBe(401);
     const membership = await getDb(env)
@@ -429,12 +341,8 @@ describe("Clerk auth request cache", () => {
       .run();
     await seedOwnInvitation("pending");
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
 
     expect(res.status).toBe(200);
 
@@ -459,12 +367,8 @@ describe("Clerk auth request cache", () => {
       .bind("{{user.primary_email_address.email_address}}")
       .run();
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -484,12 +388,8 @@ describe("Clerk auth request cache", () => {
       .bind(placeholder, TEST_USER.id)
       .run();
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
     expect(res.status).toBe(200);
 
     const identity = await getDb(env)
@@ -514,12 +414,8 @@ describe("Clerk auth request cache", () => {
     await seedOwnInvitation("revoked");
     await seedOwnInvitation("pending");
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
 
     expect(res.status).toBe(200);
   });
@@ -527,12 +423,8 @@ describe("Clerk auth request cache", () => {
   it("does not lock out an existing member carrying a stale revoked invitation", async () => {
     await seedOwnInvitation("revoked");
 
-    const { app, token } = await createProtectedApp(cachedUserPayload());
-    const res = await app.request(
-      "/protected",
-      { headers: { Authorization: `Bearer ${token}` } },
-      env
-    );
+    const { request } = await createProtectedApp(cachedUserPayload());
+    const res = await request();
 
     expect(res.status).toBe(200);
   });

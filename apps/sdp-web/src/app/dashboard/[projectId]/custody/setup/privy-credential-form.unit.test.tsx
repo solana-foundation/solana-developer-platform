@@ -18,7 +18,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { generateFireblocksCsrAction, loadFireblocksCsrAction } from "./fireblocks-csr-actions";
-import { PrivyCredentialForm } from "./privy-credential-form";
+import { ByokCredentialForm } from "./privy-credential-form";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -30,7 +30,7 @@ function renderForm(
 ) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <PrivyCredentialForm
+      <ByokCredentialForm
         formId="byok-test-form"
         provider={provider}
         onPendingChange={onPendingChange}
@@ -50,7 +50,24 @@ function submittedKey(call: number): string {
   return String(formData.get("idempotencyKey"));
 }
 
-describe("PrivyCredentialForm", () => {
+/** Renders the SWR read of `cacheKey` in an `<output>` with test id `name`. */
+function Inventory({
+  cacheKey,
+  name,
+  fetcher,
+}: {
+  cacheKey: string | readonly string[];
+  name: string;
+  fetcher: () => Promise<string>;
+}) {
+  const { data } = useSWR(cacheKey, fetcher, {
+    fallbackData: "Previous data",
+    revalidateOnMount: false,
+  });
+  return <output data-testid={name}>{data}</output>;
+}
+
+describe("ByokCredentialForm", () => {
   beforeEach(() => {
     vi.spyOn(byokActions, "submitPrivyCredentialAction");
     vi.spyOn(byokActions, "recheckPrivyCredentialAction");
@@ -290,26 +307,11 @@ describe("PrivyCredentialForm", () => {
     const walletRead = vi.fn(async () => "New Connection wallet");
     const otherProjectRead = vi.fn(async () => "Other project changed");
     const command = vi.fn(async () => "Replayed command");
-    function Inventory({
-      cacheKey,
-      name,
-      fetcher,
-    }: {
-      cacheKey: string | readonly string[];
-      name: string;
-      fetcher: () => Promise<string>;
-    }) {
-      const { data } = useSWR(cacheKey, fetcher, {
-        fallbackData: "Previous data",
-        revalidateOnMount: false,
-      });
-      return <output data-testid={name}>{data}</output>;
-    }
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <SWRConfig value={{ provider: () => new Map() }}>
-          <PrivyCredentialForm formId="byok-test-form" />
+          <ByokCredentialForm formId="byok-test-form" />
           <Inventory
             cacheKey={paymentsQueryKeys.actionWallets()}
             name="payments"
@@ -429,7 +431,7 @@ describe("PrivyCredentialForm", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivyCredentialForm formId="byok-lock-test" onRecoveryLockChange={onLock} />
+        <ByokCredentialForm formId="byok-lock-test" onRecoveryLockChange={onLock} />
       </I18nProvider>
     );
 
@@ -473,7 +475,7 @@ describe("PrivyCredentialForm", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivyCredentialForm formId="byok-refused-test" onRecoveryLockChange={onLock} />
+        <ByokCredentialForm formId="byok-refused-test" onRecoveryLockChange={onLock} />
       </I18nProvider>
     );
 
@@ -502,7 +504,7 @@ describe("PrivyCredentialForm", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivyCredentialForm formId="byok-unrecoverable-test" onRecoveryLockChange={onLock} />
+        <ByokCredentialForm formId="byok-unrecoverable-test" onRecoveryLockChange={onLock} />
       </I18nProvider>
     );
 
@@ -553,7 +555,7 @@ describe("PrivyCredentialForm", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <PrivyCredentialForm formId="byok-reject-test" onRecoveryLockChange={onLock} />
+        <ByokCredentialForm formId="byok-reject-test" onRecoveryLockChange={onLock} />
       </I18nProvider>
     );
 

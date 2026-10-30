@@ -4,6 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./ai-discovery": {
+      "types": "./src/ai-discovery.ts",
+      "import": "./src/ai-discovery.ts",
+      "default": "./src/ai-discovery.ts"
+    },
+    "./catalog": {
+      "types": "./src/catalog.ts",
+      "import": "./src/catalog.ts",
+      "default": "./src/catalog.ts"
+    },
+    "./playground-catalog": {
+      "types": "./src/generated/playground-catalog.json",
+      "import": "./src/generated/playground-catalog.json",
+      "default": "./src/generated/playground-catalog.json"
+    },
+    "./reference": {
+      "types": "./src/reference.ts",
+      "import": "./src/reference.ts",
+      "default": "./src/reference.ts"
+    },
     "./snippets": {
       "types": "./src/snippets.ts",
       "import": "./src/snippets.ts",
@@ -14,6 +34,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@sdp/types": "workspace:*",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "typescript": "6.0.3",

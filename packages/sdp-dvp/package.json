@@ -20,7 +20,7 @@
     "@solana/kit": "catalog:"
   },
   "devDependencies": {
-    "@codama/renderers-js": "2.5.0",
+    "@codama/renderers-js": "2.8.0",
     "codama": "1.11.0",
     "tsx": "4.23.15",
     "vitest": "4.1.12"

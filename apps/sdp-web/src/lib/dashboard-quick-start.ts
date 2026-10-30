@@ -16,7 +16,7 @@ export const quickStartStatusSchema = z.object({
 export type QuickStartStatus = z.infer<typeof quickStartStatusSchema>;
 
 export const QUICK_START_STEP_IDS = ["custody", "first-call"] as const;
-export type QuickStartStepId = (typeof QUICK_START_STEP_IDS)[number];
+type QuickStartStepId = (typeof QUICK_START_STEP_IDS)[number];
 
 /**
  * - done: the signal is in (a provider is connected, a call arrived).

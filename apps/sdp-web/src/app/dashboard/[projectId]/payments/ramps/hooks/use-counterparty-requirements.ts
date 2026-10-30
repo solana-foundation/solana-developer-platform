@@ -67,7 +67,7 @@ async function fetchCounterpartyRequirements(
   return body.data;
 }
 
-export interface AdvanceRequirementsPayload {
+interface AdvanceRequirementsPayload {
   assetRail: CryptoRailId;
   destinationCustodyWalletId: string;
   fiatCurrency: RampFiatCurrency;

@@ -1,0 +1,6 @@
+interface:
+  display_name: "SDP Module Alignment"
+  short_description: "Audit a module against SDP architecture and the refresh design"
+  default_prompt: "Use $sdp-module-alignment to audit the dvp module and write its alignment ledger."
+policy:
+  allow_implicit_invocation: true
