@@ -6,11 +6,11 @@ const { getDb } = apiTestSupport;
 
 /**
  * The harness's own test chain, set by the CI scripts; the API never reads these.
- * `vitest.config.ts` defaults `SOLANA_NETWORK` to devnet.
+ * `vitest.config.ts` defaults `KORA_SURFPOOL_CLUSTER` to devnet.
  */
 const testChainEnvSchema = z.object({
   SOLANA_RPC_URL: z.url().optional(),
-  SOLANA_NETWORK: z.enum(SOLANA_CLUSTERS),
+  KORA_SURFPOOL_CLUSTER: z.enum(SOLANA_CLUSTERS),
 });
 
 const testChainEnv = testChainEnvSchema.parse(process.env);
@@ -44,7 +44,7 @@ export const env = {
 };
 
 /** The cluster the test chain stands in for. */
-export const testChainCluster = testChainEnv.SOLANA_NETWORK;
+export const testChainCluster = testChainEnv.KORA_SURFPOOL_CLUSTER;
 
 /**
  * The test chain's RPC URL, for suites that cannot run without one.
