@@ -223,7 +223,7 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
   });
 
   if (config.authorizedParty !== null && payload.azp !== config.authorizedParty) {
-    getLogger().warn(
+    getLogger().error(
       {
         event: "sdp_api_clerk_session_azp_refused",
         azp: payload.azp ?? null,
