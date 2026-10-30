@@ -25,6 +25,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import {
@@ -1738,9 +1739,25 @@ describe("payment transfer batches", () => {
     const audit = await readChunkAudit(transferId);
     expect(audit.intent).not.toBeNull();
     expect(audit.outcome).toBeNull();
-    getSignatureStatusesMock.mockResolvedValueOnce([
-      { slot: 101n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
-    ]);
+    const confirmed = [
+      { slot: 101n, confirmations: 1n, confirmationStatus: "confirmed" as const, err: null },
+    ];
+    // A ledger failure rolls the settle back with it: the chunk stays
+    // processing, unaudited, for the next run.
+    const ledgerDown = vi
+      .spyOn(AuditService.prototype, "logSystemWithin")
+      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
+    getSignatureStatusesMock.mockResolvedValueOnce(confirmed);
+    await runInEachClusterScope(() => trackPendingTransfers(env));
+    ledgerDown.mockRestore();
+    const stillProcessing = await getDb(env)
+      .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string }>();
+    expect(required(stillProcessing).status).toBe("processing");
+    expect((await readChunkAudit(transferId)).outcome).toBeNull();
+
+    getSignatureStatusesMock.mockResolvedValueOnce(confirmed);
     await runInEachClusterScope(() => trackPendingTransfers(env));
     const settled = await readChunkAudit(transferId);
     expect(required(settled.outcome)).toMatchObject({ status: "success" });
@@ -4152,7 +4169,10 @@ describe("payment transfer batches", () => {
             getSignatureStatusesMock.mockResolvedValueOnce([
               { slot: 300n, confirmations: 3n, confirmationStatus: "confirmed", err: null },
             ]);
-            await trackPendingTransfers(env);
+            // The job runs as the cron runner runs it, not as the request it interrupts.
+            await runWithSystemDatabaseIdentity("cron:track-pending-transfers", () =>
+              trackPendingTransfers(env)
+            );
           }
           return repository.recomputeTransferBatchStatus(input);
         },

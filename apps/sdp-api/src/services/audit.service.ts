@@ -587,6 +587,32 @@ async function stampTransactionIdentity(
   }
 }
 
+export type CriticalOutcome = Partial<
+  Pick<AuditLogEntry, "action" | "resourceType" | "resourceId" | "metadata" | "status">
+>;
+
+/**
+ * The outcome record that resolves a critical intent. `completeCritical`
+ * appends it on its own; a caller whose outcome must commit with the state
+ * write it describes returns it from `logWithin` or `logSystemWithin` work.
+ */
+export function criticalOutcomeEntry(
+  intent: AuditIntent,
+  outcome: CriticalOutcome = {}
+): AuditLogEntry {
+  return {
+    ...intent.entry,
+    ...outcome,
+    metadata: {
+      ...intent.entry.metadata,
+      ...outcome.metadata,
+      auditPhase: "outcome",
+      auditIntentId: intent.id,
+    },
+    status: outcome.status ?? "success",
+  };
+}
+
 export class AuditService {
   constructor(
     private db: DatabaseClient,
@@ -786,17 +812,7 @@ export class AuditService {
     > = {}
   ): Promise<boolean> {
     try {
-      await this.logSystem({
-        ...intent.entry,
-        ...outcome,
-        metadata: {
-          ...intent.entry.metadata,
-          ...outcome.metadata,
-          auditPhase: "outcome",
-          auditIntentId: intent.id,
-        },
-        status: outcome.status ?? "success",
-      });
+      await this.logSystem(criticalOutcomeEntry(intent, outcome));
       return true;
     } catch (error) {
       getLogger().error(
@@ -830,17 +846,7 @@ export class AuditService {
     > = {}
   ): Promise<boolean> {
     try {
-      await this.log(c, {
-        ...intent.entry,
-        ...outcome,
-        metadata: {
-          ...intent.entry.metadata,
-          ...outcome.metadata,
-          auditPhase: "outcome",
-          auditIntentId: intent.id,
-        },
-        status: outcome.status ?? "success",
-      });
+      await this.log(c, criticalOutcomeEntry(intent, outcome));
       return true;
     } catch (error) {
       getLogger().error(
