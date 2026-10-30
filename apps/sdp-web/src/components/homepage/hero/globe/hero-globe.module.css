@@ -1,0 +1,157 @@
+/* The globe's box; its size and place come from the hero (hero.module.css). */
+.globe {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+/* three.js puts its own canvas in the box; it and the still one fill it and fade out at the rim */
+.globe > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  -webkit-mask-image: radial-gradient(circle closest-side at 50% 50%, #000 74%, transparent 99%);
+  mask-image: radial-gradient(circle closest-side at 50% 50%, #000 74%, transparent 99%);
+}
+
+/* without WebGL the still planet is drawn on a 2D canvas and its rim here (the live rim, mostly
+   under the mask, reads this faint), so the box is never an empty hole */
+.globe[data-mode="static"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  height: 97.7%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.5px solid #f1f0ee;
+}
+
+/*
+ * The tags: a frosted capsule level with its pin and joined to it by a hairline leader, so it
+ * reads as a note on the map. The scene sets their place and data-on / data-flip.
+ */
+.tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 420ms var(--e);
+  white-space: nowrap;
+  padding: 9px 14px 10px;
+  border-radius: 12px;
+  border: 1px solid #0f0f1314;
+  background: #fbfaf9d9;
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 1px 0 #ffffffcc inset,
+    0 1px 2px #0f0f130d,
+    0 16px 32px -18px #0f0f1347;
+  font: 500 13px / 1.2 var(--font);
+  color: var(--ink);
+}
+
+.tag::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -16px;
+  width: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, #0f0f131a, #0f0f1359);
+}
+
+.tag[data-flip="true"]::before {
+  left: auto;
+  right: -16px;
+  background: linear-gradient(90deg, #0f0f1359, #0f0f131a);
+}
+
+.tag b {
+  display: block;
+  font: 500 15px / 1.15 var(--font);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.tag b i {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--ink4);
+}
+
+.tag span {
+  display: block;
+  margin-top: 3px;
+  font: 500 12px / 1.2 var(--font);
+  color: var(--ink4);
+}
+
+.tag b,
+.tag span {
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 420ms var(--e),
+    transform 520ms var(--e);
+}
+
+.tag span {
+  transition-delay: 70ms;
+}
+
+.tagTo {
+  border-color: #14c77f33;
+  background: linear-gradient(180deg, #f2fcf7e6, #fbfaf9d9);
+}
+
+.tagTo::before {
+  background: linear-gradient(90deg, #14c77f33, #14c77faa);
+}
+
+.tagTo[data-flip="true"]::before {
+  background: linear-gradient(90deg, #14c77faa, #14c77f33);
+}
+
+.tagTo b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* the landing's small green check */
+.tagTo b::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background:
+    #14c77f
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='m4.2 7.2 1.9 1.9 3.8-4' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 14px no-repeat;
+}
+
+.tag[data-on="true"] {
+  opacity: 1;
+}
+
+.tag[data-on="true"] b,
+.tag[data-on="true"] span {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tag b,
+  .tag span {
+    transition: none;
+    transform: none;
+  }
+}

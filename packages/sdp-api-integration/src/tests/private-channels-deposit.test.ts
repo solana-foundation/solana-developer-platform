@@ -14,7 +14,10 @@
  *     pnpm --filter @sdp/api-integration test
  */
 
-import { createChannelGatewayRpc, getChannelTokenBalance } from "@sdp/private-channels/gateway";
+import {
+  createPrivateChannelLocalRpc,
+  getChannelTokenBalance,
+} from "@sdp/private-channels/gateway";
 import {
   confirmTransaction,
   createRpc,
@@ -43,7 +46,6 @@ import {
   PRIVATE_CHANNEL_DEPOSIT_CONFIGURED,
   RUN_INTEGRATION_TESTS,
 } from "#/helpers/private-channels";
-import { env } from "#env-impl";
 
 // Sandbox instance + devnet USDC (classic Token program).
 const INSTANCE = address("7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz");
@@ -60,7 +62,7 @@ function decodeSecretKey(raw: string): Uint8Array {
 }
 
 async function readChannelAmount(
-  gatewayRpc: ReturnType<typeof createChannelGatewayRpc>,
+  gatewayRpc: ReturnType<typeof createPrivateChannelLocalRpc>,
   owner: ReturnType<typeof address>,
   mint: ReturnType<typeof address>
 ): Promise<bigint> {
@@ -76,7 +78,7 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const owner = signer.address;
       const amount = getDepositAmountBaseUnits();
 
-      const gatewayRpc = createChannelGatewayRpc(env, getGatewayUrl());
+      const gatewayRpc = createPrivateChannelLocalRpc(getGatewayUrl());
       const baseline = await readChannelAmount(gatewayRpc, owner, DEVNET_USDC);
 
       // Build the escrow deposit (payer + user are the same funded keypair).
@@ -90,7 +92,7 @@ describe.skipIf(!PRIVATE_CHANNEL_DEPOSIT_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       });
 
       // Sign + broadcast + confirm on the instance chain (devnet).
-      const chainRpc = createRpc(env, { rpcUrl: getChainRpcUrl() });
+      const chainRpc = createRpc(getChainRpcUrl());
       const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(chainRpc, "confirmed");
       const message = pipe(
         createTransactionMessage({ version: 0 }),

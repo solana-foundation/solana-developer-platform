@@ -43,6 +43,7 @@ import {
   TEST_SOLANA_ADDRESSES,
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -268,6 +269,8 @@ async function deriveAssociatedTokenAccount(owner: string, mint: string): Promis
 }
 
 describe("Issuance Routes", () => {
+  const clusterRpc = installClusterRpcStub();
+
   let apiKeyHash: string;
 
   beforeAll(async () => {
@@ -344,7 +347,7 @@ describe("Issuance Routes", () => {
     );
 
     vi.spyOn(AuthorityResolution, "resolveCurrentAuthorityForRole").mockImplementation(
-      async (_runtimeEnv, _tokenService, token, role, override) => {
+      async (_tokenService, token, role, override) => {
         const currentAuthority = role === "freeze" ? token?.freezeAuthority : token?.mintAuthority;
         if (override !== undefined && override !== currentAuthority) {
           throw new AppError(
@@ -3247,7 +3250,6 @@ describe("Issuance Routes", () => {
         expect(body.data.token.imageUrl).toBe("https://example.com/token.png");
 
         expect(resolveCurrentAuthoritySpy).toHaveBeenCalledWith(
-          env,
           expect.anything(),
           expect.objectContaining({ id: activeTokenId }),
           "metadata"
@@ -3676,10 +3678,6 @@ describe("Issuance Routes", () => {
     let activeTokenId: string;
 
     beforeEach(async () => {
-      if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-        (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-      }
-
       const db = getDb(env);
 
       await db
@@ -3703,20 +3701,10 @@ describe("Issuance Routes", () => {
     });
 
     it("refreshes cached supply from RPC", async () => {
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: "1",
-            result: {
-              value: {
-                amount: "1500000000",
-              },
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        )
-      );
+      clusterRpc.answer("getTokenSupply", {
+        context: { slot: 1 },
+        value: { amount: "1500000000", decimals: 9, uiAmount: 1.5, uiAmountString: "1.5" },
+      });
 
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
@@ -3726,8 +3714,6 @@ describe("Issuance Routes", () => {
         },
         env
       );
-
-      fetchSpy.mockRestore();
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3767,10 +3753,6 @@ describe("Issuance Routes", () => {
     });
 
     it("returns 502 when RPC call fails", async () => {
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(new Response("upstream unavailable", { status: 503 }));
-
       const res = await app.request(
         `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
         {
@@ -3779,8 +3761,6 @@ describe("Issuance Routes", () => {
         },
         env
       );
-
-      fetchSpy.mockRestore();
 
       expect(res.status).toBe(502);
       const body = await res.json();
@@ -8299,10 +8279,6 @@ describe("Issuance Routes", () => {
       });
 
       it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_uri_default",
           mintAddress: null,
@@ -8357,10 +8333,6 @@ describe("Issuance Routes", () => {
       });
 
       it("re-prepares with an empty uri and signals a follow-up when the create tx overflows", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_uri_overflow",
           mintAddress: null,
@@ -8443,10 +8415,6 @@ describe("Issuance Routes", () => {
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
       it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_followup",
           mintAddress: TEST_SOLANA_ADDRESSES.mint,
@@ -8502,10 +8470,6 @@ describe("Issuance Routes", () => {
       });
 
       it("ignores a request-body signingWalletId, using the wallet pinned at deploy/prepare", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-
         await seedIssuanceActivityWallet("wallet_pinned", TEST_SOLANA_ADDRESSES.wallet2);
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_wallet_pin",
@@ -8629,15 +8593,7 @@ describe("Issuance Routes", () => {
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/confirm", () => {
-      const ensureRpcUrl = () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
-      };
-
       it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm",
           mintAddress: null,
@@ -8741,8 +8697,6 @@ describe("Issuance Routes", () => {
       });
 
       it("still returns 200 with the token active when post-deploy bookkeeping fails", async () => {
-        ensureRpcUrl();
-
         // The mint is live on-chain and setTokenDeployed has flipped the token to
         // active; a failure writing the audit/transaction row afterward must not
         // 500, or a retry would hit the `status !== "pending"` guard and 400
@@ -8826,8 +8780,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the confirmed tx did not create the supplied mint", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_unrelated_tx",
           mintAddress: null,
@@ -8900,8 +8852,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the mint authority differs from the server-derived custody address", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_wrong_authority",
           mintAddress: null,
@@ -8973,8 +8923,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns a retryable error (not the wrong-tx 400) when the tx is not yet indexed", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_not_indexed",
           mintAddress: null,
@@ -9039,8 +8987,6 @@ describe("Issuance Routes", () => {
       });
 
       it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_abl",
           mintAddress: null,
@@ -9129,8 +9075,6 @@ describe("Issuance Routes", () => {
       });
 
       it("pins the signing wallet from prepareDeploy so confirmDeploy can't diverge", async () => {
-        ensureRpcUrl();
-
         await seedIssuanceActivityWallet("wallet_custom_pin", TEST_SOLANA_ADDRESSES.wallet2);
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_wallet_pin",
@@ -9244,8 +9188,6 @@ describe("Issuance Routes", () => {
       });
 
       it("returns 400 when the create tx is not confirmed on-chain", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_unconfirmed",
           mintAddress: null,
@@ -9313,8 +9255,6 @@ describe("Issuance Routes", () => {
       // both reach the commit — the atomic pending→deploying claim serializes
       // them, and the loser gets a 409 instead of overwriting the winner's mint.
       it("returns 409 when a concurrent deployment already holds the claim", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_claim_race",
           mintAddress: null,
@@ -9353,8 +9293,6 @@ describe("Issuance Routes", () => {
       });
 
       it("releases the claim after a failed verification so a retry can re-claim", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_release",
           mintAddress: null,
@@ -9407,8 +9345,6 @@ describe("Issuance Routes", () => {
       // authority, so verifying against the stale (freezable) snapshot would
       // wrongly 400. The claim snapshot must win.
       it("verifies and records against the claimed snapshot, not the pre-claim read", async () => {
-        ensureRpcUrl();
-
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_stale_snapshot",
           signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,

@@ -6,6 +6,9 @@ import {
   paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  RECURRING_PAYMENT_PAUSE_REASONS,
+  RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
@@ -941,6 +944,13 @@ const paymentRecurringPaymentSchema = z
       .nullable()
       .openapi({ description: "Solana signature for subscription authorization." }),
     status: paymentRecurringPaymentStatusSchema,
+    pausedReason: z
+      .enum(RECURRING_PAYMENT_PAUSE_REASONS)
+      .nullable()
+      .openapi({
+        description: `Why SDP paused the recurring payment, set exactly while \`status\` is \`paused\`: \`custody_policy_refused\` when the custody provider's policy refused to sign a collection, \`failed_attempts\` when one due period failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Resume clears it.`,
+        example: null,
+      }),
     metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),
     createdBy: z.string().nullable().openapi({ description: "Creator user ID or API key ID." }),
     createdAt: isoDateTimeSchema,
@@ -948,9 +958,43 @@ const paymentRecurringPaymentSchema = z
   })
   .openapi({ description: "SDP-custody outbound recurring payment record." });
 
+const paymentRecurringPaymentTokenApprovalSchema = z
+  .object({
+    status: z.enum(RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES).openapi({
+      description:
+        "`revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.",
+      example: "kept",
+    }),
+    delegate: solanaAddressSchema.openapi({
+      description:
+        "The approval's delegate: the Subscriptions program's authority for this wallet and token.",
+    }),
+    sharedWith: z
+      .array(
+        z.object({
+          id: z
+            .string()
+            .openapi({ description: "SDP recurring payment ID.", example: "prp_example" }),
+          status: paymentRecurringPaymentStatusSchema,
+        })
+      )
+      .openapi({
+        description:
+          "The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.",
+      }),
+  })
+  .openapi({
+    description:
+      "Every recurring payment from one wallet in one token relies on one token approval, to the Subscriptions program's authority for that wallet and token. This says what became of it after the cancel.",
+  });
+
 export const paymentRecurringPaymentResponseSchema = z
   .object({
     recurringPayment: paymentRecurringPaymentSchema,
+    tokenApproval: paymentRecurringPaymentTokenApprovalSchema.optional().openapi({
+      description:
+        "Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.",
+    }),
   })
   .openapi({ description: "Recurring payment response payload." });
 

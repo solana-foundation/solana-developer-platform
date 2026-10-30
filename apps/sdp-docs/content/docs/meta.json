@@ -1,23 +1,17 @@
 {
   "title": "Solana Developer Platform Docs",
   "pages": [
-    "introduction",
-    "developing-with-sdp",
-    "guides",
-    "tokens",
-    "wallet-operations",
-    "payments",
-    "tutorials",
-    "self-hosting",
-    "reference",
+    "index",
+    "---Learn---",
+    "tutorials/index",
+    "developing-with-sdp/index",
+    "---Modules---",
+    "wallet-operations/index",
+    "payments/index",
+    "tokens/index",
+    "---Resources---",
+    "self-hosting/index",
     "reference/api/index",
-    "reference/api/health",
-    "reference/api/wallets",
-    "reference/api/projects",
-    "reference/api/issuance",
-    "reference/api/payments",
-    "reference/api/compliance",
-    "reference/api/counterparties",
-    "reference/api/asset-profiles"
+    "reference/docs-for-ai"
   ]
 }

@@ -36,6 +36,8 @@ import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
 import { activityEventLabel } from "./token-activity";
 import {
@@ -44,7 +46,6 @@ import {
   shortAddress,
   type TokenTab,
   type TokenTabProps,
-  transactionExplorerHref,
 } from "./token-page.shared";
 import { TokenTable } from "./token-table";
 import { FreezeAccountForm, PauseTransfersForm } from "./transfer-operation-forms";
@@ -574,6 +575,7 @@ function OperationRows({
 
 function TokenTransactions({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
+  const cluster = useSolanaCluster();
   const locale = useLocale();
   const [page, setPage] = useState(1);
   const { data, error } = useSWR<TokenTransactionsPage, Error>(
@@ -623,7 +625,7 @@ function TokenTransactions({ tokenId }: { tokenId: string }) {
               <TableCell className={`${PAYMENTS_TABLE_CELL} truncate tabular-nums`}>
                 {transaction.signature ? (
                   <a
-                    href={transactionExplorerHref(transaction.signature)}
+                    href={explorerTxUrl(transaction.signature, cluster)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-primary hover:underline"

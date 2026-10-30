@@ -8,10 +8,10 @@ import type { SpcAuthContext } from "./gateway-auth";
 // Mock the packages whose runtime graph doesn't resolve in the node pool. gateway-auth
 // imports SolanaRpc as a TYPE only, so @sdp/rpc/solana is never loaded here; the
 // isUnauthorizedRpcError (@sdp/rpc) IS used so the 401 classification is exercised end-to-end.
-const { createChannelGatewayRpc } = vi.hoisted(() => ({
+const { createPrivateChannelLocalRpc } = vi.hoisted(() => ({
   // Return a sentinel identifying which token the rpc was built with.
-  createChannelGatewayRpc: vi.fn(
-    (_env: unknown, url: string, opts?: { headers?: Record<string, string> }) => ({
+  createPrivateChannelLocalRpc: vi.fn(
+    (url: string, opts?: { headers?: Record<string, string> }) => ({
       url,
       authorization: opts?.headers?.Authorization,
     })
@@ -19,7 +19,7 @@ const { createChannelGatewayRpc } = vi.hoisted(() => ({
 }));
 vi.mock("@sdp/private-channels/gateway", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/private-channels/gateway")>()),
-  createChannelGatewayRpc,
+  createPrivateChannelLocalRpc,
 }));
 vi.mock("@sdp/private-channels/errors", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/private-channels/errors")>()),
@@ -46,7 +46,7 @@ import { withGatewayRpc, withSpcAuth } from "./gateway-auth";
 const ENV = {} as Env;
 const URL = "https://gw.example";
 
-/** The token sentinel our mocked createChannelGatewayRpc returns in place of a SolanaRpc. */
+/** The token sentinel our mocked createPrivateChannelLocalRpc returns in place of a SolanaRpc. */
 type FakeRpc = { url: string; authorization?: string };
 
 function context(

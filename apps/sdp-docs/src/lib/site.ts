@@ -6,7 +6,7 @@ import {
 } from "@sdp/types/site";
 
 export function normalizeDocsPageSlug(pageSlug: string): string {
-  return pageSlug.replace(/\/index$/, "");
+  return pageSlug.replace(/(^|\/)index$/, "");
 }
 
 /** A `(name)` folder: Fumadocs shows it in the sidebar and leaves it out of its pages' URLs. */

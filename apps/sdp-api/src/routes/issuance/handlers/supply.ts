@@ -1,4 +1,5 @@
-import { getSolanaConfig } from "@sdp/rpc/config";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { assertValidAddress } from "@sdp/solana/address";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
@@ -11,46 +12,17 @@ import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-interface TokenSupplyRpcResponse {
-  result?: {
-    value?: {
-      amount?: string;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
-async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): Promise<string> {
-  const rpcResponse = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTokenSupply",
-      params: [mintAddress, { commitment: "confirmed" }],
-    }),
-  });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as TokenSupplyRpcResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  const amount = payload.result?.value?.amount;
-  if (!amount || !/^\d+$/.test(amount)) {
-    throw new Error("RPC returned an invalid token supply");
-  }
-
-  return amount;
+/**
+ * The mint's current supply in base units, read through the scope's cluster pool.
+ *
+ * @param mintAddress - The token's mint.
+ * @returns The confirmed supply as a base-unit integer string.
+ */
+async function fetchTokenSupplyBaseUnits(mintAddress: string): Promise<string> {
+  const { value } = await createClusterRpc()
+    .getTokenSupply(assertValidAddress(mintAddress, "mintAddress"), { commitment: "confirmed" })
+    .send();
+  return value.amount;
 }
 
 export const refreshTokenSupply = async (c: AppContext) => {
@@ -74,8 +46,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
 
   let supplyBaseUnits: string;
   try {
-    const { rpcUrl } = getSolanaConfig(c.env);
-    supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
+    supplyBaseUnits = await fetchTokenSupplyBaseUnits(token.mintAddress);
   } catch (error) {
     rethrowRpcUnavailable(error);
     throw new AppError(

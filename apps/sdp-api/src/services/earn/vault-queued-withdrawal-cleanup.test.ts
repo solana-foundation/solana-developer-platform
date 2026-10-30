@@ -60,8 +60,6 @@ describe("queued withdrawal build cleanup", () => {
   );
 
   it("defers production cleanup rather than judge it by a devnet height", async () => {
-    // How stage and prod are configured without a mainnet pool: a devnet process default.
-    vi.stubEnv("SOLANA_NETWORK", "devnet");
     vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
     const ledger = ledgerWithBuildsIn("production");
 

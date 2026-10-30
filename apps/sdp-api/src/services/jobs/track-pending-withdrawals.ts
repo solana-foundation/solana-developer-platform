@@ -30,8 +30,9 @@
  * memo/withdrawId on the release tx would make it exact.
  */
 
+import { createPrivateChannelLocalRpc } from "@sdp/private-channels/gateway";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
-  createRpc,
   getSignatureStatuses,
   getSignaturesForAddress,
   getTransaction,
@@ -56,6 +57,7 @@ import {
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
+import { createPrivateChannelGatewayTransport } from "@/services/private-channels/egress";
 import { knownMintToken } from "@/services/private-channels/mint";
 import {
   loadProjectRpcClient,
@@ -80,7 +82,10 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const repo = createPrivateChannelWithdrawalRepository(env);
   const instanceRepo = createPrivateChannelInstanceRepository(env);
   const observationRepo = createPrivateChannelSettlementObservationRepository(env);
-  const pending = await repo.listNonTerminal(MAX_PER_RUN);
+  const pending = await repo.listNonTerminal({
+    environment: currentClusterScope().environment,
+    limit: MAX_PER_RUN,
+  });
   if (pending.length === 0) {
     return;
   }
@@ -116,7 +121,10 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createRpc(env, { rpcUrl: instance.gateway_url });
+      rpc = createPrivateChannelLocalRpc(instance.gateway_url, {
+        transportFactory: (headers) =>
+          createPrivateChannelGatewayTransport(env, instance.gateway_url, headers),
+      });
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;

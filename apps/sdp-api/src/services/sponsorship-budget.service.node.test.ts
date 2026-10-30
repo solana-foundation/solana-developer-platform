@@ -145,7 +145,7 @@ function harnessIn(environment: SdpEnvironment, scope: SponsorshipMovementScope)
   const feePayment = runInClusterScope(
     { projectId: scope.projectId, environment },
     () =>
-      new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, parts.provider, {
+      new BudgetedFeePayment({} as Env, scope, parts.provider, {
         repository: parts.repository,
         budgetRedis: parts.budgetRedis,
         priceTransaction: vi.fn().mockResolvedValue({

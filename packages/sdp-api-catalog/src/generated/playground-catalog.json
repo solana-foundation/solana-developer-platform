@@ -7,7 +7,7 @@
       "Wallets": 10,
       "Projects": 4,
       "Issuance": 37,
-      "Payments": 35,
+      "Payments": 36,
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7
@@ -1354,8 +1354,6 @@
         "title": "Retry a transfer batch's failed recipients",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/{batchId}/retry",
-        "releaseModule": "payments",
-        "shadowedBy": [],
         "pathFields": [
           {
             "key": "batchId",
@@ -1480,7 +1478,9 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
       },
       {
         "id": "get-payment-transfer-batch",
@@ -1661,10 +1661,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1779,6 +1790,7 @@
                 "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
                 "authorizationSignature": "example",
                 "status": "active",
+                "pausedReason": null,
                 "metadataUri": "example",
                 "createdBy": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1850,10 +1862,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1907,10 +1930,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1964,10 +1998,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -2021,10 +2066,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -2130,6 +2186,7 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -2281,10 +2338,21 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
+              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {

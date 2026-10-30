@@ -68,6 +68,27 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
   },
 ];
 
+/** Tutorial links shown only when their module is available on this build. */
+export const DOCS_TUTORIALS: readonly {
+  title: string;
+  href: string;
+  description: string;
+  module?: SdpModule;
+}[] = [
+  {
+    title: "Send a payment",
+    href: "/docs/tutorials/end-to-end-payment-flow",
+    description: "Move from wallet setup to settlement and reconciliation.",
+    module: "payments",
+  },
+  {
+    title: "Issue a regulated stablecoin",
+    href: "/docs/tutorials/issue-a-regulated-stablecoin",
+    description: "Follow the token issuance workflow and its controls.",
+    module: "issuance",
+  },
+];
+
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {
   provider: RampProviderId;

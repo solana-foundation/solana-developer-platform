@@ -276,8 +276,19 @@ function buildSections(
     currentSection = { title: "Docs", pages: [] };
   };
 
+  // The full AI corpus keeps the overview even though the sidebar links to it
+  // only from the home page.
+  visit("introduction", "", null);
   for (const entry of meta.pages || []) {
     visit(entry, "", null);
+  }
+
+  // Sidebar navigation is intentionally short. Include every published page
+  // from the folder trees in the AI corpus, even when its folder is unlisted.
+  const rootFolders = [...folderMetas.keys()].filter((folder) => !folder.includes("/"));
+  const navRoots = (meta.pages || []).map((entry) => entry.split("/")[0]).filter(Boolean);
+  for (const folder of new Set([...navRoots, ...rootFolders])) {
+    if (folderMetas.has(folder)) visit(folder, "", null);
   }
 
   flush();

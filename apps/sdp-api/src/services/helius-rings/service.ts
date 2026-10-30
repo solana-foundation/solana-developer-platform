@@ -28,6 +28,7 @@ import type {
   ProjectRing,
   RuntimeHealth,
 } from "@sdp/helius-rings/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { HELIUS_RINGS_OPERATION_TYPES as OP_TYPES } from "@sdp/types/helius-rings";
 import { HELIUS_RINGS_OPERATION_MOVEMENTS } from "@sdp/types/movements";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db/client";
@@ -227,7 +228,7 @@ export class HeliusRingsService {
   ) {
     // The schema's network CHECK is the second half of this guard. Going to
     // mainnet is a deliberate migration, not a config flip.
-    if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
+    if (currentClusterScope().cluster !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
     }
     this.initiatedByKeyId = dependencies.initiatedByKeyId ?? null;

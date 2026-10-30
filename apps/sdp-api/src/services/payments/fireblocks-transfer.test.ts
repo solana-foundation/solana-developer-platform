@@ -99,7 +99,6 @@ async function newRegistration(projectId = PROJECT_ID) {
 
 beforeEach(async () => {
   testEnv.SDP_RELEASE_CHANNEL = "beta";
-  testEnv.SOLANA_NETWORK = "devnet";
   testEnv.CREDENTIAL_SECRET_STORE_BACKEND = "encrypted_db";
   await seedTestDatabase(env);
   await clearKVStores(env);
@@ -701,19 +700,15 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock.mock.calls.filter(([, init]) => init?.method === "GET")).toHaveLength(1);
   });
   it.each([
-    { projectId: `${PROJECT_ID}_production`, defaultNetwork: "devnet", assetId: "SOL" },
-    { projectId: PROJECT_ID, defaultNetwork: "mainnet-beta", assetId: "SOL_TEST" },
-  ] as const)(
-    "uses the project's $assetId despite deployment default $defaultNetwork",
-    async ({ projectId, defaultNetwork, assetId }) => {
-      testEnv.SOLANA_NETWORK = defaultNetwork;
-      const mock = await ready(projectId);
-      const response = await send("project-network", {}, projectId);
-      expect(response.status, await response.clone().text()).toBe(200);
-      expect(createBody.assetId).toBe(assetId);
-      expect(mock).toHaveBeenCalledTimes(1);
-    }
-  );
+    { projectId: `${PROJECT_ID}_production`, assetId: "SOL" },
+    { projectId: PROJECT_ID, assetId: "SOL_TEST" },
+  ] as const)("uses the project's $assetId", async ({ projectId, assetId }) => {
+    const mock = await ready(projectId);
+    const response = await send("project-network", {}, projectId);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(createBody.assetId).toBe(assetId);
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
 
   it("only polls Fireblocks intents in the cron's current environment", async () => {
     const projectId = `${PROJECT_ID}_production`;
