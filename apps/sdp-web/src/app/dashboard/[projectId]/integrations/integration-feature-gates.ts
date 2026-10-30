@@ -1,13 +1,7 @@
-import type { CustodyProviderUseCase } from "@sdp/types/custody";
 import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import type { SdpModule } from "@sdp/types/release-channels";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
-import {
-  isModuleInEnvironmentReleaseChannel,
-  rampProvidersInReleaseChannel,
-} from "@/flags/release-channel";
-import { requestProjectEnvironment } from "@/lib/sdp-api";
+import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
 export type IntegrationFeatureFlags = {
@@ -62,30 +56,6 @@ export function isIntegrationProviderEnabled(
   if (flags.rampProviders.some((offered) => offered === provider)) return true;
   if ((COMPLIANCE_PROVIDERS as readonly string[]).includes(provider)) return flags.compliance;
   return false;
-}
-
-/** The module that delivers each custody use case. Transfers are custody wallets' own. */
-const CUSTODY_USE_CASE_MODULES = {
-  issuance: "issuance",
-  transfers: "custody",
-  compliance: "compliance",
-} as const satisfies Record<CustodyProviderUseCase, SdpModule>;
-
-/**
- * A custody provider's use cases the release channel runs for the request's Project
- * environment, so its Capabilities never advertise a module the API refuses (Issuance on
- * `stable`).
- *
- * @param useCases - The provider's use cases.
- * @returns The use cases whose module the channel runs, in their given order.
- */
-export async function custodyUseCasesInProjectReleaseChannel(
-  useCases: readonly CustodyProviderUseCase[]
-): Promise<CustodyProviderUseCase[]> {
-  const environment = await requestProjectEnvironment();
-  return useCases.filter((useCase) =>
-    isModuleInEnvironmentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase], environment)
-  );
 }
 
 /** What the catalog will render, so its loading placeholder reserves exactly that. */
