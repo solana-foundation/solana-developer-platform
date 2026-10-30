@@ -74,11 +74,19 @@ function post(body: unknown, authorization = `Bearer ${adminToken}`) {
   );
 }
 
+/** The organization's request columns, or null while it has not asked. */
 async function storedRow() {
-  return getDb(env)
-    .prepare("SELECT * FROM organization_mainnet_access WHERE organization_id = ?")
+  const row = await getDb(env)
+    .prepare(
+      `SELECT jurisdiction_country_code AS country_code, terms_accepted_version AS terms_version,
+              terms_accepted_at, terms_accepted_by_user_id, mainnet_requested_at AS requested_at,
+              mainnet_requested_by_user_id AS requested_by_user_id,
+              mainnet_request_notified_at AS notified_at
+       FROM organizations WHERE id = ?`
+    )
     .bind(ORGANIZATION_ID)
     .first<Record<string, string | null>>();
+  return row?.requested_at ? row : null;
 }
 
 function sentEmails(): Array<{ headers: Record<string, string>; body: Record<string, unknown> }> {
@@ -218,6 +226,15 @@ describe("Organization mainnet access (HOO-2427)", () => {
     const emails = sentEmails();
     expect(emails).toHaveLength(2);
     expect(emails[0]?.headers["idempotency-key"]).toBe(emails[1]?.headers["idempotency-key"]);
+  });
+
+  it("rejects a half-written request at the database", async () => {
+    await expect(
+      getDb(env)
+        .prepare("UPDATE organizations SET mainnet_requested_at = sdp_iso_now() WHERE id = ?")
+        .bind(ORGANIZATION_ID)
+        .run()
+    ).rejects.toThrow(/organizations_mainnet_request_whole/);
   });
 
   it("refuses before recording anything when the deployment has no alias", async () => {

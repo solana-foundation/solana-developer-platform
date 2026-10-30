@@ -3,6 +3,9 @@
  * jurisdiction and accepts the SDP Terms and Conditions in the same submit; SDP records both and
  * emails its alias. Approval is not here: an operator sets `enableProductionProject` in Clerk, the
  * webhook syncs it into the organization's settings, and `state` reads `approved` from that alone.
+ *
+ * The jurisdiction, the acceptance and the request are the organization's own facts, so they are
+ * columns on its row (migration 0192); a request exists once `mainnet_requested_at` is set.
  */
 import { COUNTRIES, type CountryCode } from "@sdp/types/countries";
 import { type MainnetAccess, type MainnetAccessState, SDP_TERMS } from "@sdp/types/mainnet-access";
@@ -26,8 +29,52 @@ export interface MainnetAccessRow {
   notified_at: string | null;
 }
 
-const MAINNET_ACCESS_COLUMNS = `organization_id, country_code, terms_version, terms_accepted_at,
-  terms_accepted_by_user_id, requested_at, requested_by_user_id, notified_at`;
+/** The organization's columns under the names the rest of this module reads. */
+const MAINNET_ACCESS_COLUMNS = `id AS organization_id, jurisdiction_country_code AS country_code,
+  terms_accepted_version AS terms_version, terms_accepted_at, terms_accepted_by_user_id,
+  mainnet_requested_at AS requested_at, mainnet_requested_by_user_id AS requested_by_user_id,
+  mainnet_request_notified_at AS notified_at`;
+
+type MainnetAccessColumns = {
+  [Column in keyof MainnetAccessRow]: MainnetAccessRow[Column] | null;
+} & { organization_id: string };
+
+/** The organization's request, or null when it has not asked (the migration keeps them whole). */
+function requestOf(columns: MainnetAccessColumns | null): MainnetAccessRow | null {
+  if (
+    !columns?.requested_at ||
+    !columns.requested_by_user_id ||
+    !columns.country_code ||
+    !columns.terms_version ||
+    !columns.terms_accepted_at ||
+    !columns.terms_accepted_by_user_id
+  ) {
+    return null;
+  }
+  return {
+    organization_id: columns.organization_id,
+    country_code: columns.country_code,
+    terms_version: columns.terms_version,
+    terms_accepted_at: columns.terms_accepted_at,
+    terms_accepted_by_user_id: columns.terms_accepted_by_user_id,
+    requested_at: columns.requested_at,
+    requested_by_user_id: columns.requested_by_user_id,
+    notified_at: columns.notified_at,
+  };
+}
+
+async function readColumns(
+  db: DatabaseExecutor,
+  organizationId: string,
+  forUpdate = false
+): Promise<MainnetAccessColumns | null> {
+  return db
+    .prepare(
+      `SELECT ${MAINNET_ACCESS_COLUMNS} FROM organizations WHERE id = ?${forUpdate ? " FOR UPDATE" : ""}`
+    )
+    .bind(organizationId)
+    .first<MainnetAccessColumns>();
+}
 
 export function countryName(code: string): string {
   return COUNTRIES.find((country) => country.code === code)?.name ?? code;
@@ -37,16 +84,11 @@ function isCountryCode(code: string): code is CountryCode {
   return COUNTRIES.some((country) => country.code === code);
 }
 
-export function readMainnetAccessRow(
+export async function readMainnetAccessRow(
   db: DatabaseExecutor,
   organizationId: string
 ): Promise<MainnetAccessRow | null> {
-  return db
-    .prepare(
-      `SELECT ${MAINNET_ACCESS_COLUMNS} FROM organization_mainnet_access WHERE organization_id = ?`
-    )
-    .bind(organizationId)
-    .first<MainnetAccessRow>();
+  return requestOf(await readColumns(db, organizationId));
 }
 
 function mainnetAccessState(row: MainnetAccessRow | null, entitled: boolean): MainnetAccessState {
@@ -104,32 +146,29 @@ export async function recordMainnetAccessRequest(
       currentTermsVersion: SDP_TERMS.version,
     });
   }
-  const inserted = await tx
+  // One statement claims the request, so two admins submitting at once record one of them.
+  const recorded = await tx
     .prepare(
-      `INSERT INTO organization_mainnet_access (
-         organization_id, country_code, terms_version, terms_accepted_at,
-         terms_accepted_by_user_id, requested_at, requested_by_user_id
-       ) VALUES (?, ?, ?, sdp_iso_now(), ?, sdp_iso_now(), ?)
-       ON CONFLICT (organization_id) DO NOTHING
+      `UPDATE organizations
+       SET jurisdiction_country_code = ?, terms_accepted_version = ?,
+           terms_accepted_at = sdp_iso_now(), terms_accepted_by_user_id = ?,
+           mainnet_requested_at = sdp_iso_now(), mainnet_requested_by_user_id = ?,
+           updated_at = sdp_datetime_now()
+       WHERE id = ? AND mainnet_requested_at IS NULL
        RETURNING ${MAINNET_ACCESS_COLUMNS}`
     )
     .bind(
-      submission.organizationId,
       submission.countryCode,
       submission.termsVersion,
       submission.userId,
-      submission.userId
+      submission.userId,
+      submission.organizationId
     )
-    .first<MainnetAccessRow>();
-  if (inserted) return { row: inserted, created: true };
+    .first<MainnetAccessColumns>();
+  const created = requestOf(recorded);
+  if (created) return { row: created, created: true };
 
-  const existing = await tx
-    .prepare(
-      `SELECT ${MAINNET_ACCESS_COLUMNS} FROM organization_mainnet_access
-       WHERE organization_id = ? FOR UPDATE`
-    )
-    .bind(submission.organizationId)
-    .first<MainnetAccessRow>();
+  const existing = requestOf(await readColumns(tx, submission.organizationId, true));
   if (!existing || existing.notified_at !== null) {
     throw conflict("This organization already requested mainnet access");
   }
@@ -173,14 +212,14 @@ export async function notifyMainnetAccessRequest(
 
   const updated = await db
     .prepare(
-      `UPDATE organization_mainnet_access
-       SET notified_at = COALESCE(notified_at, sdp_iso_now()), updated_at = sdp_iso_now()
-       WHERE organization_id = ?
+      `UPDATE organizations
+       SET mainnet_request_notified_at = COALESCE(mainnet_request_notified_at, sdp_iso_now())
+       WHERE id = ? AND mainnet_requested_at = ?
        RETURNING ${MAINNET_ACCESS_COLUMNS}`
     )
-    .bind(row.organization_id)
-    .first<MainnetAccessRow>();
-  return updated ?? row;
+    .bind(row.organization_id, row.requested_at)
+    .first<MainnetAccessColumns>();
+  return requestOf(updated) ?? row;
 }
 
 export interface MainnetAccessCorrection {
@@ -211,31 +250,35 @@ export async function correctMainnetAccess(
     throw new Error("set-country requires a country code");
   }
   return createSystemAuditService(env).logSystemWithin(async (db) => {
-    const before = await db
-      .prepare(
-        `SELECT ${MAINNET_ACCESS_COLUMNS} FROM organization_mainnet_access
-         WHERE organization_id = ? FOR UPDATE`
-      )
-      .bind(input.organizationId)
-      .first<MainnetAccessRow>();
+    const before = requestOf(await readColumns(db, input.organizationId, true));
     if (!before) throw new Error("This organization has not requested mainnet access");
 
-    let after: MainnetAccessRow | null = null;
+    const after =
+      input.operation === "reset"
+        ? null
+        : requestOf(
+            await db
+              .prepare(
+                `UPDATE organizations
+                 SET jurisdiction_country_code = ?, updated_at = sdp_datetime_now()
+                 WHERE id = ?
+                 RETURNING ${MAINNET_ACCESS_COLUMNS}`
+              )
+              .bind(input.countryCode, input.organizationId)
+              .first<MainnetAccessColumns>()
+          );
     if (input.operation === "reset") {
       await db
-        .prepare("DELETE FROM organization_mainnet_access WHERE organization_id = ?")
+        .prepare(
+          `UPDATE organizations
+           SET jurisdiction_country_code = NULL, terms_accepted_version = NULL,
+               terms_accepted_at = NULL, terms_accepted_by_user_id = NULL,
+               mainnet_requested_at = NULL, mainnet_requested_by_user_id = NULL,
+               mainnet_request_notified_at = NULL, updated_at = sdp_datetime_now()
+           WHERE id = ?`
+        )
         .bind(input.organizationId)
         .run();
-    } else {
-      after = await db
-        .prepare(
-          `UPDATE organization_mainnet_access
-           SET country_code = ?, updated_at = sdp_iso_now()
-           WHERE organization_id = ?
-           RETURNING ${MAINNET_ACCESS_COLUMNS}`
-        )
-        .bind(input.countryCode, input.organizationId)
-        .first<MainnetAccessRow>();
     }
     return {
       result: after,
