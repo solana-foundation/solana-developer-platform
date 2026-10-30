@@ -948,6 +948,7 @@ export async function resumeRecurringPayment(input: {
       recurringPaymentId: recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      expectedUpdatedAt: recurringPayment.updated_at,
       currentCollectionDueAt: currentDueAt,
       nextCollectionDueAt: nextDueAt,
       activatedBy,
