@@ -90,6 +90,23 @@ describe("findSolRentShortfall", () => {
     expect(shortfall?.sourceRemainderLamports).toBe(500_000n);
   });
 
+  it("refuses a sweep beside a transaction that only pays the source back", async () => {
+    // The self-payment still needs 0.0005 SOL in the source, which is empty if it lands last.
+    const shortfall = await find(
+      {
+        source: SOURCE,
+        payments: [
+          { index: 0, destination: OTHER, lamports: 1_000_000n },
+          { index: 1, destination: SOURCE, lamports: 500_000n },
+          { index: 2, destination: OTHER, lamports: 9_000_000n },
+        ],
+        transactions: [[0], [1], [2]],
+      },
+      10_000_000n
+    );
+    expect(shortfall?.sourceRemainderLamports).toBe(0n);
+  });
+
   it("allows a sweep in one transaction", async () => {
     await expect(
       find(

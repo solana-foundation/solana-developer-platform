@@ -62,7 +62,8 @@ function cancelState(row: PaymentRequestRow): "canceled" | "open" {
  * @param row - The request as read in the caller's Project; the compare-and-set decides.
  * @returns The canceled request.
  * @throws AppError `CONFLICT` when it is paid or expired, or a sponsored transaction can land.
- * @throws AppError `SOLANA_RPC_ERROR` when the row holds a claim and the cluster cannot be read.
+ * @throws RpcUnavailableError (503) when the row holds a claim and the cluster cannot be read, or
+ *   AppError `SOLANA_RPC_ERROR` when it answers with a persistent error.
  */
 export async function cancelOpenPaymentRequest(
   c: Context<{ Bindings: Env }>,

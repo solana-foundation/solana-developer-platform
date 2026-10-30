@@ -17,19 +17,24 @@ import {
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
+import { RpcUnavailableError } from "./errors";
 import {
+  assertManagedRpcConfigured,
   createClusterHistoryRpc,
   createClusterRpc,
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
+  POOL_WALK_TIMEOUT_MS,
   proveEarnClusterEndpoint,
 } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import { type RpcTelemetryEvent, setRpcTelemetrySink } from "./telemetry";
+import { fetchFailedError } from "./test-fixtures";
 import type { ManagedRpcEnv } from "./types";
 
 type Answer =
@@ -155,10 +160,10 @@ function stubEndpoints(endpoints: Readonly<Record<string, Endpoint>>): RpcCall[]
     calls.push({ url: request.url, method: request.method });
     const endpoint = endpoints[request.url];
     if (request.method === "getGenesisHash") {
-      if (endpoint.genesis.kind === "fetchFailed") throw new TypeError("fetch failed");
+      if (endpoint.genesis.kind === "fetchFailed") throw fetchFailedError();
       return respond(request.id, { result: endpoint.genesis.genesisHash });
     }
-    if (endpoint.answer.kind === "fetchFailed") throw new TypeError("fetch failed");
+    if (endpoint.answer.kind === "fetchFailed") throw fetchFailedError();
     if (endpoint.answer.kind === "httpStatus") {
       return new Response("Too Many Requests", { status: endpoint.answer.status });
     }
@@ -366,15 +371,16 @@ describe("createClusterRpc", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-only.example.test" });
 
     assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No RPC endpoint is configured for mainnet-beta",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "mainnet-beta" },
+      details: { reason: "not_configured", cluster: "mainnet-beta" },
     });
   });
 
-  it("rejects a cluster mismatch without failing over", async () => {
+  it("fails a cluster mismatch over, cools it down and probes it once per cooldown", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 2_000_000 });
     const wrongCluster = "https://devnet-mismatch-a.example.test";
     const healthy = "https://devnet-mismatch-b.example.test";
     configurePool({
@@ -382,15 +388,172 @@ describe("createClusterRpc", () => {
       SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
     });
     const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: SERVES_DEVNET });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
 
-    await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), {
-      name: "SdpRpcError",
-      message: "An RPC endpoint configured for devnet serves a different cluster",
-      code: "RPC_CLUSTER_MISMATCH",
-      statusCode: 500,
-      details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+    for (let request = 0; request < 3; request += 1) {
+      assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    }
+    assert.deepEqual(calls, [
+      genesisProbe(wrongCluster),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+    ]);
+
+    const outage = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: DEVNET_FETCH_FAILS });
+    await assert.rejects(rpc.getSlot().send(), { name: "RpcUnavailableError" });
+    assert.deepEqual(outage, [slotRead(healthy)]);
+
+    mock.timers.tick(30_000);
+    const afterCooldown = stubEndpoints({
+      [wrongCluster]: SERVES_MAINNET,
+      [healthy]: SERVES_DEVNET,
     });
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.deepEqual(afterCooldown, [
+      genesisProbe(wrongCluster),
+      genesisProbe(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("surfaces a cluster mismatch on the last endpoint as cluster_mismatch", async () => {
+    const wrongCluster = "https://devnet-mismatch-only.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: wrongCluster });
+    const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    for (let request = 0; request < 2; request += 1) {
+      await assert.rejects(rpc.getSlot().send(), {
+        name: "RpcUnavailableError",
+        message: "An RPC endpoint configured for devnet serves a different cluster",
+        code: "RPC_UNAVAILABLE",
+        statusCode: 503,
+        details: {
+          reason: "cluster_mismatch",
+          cluster: "devnet",
+          genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+        },
+      });
+    }
     assert.deepEqual(calls, [genesisProbe(wrongCluster)]);
+  });
+
+  it("fails over a provider that refuses its key and skips it while it cools down", async () => {
+    const unauthorized = "https://devnet-unauthorized.example.test";
+    const healthy = "https://devnet-authorized.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: unauthorized,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({
+      [unauthorized]: devnetHttpStatus(401),
+      [healthy]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+
+    assert.deepEqual(calls, [
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("calls a provider that refused its key once per cooldown, even with no other endpoint", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 3_000_000 });
+    const unauthorized = "https://devnet-unauthorized-only.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: unauthorized });
+    const calls = stubEndpoints({ [unauthorized]: devnetHttpStatus(401) });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    for (let request = 0; request < 3; request += 1) {
+      await assert.rejects(rpc.getSlot().send(), (error: unknown) => {
+        assert.ok(error instanceof RpcUnavailableError);
+        assert.deepEqual(error.details, { reason: "not_configured", cluster: "devnet" });
+        assert.ok(isSolanaError(error.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR));
+        assert.equal(error.cause.context.statusCode, 401);
+        return true;
+      });
+    }
+    assert.deepEqual(calls, [genesisProbe(unauthorized), slotRead(unauthorized)]);
+
+    mock.timers.tick(30_000);
+    await assert.rejects(rpc.getSlot().send());
+    assert.deepEqual(calls, [
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
+    ]);
+  });
+
+  it("answers upstream_unavailable when the last endpoint refused its key after an outage", async () => {
+    const down = "https://devnet-refusal-after-outage-down.example.test";
+    const unauthorized = "https://devnet-refusal-after-outage-401.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: down,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: unauthorized,
+    });
+    stubEndpoints({ [down]: devnetHttpStatus(503), [unauthorized]: devnetHttpStatus(401) });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    await assert.rejects(rpc.getSlot().send(), {
+      name: "RpcUnavailableError",
+      details: { reason: "upstream_unavailable", cluster: "devnet" },
+    });
+  });
+
+  it("fails a read over on -32603 without cooling the endpoint down, and returns a send's as-is", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 4_000_000 });
+    const failing = "https://devnet-internal-error-preferred.example.test";
+    const healthy = "https://devnet-internal-error-fallback.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: failing,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({
+      [failing]: devnetJsonRpcError(SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR),
+      [healthy]: SERVES_DEVNET,
+    });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    assert.equal(await rpc.getSlot().send(), BigInt(SLOT));
+    await assert.rejects(
+      rpc.sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send(),
+      (error) => isSolanaError(error, SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR)
+    );
+    assert.deepEqual(calls, [
+      genesisProbe(failing),
+      slotRead(failing),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      { url: failing, method: "sendTransaction" },
+    ]);
+  });
+
+  it("fails sendTransaction over when the provider refuses its key with 403", async () => {
+    const forbidden = "https://devnet-forbidden.example.test";
+    const healthy = "https://devnet-send-authorized.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: forbidden,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({ [forbidden]: devnetHttpStatus(403), [healthy]: SERVES_DEVNET });
+
+    await runInClusterScope(SANDBOX, () =>
+      createClusterRpc().sendTransaction(WIRE_TRANSACTION, { encoding: "base64" }).send()
+    );
+
+    assert.deepEqual(
+      calls.filter((call) => call.method === "sendTransaction").map((call) => call.url),
+      [forbidden, healthy]
+    );
   });
 
   it("proves an endpoint URL configured for both clusters separately per cluster", async () => {
@@ -403,11 +566,15 @@ describe("createClusterRpc", () => {
 
     assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
     await assert.rejects(runInClusterScope(PRODUCTION, createClusterRpc).getSlot().send(), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "An RPC endpoint configured for mainnet-beta serves a different cluster",
-      code: "RPC_CLUSTER_MISMATCH",
-      statusCode: 500,
-      details: { cluster: "mainnet-beta", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
+      code: "RPC_UNAVAILABLE",
+      statusCode: 503,
+      details: {
+        reason: "cluster_mismatch",
+        cluster: "mainnet-beta",
+        genesisHash: GENESIS_HASH_BY_CLUSTER.devnet,
+      },
     });
     assert.deepEqual(calls, [genesisProbe(url), slotRead(url), genesisProbe(url)]);
   });
@@ -857,6 +1024,88 @@ describe("createClusterRpc", () => {
   });
 });
 
+describe("managed endpoint URL validation", () => {
+  beforeEach(isolateRpcEnv);
+
+  afterEach(restoreRpcEnv);
+
+  const VALID_URLS: ManagedRpcEnv = {
+    SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://sdp-1.devnet.rpcpool.com/secret",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet.helius-rpc.com/?api-key=secret",
+    SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: "https://solana-devnet.g.alchemy.com/v2/secret",
+    SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL: "https://sdp.solana-devnet.quiknode.pro/secret/",
+    SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL:
+      "https://devnet.solana.validationcloud.io/v1/secret",
+    SOLANA_RPC_NODIT_DEVNET_API_KEY_URL: "https://solana-devnet.nodit.io/secret",
+    SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "https://rpc.self-hosted.example.com",
+    SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://sdp-1.mainnet.rpcpool.com/secret",
+    SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet.helius-rpc.com/?api-key=secret",
+    SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL: "https://solana-mainnet.g.alchemy.com/v2/secret",
+    SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL: "https://sdp.solana-mainnet.quiknode.pro/secret/",
+    SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL:
+      "https://mainnet.solana.validationcloud.io/v1/secret",
+    SOLANA_RPC_NODIT_MAINNET_API_KEY_URL: "https://solana-mainnet.nodit.io/secret",
+    SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://api.mainnet-beta.solana.com",
+  };
+
+  it("loads every provider's own host on each cluster", () => {
+    configurePool(VALID_URLS);
+
+    assert.doesNotThrow(assertManagedRpcConfigured);
+  });
+
+  const INVALID_URLS: ReadonlyArray<[keyof ManagedRpcEnv, string]> = [
+    ["SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL", "https://devnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://sdp-1.devnet.rpcpool.com/secret"],
+    ["SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://a.b.mainnet.rpcpool.com/secret"],
+    ["SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL", "https://solana-mainnet.quiknode.pro/secret"],
+    ["SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL", "https://mainnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_NODIT_MAINNET_API_KEY_URL", "http://solana-mainnet.nodit.io/secret"],
+    ["SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "https://api.devnet.solana.com/?secret"],
+    ["SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "https://devnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "http://rpc.self-hosted.example.com/secret"],
+    ["SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "secret"],
+  ];
+
+  for (const [envKey, endpointUrl] of INVALID_URLS) {
+    it(`refuses ${endpointUrl.split("/")[2] ?? "a non-URL"} in ${envKey} without quoting it`, () => {
+      configurePool({ ...VALID_URLS, [envKey]: endpointUrl });
+
+      assert.throws(assertManagedRpcConfigured, (error: unknown) => {
+        assert.ok(error instanceof RpcUnavailableError);
+        assert.equal(error.code, "RPC_UNAVAILABLE");
+        assert.equal(error.reason, "not_configured");
+        assert.equal(error.details?.envKey, envKey);
+        assert.ok(error.message.startsWith(`${envKey} `));
+        assert.doesNotMatch(JSON.stringify([error.message, error.details]), /secret/);
+        return true;
+      });
+    });
+  }
+
+  it("refuses a misconfigured slot before sending any request", async () => {
+    configurePool({
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://devnet.helius-rpc.com/?api-key=secret",
+    });
+    const calls = stubEndpoints({});
+
+    assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
+      code: "RPC_UNAVAILABLE",
+      reason: "not_configured",
+    });
+    assert.deepEqual(calls, []);
+  });
+
+  it("accepts loopback http and reserved test hosts in any slot", () => {
+    configurePool({
+      SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "http://127.0.0.1:8899",
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet.example.test",
+    });
+
+    assert.doesNotThrow(assertManagedRpcConfigured);
+  });
+});
+
 describe("createClusterRpc with a deadline", () => {
   beforeEach(isolateRpcEnv);
 
@@ -929,6 +1178,50 @@ describe("createClusterRpc with a deadline", () => {
       events.map((event) => event.outcome),
       ["aborted"]
     );
+  });
+
+  it("bounds a whole walk across hanging endpoints by one deadline", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const first = "https://devnet-walk-hang-a.example.test";
+    const second = "https://devnet-walk-hang-b.example.test";
+    const third = "https://devnet-walk-hang-c.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: first,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: second,
+      SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: third,
+    });
+    const calls: RpcCall[] = [];
+    const reads: Array<() => void> = [];
+    globalThis.fetch = async (input, init) => {
+      const request = readRequest(input, init);
+      calls.push({ url: request.url, method: request.method });
+      if (request.method === "getGenesisHash") {
+        return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+      }
+      const { signal } = request;
+      assert.ok(signal instanceof AbortSignal);
+      for (const markStarted of reads.splice(0)) markStarted();
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const readStarted = () => new Promise<void>((resolve) => reads.push(resolve));
+
+    let started = readStarted();
+    const slot = runInClusterScope(SANDBOX, createClusterRpc).getSlot().send();
+    await started;
+    started = readStarted();
+    mock.timers.tick(DEFAULT_RPC_REQUEST_TIMEOUT_MS);
+    await started;
+    mock.timers.tick(POOL_WALK_TIMEOUT_MS - DEFAULT_RPC_REQUEST_TIMEOUT_MS);
+
+    await assert.rejects(slot, { name: "RpcTimeoutError" });
+    assert.deepEqual(calls, [
+      genesisProbe(first),
+      slotRead(first),
+      genesisProbe(second),
+      slotRead(second),
+    ]);
   });
 });
 
@@ -1031,12 +1324,13 @@ describe("Earn's URL helpers", () => {
     await runInClusterScope(SANDBOX, async () => {
       await assert.rejects(
         proveEarnClusterEndpoint("devnet", "https://devnet-earn-stranger.example.test"),
-        { name: "SdpRpcError", code: "RPC_NOT_CONFIGURED" }
+        { name: "RpcUnavailableError", code: "RPC_UNAVAILABLE" }
       );
       assert.deepEqual(calls, []);
       await assert.rejects(proveEarnClusterEndpoint("devnet", pooled), {
-        name: "SdpRpcError",
-        code: "RPC_CLUSTER_MISMATCH",
+        name: "RpcUnavailableError",
+        code: "RPC_UNAVAILABLE",
+        reason: "cluster_mismatch",
       });
     });
     assert.deepEqual(calls, [genesisProbe(pooled)]);
@@ -1169,18 +1463,18 @@ describe("createKoraUpstreamRpc", () => {
     configureKoraUpstreams({ KORA_DEVNET_RPC_URL: "  " });
 
     assert.throws(() => runInClusterScope(SANDBOX, createKoraUpstreamRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No Kora upstream RPC is configured for devnet: set KORA_DEVNET_RPC_URL",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "devnet" },
+      details: { reason: "not_configured", cluster: "devnet" },
     });
     assert.throws(() => runInClusterScope(PRODUCTION, createKoraUpstreamRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No Kora upstream RPC is configured for mainnet-beta: set KORA_MAINNET_RPC_URL",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "mainnet-beta" },
+      details: { reason: "not_configured", cluster: "mainnet-beta" },
     });
   });
 

@@ -156,8 +156,9 @@ describe("resolveVaultDirectClient", () => {
         })
       )
     ).rejects.toThrow(/reports genesis/);
-    // Only genesis probes went out: no SDK read reached the mismatched endpoint.
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // One genesis probe went out, its mismatch cached for the cooldown: no SDK read reached the
+    // mismatched endpoint.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("refuses provider work when the cluster has no managed pool", async () => {

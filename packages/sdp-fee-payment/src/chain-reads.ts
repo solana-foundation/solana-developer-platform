@@ -30,7 +30,7 @@ import type { Signature, Slot } from "@solana/kit";
  *
  * @param transaction - The wire transaction to price.
  * @returns The fee in lamports and the last valid block height bound.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
+ * @throws RpcUnavailableError `not_configured` when the scope's cluster has no Kora upstream.
  * @throws SdpRpcError `SOLANA_RPC_ERROR` when the upstream cannot price the message.
  */
 export async function priceSponsoredTransaction(
@@ -48,7 +48,7 @@ export async function priceSponsoredTransaction(
  *
  * @param signature - The transaction signature.
  * @returns The parsed transaction, or null when the upstream has not finalized it.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
+ * @throws RpcUnavailableError `not_configured` when the scope's cluster has no Kora upstream.
  */
 export function getSponsoredTransaction(signature: Signature): Promise<ParsedTransaction | null> {
   return getTransaction(createKoraUpstreamRpc(), signature, "finalized");
@@ -60,7 +60,7 @@ export function getSponsoredTransaction(signature: Signature): Promise<ParsedTra
  * descends from a block that can no longer include it, so the transaction can never land.
  *
  * @returns The finalized bank's block height and absolute slot.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
+ * @throws RpcUnavailableError `not_configured` when the scope's cluster has no Kora upstream.
  */
 export function sponsoredFinalizedHeight(): Promise<{ blockHeight: bigint; absoluteSlot: Slot }> {
   return getChainHeight(createKoraUpstreamRpc(), "finalized");
@@ -75,7 +75,7 @@ export function sponsoredFinalizedHeight(): Promise<{ blockHeight: bigint; absol
  * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
  * instead of answering, so a lagging node cannot report a landed transaction as absent.
  * @returns The signature's status, or null when the upstream has no record of it.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
+ * @throws RpcUnavailableError `not_configured` when the scope's cluster has no Kora upstream.
  */
 export async function getSponsoredSignatureStatus(
   signature: Signature,

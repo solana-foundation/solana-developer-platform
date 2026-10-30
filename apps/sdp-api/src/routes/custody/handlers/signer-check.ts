@@ -96,7 +96,7 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // sponsorship — the transaction below is verified locally and in RPC
     // simulation, and is never broadcast.
     const [signer, feePayer] = await Promise.all([
-      createOrgSignerForCustodyWallet(
+      createOrgSignerForCustodyWallet<"custody">(
         c.env,
         auth.organizationId,
         projectId,

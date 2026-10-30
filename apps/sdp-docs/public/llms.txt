@@ -18,6 +18,16 @@
 - Compliance screening
 - Asset profiles and public token metadata
 
+## Public endpoint families
+- Health: https://api.solana.com/health
+- Wallets: https://api.solana.com/v1/wallets
+- Projects: https://api.solana.com/v1/projects
+- Issuance: https://api.solana.com/v1/issuance
+- Payments: https://api.solana.com/v1/payments
+- Compliance: https://api.solana.com/v1/compliance
+- Counterparties: https://api.solana.com/v1/counterparties
+- Asset Profiles: https://api.solana.com/v1/issuance
+
 ## Start here
 - [What is SDP?](https://platform.solana.com/docs/introduction): One API in front of interchangeable providers for building on Solana.
 - [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Set up your SDP organization and see how projects scope work within it.

@@ -7,8 +7,8 @@ import { InfoHint } from "@sdp/ui/info-hint";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { StatusText } from "@sdp/ui/status-text";
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Sparkles, X } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ChevronDown, Copy, Loader2, Play, Sparkles, X } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundExecution,
@@ -50,19 +50,6 @@ const PHONE_CHIP_CLASS = "refresh:px-2 refresh:py-1 refresh:text-body";
 // like the deck's other controls.
 const FIELD_CLASS =
   "h-9 w-full border-0 border-b border-border-default bg-transparent pr-8 pl-0.5 text-body tracking-[-0.01em] text-primary outline-none transition-colors placeholder:text-tertiary hover:border-border-strong focus:border-border-strong";
-
-function subscribeToNothing() {
-  return () => {};
-}
-
-/** Whether the viewer's keyboard names the run shortcut ⌘ rather than Ctrl. */
-function useApplePlatform(): boolean {
-  return useSyncExternalStore(
-    subscribeToNothing,
-    () => /Mac|iPhone|iPad/.test(navigator.platform),
-    () => true
-  );
-}
 
 function endpointGroups(endpoints: ApiPlaygroundEndpointConfig[]) {
   const groups = new Map<string, ApiPlaygroundEndpointConfig[]>();
@@ -201,23 +188,6 @@ function PlaygroundField({
       {control}
       {field.description ? <p className="text-meta text-tertiary">{field.description}</p> : null}
     </div>
-  );
-}
-
-function RunShortcut() {
-  const apple = useApplePlatform();
-  const keys = apple ? ["⌘", "↵"] : ["Ctrl", "↵"];
-  return (
-    <span aria-hidden="true" className="ml-2.5 flex items-center gap-1 max-sm:hidden">
-      {keys.map((key) => (
-        <kbd
-          key={key}
-          className="flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-on-primary/30 px-1 font-sans text-meta text-on-primary/80"
-        >
-          {key}
-        </kbd>
-      ))}
-    </span>
   );
 }
 
@@ -460,7 +430,7 @@ function ResponseHeaders({
   return <PlainCode content={entries.map(([name, value]) => `${name}: ${value}`).join("\n")} />;
 }
 
-/** The endpoint picker and Run, on one 60px line. */
+/** A compact endpoint picker with the primary request action beside it. */
 function EndpointLine({
   endpoints,
   activeEndpoint,
@@ -474,21 +444,18 @@ function EndpointLine({
 > & { runDisabled: boolean }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-      {/* 60px tall: two lines of 18/24 and 13/16 inside 9px and the rule. */}
-      <div className="relative flex min-w-0 items-center gap-3 rounded-control border border-border-default px-3 py-[9px] transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
-        <span className="min-w-9 shrink-0 font-mono text-meta text-tertiary">
-          {activeEndpoint.method}
-        </span>
+    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="relative flex min-h-12 min-w-0 items-center gap-3 rounded-control border border-border-default px-3 transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
+        <span className="shrink-0 font-mono text-meta text-secondary">{activeEndpoint.method}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-subheading text-primary">
+          <span className="block truncate text-body font-medium text-primary">
             {activeEndpoint.title}
           </span>
-          <span className="block truncate font-mono text-meta text-secondary">
+          <span className="block truncate font-mono text-meta text-tertiary">
             {activeEndpoint.path.split("?", 1)[0]}
           </span>
         </span>
-        <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
         <select
           aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
           className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
@@ -498,37 +465,22 @@ function EndpointLine({
           <ApiPlaygroundEndpointOptions endpoints={endpoints} />
         </select>
       </div>
-      {/* The design's Run sits a pixel inside the picker's rule, top and bottom; on a phone it is
-          a 36px full-width button under the picker, without the shortcut. */}
       <Button
         type="button"
         onClick={onRun}
         disabled={runDisabled}
         aria-keyshortcuts="Meta+Enter Control+Enter"
-        className="!h-9 !gap-0 self-center rounded-control !px-5 sm:!h-[3.625rem]"
+        className="!h-11 self-center rounded-control !px-4 text-body font-medium max-sm:w-full"
+        iconLeft={
+          execution.state === "running" ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <Play className="size-4" aria-hidden="true" />
+          )
+        }
       >
-        <span className="flex items-center whitespace-nowrap">
-          <span className="flex items-center gap-1.5">
-            {execution.state === "running" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Play className="size-4" aria-hidden="true" />
-            )}
-            {t("Shared.SharedComponents.runRequest")}
-          </span>
-          <RunShortcut />
-        </span>
+        {t("Shared.SharedComponents.run")}
       </Button>
-    </div>
-  );
-}
-
-/** The host the call goes to, on one quiet line under the endpoint. */
-function HostLine({ apiHost }: { apiHost: string | null }) {
-  if (!apiHost) return null;
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
-      <span className="font-mono">{apiHost}</span>
     </div>
   );
 }
@@ -596,8 +548,8 @@ export interface ApiPlaygroundRefreshLayoutProps {
 }
 
 /**
- * The playground as a refresh surface lays it out: the endpoint and Run on one line, the host
- * under it, then the request (form, raw HTTP or code) beside the response (body or
+ * The playground as a refresh surface lays out the endpoint and Run on one line, then the
+ * request (form, raw HTTP or code) beside the response (body or
  * headers). ⌘↵ or Ctrl+↵ runs the request from anywhere on the page.
  */
 export function ApiPlaygroundRefreshLayout({
@@ -641,14 +593,9 @@ export function ApiPlaygroundRefreshLayout({
         onRun={onRun}
       />
 
-      <HostLine apiHost={apiHost} />
-
       <PlaygroundMessages messages={messages} />
 
-      {/* The design's rhythm: 28px to the rule, 40px under it to the two 36px section rows (the
-          divider between the halves starts there, not at the rule), 24px to the view tabs. A
-          phone stacks the halves 32px apart, with chips 12px under each heading row. */}
-      <div className="mt-7 grid border-t border-border-default pt-10 lg:grid-cols-2">
+      <div className="mt-6 grid border-t border-border-default pt-8 lg:grid-cols-2">
         <section
           aria-labelledby="api-playground-request"
           className="min-w-0 pb-8 md:pb-10 lg:border-r lg:border-border-default lg:pr-10 lg:pb-0"

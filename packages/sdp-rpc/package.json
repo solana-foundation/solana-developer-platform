@@ -49,6 +49,11 @@
       "import": "./src/telemetry.ts",
       "default": "./src/telemetry.ts"
     },
+    "./transaction-version": {
+      "types": "./src/transaction-version.ts",
+      "import": "./src/transaction-version.ts",
+      "default": "./src/transaction-version.ts"
+    },
     "./solana": {
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",
