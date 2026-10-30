@@ -195,14 +195,14 @@ describe("Clerk authorized party", () => {
       "https://evil.example",
     ],
   ])("refuses a production token with %s", async (_label, claims, azp) => {
-    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => undefined);
+    const logError = vi.spyOn(getLogger(), "error").mockImplementation(() => undefined);
     const env = await envFor("production");
     const token = await signTestClerkClaims(claims, 300);
 
     await expect(verifyClerkJwt(token, env)).rejects.toThrow(
       "Clerk session was not issued to the dashboard"
     );
-    expect(warn).toHaveBeenCalledWith(
+    expect(logError).toHaveBeenCalledWith(
       { event: "sdp_api_clerk_session_azp_refused", azp, clerk_user_id: claims.sub },
       "Clerk session refused: not issued to the dashboard"
     );
