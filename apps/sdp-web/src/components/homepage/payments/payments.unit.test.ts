@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import catalog from "@/../messages/en/homepage.json";
 import { formatNumber } from "@/lib/number-format";
+import catalog from "@/messages/en/homepage.json";
 import { type FakeIntersectionObserver, stubIntersectionObserver } from "@/test/visibility";
 import { createBenchController } from "./bench-controller";
 import { buildFigure } from "./figures/build-figures";

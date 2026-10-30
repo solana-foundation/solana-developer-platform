@@ -32,10 +32,24 @@ describe("watchActive", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { intersectionRatio: 0.1, active: false },
+    { intersectionRatio: 0.4, active: true },
+  ])(
+    "with a 0.35 threshold, a $intersectionRatio ratio reports $active",
+    ({ intersectionRatio, active }) => {
+      stubIntersectionObserver();
+      const onChange = vi.fn();
+      watchActive(document.body, { threshold: 0.35 }, onChange);
+      intersect(true, { intersectionRatio });
+      expect(onChange).toHaveBeenLastCalledWith(active);
+    }
+  );
+
   it("counts the element as on screen without IntersectionObserver", () => {
     vi.stubGlobal("IntersectionObserver", undefined);
     const onChange = vi.fn();
-    watchActive(document.body, {}, onChange)();
+    watchActive(document.body, { rootMargin: "0px" }, onChange)();
     expect(onChange).toHaveBeenCalledWith(true);
   });
 });
