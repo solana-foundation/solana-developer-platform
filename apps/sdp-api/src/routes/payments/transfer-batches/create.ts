@@ -198,11 +198,10 @@ export async function findTransferBatchRecordReplay(
  * The final batch status comes from the locked repository recompute — never
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
- * Replays idempotently by Idempotency-Key + payload fingerprint. A batch that
- * names its payout run (`externalId`) is recorded under the run's key
- * (transferBatchRowKey), so findTransferBatchRecordReplay answers a resend of
- * the run under a new key, and the batch's key index lets one of two
- * concurrent sends of the run win.
+ * Replays idempotently by Idempotency-Key + payload fingerprint. Every batch
+ * is recorded under its payout run's key (transferBatchRunKey), so
+ * findTransferBatchRecordReplay answers a resend of the run under a new key,
+ * and the batch's key index lets one of two concurrent sends of the run win.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
