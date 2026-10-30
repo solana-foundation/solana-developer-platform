@@ -1141,6 +1141,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect((await listLateCheck()).map((row) => row.id)).toEqual([inside.id]);
       });
 
+      it("keeps an older expired request in the watch while a signature is unresolved", async () => {
+        const unresolved = await closedRequest({
+          expires_at: ago(8 * DAY),
+          signature_scan_stuck_signature: "unresolved_signature",
+          signature_scan_stuck_since: ago(8 * DAY),
+        });
+
+        expect((await listLateCheck()).map((row) => row.id)).toEqual([unresolved.id]);
+      });
+
       it("lists canceled requests by when they were canceled, not when they expire", async () => {
         const canceled = {
           status: "canceled",
@@ -1265,6 +1275,16 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(await countStaleLateWatch()).toBe(2);
         expect(await countStaleLateWatch("production")).toBe(0);
       });
+
+      it("counts an old unresolved signature as still watched", async () => {
+        await expiredRequest({
+          expires_at: ago(8 * DAY),
+          signature_scan_stuck_signature: "unresolved_signature",
+          signature_scan_stuck_since: ago(8 * DAY),
+        });
+
+        expect(await countStaleLateWatch()).toBe(1);
+      });
     });
 
     describe("countStaleLapsedPaymentRequests", () => {
@@ -1337,7 +1357,15 @@ describe("PaymentRequestsRepository (postgres)", () => {
       }
 
       function scanAt(position: Partial<SignatureScanPosition>): SignatureScanPosition {
-        return { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...position };
+        return {
+          cursor: null,
+          before: null,
+          progress: null,
+          cycleHadRetry: false,
+          stuckSignature: null,
+          stuckSince: null,
+          ...position,
+        };
       }
 
       it("starts with no scan position", async () => {
@@ -1345,6 +1373,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(created).toMatchObject({
           signature_scan_cursor: null,
           signature_scan_before: null,
+          signature_scan_progress: null,
+          signature_scan_cycle_had_retry: false,
           signature_scan_stuck_signature: null,
           signature_scan_stuck_since: null,
         });
@@ -1359,6 +1389,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
           to: scanAt({
             cursor: "sigA",
             before: "sigB",
+            progress: "sigProgress",
+            cycleHadRetry: true,
             stuckSignature: "sigC",
             stuckSince: PAST,
           }),
@@ -1368,6 +1400,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
           signature_scan_cursor: "sigA",
           signature_scan_before: "sigB",
+          signature_scan_progress: "sigProgress",
+          signature_scan_cycle_had_retry: true,
           signature_scan_stuck_signature: "sigC",
           signature_scan_stuck_since: PAST,
         });

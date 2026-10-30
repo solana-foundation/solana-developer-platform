@@ -116,7 +116,7 @@ export async function reclaimDvpTradeLeg(
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"dvp">(
     env,
     params.organizationId,
     params.projectId,
@@ -136,7 +136,7 @@ export async function reclaimDvpTradeLeg(
   const [destination] = await findAssociatedTokenPda({ owner: party, mint, tokenProgram });
 
   // Sponsorship only after every refusal above, as in fund and settle.
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"dvp">(
     env,
     await resolveProjectSponsorshipScope(env, {
       organizationId: params.organizationId,

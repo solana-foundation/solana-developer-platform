@@ -7,6 +7,7 @@ import {
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { MovementOf } from "@sdp/types/movements";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isCanceledRecurringPaymentStatus,
@@ -66,7 +67,7 @@ import {
 } from "./shared";
 
 /** Cancel is an exit: money admission never refuses it (ADR 0002). */
-const CANCEL_MOVEMENT = "recurring.cancel";
+const CANCEL_MOVEMENT = "recurring.cancel" satisfies MovementOf<"recurring_payments">;
 const CANCEL_FAILED_MESSAGE = "Recurring payment cancellation failed on-chain";
 
 /**
@@ -650,7 +651,7 @@ async function runRecurringPaymentCancel(input: {
       signature = null;
     }
 
-    const sourceSigner = await createOrgSignerForCustodyWallet(
+    const sourceSigner = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,

@@ -58,6 +58,8 @@ export interface ApiPlaygroundFieldConfig {
 
 export interface ApiPlaygroundEndpointConfig {
   id: string;
+  /** The generated reference ID, when a curated form uses an older ID. */
+  referenceEndpointId?: string;
   title: string;
   method: ApiPlaygroundMethod;
   path: string;
@@ -1203,9 +1205,10 @@ function useApiPlaygroundState({
   const endpointsRef = useRef(endpoints);
   const endpointParam = searchParams.get("endpoint");
 
-  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === endpointParam)
-    ? (endpointParam ?? "")
-    : initialEndpointId;
+  const activeEndpointId =
+    endpoints.find((endpoint) => endpoint.id === endpointParam)?.id ??
+    endpoints.find((endpoint) => endpoint.referenceEndpointId === endpointParam)?.id ??
+    initialEndpointId;
   const activeEndpoint =
     endpoints.find((endpoint) => endpoint.id === activeEndpointId) ?? initialEndpoint;
   const effectiveApiBaseUrl = useMemo(
@@ -1277,10 +1280,9 @@ function useApiPlaygroundState({
           activeEndpoint && requestBody && hasRequestBody(activeEndpoint.method)
             ? requestBody
             : null,
-        // The playground offers only operations an API key can call (generate-playground-catalog.ts).
+        // Keep existing dashboard snippets stable; the docs use each route's auth metadata.
         auth: "apiKey",
-        // Its Send keys every write (executePlaygroundRequest), and its catalog does not carry a
-        // route's declared header until it reads the API reference model (PRO-2298).
+        // Send keys every write; the displayed snippets keep their existing body rule.
         takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]

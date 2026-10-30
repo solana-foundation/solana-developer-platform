@@ -119,6 +119,8 @@ export const apiParameterSchema = z.object({
   description: z.string().nullable(),
   /** Carries the parameter's example, whether the document gives it on the parameter or its schema. */
   schema: apiSchemaSchema,
+  /** The value the docs and playground put in a sample call, including a schema fallback. */
+  sample: z.json(),
 });
 
 export type ApiParameter = z.infer<typeof apiParameterSchema>;

@@ -21,6 +21,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { fetchFailedError, rpcHttpError } from "@/test/helpers/rpc-errors";
 import { createVaultDeadline } from "./vault-deadline";
 import * as execution from "./vault-execution.service";
 import { VaultTransactionTooLargeError } from "./vault-execution.service";
@@ -304,7 +305,7 @@ describe("vault execution validation", () => {
         owner,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
     await expect(
       simulateVaultPlan({
         deadline: createVaultDeadline(),
@@ -313,16 +314,16 @@ describe("vault execution validation", () => {
         owner: ownerAddress,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
     await expect(
       broadcastVaultTransaction({
         deadline: createVaultDeadline(),
         bytes: new Uint8Array(),
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
 
-    // A mismatch is never cached, so each path re-probed, and nothing else left SDP.
-    expect(methods).toEqual(["getGenesisHash", "getGenesisHash", "getGenesisHash"]);
+    // The first path probed and cached the mismatch for the cooldown; nothing else left SDP.
+    expect(methods).toEqual(["getGenesisHash"]);
     expect(simulateSend).not.toHaveBeenCalled();
   });
 
@@ -496,7 +497,7 @@ describe("vault lookup-table reads", () => {
 
   it("rethrows an exhausted transport failure without simulating an unprepared plan", async () => {
     vi.useFakeTimers();
-    const failure = new Error("lookup-table service unavailable");
+    const failure = rpcHttpError(503);
     lookupTableSend.mockRejectedValue(failure);
 
     // A missing RPC mock method used to satisfy a truthy-rejection assertion.
@@ -520,7 +521,7 @@ describe("vault lookup-table reads", () => {
 
   it("recovers a transient read and uses the fetched table in the simulated transaction", async () => {
     vi.useFakeTimers();
-    lookupTableSend.mockRejectedValueOnce(new Error("fetch failed")).mockResolvedValue({
+    lookupTableSend.mockRejectedValueOnce(fetchFailedError()).mockResolvedValue({
       context: { slot: 1n },
       value: [
         {

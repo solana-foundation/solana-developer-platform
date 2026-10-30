@@ -1,5 +1,5 @@
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import type { MoneyAdmissionSubject } from "@/lib/money-admission";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import {
@@ -33,10 +33,10 @@ const UNRECORDED_SUBMISSION: SignedSubmissionStore = {
 export function createIssuanceSponsor(
   env: Env,
   scope: SponsorshipScope,
-  movement: MovementId,
+  movement: MovementOf<"issuance">,
   subject: MoneyAdmissionSubject
 ): SponsoredSubmitter {
-  const feePayment = createSponsorshipFeePayment(env, scope, movement, subject);
+  const feePayment = createSponsorshipFeePayment<"issuance">(env, scope, movement, subject);
   return {
     getFeePayer: () => feePayment.getFeePayer(),
     submitSponsored: ({ transaction, lastValidBlockHeight, rpc }) =>

@@ -109,15 +109,14 @@ async function seedDirectory(memberCount: number): Promise<void> {
       db
         .prepare(
           `INSERT INTO invitations
-             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id, created_at)
-           VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?, ?)`
+             (id, organization_id, email, role, invited_by, expires_at, status, clerk_invitation_id, created_at)
+           VALUES (?, ?, ?, 'member', ?, ?, 'pending', ?, ?)`
         )
         .bind(
           `inv_directory_${index}`,
           ORGANIZATION_ID,
           `invitee${index}@example.com`,
           INVITER_USER_ID,
-          `hash_directory_${index}`,
           INVITATION_EXPIRES_AT,
           `orginv_${index}`,
           `2025-02-${String(4 - index).padStart(2, "0")}T00:00:00.000Z`

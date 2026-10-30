@@ -600,7 +600,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             maxLength={256}
             placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
             size="xl"
+            aria-describedby="batch-send-reference-hint"
           />
+          <p id="batch-send-reference-hint" className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.referenceHint")}
+          </p>
         </div>
 
         <div className="space-y-3">
@@ -839,6 +843,14 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
             transactions: batchResult.batch.transactionCount,
           })}
         </p>
+        {wizard.failedRecipientCount > 0 ? (
+          <p className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.failedRecipientsNote", {
+              failed: wizard.failedRecipientCount,
+              count: batchResult.batch.recipientCount,
+            })}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col gap-0.5">
         {batchResult.recipients.map((recipient) => {
