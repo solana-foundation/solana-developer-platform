@@ -78,6 +78,9 @@ const entryPoints = {
   configure: "scripts/configure.ts",
   // ephemeral-db.js creates/drops per-PR databases from the prebuilt image (PRO-1767).
   "ephemeral-db": "scripts/ephemeral-db.mjs",
+  // incident-ops.js runs the allowlisted incident scripts (sponsorship kill switch,
+  // per-project movement control) from the prebuilt image via the incident-ops Cloud Run job.
+  "incident-ops": "scripts/incident-ops.ts",
 };
 
 const zkSdkNodeEntries = new Set();

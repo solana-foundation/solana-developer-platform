@@ -1,0 +1,211 @@
+# Incident response: pause one project's money movements (movement:control, HOO-2334),
+# run against prod/stage from CI because Cloud SQL and Redis are private-IP only.
+#
+# Gating: `status` and `disable` run with the deploy credentials alone, so on-call can
+# pause a project's payouts instantly. `enable` on prod first requires a
+# release-production approval (a second person: the environment prevents self-review).
+# Stage is ungated, for drills.
+#
+# Requires the sdp-<env>-incident-ops Cloud Run job (sdp-infra): same VPC, service
+# account, DATABASE_URL/REDIS_URL wiring as the migrate job, command pinned to
+# ["node", "incident-ops.js"]. This workflow only overrides the execution args, and
+# that entrypoint only dispatches to the allowlisted incident scripts.
+name: Incident — movement control
+
+run-name: "Movement ${{ inputs.action }} — ${{ inputs.target }} — ${{ github.actor }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment to act on"
+        type: choice
+        options: [prod, stage]
+        required: true
+      action:
+        description: "status reads the project's controls; disable pauses a movement now; enable resumes it (approval)"
+        type: choice
+        options: [status, disable, enable]
+        required: true
+      organization_id:
+        description: "Organization id that owns the project"
+        type: string
+        required: true
+      project_id:
+        description: "Project id whose movement is controlled"
+        type: string
+        required: true
+      movement:
+        description: "disable/enable only: movement id (a start in MOVEMENTS, e.g. payments.transfer.start)"
+        type: string
+      reason:
+        description: "disable/enable only: why (recorded on the control row)"
+        type: string
+      ticket:
+        description: "disable/enable only: tracking issue, e.g. HOO-2334"
+        type: string
+      expected_version:
+        description: "enable only: control version being re-enabled (from status), so a racing disable wins"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sdp-incident-ops-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate and stage the command
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      args: ${{ steps.compose.outputs.args }}
+      gated: ${{ steps.compose.outputs.gated }}
+    steps:
+      - name: Compose the allowlisted command
+        id: compose
+        env:
+          TARGET: ${{ inputs.target }}
+          ACTION: ${{ inputs.action }}
+          ORGANIZATION_ID: ${{ inputs.organization_id }}
+          PROJECT_ID_INPUT: ${{ inputs.project_id }}
+          MOVEMENT: ${{ inputs.movement }}
+          REASON: ${{ inputs.reason }}
+          TICKET: ${{ inputs.ticket }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          OPERATOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${OPERATOR}" =~ ^[A-Za-z0-9-]{1,39}$ ]]; then
+            echo "Unexpected actor login." >&2; exit 1
+          fi
+          check_id() {
+            local name="$1" value="$2"
+            if [[ ! "${value}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+              echo "${name} must be 1-64 chars of letters, digits, - and _." >&2
+              exit 1
+            fi
+          }
+          check_id organization_id "${ORGANIZATION_ID}"
+          check_id project_id "${PROJECT_ID_INPUT}"
+          args=(movement-control "${ACTION}" --organization-id "${ORGANIZATION_ID}" --project-id "${PROJECT_ID_INPUT}")
+          if [[ "${ACTION}" != "status" ]]; then
+            if [[ ! "${MOVEMENT}" =~ ^[a-z0-9._:-]{1,80}$ ]]; then
+              echo "movement must name a start in MOVEMENTS." >&2
+              exit 1
+            fi
+            # The args list is |-delimited, so the reason may not carry | ^ quotes or control chars.
+            text_re='^[A-Za-z0-9][A-Za-z0-9 ._,:;/#()-]{3,199}$'
+            if [[ ! "${REASON}" =~ ${text_re} ]]; then
+              echo "reason must be 4-200 chars of letters, digits, spaces and ._,:;/#()- and start with a letter or digit." >&2
+              exit 1
+            fi
+            if [[ ! "${TICKET}" =~ ^[A-Z]{2,6}-[0-9]{1,6}$ ]]; then
+              echo "ticket must look like HOO-2334." >&2
+              exit 1
+            fi
+            args+=(--movement "${MOVEMENT}" --operator "github:${OPERATOR}" --reason "${REASON}" --ticket "${TICKET}")
+          fi
+          if [[ "${ACTION}" == "enable" ]]; then
+            if [[ ! "${EXPECTED_VERSION}" =~ ^[0-9]{1,9}$ ]]; then
+              echo "expected_version must be the non-negative integer version shown by status." >&2
+              exit 1
+            fi
+            args+=(--expected-version "${EXPECTED_VERSION}")
+          fi
+          joined="$(IFS='|'; echo "${args[*]}")"
+          echo "args=${joined}" >> "${GITHUB_OUTPUT}"
+          gated=false
+          if [[ "${TARGET}" == "prod" && "${ACTION}" == "enable" ]]; then
+            gated=true
+          fi
+          echo "gated=${gated}" >> "${GITHUB_OUTPUT}"
+          printf 'This run executes on %s:\n\n    incident-ops %s\n' "${TARGET}" "${args[*]}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${gated}" == "true" ]]; then
+            echo "Re-enabling a movement on prod waits for release-production approval." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  approve:
+    name: Re-enable approval
+    needs: validate
+    if: needs.validate.outputs.gated == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: release-production
+    concurrency:
+      group: sdp-incident-ops-approval
+      cancel-in-progress: true
+    steps:
+      - name: Record the approved command
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: |
+          echo "Approved movement-control command on prod: ${ARGS//|/ }" >> "${GITHUB_STEP_SUMMARY}"
+
+  run-prod:
+    name: Run on prod
+    needs: [validate, approve]
+    if: >-
+      always() && inputs.target == 'prod' &&
+      needs.validate.result == 'success' &&
+      (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      PROJECT_ID: solana-developer-platform
+      REGION: us-central1
+      OPS_JOB: sdp-prod-incident-ops
+      MIGRATE_JOB: sdp-prod-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh
+
+  run-stage:
+    name: Run on stage
+    needs: [validate]
+    if: inputs.target == 'stage' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT_ID: solana-developer-platform-stg
+      REGION: us-central1
+      OPS_JOB: sdp-stage-incident-ops
+      MIGRATE_JOB: sdp-stage-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh
