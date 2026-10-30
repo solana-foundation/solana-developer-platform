@@ -268,15 +268,15 @@ start_cli_surfpool() {
 }
 
 # The door reads only the per-cluster pool vars. Surfpool is the sole DEFAULT endpoint for the
-# lane's cluster (its SOLANA_NETWORK) and every other pool var is blanked, so no
+# lane's cluster (its KORA_SURFPOOL_CLUSTER) and every other pool var is blanked, so no
 # test request can reach a real cluster through a provider URL inherited from Doppler.
 write_cluster_pool_env() {
   local lane_suffix cluster_suffix provider
-  case "${SOLANA_NETWORK:-devnet}" in
+  case "${KORA_SURFPOOL_CLUSTER:-devnet}" in
     devnet) lane_suffix="DEVNET" ;;
     mainnet-beta) lane_suffix="MAINNET" ;;
     *)
-      echo "SOLANA_NETWORK must be devnet or mainnet-beta, got ${SOLANA_NETWORK}" >&2
+      echo "KORA_SURFPOOL_CLUSTER must be devnet or mainnet-beta, got ${KORA_SURFPOOL_CLUSTER}" >&2
       exit 1
       ;;
   esac
@@ -298,11 +298,10 @@ write_runtime_env() {
     echo "SURFPOOL_REMOTE_RPC_URL=$(shell_quote "${SURFPOOL_REMOTE_RPC_URL:-}")"
     echo "SOLANA_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
     echo "SOLANA_RPC_CI_PREFERRED_PROVIDER=default"
-    echo "SOLANA_RPC_DEFAULT_PROVIDER=default"
     write_cluster_pool_env
     # Sponsorship prices and settles on the lane cluster's Kora upstream: point it at Surfpool,
     # and blank the other cluster's so nothing inherits a real endpoint from Doppler.
-    if [ "${SOLANA_NETWORK:-devnet}" = "mainnet-beta" ]; then
+    if [ "${KORA_SURFPOOL_CLUSTER:-devnet}" = "mainnet-beta" ]; then
       echo "KORA_MAINNET_RPC_URL=$(shell_quote "${SURFPOOL_RPC_URL}")"
       echo "KORA_DEVNET_RPC_URL="
     else
@@ -497,7 +496,6 @@ Local Kora-on-Surfpool is ready.
 Use these environment overrides with Doppler-backed commands:
   export SOLANA_RPC_URL=${SURFPOOL_RPC_URL}
   export SOLANA_RPC_CI_PREFERRED_PROVIDER=default
-  export SOLANA_RPC_DEFAULT_PROVIDER=default
   export ${KORA_SURFPOOL_ENV_PREFIX}_URL=${KORA_SURFPOOL_KORA_URL}
   export RUN_INTEGRATION_TESTS=true
 

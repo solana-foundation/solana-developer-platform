@@ -135,7 +135,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     responses: {
       200: { description: "Leg reclaimed", content: jsonContent(dvpLegActionResponse) },
       ...errorResponses(dvpLegRefusalErrorResponseSchema, [400, 409]),
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 422, 500]),
     },
   });
 

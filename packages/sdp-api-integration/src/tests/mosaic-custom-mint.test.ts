@@ -1,5 +1,4 @@
 import { type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
-import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -15,7 +14,7 @@ import {
   TEST_ORG,
   TEST_PROJECT,
 } from "#/helpers/integration";
-import { env } from "#env-impl";
+import { env, testChainCluster } from "#env-impl";
 
 const { createOrgSignerForCustodyWallet } = apiTestSupport;
 
@@ -47,7 +46,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
     const result = await runInClusterScope(
       {
         projectId: TEST_PROJECT.id,
-        environment: SDP_ENVIRONMENT_BY_CLUSTER[resolveDefaultCluster(env)],
+        environment: SDP_ENVIRONMENT_BY_CLUSTER[testChainCluster],
       },
       () => {
         const mosaic = createMosaicService(env as ApiTestEnv, signer, {

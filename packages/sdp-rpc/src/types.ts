@@ -1,5 +1,3 @@
-import type { OrganizationRpcProvider } from "@sdp/types/organizations";
-
 /**
  * The per-cluster managed pool: one complete endpoint URL (key embedded) per
  * provider per cluster.
@@ -19,28 +17,4 @@ export interface ManagedRpcEnv {
   SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL?: string;
   SOLANA_RPC_NODIT_MAINNET_API_KEY_URL?: string;
   SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL?: string;
-}
-
-export interface RpcEnv extends ManagedRpcEnv {
-  SOLANA_RPC_URL?: string;
-  SOLANA_RPC_DEFAULT_PROVIDER?: OrganizationRpcProvider;
-  SOLANA_RPC_TRITON_URL?: string;
-  SOLANA_RPC_TRITON_API_KEY?: string;
-  SOLANA_RPC_HELIUS_URL?: string;
-  SOLANA_RPC_HELIUS_API_KEY?: string;
-  SOLANA_RPC_ALCHEMY_URL?: string;
-  SOLANA_RPC_ALCHEMY_API_KEY?: string;
-  SOLANA_RPC_QUICKNODE_URL?: string;
-  SOLANA_RPC_QUICKNODE_API_KEY?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_URL?: string;
-  SOLANA_RPC_VALIDATIONCLOUD_API_KEY?: string;
-  SOLANA_RPC_NODIT_URL?: string;
-  SOLANA_RPC_NODIT_API_KEY?: string;
-  SOLANA_NETWORK?: "devnet" | "mainnet-beta";
-  /**
-   * Per-cluster overrides read only by the deprecated `createClusterRpc(env, cluster)` in
-   * `./solana` (Private Channels, HOO-1879). Earn reads each cluster's managed pool instead.
-   */
-  SOLANA_DEVNET_RPC_URL?: string;
-  SOLANA_MAINNET_RPC_URL?: string;
 }

@@ -2,6 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { useState } from "react";
 import { toast } from "sonner";
 import type {
@@ -25,7 +26,6 @@ import {
   getBurnValidationErrors,
   getBurnValidationReason,
   getControlListCopy,
-  getExplorerHref,
   getForceBurnValidationErrors,
   getForceBurnValidationReason,
   getLockSupplyDisabledReason,
@@ -48,6 +48,7 @@ import {
 import { buildDraftDeployRequest } from "@/app/dashboard/[projectId]/issuance/draft-permissions";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { explorerAddressUrl } from "@/lib/explorer";
 import { getTokenOperationPermissions } from "./token-operation-permissions";
 import { useTokenOperationData } from "./use-token-operation-data";
 
@@ -182,7 +183,9 @@ export function useTokenOperations({
     });
 
   const tokenBasePath = `/api/dashboard/issuance/tokens/${token.id}`;
-  const explorerHref = getExplorerHref(token.mintAddress);
+  const explorerHref = token.mintAddress
+    ? explorerAddressUrl(token.mintAddress, CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment])
+    : null;
   const canDeployToken = token.status === "pending" && !token.mintAddress;
   const {
     pauseDisabledReason,

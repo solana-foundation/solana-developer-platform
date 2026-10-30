@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
+import type { ApiFamily, ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
 import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -12,6 +12,7 @@ import {
   codeSpan,
   mdxText,
   operationGroups,
+  renderApiIndex,
   renderFamilyIndex,
   renderOperation,
   renderOperationPage,
@@ -247,7 +248,7 @@ describe("renderOperation", () => {
     assert.ok(page.includes("- **`widgetId`** · `string` · required · always `fixed`"));
   });
 
-  it("lists every status, and gives each JSON answer a response tab", () => {
+  it("lists every status and shows the useful response examples", () => {
     const at = ["- **`201`** Created it", "- **`204`** No body", "- **`404`** Not Found"].map(
       (status) => markdown.indexOf(status)
     );
@@ -257,17 +258,13 @@ describe("renderOperation", () => {
       [...at].sort((left, right) => left - right)
     );
     assert.ok(markdown.includes("- **`204`** No body\n\n- **`404`** Not Found"));
-    for (const tab of [
-      'tab="cURL"',
-      'tab="TypeScript"',
-      'tab="Python"',
-      'tab="201"',
-      'tab="404"',
-      'tab="409"',
-    ]) {
+    for (const tab of ['tab="cURL"', 'tab="TypeScript"', 'tab="Python"', 'tab="201"']) {
       assert.ok(markdown.includes(tab), tab);
     }
     assert.ok(!markdown.includes('tab="204"'));
+    assert.ok(!markdown.includes('tab="404"'));
+    assert.ok(!markdown.includes('tab="409"'));
+    assert.ok(markdown.includes("[standard error shape](/docs/reference/conventions/errors)"));
     assert.ok(markdown.includes("curl -X POST 'https://api.solana.com/v1/widgets/wdg_1'"));
   });
 
@@ -409,6 +406,57 @@ describe("renderOperation", () => {
     assert.ok(keyed.includes('    "Idempotency-Key": crypto.randomUUID()'));
     assert.ok(keyed.includes('"Idempotency-Key": str(uuid.uuid4())'));
   });
+
+  it("summarizes the shared idempotency contract without dropping custom headers", () => {
+    const header = {
+      name: "Idempotency-Key",
+      in: "header" as const,
+      required: false,
+      schema: schema({
+        example: "key",
+        constraints: [{ kind: "pattern", value: "^[a-z]+$" }],
+      }),
+      sample: "key",
+    };
+    const shared = renderOperation({
+      ...CREATE_WIDGET,
+      parameters: [
+        {
+          ...header,
+          description:
+            "Within 24 hours, a retry with the same key and the same request returns the original answer. A long contract follows.",
+        },
+      ],
+    });
+    assert.ok(shared.includes("[Retry and recovery rules](/docs/developing-with-sdp/idempotency)"));
+    assert.ok(!shared.includes("A long contract follows."));
+    assert.ok(shared.includes("1–255 printable ASCII key"));
+    assert.ok(!shared.includes("pattern `^[a-z]+$`"));
+    assert.ok(!shared.includes("example `key`"));
+
+    const custom = renderOperation({
+      ...CREATE_WIDGET,
+      parameters: [{ ...header, description: "This route has custom retry rules." }],
+    });
+    assert.ok(custom.includes("This route has custom retry rules."));
+    assert.ok(custom.includes("pattern `^[a-z]+$`"));
+  });
+
+  it("keeps an example for a route-specific error", () => {
+    const custom = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        ...CREATE_WIDGET.responses,
+        {
+          status: "422",
+          description: "Request conflicts with the existing widget.",
+          body: { kind: "json", schema: ERROR_SCHEMA, example: ERROR_EXAMPLE },
+        },
+      ],
+    });
+    assert.ok(custom.includes('tab="422"'));
+    assert.ok(!custom.includes('tab="404"'));
+  });
 });
 
 describe("the operation's panel", () => {
@@ -417,7 +465,7 @@ describe("the operation's panel", () => {
   it("holds the samples and example responses, after the responses list", () => {
     const panel = markdown.slice(markdown.indexOf("<ApiPanel>"), markdown.indexOf("</ApiPanel>"));
     assert.ok(markdown.indexOf("## Responses") < markdown.indexOf("<ApiPanel>"));
-    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="404"']) {
+    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="201"']) {
       assert.ok(panel.includes(part), part);
     }
     // The response fields stay in the body, under Responses.
@@ -521,6 +569,82 @@ describe("operation groups", () => {
       docsPageSlugOf("reference/api/payments/index.mdx"),
       "reference/api/payments/index"
     );
+  });
+});
+
+describe("renderApiIndex", () => {
+  const families: ApiFamily[] = [
+    { name: "Widgets", description: "Create and read widgets.", operations: [CREATE_WIDGET] },
+    { name: "Projects", description: "Manage project settings.", operations: [CREATE_WIDGET] },
+  ];
+  const page = renderApiIndex(
+    families,
+    (family) => `/docs/reference/api/${family.name.toLowerCase()}`,
+    "/docs/postman/collection.json"
+  );
+
+  it("links each family once and leaves its operations on the family page", () => {
+    for (const family of families) {
+      const link = `[${family.name}](/docs/reference/api/${family.name.toLowerCase()})`;
+      assert.equal(page.split(link).length - 1, 1);
+      assert.ok(page.includes(family.description));
+    }
+    assert.doesNotMatch(page, /ApiOperationTable|\| Method \| Endpoint \| Summary \|/);
+    assert.ok(!page.includes(CREATE_WIDGET.summary));
+    assert.ok(!page.includes(CREATE_WIDGET.path));
+    assert.ok(!page.includes(CREATE_WIDGET.endpointId));
+    assert.ok(page.includes("[API conventions](/docs/reference/conventions)"));
+    assert.ok(page.includes('href="/docs/postman/collection.json" download'));
+  });
+
+  it("keeps family descriptions and Markdown family links in the agent view", () => {
+    const markdown = expandDocsBlocks(page, "reference/api/index.mdx");
+    assert.doesNotMatch(markdown, /ApiFamilyList|ActionLinks|ApiOperationTable/);
+    for (const family of families) {
+      assert.ok(
+        markdown.includes(`[${family.name}](/docs/reference/api/${family.name.toLowerCase()}.md)`)
+      );
+      assert.ok(markdown.includes(family.description));
+    }
+    assert.ok(!markdown.includes(CREATE_WIDGET.path));
+  });
+
+  it("summarizes the directory while keeping the full description on the family page", () => {
+    const family: ApiFamily = {
+      name: "Projects",
+      description: "Manage project settings. Project members use the dashboard.",
+      operations: [CREATE_WIDGET],
+    };
+    const directory = renderApiIndex(
+      [family],
+      () => "/docs/reference/api/projects",
+      "/docs/postman/collection.json"
+    );
+    const familyPage = renderFamilyIndex(
+      family,
+      (operation) => `/docs/reference/api/projects/${operation.endpointId}`
+    );
+    assert.ok(directory.includes("Manage project settings."));
+    assert.ok(!directory.includes("Project members use the dashboard."));
+    assert.ok(familyPage.includes(family.description));
+  });
+
+  it("escapes family text that would otherwise open MDX expressions or JSX", () => {
+    const escaped = renderApiIndex(
+      [
+        {
+          name: "Widgets {owned} <public>",
+          description: "Read {state} < safely with `x < y` as code. Preserve more details.",
+          operations: [CREATE_WIDGET],
+        },
+      ],
+      () => "/docs/reference/api/widgets",
+      "/docs/postman/collection.json"
+    );
+    assert.ok(escaped.includes("Widgets \\{owned\\} \\<public>"));
+    assert.ok(escaped.includes("Read \\{state\\} \\< safely with `x < y` as code."));
+    const body = escaped.replace(/^---[\s\S]*?---\r?\n/, "");
+    assert.doesNotThrow(() => unified().use(remarkParse).use(remarkMdx).parse(body));
   });
 });
 

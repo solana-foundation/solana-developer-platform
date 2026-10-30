@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
 import { z } from "zod";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 
@@ -420,7 +421,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Activate recurring payment",
     operationId: "activatePaymentRecurringPayment",
     description:
-      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.",
+      "Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures. The source wallet gives the Subscriptions program's authority for that token an approval of 0, and each collection approves exactly its own amount in the same transaction as the pull, so the token program's `Approve` instruction appears in activation and collection transactions. If your custody provider's wallet policy allowlists programs or instructions, allow `Approve` to that authority, or the provider refuses the collection and SDP pauses the recurring payment with `pausedReason` `custody_policy_refused`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -443,7 +444,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
-      "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently.",
+      "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period. A canceled recurring payment never collects or resumes again. Every recurring payment from one wallet in one token relies on one token approval. When no other live recurring payment uses it, it is revoked right after the cancel; otherwise it stays for the schedules that still use it. The response's `tokenApproval` says which: `revoked`, `kept` with the recurring payments still using it in `sharedWith`, or `revoking` while a collection that was already processing settles, after which the background sweep revokes it. GET returns the same `tokenApproval` for a canceled recurring payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -511,8 +512,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description:
-      "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.",
+    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, or at once when the custody provider's policy refuses to sign a collection. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -704,7 +704,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
-      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction. The subscriber must be the customer's own wallet: a subscriber that is one of the organization's SDP wallets answers 409, because to pay on a schedule from an SDP wallet you create a recurring payment, which keeps the wallet's token approval bounded.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,
@@ -752,7 +752,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription authorization",
     operationId: "preparePaymentSubscriptionAuthorization",
     description:
-      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -767,7 +767,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription authorization prepared",
         content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -806,7 +806,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription resume",
     operationId: "preparePaymentSubscriptionResume",
     description:
-      "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+      "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client. A subscription that belongs to a recurring payment answers 409: a recurring payment's cancel is final.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -821,7 +821,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription resume prepared",
         content: jsonContent(preparePaymentSubscriptionLifecycleResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -833,7 +833,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
-      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -848,7 +848,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription collection prepared",
         content: jsonContent(preparePaymentSubscriptionCollectionResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

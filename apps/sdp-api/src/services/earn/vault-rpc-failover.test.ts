@@ -124,9 +124,7 @@ describe("Earn RPC fallback", () => {
     expect(probedUrls).toEqual([primary, fallback]);
   });
 
-  it("draws only the requested cluster's pool, never the process default", async () => {
-    vi.stubEnv("SOLANA_NETWORK", "devnet");
-    vi.stubEnv("SOLANA_RPC_URL", "https://process-default.failover.test");
+  it("refuses a cluster with no pool without probing anything", async () => {
     const rpc = failoverIn("production");
 
     await expect(

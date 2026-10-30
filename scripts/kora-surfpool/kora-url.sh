@@ -1,11 +1,11 @@
 # Sourced by up.sh, run.sh, test.sh and integration.sh. Points the API at the
-# harness Kora for the cluster SOLANA_NETWORK names (the API's own default is
-# devnet) and clears the other cluster's Kora, so a Doppler-mounted deployed
+# harness Kora for the cluster KORA_SURFPOOL_CLUSTER names (devnet when unset)
+# and clears the other cluster's Kora, so a Doppler-mounted deployed
 # Kora never serves a harness run; that cluster answers wallet-pays. The
 # audience is cleared too: the harness Kora is plain HTTP on loopback.
 KORA_SURFPOOL_KORA_URL="${KORA_SURFPOOL_KORA_RPC_URL:-http://127.0.0.1:18080}"
 
-case "${SOLANA_NETWORK:-devnet}" in
+case "${KORA_SURFPOOL_CLUSTER:-devnet}" in
   mainnet-beta)
     KORA_SURFPOOL_ENV_PREFIX="KORA_MAINNET"
     unset KORA_DEVNET_URL KORA_DEVNET_API_KEY KORA_DEVNET_CLOUD_RUN_AUDIENCE KORA_MAINNET_CLOUD_RUN_AUDIENCE
@@ -15,7 +15,7 @@ case "${SOLANA_NETWORK:-devnet}" in
     unset KORA_MAINNET_URL KORA_MAINNET_API_KEY KORA_MAINNET_CLOUD_RUN_AUDIENCE KORA_DEVNET_CLOUD_RUN_AUDIENCE
     ;;
   *)
-    echo "Unsupported SOLANA_NETWORK for the Kora harness: ${SOLANA_NETWORK}" >&2
+    echo "Unsupported KORA_SURFPOOL_CLUSTER for the Kora harness: ${KORA_SURFPOOL_CLUSTER}" >&2
     exit 1
     ;;
 esac

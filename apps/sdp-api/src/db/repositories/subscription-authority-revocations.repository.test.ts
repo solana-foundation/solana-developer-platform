@@ -1,10 +1,16 @@
 import {
+  IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
 } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
-import { refuseWhileSubscriptionAuthorityRevokes } from "@/services/payments/recurring-payments/shared";
+import {
+  refuseIfSubscriptionAuthorityRevokedSince,
+  refuseWhileSubscriptionAuthorityRevokes,
+} from "@/services/payments/recurring-payments/shared";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
@@ -146,10 +152,14 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await getDb(env).execute(
       "UPDATE payment_recurring_payment_update_attempts SET status = 'failed' WHERE id = 'rpua_replacement'"
     );
-    await getDb(env).execute(
-      "UPDATE payment_recurring_payments SET status = 'pending_activation', subscription_id = ? WHERE id = ?",
-      [pending.subscriptionId, required(recurringPaymentId)]
-    );
+    // Reviving a canceled schedule is refused outside a test database (migration 0199).
+    await getDb(env).transaction(async (tx) => {
+      await tx.execute("SELECT set_config('sdp.test_rewind_canceled', 'on', true)", []);
+      await tx.execute(
+        "UPDATE payment_recurring_payments SET status = 'pending_activation', subscription_id = ? WHERE id = ?",
+        [pending.subscriptionId, required(recurringPaymentId)]
+      );
+    });
     expect(await list()).toEqual([]);
 
     // The update failed and the payment that named it was canceled: nothing can authorize it.
@@ -175,9 +185,17 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     expect(await list()).toEqual([]);
   });
 
-  it("keeps an authority while a canceled schedule on it is still inside its billing period", async () => {
+  it("frees a recurring payment's canceled subscription at once but holds a standalone one through its period", async () => {
     await canceledSchedule(RECENTLY);
+    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
 
+    await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "canceled",
+      changedAt: RECENTLY,
+      recurring: null,
+    });
     expect(await list()).toEqual([]);
     expect(await claim("psar_recent")).toBeNull();
   });
@@ -206,6 +224,46 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     });
     expect(await list()).toEqual([]);
     expect(await claim("psar_live")).toBeNull();
+  });
+
+  it("names the schedules sharing an authority in every project of the environment", async () => {
+    const live = await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "active",
+      changedAt: LONG_AGO,
+      recurring: { status: "canceling" },
+    });
+    await canceledSchedule();
+    const sharing = () =>
+      repo.listRecurringPaymentsSharingAuthority({
+        environment: "sandbox",
+        subscriptionAuthorityAddress: AUTHORITY,
+        excludeRecurringPaymentId: "",
+      });
+    const expected = [
+      {
+        id: required(live.recurringPaymentId),
+        status: "canceling",
+        organization_id: TEST_ORG.id,
+        project_id: tenant.projectId,
+      },
+    ];
+    expect(await sharing()).toEqual(expected);
+
+    // A project the caller is not in (archived here, since an org has one active project per
+    // environment) still holds the authority.
+    await getDb(env).execute("UPDATE projects SET status = 'archived' WHERE id = ?", [
+      tenant.projectId,
+    ]);
+    expect(await sharing()).toEqual(expected);
+    expect(
+      await repo.listRecurringPaymentsSharingAuthority({
+        environment: "production",
+        subscriptionAuthorityAddress: AUTHORITY,
+        excludeRecurringPaymentId: "",
+      })
+    ).toEqual([]);
   });
 
   it("keeps every authority on a wallet while a schedule on it may be about to use one", async () => {
@@ -248,6 +306,41 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     }
     expect(await list()).toHaveLength(1);
   });
+
+  it.each(PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES)(
+    "claims an authority only while no collection on it is in flight: %s",
+    async (status) => {
+      const { subscriptionId, recurringPaymentId } = await canceledSchedule();
+      const metadata = {
+        source: "automated",
+        recurringPaymentId: required(recurringPaymentId),
+        initiatedByKeyId: null,
+      } satisfies PaymentSubscriptionCollectionAttemptMetadata;
+      await getDb(env).execute(
+        `INSERT INTO payment_subscription_collection_attempts
+           (id, organization_id, project_id, subscription_id, token, amount, due_at, status,
+            metadata)
+         VALUES (?, ?, ?, ?, ?, '1', ?, ?, ?::jsonb)`,
+        [
+          `psca_${status}`,
+          TEST_ORG.id,
+          tenant.projectId,
+          subscriptionId,
+          MINT,
+          LONG_AGO,
+          status,
+          JSON.stringify(metadata),
+        ]
+      );
+      const inFlight = IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES.some(
+        (candidate) => candidate === status
+      );
+
+      expect(await claim(`psar_${status}`)).toEqual(
+        inFlight ? null : expect.objectContaining({ status: "processing" })
+      );
+    }
+  );
 
   it("holds one revoke in flight per authority and offers it again only after a later change", async () => {
     const { subscriptionId } = await canceledSchedule();
@@ -318,7 +411,55 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
         updatedAt: NOW,
       });
     }
-    await expect(guard()).resolves.toBeUndefined();
+    const fence = await guard();
+    expect(fence).toEqual({
+      wallets: [{ walletAddress: WALLET, environment: "sandbox", revocations: 2 }],
+    });
+    await expect(refuseIfSubscriptionAuthorityRevokedSince(env, fence)).resolves.toBeUndefined();
+    // An incident revoke claimed after the claim overtakes it: the claimed work sends no
+    // authority setup or subscribe (HOO-2339).
+    required(
+      await repo.claimRevocationNow({
+        id: "psar_incident",
+        leaseId: "lease_psar_incident",
+        organizationId: TEST_ORG.id,
+        projectId: tenant.projectId,
+        environment: "sandbox",
+        custodyWalletId: tenant.custodyWalletId,
+        walletAddress: WALLET,
+        tokenMint: MINT,
+        subscriptionAuthorityAddress: AUTHORITY,
+        now: NOW,
+      })
+    );
+    await expect(refuseIfSubscriptionAuthorityRevokedSince(env, fence)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("dates a confirmed revoke by when it confirmed, not when it was claimed", async () => {
+    await canceledSchedule();
+    const claimed = required(await claim("psar_confirmed_late"));
+    const confirmedAt = "2026-10-21T13:00:00.000Z";
+    required(
+      await repo.finish({
+        id: claimed.id,
+        leaseId: claimed.lease_id,
+        status: "confirmed",
+        error: null,
+        updatedAt: confirmedAt,
+      })
+    );
+    const confirmedSince = (since: string) =>
+      repo.hasConfirmedRevocationSince({
+        environment: "sandbox",
+        subscriptionAuthorityAddress: AUTHORITY,
+        since,
+      });
+
+    // A cancel that landed after the claim but before the confirm sees the revoke.
+    expect(await confirmedSince("2026-10-21T12:30:00.000Z")).toBe(true);
+    expect(await confirmedSince("2026-10-21T13:30:00.000Z")).toBe(false);
   });
 
   it("lets only the lease holder save, clear or finish a revoke", async () => {

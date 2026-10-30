@@ -85,13 +85,6 @@ function poolUrl(cluster: "devnet" | "mainnet"): string {
   return `https://${cluster}-${poolSequence}.mint-guard.test`;
 }
 
-/** How stage and prod run: a devnet process default and no mainnet override. */
-function stubDevnetDefaultProcess(): void {
-  vi.stubEnv("SOLANA_NETWORK", "devnet");
-  vi.stubEnv("SOLANA_RPC_URL", poolUrl("devnet"));
-  vi.stubEnv("SOLANA_MAINNET_RPC_URL", "");
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   poolSequence += 1;
@@ -239,15 +232,6 @@ describe("guardDepositMints", () => {
     }
   );
 
-  it("reads mainnet from the mainnet pool on a devnet-default process", async () => {
-    stubDevnetDefaultProcess();
-
-    await expect(guardIn("production", earnEnabledEnv)).resolves.toBe(0);
-
-    expect(new Set(requests.map(({ url }) => url))).toEqual(new Set([poolUrl("mainnet")]));
-    expect(mocks.logEvent).not.toHaveBeenCalled();
-  });
-
   it("emits one drift event per changed field, naming cluster, symbol and mint", async () => {
     accountFor.mockImplementation((mint) =>
       mint === PYUSD_MAINNET
@@ -276,7 +260,6 @@ describe("guardDepositMints", () => {
   ] as const)(
     "logs a skip at %s where Earn is %s when the cluster has no pool, never reading another",
     async (level, _state, guardEnv) => {
-      stubDevnetDefaultProcess();
       vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
 
       await expect(guardIn("production", guardEnv)).resolves.toBe(0);

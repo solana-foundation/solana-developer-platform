@@ -1,8 +1,10 @@
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRampQuoteDeliveryMode,
-  PaymentRecurringPayment,
-  PaymentTransferRecipient,
+import {
+  isPendingActivationRecurringPaymentStatus,
+  isRecurringPaymentLifecycleClaimableStatus,
+  type PaymentRampQuoteDeliveryMode,
+  type PaymentRecurringPayment,
+  type PaymentTransferRecipient,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
@@ -414,6 +416,7 @@ function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
     subscriptionAuthorityAddress: null,
     authorizationSignature: null,
     status: "pending_activation",
+    pausedReason: null,
     metadataUri: null,
     createdBy: CREATED_BY,
     createdAt: iso(op.at),
@@ -489,14 +492,19 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
       if (schedule.status === "active") collect(world, schedule, op.at);
       break;
     case "cancel":
-      if (schedule.status === "pending_activation" || schedule.status === "active") {
+      if (
+        isPendingActivationRecurringPaymentStatus(schedule.status) ||
+        isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
+      ) {
         schedule.status = "canceled";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = null;
       }
       break;
     case "resume":
-      if (schedule.status === "canceled" && schedule.subscriptionId) {
+      if (isRecurringPaymentLifecycleClaimableStatus("resume", schedule.status)) {
         schedule.status = "active";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = iso(op.at + schedule.periodHours * HOUR_MS);
       }
       break;

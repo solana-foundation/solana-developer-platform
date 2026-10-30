@@ -423,6 +423,34 @@ export function createPostgresPaymentSubscriptionsRepository(
       return row ? mapSubscriptionRow(row) : null;
     },
 
+    async isRecurringPaymentSubscription(params) {
+      const row = await db.queryOne<{ owned: boolean }>(
+        `SELECT EXISTS (
+                  SELECT 1 FROM payment_recurring_payments owner
+                   WHERE owner.subscription_id = ?
+                     AND owner.organization_id = ?
+                     AND owner.project_id = ?)
+             OR EXISTS (
+                  SELECT 1 FROM payment_recurring_payment_update_attempts linked
+                   WHERE (linked.new_subscription_id = ? OR linked.old_subscription_id = ?)
+                     AND linked.organization_id = ?
+                     AND linked.project_id = ?) AS owned`,
+        [
+          params.subscriptionId,
+          params.organizationId,
+          params.projectId,
+          params.subscriptionId,
+          params.subscriptionId,
+          params.organizationId,
+          params.projectId,
+        ]
+      );
+      if (row === null) {
+        throw internalError("Failed to read whether a recurring payment owns the subscription");
+      }
+      return row.owned;
+    },
+
     getSubscriptionById(params) {
       return getSubscriptionByIdInternal(db, params);
     },

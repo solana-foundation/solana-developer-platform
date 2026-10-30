@@ -29,6 +29,7 @@ import * as sponsorshipService from "@/services/sponsorship.service";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { testClerkContext } from "@/test/helpers/clerk-context";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -153,6 +154,8 @@ async function rowsInDb(): Promise<
 }
 
 describe("createDvpTrade", () => {
+  installClusterRpcStub();
+
   let custodyWalletAddress: string;
   let sponsor: Awaited<ReturnType<typeof generateKeyPairSigner>>;
   let originalSettlementAuthority: string | undefined;
@@ -370,9 +373,7 @@ describe("createDvpTrade", () => {
   it("refuses an out-of-channel authority before creating a trade, replacement or sponsor request", async () => {
     await seedConnectionAuthority();
     custodyReleaseChannel.outOfChannelMode = "byok";
-    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject(
-      byokChannelRefusal()
-    );
+    await expect(createTradeInSandbox(tradeInput())).rejects.toMatchObject(byokChannelRefusal());
     expect(await rowsInDb()).toEqual([]);
     expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -399,7 +400,7 @@ describe("createDvpTrade", () => {
           TEST_ORG.id,
         ]);
       }
-      await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toMatchObject({
+      await expect(createTradeInSandbox(tradeInput())).rejects.toMatchObject({
         statusCode: unavailable === "entitlement" ? 403 : 409,
       });
       expect(await rowsInDb()).toEqual([]);
@@ -531,9 +532,7 @@ describe("createDvpTrade", () => {
     validateDvpMints.mockResolvedValue([
       "mintA carries the ScaledUiAmountConfig extension, which DvP settlement refuses",
     ]);
-    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(
-      /ScaledUiAmountConfig/
-    );
+    await expect(createTradeInSandbox(tradeInput())).rejects.toThrow(/ScaledUiAmountConfig/);
     expect(createSponsorshipFeePayment).not.toHaveBeenCalled();
     expect(prepareOwnedSubmission).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
@@ -651,7 +650,7 @@ describe("createDvpTrade", () => {
   });
   it("resolves sponsorship after term validation", async () => {
     await expect(
-      createDvpTrade(env, auditContext, {
+      createTradeInSandbox({
         ...tradeInput(),
         partyB: { address: address(SETTLEMENT_AUTHORITY) },
       })

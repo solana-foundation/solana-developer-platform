@@ -136,7 +136,8 @@ export default async function RecurringPaymentDetailRoute({
           }
         }
       }
-      const recurringPaymentResultData = recurringPaymentResult.data;
+      const { recurringPayment: recurringPaymentResultData, tokenApproval } =
+        recurringPaymentResult.data;
       const sourceCustodyWalletId = recurringPaymentResultData.sourceCustodyWalletId;
       if (sourceCustodyWalletId === null) {
         throw new Error("Recurring payment source wallet is unresolved");
@@ -163,6 +164,7 @@ export default async function RecurringPaymentDetailRoute({
       return (
         <RecurringPaymentDetailWorkspace
           recurringPayment={recurringPayment}
+          tokenApproval={tokenApproval}
           wallet={wallet}
           wallets={wallets}
           issuedTokensByMint={issuedTokensByMint}

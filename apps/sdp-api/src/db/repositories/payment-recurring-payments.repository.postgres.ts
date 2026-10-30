@@ -10,7 +10,8 @@ import {
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
   RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
-  RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+  RECURRING_PAYMENT_PAUSE_REASONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
 } from "@sdp/types/payments";
@@ -18,7 +19,7 @@ import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import type {
-  ClaimPaymentRecurringPaymentLifecycleInput,
+  ClaimPaymentRecurringPaymentCancelInput,
   ClaimPaymentRecurringPaymentUpdateInput,
   ClearPaymentRecurringPaymentStepSignatureInput,
   CollectibleRecurringPaymentRow,
@@ -30,8 +31,10 @@ import type {
   GetLatestPaymentRecurringPaymentActivationAttemptInput,
   GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
   GetLatestPaymentRecurringPaymentUpdateAttemptInput,
+  IncrementFailedCollectionAttemptsInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
+  PauseRecurringPaymentInput,
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentRow,
@@ -41,6 +44,8 @@ import type {
   RecoverableCollectionRecurringPaymentRow,
   RecurringPaymentActivator,
   RecurringPaymentStepSignatureSlot,
+  ReleasePaymentRecurringPaymentCancelClaimInput,
+  ResumePausedRecurringPaymentInput,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -97,6 +102,8 @@ const recurringPaymentRowSchema = z.object({
   subscription_authority_address: z.string().nullable(),
   authorization_signature: z.string().nullable(),
   status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+  paused_reason: z.enum(RECURRING_PAYMENT_PAUSE_REASONS).nullable(),
+  failed_collection_attempts: z.number().int().nonnegative(),
   metadata_uri: z.string().nullable(),
   created_by: z.string().nullable(),
   created_at: z.string(),
@@ -519,6 +526,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE next_collection_due_at END,
                   plan_id = CASE WHEN ?::boolean THEN ? ELSE plan_id END,
                   subscription_id = CASE WHEN ?::boolean THEN ? ELSE subscription_id END,
+                  failed_collection_attempts = CASE
+                    WHEN (?::boolean AND ?::text IS DISTINCT FROM next_collection_due_at)
+                      OR (?::boolean AND ?::text IS DISTINCT FROM subscription_id)
+                    THEN 0
+                    ELSE failed_collection_attempts
+                  END,
                   plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
                   plan_created_at =
                     CASE WHEN ?::boolean THEN ? ELSE plan_created_at END,
@@ -567,6 +580,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.nextCollectionDueAt ?? null,
           input.planId !== undefined,
           input.planId ?? null,
+          input.subscriptionId !== undefined,
+          input.subscriptionId ?? null,
+          input.nextCollectionDueAt !== undefined,
+          input.nextCollectionDueAt ?? null,
           input.subscriptionId !== undefined,
           input.subscriptionId ?? null,
           input.planPda !== undefined,
@@ -748,6 +765,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET next_collection_due_at = ?,
+                  failed_collection_attempts = 0,
                   destination_token_account =
                     CASE WHEN ?::boolean THEN ? ELSE destination_token_account END,
                   updated_at = ?
@@ -799,40 +817,110 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
-    async claimRecurringPaymentLifecycle(input: ClaimPaymentRecurringPaymentLifecycleInput) {
-      const { processingStatus, claimableStatus } =
-        RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[input.operation];
-      const staleBefore = input.staleBefore ?? null;
+    async claimRecurringPaymentCancel(input: ClaimPaymentRecurringPaymentCancelInput) {
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = ?,
-                  updated_at = ?,
-                  ${ACTIVATED_BY_ASSIGNMENTS}
+                  paused_reason = NULL,
+                  updated_at = ?
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
               AND (
-                status = ?
-                OR (status = ? AND ?::text IS NOT NULL AND updated_at <= ?)
+                (status = ? AND paused_reason IS NOT DISTINCT FROM ?::text)
+                OR (?::text IS NULL AND status = ? AND updated_at <= ?)
               )
           RETURNING *`
         )
         .bind(
-          processingStatus,
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
           input.updatedAt,
-          ...activatedByBindings(input.activatedBy),
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          claimableStatus,
-          processingStatus,
-          staleBefore,
-          staleBefore
+          input.claimedFrom,
+          input.pausedReason,
+          input.claimedFrom,
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+          input.staleBefore
         )
         .first<Record<string, unknown>>();
 
       return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async releaseRecurringPaymentCancelClaim(
+      input: ReleasePaymentRecurringPaymentCancelClaimInput
+    ) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = ?,
+                  paused_reason = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = ?
+              AND updated_at = ?
+          RETURNING *`
+        )
+        .bind(
+          input.status,
+          input.pausedReason,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+          input.claimedUpdatedAt
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async pauseRecurringPayment(input: PauseRecurringPaymentInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'paused',
+                  paused_reason = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING *`
+        )
+        .bind(
+          input.reason,
+          input.updatedAt,
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async incrementFailedCollectionAttempts(input: IncrementFailedCollectionAttemptsInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET failed_collection_attempts = failed_collection_attempts + 1
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING failed_collection_attempts`
+        )
+        .bind(input.recurringPaymentId, input.organizationId, input.projectId)
+        .first<{ failed_collection_attempts: number }>();
+
+      return row ? row.failed_collection_attempts : null;
     },
 
     async claimRecurringPaymentUpdate(input: ClaimPaymentRecurringPaymentUpdateInput) {
@@ -885,6 +973,39 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId,
           input.expectedStatus
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async resumePausedRecurringPayment(input: ResumePausedRecurringPaymentInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'active',
+                  paused_reason = NULL,
+                  failed_collection_attempts = 0,
+                  next_collection_due_at = ?,
+                  updated_at = ?,
+                  ${ACTIVATED_BY_ASSIGNMENTS}
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'paused'
+              AND next_collection_due_at = ?
+              AND updated_at = ?
+          RETURNING *`
+        )
+        .bind(
+          input.nextCollectionDueAt,
+          input.updatedAt,
+          ...activatedByBindings(input.activatedBy),
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          input.currentCollectionDueAt,
+          input.expectedUpdatedAt
         )
         .first<Record<string, unknown>>();
 

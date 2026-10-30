@@ -1,10 +1,14 @@
 "use client";
 
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRecurringPayment,
-  PaymentRecurringPaymentStatus,
-  PaymentSubscriptionCollectionAttempt,
+import {
+  assertNever,
+  type PaymentRecurringPayment,
+  type PaymentRecurringPaymentStatus,
+  type PaymentSubscriptionCollectionAttempt,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  type RecurringPaymentPauseReason,
+  type RecurringPaymentTokenApproval,
 } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
@@ -62,6 +66,8 @@ type ScheduleRecord = PaymentRecurringPayment & { sourceCustodyWalletId: string 
 
 interface RecurringPaymentDetailWorkspaceProps {
   recurringPayment: ScheduleRecord;
+  /** What became of a canceled schedule's token approval; null or absent for any other status. */
+  tokenApproval?: RecurringPaymentTokenApproval | null;
   wallet: RecurringPaymentWalletView | null;
   wallets: RecurringPaymentWalletView[];
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
@@ -156,10 +162,8 @@ function footerActionIds(
       return ["activate", "cancel"];
     case "active":
       return dueNow ? ["collect", "cancel"] : ["cancel"];
-    case "canceled":
-      // Only a schedule that ran on chain has a subscription to resume; one canceled before
-      // activation has to be created again.
-      return recurringPayment.subscriptionId ? ["resume"] : [];
+    case "paused":
+      return ["resume", "cancel"];
     default:
       return [];
   }
@@ -289,16 +293,102 @@ function walletBand({
   return null;
 }
 
+/** Why SDP paused the schedule, in the words for its reason. */
+function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): string {
+  switch (reason) {
+    case "custody_policy_refused":
+      return t("DashboardPayments.recurring.statePausedPolicyRefusedBody");
+    case "failed_attempts":
+      return t("DashboardPayments.recurring.statePausedFailedAttemptsBody", {
+        count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+      });
+    case null:
+      return t("DashboardPayments.recurring.statePausedBody");
+    default:
+      return assertNever(reason);
+  }
+}
+
+/**
+ * What a canceled schedule's cancel did with the wallet's token approval (HOO-2339). Every
+ * schedule from one wallet in one token shares it, so it stays while others still use it, and
+ * this names them.
+ */
+function CanceledTokenApprovalNote({
+  tokenApproval,
+  t,
+}: {
+  tokenApproval: RecurringPaymentTokenApproval;
+  t: Translate;
+}) {
+  const projectHref = useProjectHref();
+  const { sharedWith } = tokenApproval;
+  switch (tokenApproval.status) {
+    case "revoked":
+      return (
+        <span className="mt-1 block text-secondary">
+          {t("DashboardPayments.recurring.approvalRevokedBody")}
+        </span>
+      );
+    case "revoking":
+      return (
+        <span className="mt-1 block text-secondary">
+          {t("DashboardPayments.recurring.approvalRevokingBody")}
+        </span>
+      );
+    case "kept":
+      if (sharedWith.length === 0) {
+        return (
+          <span className="mt-1 block text-secondary" data-token-approval="kept">
+            {t("DashboardPayments.recurring.approvalKeptElsewhereBody")}
+          </span>
+        );
+      }
+      return (
+        <span className="mt-1 block text-secondary" data-token-approval="kept">
+          {t(
+            sharedWith.length === 1
+              ? "DashboardPayments.recurring.approvalKeptOneBody"
+              : "DashboardPayments.recurring.approvalKeptManyBody",
+            { count: sharedWith.length }
+          )}{" "}
+          {sharedWith.map((schedule, index) => (
+            <Fragment key={schedule.id}>
+              {index > 0 ? ", " : null}
+              <Link
+                href={projectHref(
+                  `/dashboard/payments/recurring/${encodeURIComponent(schedule.id)}`
+                )}
+                className={ROW_LINK}
+              >
+                {schedule.id}
+              </Link>
+            </Fragment>
+          ))}
+        </span>
+      );
+    default: {
+      const unreachable: never = tokenApproval.status;
+      throw new Error(`Unhandled token approval status ${String(unreachable)}`);
+    }
+  }
+}
+
 /** Otherwise the status itself, in the design's words for it. */
 function statusBand({
   recurringPayment,
+  tokenApproval,
   lastRunFailed,
+  lastRunError,
   scheduleLabel,
   locale,
   t,
 }: {
   recurringPayment: PaymentRecurringPayment;
+  tokenApproval: RecurringPaymentTokenApproval | null;
   lastRunFailed: boolean;
+  /** The last failed run's error while paused, shown under the pause reason; null when none. */
+  lastRunError: string | null;
   scheduleLabel: string;
   locale: string;
   t: Translate;
@@ -328,19 +418,39 @@ function statusBand({
       };
     }
     case "paused":
-      return { tone: "warn", state, body: t("DashboardPayments.recurring.statePausedBody") };
+      return {
+        tone: "warn",
+        state,
+        body: (
+          <>
+            {pausedBody(recurringPayment.pausedReason, t)}
+            {lastRunError === null ? null : (
+              <span className="mt-1 block text-secondary">
+                {t("DashboardPayments.recurring.statePausedLastRunError", { error: lastRunError })}
+              </span>
+            )}
+          </>
+        ),
+      };
     case "canceled":
       return {
         tone: "neutral",
         state,
-        body: recurringPayment.subscriptionId
-          ? t("DashboardPayments.recurring.stateCanceledBody")
-          : t("DashboardPayments.recurring.stateCanceledBeforeRunBody"),
+        body: (
+          <>
+            {recurringPayment.subscriptionId
+              ? t("DashboardPayments.recurring.stateCanceledBody")
+              : t("DashboardPayments.recurring.stateCanceledBeforeRunBody")}
+            {tokenApproval === null ? null : (
+              <CanceledTokenApprovalNote tokenApproval={tokenApproval} t={t} />
+            )}
+          </>
+        ),
       };
     case "expired":
       return { tone: "neutral", state, body: t("DashboardPayments.recurring.stateExpiredBody") };
     default:
-      // Activating, updating, canceling, resuming: the network has the schedule.
+      // Activating, updating, canceling: the network has the schedule.
       return { tone: "info", state, body: t("DashboardPayments.recurring.stateWorkingBody") };
   }
 }
@@ -452,7 +562,9 @@ function SchedulePlan({
         </RecordLine>
       )}
       <RecordLine label={t("DashboardPayments.recurring.ifRunFails")}>
-        {t("DashboardPayments.recurring.staysActive")}
+        {t("DashboardPayments.recurring.pausesAfterFailures", {
+          count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+        })}
       </RecordLine>
     </dl>
   );
@@ -662,6 +774,7 @@ function ScheduleFooter({
  */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
+  tokenApproval = null,
   wallet,
   wallets,
   issuedTokensByMint,
@@ -709,8 +822,12 @@ export function RecurringPaymentDetailWorkspace({
     counterparty: counterpartyLabel,
   });
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
-  const lastRunFailed =
-    status === "active" && latestAttempt(collectionAttempts)?.status === "failed";
+  const lastRun = latestAttempt(collectionAttempts);
+  const lastRunFailed = status === "active" && lastRun?.status === "failed";
+  const lastRunError =
+    status === "paused" && lastRun?.status === "failed" && lastRun.error !== null
+      ? lastRun.error
+      : null;
   // Every footer action (collect, pause, resume, cancel) changes the schedule.
   const actions = canWrite
     ? footerActions({
@@ -767,7 +884,15 @@ export function RecurringPaymentDetailWorkspace({
           t,
         })
       : null) ??
-    statusBand({ recurringPayment, lastRunFailed, scheduleLabel, locale, t });
+    statusBand({
+      recurringPayment,
+      tokenApproval,
+      lastRunFailed,
+      lastRunError,
+      scheduleLabel,
+      locale,
+      t,
+    });
   const canEdit = canWrite && isEditable && !controlsDisabled && !editing;
 
   return (

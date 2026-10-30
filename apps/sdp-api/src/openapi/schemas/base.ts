@@ -32,9 +32,7 @@ export const projectScopeHeaderSchema = z
   .min(1)
   .openapi({
     param: { name: "x-project-id", in: "header" },
-    description:
-      "Selects the active project for this request. Required for Clerk (dashboard) callers. " +
-      "Ignored when authenticating with an API key, whose scope is fixed to the key's project.",
+    description: "Required for dashboard sessions. API keys use their assigned project.",
     example: "prj_example",
   });
 
@@ -160,6 +158,7 @@ const errorCodeSchema = z
     "TRANSACTION_FAILED",
     "SIGNING_FAILED",
     "SIGNING_REJECTED",
+    "CUSTODY_POLICY_REFUSED",
     "PROVIDER_NOT_CONFIGURED",
     "PROVIDER_UNAVAILABLE",
     "PROVIDER_RESPONSE_INVALID",

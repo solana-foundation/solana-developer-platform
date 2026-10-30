@@ -154,7 +154,7 @@ wrote or claimed (`attempt_id`), and a chunk links or fails only its own attempt
 that finishes late never takes or fails a recipient a newer retry has claimed.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
-`activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
+`activating` or `canceling` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Every step saves its signature and its blockhash's
 last valid block height before broadcast, so a run that resumes a step an earlier run reached
 reads it first (`readRecurringPaymentStep`, HOO-2185): the effect at `finalized` means it landed

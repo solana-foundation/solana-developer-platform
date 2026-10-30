@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { DocsBreadcrumb } from "@/components/docs-shell/breadcrumb";
 import { DocsSidebar } from "@/components/docs-shell/sidebar";
 import { getAgentSetupOptions } from "@/lib/agent-setup";
 import { resolveDashboardUrl } from "@/lib/dashboard-url";
@@ -18,10 +17,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         agentSetup={getAgentSetupOptions()}
       />
       <main className="launch-docs-main">
-        <div className="launch-docs-main-inner">
-          <DocsBreadcrumb tree={source.pageTree} />
-          {children}
-        </div>
+        <div className="launch-docs-main-inner">{children}</div>
       </main>
     </div>
   );

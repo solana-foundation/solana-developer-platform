@@ -1,7 +1,7 @@
 ---
 module: issuance
 title: Issue a Regulated Stablecoin
-description: Build a GENIUS-compliant digital dollar on Solana with institutional custody, integrated compliance, and operational reversibility from day one.
+description: Build a regulated digital dollar on Solana with custody and compliance controls.
 ---
 
 import { Steps, Step } from "fumadocs-ui/components/steps";
@@ -339,7 +339,9 @@ With the token deployed, Section 5 configures the compliance controls the GENIUS
 
 Every other section of this tutorial is engineering. This one is the regulatory backbone.
 
-Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)." The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
+Section 4(a)(5) of the GENIUS Act treats a permitted payment stablecoin issuer as a financial institution for purposes of the Bank Secrecy Act. That single sentence is what makes everything below load-bearing. The Act also requires you to have "[the technological capability to comply with all lawful orders to seize, freeze, burn or prevent the transfer of outstanding stablecoins](https://www.skadden.com/insights/publications/2025/07/us-establishes-first-federal-regulatory-framework)."
+
+The endpoints in this section map directly onto that statutory phrase, in the order you'll encounter them: screening first, freeze for per-account blocks, seize for compliance recovery, force-burn as the final remedy.
 
 The issuance selectors below reuse the exact `signingCustodyWalletId` from Section 2. SDP verifies that it controls the live freeze or permanent-delegate authority before signing.
 
@@ -390,7 +392,9 @@ Section 7 demonstrates the resulting error: an HTTP 502 `SOLANA_RPC_ERROR` from 
 
 ### Seize for compliance recovery
 
-Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature. This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
+Seize moves tokens out of a holder's account without their signature, via the **permanent delegate** authority set at deploy. The permanent delegate is a Token-2022 extension that grants a named authority the right to transfer or burn any holder's tokens regardless of holder signature.
+
+This is the technological capability the GENIUS Act requires you to have ready for lawful orders. The institutional use case is a court-ordered transfer or a sanctions matter where you must recover specific tokens to a controlled wallet.
 
 ```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
