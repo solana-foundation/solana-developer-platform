@@ -17,7 +17,7 @@ vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchPaymentsWallets: mocks.wallets,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
-vi.mock("@/flags", () => ({ assetProfiles: mocks.enabled }));
+vi.mock("@/flags/project-modules", () => ({ assetProfiles: mocks.enabled }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 const input = {
   assetClass: "stablecoin",

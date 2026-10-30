@@ -20,10 +20,11 @@ const {
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: authMock }));
-vi.mock("@/flags", () => ({ issuance: issuanceMock }));
+vi.mock("@/flags/project-modules", () => ({ issuance: issuanceMock }));
 // Custody has no flag of its own: the release channel alone decides (HOO-1956).
-vi.mock("@/flags/release-channel", () => ({
-  isModuleInDeploymentReleaseChannel: (module: SdpModule) => module !== "custody" || custodyMock(),
+vi.mock("@/flags/project-release-channel", () => ({
+  isModuleInProjectReleaseChannel: async (module: SdpModule) =>
+    module !== "custody" || custodyMock(),
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: createSdpApiClientMock }));

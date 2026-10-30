@@ -11,7 +11,7 @@ const flagMocks = vi.hoisted(() => ({
   earn: vi.fn(async () => true),
   dvp: vi.fn(async () => true),
 }));
-vi.mock("@/flags", () => flagMocks);
+vi.mock("@/flags/project-modules", () => flagMocks);
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: ComponentProps<"a">) => <a {...props}>{children}</a>,

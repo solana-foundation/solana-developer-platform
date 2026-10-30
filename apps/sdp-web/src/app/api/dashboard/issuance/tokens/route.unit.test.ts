@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
 }));
 
-vi.mock("@/flags", () => ({ assetProfiles: mocks.assetProfiles }));
+vi.mock("@/flags/project-modules", () => ({ assetProfiles: mocks.assetProfiles }));
 vi.mock("@/lib/request-tracing", () => ({
   createTimedTrace: () => ({
     childContext: () => undefined,

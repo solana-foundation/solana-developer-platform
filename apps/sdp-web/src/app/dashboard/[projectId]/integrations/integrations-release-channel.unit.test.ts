@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IntegrationDetailPage from "@/app/dashboard/[projectId]/integrations/[provider]/page";
 import { integrationsSkeletonLayout } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
 import IntegrationsPage from "@/app/dashboard/[projectId]/integrations/page";
-import * as flags from "@/flags";
+import * as projectModules from "@/flags/project-modules";
 import * as ramps from "@/flags/ramps";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 import * as sdpApi from "@/lib/sdp-api";
@@ -57,7 +57,7 @@ function useChannel(releaseChannel: SdpReleaseChannel) {
   // The page reads the channel itself; the flags it reads are capped at it.
   vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
   const snapshot = dashboardFlagsAt(releaseChannel);
-  vi.spyOn(flags, "privateChannels").mockResolvedValue(snapshot.privateChannels);
+  vi.spyOn(projectModules, "privateChannels").mockResolvedValue(snapshot.privateChannels);
   vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(
     snapshot.ramps ? rampProvidersInReleaseChannel(releaseChannel) : []
   );
@@ -69,6 +69,7 @@ beforeEach(() => {
   setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations`);
   // The member's SDP role comes from the API (`/v1/members/me`), not the Clerk session.
   vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("admin");
+  vi.spyOn(sdpApi, "requestProjectEnvironment").mockResolvedValue(SANDBOX_PROJECT.environment);
   vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
     organizationClient: apiClient({
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },

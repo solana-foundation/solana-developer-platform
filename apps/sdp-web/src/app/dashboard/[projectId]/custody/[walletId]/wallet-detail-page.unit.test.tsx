@@ -36,7 +36,7 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
 
-vi.mock("@/flags", () => ({
+vi.mock("@/flags/project-modules", () => ({
   issuance: mockIssuanceFlag,
 }));
 
