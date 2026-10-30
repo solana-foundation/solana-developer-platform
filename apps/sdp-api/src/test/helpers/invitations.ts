@@ -18,15 +18,14 @@ export async function seedInvitation(
   }
 ): Promise<void> {
   await db.execute(
-    `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO invitations (id, organization_id, email, role, invited_by, expires_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       input.id,
       input.organizationId,
       input.email,
       input.role,
       input.invitedBy,
-      input.id,
       new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000).toISOString(),
       input.status,
     ]

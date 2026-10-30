@@ -32,8 +32,8 @@ function insertInvitation(
   createdAt: string
 ) {
   return client.query(
-    `INSERT INTO invitations (id, organization_id, email, invited_by, token_hash, expires_at, status, created_at)
-     VALUES ($1, $2, $3, $4, $1, '2099-01-01T00:00:00.000Z', $5, $6)`,
+    `INSERT INTO invitations (id, organization_id, email, invited_by, expires_at, status, created_at)
+     VALUES ($1, $2, $3, $4, '2099-01-01T00:00:00.000Z', $5, $6)`,
     [id, organizationId, email, inviterId, status, createdAt]
   );
 }
