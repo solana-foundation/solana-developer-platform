@@ -3,6 +3,7 @@
  * organization and project, who did it, and a dashboard link. It never carries an address, an
  * amount or a secret; the dashboard shows those to someone signed in.
  */
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 
@@ -42,9 +43,16 @@ export const moneyMovementCountsSchema = z.object({
 export type MoneyMovementCounts = z.infer<typeof moneyMovementCountsSchema>;
 
 /** Everything an email renders, snapshotted when the alert is written. */
+/** The project an alert is about, as its email names it. */
+export const alertProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+});
+
 export const adminAlertDetailsSchema = z.object({
   organizationName: z.string(),
-  project: z.object({ id: z.string(), name: z.string(), environment: z.string() }).nullable(),
+  project: alertProjectSchema.nullable(),
   /** Who did it: a member's name or email, an API key's name, or null for SDP itself. */
   actor: z.string().nullable(),
   /** What it was done to: the member, key or wallet, when the event names one. */

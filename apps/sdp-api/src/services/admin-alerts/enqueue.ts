@@ -13,17 +13,19 @@
  * Each alert is written once per source (`source_key` is unique) with a delivery row per admin,
  * in the transaction that moves its cursor; `deliver.ts` sends them after that commits.
  */
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { buildInClause, parsePostgresJson } from "@/db/postgres-utils";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import type {
-  AdminAlertDetails,
-  AdminAlertKind,
-  ConfigAlertKind,
-  MoneyMovementCounts,
+import {
+  type AdminAlertDetails,
+  type AdminAlertKind,
+  alertProjectSchema,
+  type ConfigAlertKind,
+  type MoneyMovementCounts,
 } from "./content";
 
 /** Audit entries read per run; a longer backlog drains over the next runs. */
@@ -38,7 +40,7 @@ export const ADMIN_ALERT_MAX_AGE_MS = 24 * 60 * 60_000;
  * Alerts about a project cover mainnet projects only; devnet is test traffic. Organization-wide
  * changes (members, the allowlist, the entitlement, this setting) have no project and always alert.
  */
-const ALERTING_PROJECT_ENVIRONMENT = "production";
+const ALERTING_PROJECT_ENVIRONMENT = "production" satisfies SdpEnvironment;
 
 interface AuditRow {
   ledger_sequence: string | number;
@@ -298,11 +300,11 @@ async function projectOf(
   projectId: string | null
 ): Promise<AdminAlertDetails["project"]> {
   if (!projectId) return null;
-  const project = await db.queryOne<{ id: string; name: string; environment: string }>(
+  const project = await db.queryOne<Record<string, unknown>>(
     "SELECT id, name, environment FROM projects WHERE id = ? AND organization_id = ?",
     [projectId, organizationId]
   );
-  return project ?? null;
+  return project ? alertProjectSchema.parse(project) : null;
 }
 
 /**
