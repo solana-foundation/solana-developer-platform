@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
@@ -15,6 +16,7 @@ import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -65,11 +67,33 @@ describe("Payments routes — signed submission", () => {
       return postTransfer(body, { idempotencyKey });
     }
 
-    async function mockSignedSubmissionAdapter(options?: { signError?: Error }) {
+    async function mockSignedSubmissionAdapter(options?: {
+      signError?: Error;
+      custodyError?: SigningError;
+    }) {
       const source = await generateKeyPairSigner();
       const sponsor = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(source.address);
-      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(source);
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(
+        options?.custodyError
+          ? admittedSigner(
+              {
+                ...source,
+                signTransactions: async () => {
+                  throw options.custodyError;
+                },
+              },
+              async () => ({ admitted: true }),
+              {
+                movement: "payments.transfer",
+                organizationId: TEST_ORG.id,
+                projectId: TEST_PROJECT.id,
+                custodyWalletId: TEST_CUSTODY_WALLET_ID,
+                provider: "privy",
+              }
+            )
+          : source
+      );
 
       const signAsFeePayer = options?.signError
         ? vi.fn().mockRejectedValue(options.signError)
@@ -480,6 +504,51 @@ describe("Payments routes — signed submission", () => {
       ).toEqual({ status: "completed", response_status: 400 });
       expect(sendTransactionMock).toHaveBeenCalledOnce();
       expect(await listTransferRows()).toHaveLength(1);
+    });
+
+    it("persists a clear policy refusal and replays 422 without signing or sending again", async () => {
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter({
+        custodyError: new SigningError("private provider response", "POLICY_REFUSED"),
+      });
+      const key = "privy-policy-refusal";
+      const first = await transferRequest("0.001", key);
+      const firstBody = await readErrorResponse(first);
+
+      expect(first.status).toBe(422);
+      expect(firstBody.error).toMatchObject({
+        code: "CUSTODY_POLICY_REFUSED",
+        message: expect.stringContaining("Privy refused to sign"),
+      });
+      expect(JSON.stringify(firstBody)).not.toContain("private provider response");
+      expect(await latestTransferRow()).toMatchObject({
+        status: "failed",
+        signature: null,
+        error: firstBody.error.message,
+        provider_data: { executionFailure: { code: "CUSTODY_POLICY_REFUSED" } },
+      });
+
+      const replay = await transferRequest("0.001", key);
+      expect(replay.status).toBe(422);
+      expect((await readErrorResponse(replay)).error).toEqual(firstBody.error);
+
+      await expireIdempotencyKey(key);
+      const durableReplay = await transferRequest("0.001", key);
+      expect(durableReplay.status).toBe(422);
+      expect((await readErrorResponse(durableReplay)).error).toMatchObject({
+        code: "CUSTODY_POLICY_REFUSED",
+        message: expect.stringContaining(firstBody.error.message),
+      });
+      expect(signAsFeePayer).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await listTransferRows()).toHaveLength(1);
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::integer AS count FROM sponsorship_budget_reservations WHERE organization_id = ? AND status = 'reserved'"
+          )
+          .bind(TEST_ORG.id)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
     });
 
     it("stores a 409 signer mismatch raised after the row and replays it", async () => {

@@ -594,6 +594,29 @@ export function ByokCredentialForm({
         />
       </fieldset>
 
+      {provider === "privy" ? (
+        <p className="text-sm leading-5 text-tertiary">
+          {t("DashboardCustody.privyPolicyGuidance")}{" "}
+          <a
+            href="https://docs.privy.io/controls/policies/create-a-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-secondary underline underline-offset-4 hover:text-primary"
+          >
+            {t("DashboardCustody.privyPolicySetup")}
+          </a>
+          {" · "}
+          <a
+            href="https://docs.privy.io/security/implementation-guide/ip-allowlist"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-secondary underline underline-offset-4 hover:text-primary"
+          >
+            {t("DashboardCustody.privyIpAllowlistSetup")}
+          </a>
+        </p>
+      ) : null}
+
       {check.kind === "failed" ? (
         <div
           role="alert"

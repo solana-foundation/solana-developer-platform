@@ -27,6 +27,7 @@ const CONTEXT = {
   organizationId: "org_admitted_signer",
   projectId: "prj_admitted_signer",
   custodyWalletId: "cwlt_admitted_signer",
+  provider: "privy",
 } as const;
 
 const ADMITTED: MoneyAdmissionDecision = { admitted: true };
@@ -197,6 +198,8 @@ describe("admittedSigner custody policy refusals (HOO-2333)", () => {
       await expect(sign(signer)).rejects.toMatchObject({
         code: "CUSTODY_POLICY_REFUSED",
         statusCode: 422,
+        message:
+          "Privy refused to sign this request because of a wallet policy. Review the wallet's policy in Privy or adjust the request before retrying.",
         cause: refusal,
       });
     }

@@ -387,13 +387,19 @@ function statusBand({
   recurringPayment: PaymentRecurringPayment;
   tokenApproval: RecurringPaymentTokenApproval | null;
   lastRunFailed: boolean;
-  /** The last failed run's error while paused, shown under the pause reason; null when none. */
+  /** The last failed run's error, shown while active or paused; null when none. */
   lastRunError: string | null;
   scheduleLabel: string;
   locale: string;
   t: Translate;
 }): Band {
   const state = t(STATUS_TRANSLATION_KEYS[recurringPayment.status]);
+  const failureReason =
+    lastRunError === null ? null : (
+      <span className="mt-1 block text-secondary">
+        {t("DashboardPayments.recurring.stateLastRunError", { error: lastRunError })}
+      </span>
+    );
   switch (recurringPayment.status) {
     case "pending_activation":
       return { tone: "warn", state, body: t("DashboardPayments.recurring.statePendingBody") };
@@ -402,7 +408,12 @@ function statusBand({
         return {
           tone: "error",
           state: t("DashboardPayments.recurring.lastRunFailed"),
-          body: t("DashboardPayments.recurring.stateFailedBody"),
+          body: (
+            <>
+              {t("DashboardPayments.recurring.stateFailedBody")}
+              {failureReason}
+            </>
+          ),
         };
       }
       const next = formatDateTime(recurringPayment.nextCollectionDueAt, locale);
@@ -424,11 +435,7 @@ function statusBand({
         body: (
           <>
             {pausedBody(recurringPayment.pausedReason, t)}
-            {lastRunError === null ? null : (
-              <span className="mt-1 block text-secondary">
-                {t("DashboardPayments.recurring.statePausedLastRunError", { error: lastRunError })}
-              </span>
-            )}
+            {failureReason}
           </>
         ),
       };
@@ -826,10 +833,7 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const lastRun = latestAttempt(collectionAttempts);
   const lastRunFailed = status === "active" && lastRun?.status === "failed";
-  const lastRunError =
-    status === "paused" && lastRun?.status === "failed" && lastRun.error !== null
-      ? lastRun.error
-      : null;
+  const lastRunError = lastRun?.status === "failed" ? lastRun.error : null;
   // Every footer action (collect, pause, resume, cancel) changes the schedule.
   const actions = canWrite
     ? footerActions({

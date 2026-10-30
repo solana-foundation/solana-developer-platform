@@ -147,12 +147,49 @@ describe("privy adapter", () => {
     await expect(signing).rejects.toThrow(SignerError);
   });
 
-  it("rethrows Privy's error unchanged when keychain truncated a policy violation body", async () => {
+  it.each([
+    [401, { code: "invalid_credentials", error: "Invalid app credentials" }],
+    [403, { error: "Forbidden" }],
+    [429, { code: "rate_limit_exceeded", error: "Too many requests" }],
+    [500, { error: "Internal error" }],
+  ])("keeps HTTP %s errors distinct from policy refusals", async (status, body) => {
+    const signing = signAgainstRpcAnswer(Response.json(body, { status }), signTestTransaction);
+
+    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toMatchObject({ context: { status } });
+  });
+
+  it.each([
+    ["signTransactions", signTestTransaction],
+    ["signMessages", signTestMessage],
+  ] as const)("retains a policy code beyond the truncated %s response", async (_method, sign) => {
     const signing = signAgainstRpcAnswer(
-      privyErrorAnswer(JSON.stringify({ code: "policy_violation", error: "x".repeat(300) })),
-      signTestTransaction
+      privyErrorAnswer(JSON.stringify({ error: "x".repeat(500), code: "policy_violation" })),
+      sign
     );
 
-    await expect(signing).rejects.toThrow(SignerError);
+    await expect(signing).rejects.toMatchObject({
+      code: "POLICY_REFUSED",
+      cause: {
+        context: {
+          responseCode: "policy_violation",
+          response: expect.not.stringContaining("policy_violation"),
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["error text", JSON.stringify({ error: "policy_violation" })],
+    ["nested code", JSON.stringify({ error: { code: "policy_violation" } })],
+    ["invalid JSON", '{"code":"policy_violation",'],
+    ["array", JSON.stringify([{ code: "policy_violation" }])],
+    ["invalid code", JSON.stringify({ code: "policy_violation\n" })],
+    ["oversized code", JSON.stringify({ code: "policy_violation".repeat(100) })],
+  ])("does not infer a refusal from %s", async (_case, body) => {
+    const signing = signAgainstRpcAnswer(privyErrorAnswer(body), signTestTransaction);
+
+    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toMatchObject({ context: { responseCode: undefined } });
   });
 });
