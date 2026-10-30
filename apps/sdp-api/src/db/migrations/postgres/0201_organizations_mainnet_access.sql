@@ -5,7 +5,7 @@
 -- operator sets in Clerk; these columns never grant anything. An admin writes them once;
 -- afterwards only the operator script (`pnpm -C apps/sdp-api mainnet-access`) changes them.
 -- Nullable: no existing organization has asked. The constraints are added NOT VALID so they take no
--- blocking scan of organizations; 0200 validates them.
+-- blocking scan of organizations; 0202 validates them.
 ALTER TABLE organizations
     ADD COLUMN jurisdiction_country_code TEXT,
     ADD COLUMN terms_accepted_version TEXT,

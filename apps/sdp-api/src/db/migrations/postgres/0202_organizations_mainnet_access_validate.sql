@@ -1,4 +1,4 @@
--- Validates 0199's constraints in a later migration, so the scan of organizations runs without
+-- Validates 0201's constraints in a later migration, so the scan of organizations runs without
 -- the lock that adding them would hold.
 ALTER TABLE organizations VALIDATE CONSTRAINT organizations_jurisdiction_country_code_check;
 ALTER TABLE organizations VALIDATE CONSTRAINT organizations_mainnet_request_whole;
