@@ -87,6 +87,8 @@ const attemptRowSchema = z.object({
   updated_at: z.string(),
 });
 
+type AttemptQueryRow = z.input<typeof attemptRowSchema>;
+
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
   return planRowSchema.parse(row);
 }
@@ -95,7 +97,7 @@ function mapSubscriptionRow(row: Record<string, unknown>): PaymentSubscriptionRo
   return subscriptionRowSchema.parse(row);
 }
 
-function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollectionAttemptRow {
+function mapAttemptRow(row: AttemptQueryRow): PaymentSubscriptionCollectionAttemptRow {
   return attemptRowSchema.parse(row);
 }
 
@@ -156,7 +158,7 @@ async function getAttemptByIdInternal(
       `SELECT * FROM payment_subscription_collection_attempts WHERE ${clauses.join(" AND ")}`
     )
     .bind(...values)
-    .first<Record<string, unknown>>();
+    .first<AttemptQueryRow>();
 
   return row ? mapAttemptRow(row) : null;
 }
@@ -483,7 +485,7 @@ export function createPostgresPaymentSubscriptionsRepository(
             LIMIT 1`
         )
         .bind(...values)
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -610,7 +612,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         .bind(organizationId, projectId, idempotencyKey, [
           ...COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
         ])
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -681,7 +683,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.status ?? null,
           input.status ?? null
         )
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -706,7 +708,7 @@ export function createPostgresPaymentSubscriptionsRepository(
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
-          .all<Record<string, unknown>>(),
+          .all<AttemptQueryRow>(),
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
@@ -774,7 +776,7 @@ export function createPostgresPaymentSubscriptionsRepository(
             LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
-          .all<Record<string, unknown>>(),
+          .all<AttemptQueryRow>(),
         db
           .prepare(`${subscriptionIds}
            SELECT COUNT(*)::int AS total ${attempts}`)
