@@ -587,6 +587,32 @@ async function stampTransactionIdentity(
   }
 }
 
+export type CriticalOutcome = Partial<
+  Pick<AuditLogEntry, "action" | "resourceType" | "resourceId" | "metadata" | "status">
+>;
+
+/**
+ * The outcome record that resolves a critical intent. `completeCritical`
+ * appends it on its own; a caller whose outcome must commit with the state
+ * write it describes returns it from `logWithin` or `logSystemWithin` work.
+ */
+export function criticalOutcomeEntry(
+  intent: AuditIntent,
+  outcome: CriticalOutcome = {}
+): AuditLogEntry {
+  return {
+    ...intent.entry,
+    ...outcome,
+    metadata: {
+      ...intent.entry.metadata,
+      ...outcome.metadata,
+      auditPhase: "outcome",
+      auditIntentId: intent.id,
+    },
+    status: outcome.status ?? "success",
+  };
+}
+
 export class AuditService {
   constructor(
     private db: DatabaseClient,
@@ -709,11 +735,17 @@ export class AuditService {
    *
    * @param c - The request context, for the actor and the authenticated organization.
    * @param entry - The operation the intent admits; its outcome is appended against it.
+   * @param options.intentId - A caller-derived id, for an outcome a job appends later
+   *   without the request's intent in hand (a batch chunk's chain verdict).
    * @returns The durable intent `completeCritical` resolves.
    * @throws AppError `FORBIDDEN` when the entry names an organization other than the
    *   authenticated caller's.
    */
-  async beginCritical(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<AuditIntent> {
+  async beginCritical(
+    c: Context<{ Bindings: Env }>,
+    entry: AuditLogEntry,
+    options: { intentId?: string } = {}
+  ): Promise<AuditIntent> {
     const auth = getOptionalAuth(c);
     if (
       auth !== null &&
@@ -722,7 +754,7 @@ export class AuditService {
     ) {
       throw forbidden("Audit intent names an organization other than the caller's");
     }
-    const intentId = `aint_${crypto.randomUUID()}`;
+    const intentId = options.intentId ?? `aint_${crypto.randomUUID()}`;
     await this.log(c, {
       organizationId: entry.organizationId,
       action: "maintenance",
@@ -780,17 +812,7 @@ export class AuditService {
     > = {}
   ): Promise<boolean> {
     try {
-      await this.logSystem({
-        ...intent.entry,
-        ...outcome,
-        metadata: {
-          ...intent.entry.metadata,
-          ...outcome.metadata,
-          auditPhase: "outcome",
-          auditIntentId: intent.id,
-        },
-        status: outcome.status ?? "success",
-      });
+      await this.logSystem(criticalOutcomeEntry(intent, outcome));
       return true;
     } catch (error) {
       getLogger().error(
@@ -824,17 +846,7 @@ export class AuditService {
     > = {}
   ): Promise<boolean> {
     try {
-      await this.log(c, {
-        ...intent.entry,
-        ...outcome,
-        metadata: {
-          ...intent.entry.metadata,
-          ...outcome.metadata,
-          auditPhase: "outcome",
-          auditIntentId: intent.id,
-        },
-        status: outcome.status ?? "success",
-      });
+      await this.log(c, criticalOutcomeEntry(intent, outcome));
       return true;
     } catch (error) {
       getLogger().error(

@@ -24,6 +24,7 @@ import {
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import { closeDatabasePools, getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { app } from "@/index";
@@ -141,6 +142,12 @@ export const apiTestSupport = {
         delegatedAmount: token.exists ? token.data.delegatedAmount : null,
       };
     }),
-  trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
+  // Runs the job as cron/runner.ts does, under the system identity: the
+  // integration suite has no default identity, and the job's audited batch
+  // settle (APE-425) refuses to run without one.
+  trackPendingTransfers: (env: Env) =>
+    runWithSystemDatabaseIdentity("cron:track-pending-transfers", () =>
+      runInEachClusterScope(() => trackPendingTransfers(env))
+    ),
   withdrawFromVault,
 };
