@@ -86,12 +86,12 @@ export function WalletsTable({
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
 
-  const custodyByPubkey = new Map(custodyWallets.map((w) => [w.publicKey, w]));
-  const verifiedPubkeys = new Set(verifiedWallets.map((w) => w.pubkey));
-  const availableWallets = custodyWallets.filter(
-    (wallet) => !verifiedPubkeys.has(wallet.publicKey)
+  const custodyById: ReadonlyMap<string | null, CustodyWalletSummary> = new Map(
+    custodyWallets.map((w) => [w.id, w])
   );
-  const selectedWallet = availableWallets.find((wallet) => wallet.walletId === selectedWalletId);
+  const verifiedIds = new Set(verifiedWallets.map((w) => w.custodyWalletId));
+  const availableWallets = custodyWallets.filter((wallet) => !verifiedIds.has(wallet.id));
+  const selectedWallet = availableWallets.find((wallet) => wallet.id === selectedWalletId);
 
   function handleVerify(walletId: string, pubkey: string) {
     setPendingKey(walletId);
@@ -177,7 +177,7 @@ export function WalletsTable({
             </TableHeader>
             <TableBody>
               {verifiedWallets.map((verified) => {
-                const wallet = custodyByPubkey.get(verified.pubkey);
+                const wallet = custodyById.get(verified.custodyWalletId);
                 const busy = pending && pendingKey === verified.pubkey;
                 return (
                   <TableRow key={verified.id}>
@@ -238,7 +238,7 @@ export function WalletsTable({
       >
         <form
           action={() => {
-            if (selectedWallet) handleVerify(selectedWallet.walletId, selectedWallet.publicKey);
+            if (selectedWallet) handleVerify(selectedWallet.id, selectedWallet.publicKey);
           }}
           className="space-y-6 p-6"
         >
@@ -262,7 +262,7 @@ export function WalletsTable({
               disabled={pending}
             >
               {availableWallets.map((wallet) => (
-                <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                <SelectItem key={wallet.id} value={wallet.id}>
                   {wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet")} ·{" "}
                   {shortKey(wallet.publicKey)}
                 </SelectItem>

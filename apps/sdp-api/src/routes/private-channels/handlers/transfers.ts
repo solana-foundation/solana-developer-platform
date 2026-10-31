@@ -29,6 +29,7 @@ import {
   resolveTransferRecipients,
 } from "@/routes/private-channels/transfer-access";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
+import { resolvePrivateChannelCustodyLinks } from "@/services/private-channels/custody-links";
 import { mapPrivateChannelError } from "@/services/private-channels/errors";
 import {
   createChannelTransfer,
@@ -71,10 +72,10 @@ export async function createPrivateChannelTransfer(
     const repo = getPrivateChannelTransferRepository(c);
     const onReplay = async (row: PrivateChannelTransferRow) => {
       matchesTransferReplay(row, { ...body, channelId });
-      const context = await authorizeMovementReplay(c, row, async () => {
+      const context = await authorizeMovementReplay(c, row, body.custodyWalletId, async () => {
         const original = await resolveTransferCreateContext(c, {
           channelId: row.channel_id,
-          walletId: row.sender_wallet_id,
+          custodyWalletId: body.custodyWalletId,
           recipientVerifiedWalletId: row.recipient_verified_wallet_id,
         });
         if (
@@ -93,13 +94,14 @@ export async function createPrivateChannelTransfer(
           projectId: context.projectId,
           userId: auth.userId,
         });
-        return resolveAbandonedTransferReservation(c.env, repo, row, {
+        const recovered = await resolveAbandonedTransferReservation(c.env, repo, row, {
           gatewayUrl: context.instance.gatewayUrl,
           gatewayAuth,
           sdpUserId: auth.id,
         });
+        return { ...recovered, custodyWalletId: context.wallet.id };
       }
-      return mapPrivateChannelTransferRow(row);
+      return mapPrivateChannelTransferRow({ ...row, custody_wallet_id: context.wallet.id });
     };
     const replay = await repo.findTransferByIdempotency({
       organizationId: auth.organizationId,
@@ -109,7 +111,7 @@ export async function createPrivateChannelTransfer(
     if (replay) return success(c, await onReplay(replay));
     const context = await resolveTransferCreateContext(c, {
       channelId,
-      walletId: body.walletId,
+      custodyWalletId: body.custodyWalletId,
       recipientVerifiedWalletId: body.recipientVerifiedWalletId,
     });
     const signer = await createPrivateChannelSigner(
@@ -165,7 +167,12 @@ export async function getPrivateChannelTransferById(c: AppContext) {
   if (!row) {
     throw notFound("Transfer");
   }
-  return success(c, mapPrivateChannelTransferRow(row));
+  const [linked] = await resolvePrivateChannelCustodyLinks(
+    c.env,
+    { organizationId: auth.organizationId, projectId },
+    [row]
+  );
+  return success(c, mapPrivateChannelTransferRow(linked));
 }
 
 /** GET /transfers — project history, optionally narrowed to one channel id. */
@@ -184,5 +191,10 @@ export async function listPrivateChannelTransfers(c: AppContext) {
     projectId,
     channelId: parsed.data.channelId,
   });
-  return success(c, { transfers: rows.map(mapPrivateChannelTransferRow) });
+  const linked = await resolvePrivateChannelCustodyLinks(
+    c.env,
+    { organizationId: auth.organizationId, projectId },
+    rows
+  );
+  return success(c, { transfers: linked.map(mapPrivateChannelTransferRow) });
 }

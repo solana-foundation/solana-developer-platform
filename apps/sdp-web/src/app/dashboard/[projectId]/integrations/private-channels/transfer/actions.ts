@@ -15,7 +15,7 @@ import { createSdpApiClient, extractSdpApiErrorMessage, sdpApiAnswer } from "@/l
 
 export interface CreateTransferInput {
   channelId: string;
-  walletId: string;
+  custodyWalletId: string;
   recipientVerifiedWalletId: string;
   amount: string;
   /** Selected token mint; forwarded as-is for the API to validate. */
@@ -55,7 +55,7 @@ export async function createTransferAction(
       messageKey: "DashboardPrivateChannels.transfer.selectChannel",
     };
   }
-  if (!input.walletId) {
+  if (!input.custodyWalletId) {
     return {
       ok: false,
       kind: "validation",
@@ -79,7 +79,7 @@ export async function createTransferAction(
       client,
       input.channelId,
       {
-        walletId: input.walletId,
+        custodyWalletId: input.custodyWalletId,
         recipientVerifiedWalletId: input.recipientVerifiedWalletId,
         amount: input.amount.trim(),
         ...(input.mint ? { mint: input.mint } : {}),

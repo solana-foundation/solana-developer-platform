@@ -198,7 +198,7 @@ function makeTransfer(overrides: Partial<PrivateChannelTransfer> = {}): PrivateC
     projectId: "project_test",
     instanceId: "pci_test",
     channelId: "channel_alpha",
-    walletId: "wallet_sender",
+    custodyWalletId: "custody_sender",
     sender: sourceWallets[0]?.publicKey ?? "",
     recipient: alphaRecipients[0]?.pubkey ?? "",
     mint: "Usdc111111111111111111111111111111111111",
@@ -232,7 +232,7 @@ async function renderReadyForm() {
     sourceWallets,
   });
   await screen.findByRole("option", { name: "Alice Treasury (Alic…1111)" });
-  await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
+  await user.selectOptions(screen.getByLabelText("From wallet"), "custody_sender");
   await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_alice");
   await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
   return user;
@@ -346,7 +346,7 @@ describe("TransferForm", () => {
     await user.selectOptions(recipientSelect, "pcvw_self_operations");
     expect(recipientSelect.value).toBe("pcvw_self_operations");
 
-    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_operations");
+    await user.selectOptions(screen.getByLabelText("From wallet"), "custody_operations");
 
     await waitFor(() => {
       expect(
@@ -525,7 +525,7 @@ describe("TransferForm", () => {
     const user = await renderReadyForm();
     await waitFor(() =>
       expect(mocks.fetchWalletBalancesAction).toHaveBeenCalledWith(
-        "wallet_sender",
+        "custody_sender",
         expect.any(String)
       )
     );
@@ -533,7 +533,7 @@ describe("TransferForm", () => {
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
     await screen.findByText("Progress: confirmed");
     await user.click(screen.getByRole("button", { name: "New transfer" }));
-    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
+    await user.selectOptions(screen.getByLabelText("From wallet"), "custody_sender");
 
     await waitFor(() => expect(mocks.fetchWalletBalancesAction).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("8.75 USDC")).toBeTruthy();
@@ -592,12 +592,12 @@ describe("TransferForm", () => {
     expect(amount).toHaveProperty("disabled", true);
 
     fireEvent.change(channel, { target: { value: "channel_beta" } });
-    fireEvent.change(source, { target: { value: "wallet_operations" } });
+    fireEvent.change(source, { target: { value: "custody_operations" } });
     fireEvent.change(recipient, { target: { value: "pcvw_alice_savings" } });
     fireEvent.change(amount, { target: { value: "9" } });
 
     expect(channel).toHaveProperty("value", "channel_alpha");
-    expect(source).toHaveProperty("value", "wallet_sender");
+    expect(source).toHaveProperty("value", "custody_sender");
     expect(recipient).toHaveProperty("value", "pcvw_alice");
     expect(amount).toHaveProperty("value", "1.25");
     expect(mocks.fetchTransferRecipientsAction).toHaveBeenCalledTimes(1);
@@ -610,7 +610,7 @@ describe("TransferForm", () => {
     expect(mocks.createTransferAction).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_alice",
         amount: "1.25",
       })
@@ -654,7 +654,7 @@ describe("TransferForm", () => {
         transfer: makeTransfer({
           id: "pct_gamma",
           channelId: "channel_gamma",
-          walletId: "wallet_gamma",
+          custodyWalletId: "custody_gamma",
           sender: nextSourceWallets[0]?.publicKey ?? "",
           recipient: gammaRecipients[0]?.pubkey ?? "",
           amount: "2",
@@ -668,7 +668,7 @@ describe("TransferForm", () => {
     });
 
     await screen.findByRole("option", { name: /Alic…1111/ });
-    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_sender");
+    await user.selectOptions(screen.getByLabelText("From wallet"), "custody_sender");
     await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_alice");
     await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
@@ -690,7 +690,7 @@ describe("TransferForm", () => {
     await screen.findByRole("option", { name: /Caro…3333/ });
     expect(screen.getByLabelText("Recipient wallet")).toHaveProperty("value", "");
 
-    await user.selectOptions(screen.getByLabelText("From wallet"), "wallet_gamma");
+    await user.selectOptions(screen.getByLabelText("From wallet"), "custody_gamma");
     await user.selectOptions(screen.getByLabelText("Recipient wallet"), "pcvw_carol");
     await user.type(screen.getByLabelText("Amount (USDC)"), "2");
     await user.click(screen.getByRole("button", { name: "Transfer USDC" }));
@@ -698,7 +698,7 @@ describe("TransferForm", () => {
     expect(mocks.createTransferAction.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_alice",
         amount: "1.25",
       })
@@ -706,7 +706,7 @@ describe("TransferForm", () => {
     expect(mocks.createTransferAction.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({
         channelId: "channel_gamma",
-        walletId: "wallet_gamma",
+        custodyWalletId: "custody_gamma",
         recipientVerifiedWalletId: "pcvw_carol",
         amount: "2",
       })

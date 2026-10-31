@@ -22,6 +22,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelTransferRow {
     sender_private_channel_user_id: row.sender_private_channel_user_id as string,
     recipient_private_channel_user_id: row.recipient_private_channel_user_id as string,
     sender_wallet_id: row.sender_wallet_id as string,
+    // SAFETY: The additive migration defines this persisted column as nullable TEXT.
+    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     recipient_verified_wallet_id: row.recipient_verified_wallet_id as string,
     sender: row.sender as string,
     recipient: row.recipient as string,
@@ -68,11 +70,11 @@ export function createPostgresPrivateChannelTransferRepository(
              INSERT INTO private_channel_transfers (
                id, organization_id, project_id, instance_id, channel_id,
                sender_private_channel_user_id, recipient_private_channel_user_id,
-               sender_wallet_id, recipient_verified_wallet_id,
+               sender_wallet_id, custody_wallet_id, recipient_verified_wallet_id,
                sender, recipient, mint, amount, status,
                idempotency_key, idempotency_fingerprint
              )
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?
                FROM admitting_instance
           RETURNING *`
         )
@@ -86,6 +88,7 @@ export function createPostgresPrivateChannelTransferRepository(
           input.senderPrivateChannelUserId,
           input.recipientPrivateChannelUserId,
           input.senderWalletId,
+          input.custodyWalletId,
           input.recipientVerifiedWalletId,
           input.sender,
           input.recipient,
@@ -194,13 +197,16 @@ export function createPostgresPrivateChannelTransferRepository(
                vw.id AS verified_wallet_id,
                vw.pubkey,
                (
-                 SELECT label
-                   FROM custody_wallets
-                  WHERE wallet_id = vw.wallet_id
-                    AND public_key = vw.pubkey
-                    AND status = 'active'
-                  ORDER BY updated_at DESC, id DESC
-                  LIMIT 1
+                 SELECT MIN(w.label)
+                   FROM custody_wallets w
+                   LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+                   LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+                  WHERE w.wallet_id = vw.wallet_id
+                    AND w.public_key = vw.pubkey
+                    AND (vw.custody_wallet_id IS NULL OR w.id = vw.custody_wallet_id)
+                    AND ((cfg.organization_id = c.organization_id AND cfg.project_id = c.project_id)
+                      OR (conn.organization_id = c.organization_id AND conn.project_id = c.project_id))
+                 HAVING COUNT(*) = 1 AND BOOL_AND(w.status = 'active')
                ) AS wallet_name,
                (pcu.id = ?) AS is_self
              FROM private_channel_memberships m

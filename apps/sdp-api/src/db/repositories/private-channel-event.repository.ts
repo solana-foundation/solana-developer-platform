@@ -23,6 +23,15 @@ export interface PrivateChannelEventRow {
   created_at: string;
 }
 
+export interface PrivateChannelEventMovementSource {
+  id: string;
+  kind: "deposit" | "withdrawal" | "transfer";
+  instance_id: string;
+  custody_wallet_id: string | null;
+  wallet_id: string;
+  pubkey: string;
+}
+
 export interface PrivateChannelEventWriteInput {
   id: string;
   organizationId: string;
@@ -82,6 +91,13 @@ export interface ListProjectPrivateChannelEventsParams {
 }
 
 export interface PrivateChannelEventRepository {
+  listMovementSources(input: {
+    organizationId: string;
+    projectId: string;
+    depositIds: string[];
+    withdrawalIds: string[];
+    transferIds: string[];
+  }): Promise<PrivateChannelEventMovementSource[]>;
   insert(input: PrivateChannelEventWriteInput): Promise<PrivateChannelEventRow>;
   /**
    * Channel feed: events for this channel, plus non-transfer instance-level

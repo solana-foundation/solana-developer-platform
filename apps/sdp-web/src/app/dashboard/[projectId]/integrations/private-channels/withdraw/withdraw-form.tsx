@@ -172,7 +172,7 @@ export function WithdrawForm({
     // here: the burn is irreversible, so a retry that minted a fresh key would
     // destroy the balance a second time.
     const requestPayload = {
-      walletId,
+      custodyWalletId: walletId,
       amount: amount.trim(),
       mint: selectedToken?.mint,
       destination: destination.trim() || undefined,
@@ -223,7 +223,7 @@ export function WithdrawForm({
           value={walletId}
         >
           {wallets.map((wallet) => (
-            <SelectItem key={wallet.walletId} value={wallet.walletId}>
+            <SelectItem key={wallet.id} value={wallet.id}>
               {walletLabel(wallet)}
             </SelectItem>
           ))}

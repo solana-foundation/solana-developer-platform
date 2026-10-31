@@ -32,7 +32,7 @@ const transfer: PrivateChannelTransfer = {
   projectId: "project_test",
   instanceId: "pci_test",
   channelId: "channel_alpha",
-  walletId: "wallet_sender",
+  custodyWalletId: "custody_sender",
   sender: "Sender1111111111111111111111111111111111",
   recipient: "Recipient11111111111111111111111111111111",
   mint: "Usdc111111111111111111111111111111111111",
@@ -69,7 +69,7 @@ describe("private-channel transfer actions", () => {
     [
       {
         channelId: "",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
         idempotencyKey: "idem_transfer_unit",
@@ -79,7 +79,7 @@ describe("private-channel transfer actions", () => {
     [
       {
         channelId: "channel_alpha",
-        walletId: "",
+        custodyWalletId: "",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
         idempotencyKey: "idem_transfer_unit",
@@ -89,7 +89,7 @@ describe("private-channel transfer actions", () => {
     [
       {
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "",
         amount: "1",
         idempotencyKey: "idem_transfer_unit",
@@ -99,7 +99,7 @@ describe("private-channel transfer actions", () => {
     [
       {
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1.0000001",
         idempotencyKey: "idem_transfer_unit",
@@ -121,7 +121,7 @@ describe("private-channel transfer actions", () => {
     await expect(
       createTransferAction({
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: " 1.25 ",
         idempotencyKey: "idem_transfer_unit",
@@ -134,7 +134,7 @@ describe("private-channel transfer actions", () => {
       client,
       "channel_alpha",
       {
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1.25",
       },
@@ -148,7 +148,7 @@ describe("private-channel transfer actions", () => {
     await expect(
       createTransferAction({
         channelId: "channel_alpha",
-        walletId: "wallet_sender",
+        custodyWalletId: "custody_sender",
         recipientVerifiedWalletId: "pcvw_recipient",
         amount: "1",
         idempotencyKey: "idem_transfer_unit",

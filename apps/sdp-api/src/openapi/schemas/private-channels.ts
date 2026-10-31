@@ -221,7 +221,7 @@ export const privateChannelBalanceQuerySchema = z.object({
     .openapi({
       param: { name: "owner", in: "query" },
       description:
-        "Owner to read the balance for: a `walletId` from GET /v1/wallets, a wallet public key, or a raw Solana address.",
+        "Owner to read the balance for: an internal SDP wallet ID from GET /v1/wallets or a valid Solana address.",
       example: "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz",
     }),
   mint: solanaAddressSchema.optional().openapi({
@@ -253,7 +253,10 @@ export const privateChannelDepositSchema = z
     instanceId: z.string(),
     organizationId: z.string(),
     projectId: z.string(),
-    walletId: z.string().openapi({ description: "Custody wallet the deposit is signed from." }),
+    custodyWalletId: z
+      .string()
+      .nullable()
+      .openapi({ description: "Custody wallet the deposit is signed from." }),
     depositor: solanaAddressSchema,
     recipient: solanaAddressSchema.openapi({
       description: "Address credited in the channel (defaults to the depositor).",
@@ -287,9 +290,9 @@ export const privateChannelDepositListSchema = z.object({
 
 export const createPrivateChannelDepositBodySchema = z
   .object({
-    walletId: z.string().min(1).openapi({
-      description: "Source custody wallet (walletId or public key).",
-      example: "wlt_…",
+    custodyWalletId: z.string().min(1).openapi({
+      description: "Exact internal SDP wallet ID of the source custody wallet.",
+      example: "cw_123",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
       description: "Positive decimal amount with at most six fractional digits.",
@@ -300,9 +303,11 @@ export const createPrivateChannelDepositBodySchema = z
         "Token mint to deposit. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
     recipient: z.string().min(1).optional().openapi({
-      description: "Address/walletId to credit in the channel. Defaults to the depositor.",
+      description:
+        "Internal SDP wallet ID or Solana address to credit in the channel. Defaults to the depositor.",
     }),
   })
+  .strict()
   .openapi({ description: "Create a deposit into the channel escrow." });
 
 export const privateChannelDepositIdParamSchema = z.object({
@@ -319,9 +324,10 @@ export const privateChannelDepositIdParamSchema = z.object({
 export const privateChannelVerifiedWalletSchema = z
   .object({
     id: z.string().openapi({ example: "pcvw_9f1c..." }),
-    walletId: z
-      .string()
-      .openapi({ description: "SDP managed custody wallet id.", example: "wallet_123" }),
+    custodyWalletId: z.string().nullable().openapi({
+      description: "Internal SDP wallet ID; null when the historical relationship is unproved.",
+      example: "cw_123",
+    }),
     pubkey: solanaAddressSchema,
     verifiedAt: z.string(),
   })
@@ -337,8 +343,8 @@ export const privateChannelVerifyWalletParamSchema = z.object({
     .min(1)
     .openapi({
       param: { name: "walletId", in: "path" },
-      description: "SDP managed custody wallet id to verify.",
-      example: "wallet_123",
+      description: "Exact internal SDP wallet ID to verify (the id from GET /v1/wallets).",
+      example: "cw_123",
     }),
 });
 
@@ -367,8 +373,9 @@ export const privateChannelWithdrawalSchema = z
     instanceId: z.string(),
     organizationId: z.string(),
     projectId: z.string(),
-    walletId: z
+    custodyWalletId: z
       .string()
+      .nullable()
       .openapi({ description: "Custody wallet whose channel-chain balance is burned." }),
     owner: solanaAddressSchema.openapi({
       description: "Channel-chain address whose token balance is burned.",
@@ -404,9 +411,9 @@ export const privateChannelWithdrawalListSchema = z.object({
 
 export const createPrivateChannelWithdrawalBodySchema = z
   .object({
-    walletId: z.string().min(1).openapi({
-      description: "Custody wallet to burn from (walletId or public key).",
-      example: "wlt_…",
+    custodyWalletId: z.string().min(1).openapi({
+      description: "Exact internal SDP wallet ID of the custody wallet to burn from.",
+      example: "cw_123",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
       description: "Positive decimal amount with at most six fractional digits.",
@@ -417,9 +424,11 @@ export const createPrivateChannelWithdrawalBodySchema = z
         "Token mint to withdraw. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
     destination: z.string().min(1).optional().openapi({
-      description: "Devnet address/walletId to release to. Defaults to the owner wallet.",
+      description:
+        "Internal SDP wallet ID or Solana address to release to. Defaults to the owner wallet.",
     }),
   })
+  .strict()
   .openapi({ description: "Create a withdrawal from the channel balance." });
 
 export const privateChannelWithdrawalIdParamSchema = z.object({
@@ -440,7 +449,10 @@ export const privateChannelTransferSchema = z
     projectId: z.string(),
     instanceId: z.string(),
     channelId: z.string(),
-    walletId: z.string().openapi({ description: "Custody wallet used to sign the transfer." }),
+    custodyWalletId: z
+      .string()
+      .nullable()
+      .openapi({ description: "Custody wallet used to sign the transfer." }),
     sender: solanaAddressSchema,
     recipient: solanaAddressSchema,
     mint: solanaAddressSchema,
@@ -489,9 +501,9 @@ export const privateChannelTransferRecipientListSchema = z.object({
 
 export const createPrivateChannelTransferBodySchema = z
   .object({
-    walletId: z.string().min(1).openapi({
-      description: "Verified SDP custody wallet controlled by the project's default principal.",
-      example: "wallet_123",
+    custodyWalletId: z.string().min(1).openapi({
+      description: "Exact internal SDP wallet ID, verified under the project's default principal.",
+      example: "cw_123",
     }),
     recipientVerifiedWalletId: z.string().min(1).openapi({
       description:
@@ -507,6 +519,7 @@ export const createPrivateChannelTransferBodySchema = z
         "Token mint to transfer. Must be one this instance allows; any other mint is rejected with 400. Defaults to the instance's first allowed token.",
     }),
   })
+  .strict()
   .openapi({ description: "Create a verified principal-to-principal channel transfer." });
 
 export const privateChannelTransferChannelIdParamSchema = z.object({

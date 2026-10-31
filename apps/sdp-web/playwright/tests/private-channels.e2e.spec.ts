@@ -25,6 +25,9 @@ test.describe
       await expect(page.getByRole("link", { name: "Private Channels" })).toHaveCount(0);
 
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/integrations"));
+      await expect(page.getByRole("link", { name: /^Privacy / })).toHaveCount(0);
+
+      await page.goto(projectHref(bootstrapProjectId, "/dashboard/integrations?tab=privacy"));
       await expect(page.getByRole("link", { name: "Private Channels" })).toHaveCount(0);
 
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels"));
@@ -35,13 +38,17 @@ test.describe
       test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
 
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/integrations"));
+      await page.getByRole("link", { name: /^Privacy / }).click();
+      await expect(page).toHaveURL(
+        projectHref(bootstrapProjectId, "/dashboard/integrations?tab=privacy")
+      );
       await expect(page.getByRole("link", { name: "Private Channels" })).toBeVisible();
       await page.getByRole("link", { name: "Private Channels" }).click();
       await expect(page).toHaveURL(
-        projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels")
+        projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels/overview")
       );
 
-      await page.getByRole("link", { name: "Configure" }).click();
+      await page.getByRole("link", { name: "Add channel" }).click();
       await expect(page).toHaveURL(
         projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels/setup")
       );
@@ -62,14 +69,16 @@ test.describe
       await expect(connectButton).toBeVisible();
       await expect(connectButton).toBeEnabled();
 
-      // Clearing a required field disables Connect and surfaces the inline error.
+      // Invalid values disable Connect; Test connection surfaces validation before any probe.
       await gatewayInput.fill("");
       await expect(connectButton).toBeDisabled();
+      await testButton.click();
       await expect(page.getByText("Gateway URL is required.")).toBeVisible();
 
       // Setting an invalid URL keeps Connect disabled with a format error.
       await gatewayInput.fill("not-a-url");
       await expect(connectButton).toBeDisabled();
+      await testButton.click();
       await expect(page.getByText("Gateway URL must be a valid http/https URL.")).toBeVisible();
 
       // Restoring a valid value re-enables Connect and clears the error.
@@ -78,26 +87,22 @@ test.describe
       await expect(page.getByText("Gateway URL is required.")).toHaveCount(0);
     });
 
-    test("renders the API Playground tab without a connected instance", async ({ page }) => {
+    test("legacy API Playground link opens the channel directory without a connection", async ({
+      page,
+    }) => {
       test.skip(!privateChannelsEnabled, "Requires PRIVATE_CHANNELS_ENABLED=true");
 
-      // API Playground is `requiresActive: false` — reachable before any instance
-      // is connected because the /instance endpoints are what the operator needs
-      // to bootstrap. Regressing that flag would strand the tab behind the
-      // Overview redirect chain and make the sandbox constants unreachable.
       await page.goto(
         projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels/api-playground")
       );
-
-      await expect(page.getByRole("button", { name: "API Playground" })).toBeVisible();
-
-      // The shell's method+title chip renders the default endpoint. Ownership
-      // check: this is the SPC playground, not somebody else's.
-      await expect(page.getByText("Get instance", { exact: true })).toBeVisible();
-
-      // Bottom action bar — the "cut off" regression that motivated the layout
-      // fix. If either button is missing, the shell height chain is broken.
-      await expect(page.getByRole("button", { name: /Run request/i })).toBeVisible();
-      await expect(page.getByRole("button", { name: /Copy Code/i })).toBeVisible();
+      await expect(page).toHaveURL(
+        `${projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels/overview")}?tab=playground`
+      );
+      await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+      await expect(page.getByText("No private channels yet.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Add channel" })).toHaveAttribute(
+        "href",
+        projectHref(bootstrapProjectId, "/dashboard/integrations/private-channels/setup")
+      );
     });
   });

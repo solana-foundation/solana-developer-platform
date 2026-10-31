@@ -210,7 +210,7 @@ function transferDto(overrides: Partial<PrivateChannelTransfer>): PrivateChannel
     projectId: PROJECT_ID,
     instanceId: INSTANCE_ID,
     channelId: CHANNEL_ID,
-    walletId: ACTOR_WALLET_ID,
+    custodyWalletId: "cw-pct-actor",
     sender: ACTOR_ADDRESS,
     recipient: RECIPIENT_ADDRESS,
     mint: OUTSIDER_ADDRESS,
@@ -545,7 +545,7 @@ describe("Private Channels — transfer access and routes", () => {
 
       const response = await postTransfer(
         {
-          walletId: ACTOR_WALLET_ID,
+          custodyWalletId: "cw-pct-actor",
           recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
           amount: "1.5",
         },
@@ -590,7 +590,7 @@ describe("Private Channels — transfer access and routes", () => {
     ]);
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.500",
       },
@@ -614,7 +614,7 @@ describe("Private Channels — transfer access and routes", () => {
     await useConnectionSource();
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -631,7 +631,7 @@ describe("Private Channels — transfer access and routes", () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -662,7 +662,7 @@ describe("Private Channels — transfer access and routes", () => {
         .run();
       const response = await postTransfer(
         {
-          walletId: ACTOR_WALLET_ID,
+          custodyWalletId: "cw-pct-actor",
           recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
           amount: "1.5",
         },
@@ -708,7 +708,7 @@ describe("Private Channels — transfer access and routes", () => {
       });
       const response = await postTransfer(
         {
-          walletId: ACTOR_WALLET_ID,
+          custodyWalletId: "cw-pct-actor",
           recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
           amount: "1.5",
         },
@@ -730,7 +730,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const transfer = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -743,7 +743,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("refuses to move funds without an idempotency key", async () => {
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -812,7 +812,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const transfer = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -827,7 +827,7 @@ describe("Private Channels — transfer access and routes", () => {
     async (amount) => {
       const response = await postTransfer(
         {
-          walletId: ACTOR_WALLET_ID,
+          custodyWalletId: "cw-pct-actor",
           recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
           amount,
         },
@@ -847,7 +847,7 @@ describe("Private Channels — transfer access and routes", () => {
       .all();
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -867,7 +867,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("requires the source custody wallet to be enrolled under the principal", async () => {
     const response = await postTransfer(
       {
-        walletId: UNVERIFIED_WALLET_ID,
+        custodyWalletId: "cw-pct-unverified",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -881,7 +881,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("does not let the sender use another member's verified custody wallet", async () => {
     const response = await postTransfer(
       {
-        walletId: OTHER_USER_WALLET_ID,
+        custodyWalletId: "cw-pct-other",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -897,7 +897,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -920,7 +920,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -938,7 +938,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("accepts only opaque verified-wallet ids from eligible same-channel recipients", async () => {
     const outsider = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: OUTSIDER_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -951,7 +951,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const arbitraryAddress = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_ADDRESS,
         amount: "1.5",
       },
@@ -967,7 +967,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("rejects a recipient wallet whose pubkey equals the sender", async () => {
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: "pcvw-pct-actor",
         amount: "1.5",
       },
@@ -996,7 +996,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: "pcvw-pct-actor-second",
         amount: "1.5",
       },
@@ -1037,7 +1037,7 @@ describe("Private Channels — transfer access and routes", () => {
 
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: id,
         amount: "1.5",
       },
@@ -1050,7 +1050,7 @@ describe("Private Channels — transfer access and routes", () => {
   it("creates a transfer with the resolved actor, custody wallet, recipient, instance, and auth", async () => {
     const response = await postTransfer(
       {
-        walletId: ACTOR_WALLET_ID,
+        custodyWalletId: "cw-pct-actor",
         recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
         amount: "1.5",
       },
@@ -1120,6 +1120,10 @@ describe("Private Channels — transfer access and routes", () => {
       "pct-visible-a",
       "pct-visible-b",
     ]);
+    for (const row of listBody.data.transfers) {
+      expect(row.custodyWalletId).toBe("cw-pct-actor");
+      expect(row).not.toHaveProperty("walletId");
+    }
 
     const filtered = await app.request(
       `/v1/private-channels/transfers?channelId=${CHANNEL_ID}`,
@@ -1140,6 +1144,9 @@ describe("Private Channels — transfer access and routes", () => {
       env
     );
     expect(getVisible.status).toBe(200);
+    const { data } = await getVisible.json();
+    expect(data.custodyWalletId).toBe("cw-pct-actor");
+    expect(data).not.toHaveProperty("walletId");
   });
 
   it("returns 404 for another project's transfer", async () => {

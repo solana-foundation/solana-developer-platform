@@ -20,6 +20,7 @@ export interface PrivateChannelTransferRow {
   sender_private_channel_user_id: string;
   recipient_private_channel_user_id: string;
   sender_wallet_id: string;
+  custody_wallet_id: string | null;
   recipient_verified_wallet_id: string;
   sender: string;
   recipient: string;
@@ -48,6 +49,7 @@ export interface CreatePrivateChannelTransferInput extends PrivateChannelTransfe
   senderPrivateChannelUserId: string;
   recipientPrivateChannelUserId: string;
   senderWalletId: string;
+  custodyWalletId: string;
   recipientVerifiedWalletId: string;
   sender: string;
   recipient: string;
@@ -139,7 +141,7 @@ export function mapPrivateChannelTransferRow(
     projectId: row.project_id,
     instanceId: row.instance_id,
     channelId: row.channel_id,
-    walletId: row.sender_wallet_id,
+    custodyWalletId: row.custody_wallet_id ?? null,
     sender: row.sender,
     recipient: row.recipient,
     mint: row.mint,

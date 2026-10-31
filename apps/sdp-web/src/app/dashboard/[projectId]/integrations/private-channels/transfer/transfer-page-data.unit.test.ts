@@ -27,19 +27,19 @@ function custodyWallet(walletId: string, publicKey: string, label: string): Cust
 
 function verifiedWallet(
   id: string,
-  walletId: string,
+  custodyWalletId: string | null,
   pubkey: string
 ): PrivateChannelVerifiedWalletDto {
   return {
     id,
-    walletId,
+    custodyWalletId,
     pubkey,
     verifiedAt: "2026-07-28T00:00:00.000Z",
   };
 }
 
 describe("intersectVerifiedSourceWallets", () => {
-  it("keeps only signable wallets verified for the acting user by walletId and pubkey", () => {
+  it("keeps only the exact internal wallet and public key verified for the acting user", () => {
     const eligible = custodyWallet(
       "wallet_eligible",
       "Eligible111111111111111111111111111111111",
@@ -55,18 +55,20 @@ describe("intersectVerifiedSourceWallets", () => {
       "Other333333333333333333333333333333333333",
       "Other"
     );
+    const sibling = { ...eligible, id: "custody_sibling" };
 
     expect(
       intersectVerifiedSourceWallets(
-        [eligible, changedAddress, otherWallet],
+        [eligible, sibling, changedAddress, otherWallet],
         [
-          verifiedWallet("pcvw_eligible", eligible.walletId, eligible.publicKey),
+          verifiedWallet("pcvw_eligible", eligible.id, eligible.publicKey),
           verifiedWallet(
             "pcvw_stale",
-            changedAddress.walletId,
+            changedAddress.id,
             "Stale22222222222222222222222222222222222"
           ),
           verifiedWallet("pcvw_wrong_id", "wallet_not_signable", otherWallet.publicKey),
+          verifiedWallet("pcvw_unresolved", null, otherWallet.publicKey),
         ]
       )
     ).toEqual([eligible]);
@@ -83,8 +85,8 @@ describe("intersectVerifiedSourceWallets", () => {
       intersectVerifiedSourceWallets(
         [wallet],
         [
-          verifiedWallet("pcvw_one", wallet.walletId, wallet.publicKey),
-          verifiedWallet("pcvw_two", wallet.walletId, wallet.publicKey),
+          verifiedWallet("pcvw_one", wallet.id, wallet.publicKey),
+          verifiedWallet("pcvw_two", wallet.id, wallet.publicKey),
         ]
       )
     ).toEqual([wallet]);

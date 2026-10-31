@@ -9,6 +9,7 @@ import { internalError } from "@/lib/errors";
 import type {
   ListPrivateChannelEventsParams,
   ListProjectPrivateChannelEventsParams,
+  PrivateChannelEventMovementSource,
   PrivateChannelEventRepository,
   PrivateChannelEventRow,
   PrivateChannelEventWriteInput,
@@ -52,6 +53,38 @@ export function createPostgresPrivateChannelEventRepository(
   db: AppDb
 ): PrivateChannelEventRepository {
   return {
+    async listMovementSources(input) {
+      if (!input.depositIds.length && !input.withdrawalIds.length && !input.transferIds.length) {
+        return [];
+      }
+      const { results } = await db
+        .prepare(
+          `SELECT id, 'deposit' AS kind, instance_id, custody_wallet_id, wallet_id, depositor AS pubkey
+           FROM private_channel_deposits
+          WHERE organization_id = ? AND project_id = ? AND id = ANY(?::text[])
+         UNION ALL
+         SELECT id, 'withdrawal' AS kind, instance_id, custody_wallet_id, wallet_id, owner AS pubkey
+           FROM private_channel_withdrawals
+          WHERE organization_id = ? AND project_id = ? AND id = ANY(?::text[])
+         UNION ALL
+         SELECT id, 'transfer' AS kind, instance_id, custody_wallet_id, sender_wallet_id AS wallet_id, sender AS pubkey
+           FROM private_channel_transfers
+          WHERE organization_id = ? AND project_id = ? AND id = ANY(?::text[])`
+        )
+        .bind(
+          input.organizationId,
+          input.projectId,
+          input.depositIds,
+          input.organizationId,
+          input.projectId,
+          input.withdrawalIds,
+          input.organizationId,
+          input.projectId,
+          input.transferIds
+        )
+        .all<PrivateChannelEventMovementSource>();
+      return results;
+    },
     async insert(input) {
       const row = await db
         .prepare(

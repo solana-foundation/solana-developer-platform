@@ -15,6 +15,7 @@ const DEPOSIT: PrivateChannelDepositRow = {
   project_id: "prj_event_test",
   instance_id: "pci_event_test",
   wallet_id: "wallet_depositor",
+  custody_wallet_id: "cw_depositor",
   depositor: "wallet-a",
   recipient: "wallet-b",
   mint: "mint",
@@ -36,6 +37,7 @@ const WITHDRAWAL: PrivateChannelWithdrawalRow = {
   project_id: "prj_event_test",
   instance_id: "pci_event_test",
   wallet_id: "wallet_owner",
+  custody_wallet_id: "cw_owner",
   owner: "wallet-c",
   destination: "wallet-d",
   mint: "mint",
@@ -72,7 +74,7 @@ describe("financial event emitters", () => {
       expect.objectContaining({
         sdpUserId: "usr_depositor",
         payload: expect.objectContaining({
-          senderWalletId: DEPOSIT.wallet_id,
+          custodyWalletId: "cw_depositor",
           sender: DEPOSIT.depositor,
           recipient: DEPOSIT.recipient,
         }),
@@ -88,7 +90,7 @@ describe("financial event emitters", () => {
         sdpUserId: "usr_owner",
         payload: {
           withdrawalId: WITHDRAWAL.id,
-          senderWalletId: WITHDRAWAL.wallet_id,
+          custodyWalletId: "cw_owner",
           sender: WITHDRAWAL.owner,
           recipient: WITHDRAWAL.destination,
           amount: WITHDRAWAL.amount,
