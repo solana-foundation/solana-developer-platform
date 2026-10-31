@@ -1,5 +1,5 @@
 /**
- * An organization's mainnet access request (HOO-2427), stored on its own row (migration 0193):
+ * An organization's mainnet access request (HOO-2427), stored on the organization's row (migration 0201):
  * the declared jurisdiction, the Terms and Conditions version accepted with it, and the request.
  * The migration's check keeps them whole, so a request exists exactly when `mainnet_requested_at`
  * is set.
@@ -24,6 +24,12 @@ export interface MainnetAccessClaim {
   termsVersion: string;
 }
 
+/** A held send of the request email: the request as claimed, and the claim's own timestamp. */
+export interface MainnetAccessSendClaim {
+  row: MainnetAccessRow;
+  claimedAt: string;
+}
+
 export interface MainnetAccessEmailContext {
   organization_name: string;
   requester_email: string | null;
@@ -35,6 +41,14 @@ const COLUMNS = `id AS organization_id, jurisdiction_country_code AS country_cod
   terms_accepted_version AS terms_version,
   mainnet_requested_at AS requested_at, mainnet_requested_by_user_id AS requested_by_user_id,
   mainnet_request_notified_at AS notified_at`;
+
+/**
+ * How long a send claim holds. The send gives up after 10 seconds, so only a process that died
+ * mid-send leaves a claim this old.
+ */
+const SEND_CLAIM_LEASE = "interval '2 minutes'";
+const SEND_CLAIM_LIVE = `mainnet_request_sending_at IS NOT NULL
+  AND mainnet_request_sending_at::timestamptz > now() - ${SEND_CLAIM_LEASE}`;
 
 type StoredColumns = {
   [Column in keyof MainnetAccessRow]: string | null;
@@ -107,19 +121,58 @@ export class MainnetAccessRepository {
   }
 
   /**
-   * Marks the request sent, if it is still the one that was emailed.
+   * Claims the one send of an unsent request, so a second send and a correction wait for it. The
+   * claim commits before the email goes out, and the email describes the row it returns.
    *
-   * @returns The sent request, or null when it was reset or replaced meanwhile.
+   * @returns The claim, or null when there is no unsent request or another send holds it.
    */
-  async markNotified(row: MainnetAccessRow): Promise<MainnetAccessRow | null> {
+  async claimSend(organizationId: string): Promise<MainnetAccessSendClaim | null> {
+    const columns = await this.db.queryOne<StoredColumns & { claimed_at: string }>(
+      `UPDATE organizations
+       SET mainnet_request_sending_at = sdp_iso_now()
+       WHERE id = ? AND mainnet_requested_at IS NOT NULL AND mainnet_request_notified_at IS NULL
+         AND NOT (${SEND_CLAIM_LIVE})
+       RETURNING ${COLUMNS}, mainnet_request_sending_at AS claimed_at`,
+      [organizationId]
+    );
+    if (!columns) return null;
+    const row = requestOf(columns);
+    if (!row) throw internalError("Mainnet access send claimed without a request");
+    return { row, claimedAt: columns.claimed_at };
+  }
+
+  /**
+   * Marks the claimed request sent and lets go of the claim.
+   *
+   * @returns The sent request, or null when the claim lapsed and something else changed it.
+   */
+  async markNotified(claim: MainnetAccessSendClaim): Promise<MainnetAccessRow | null> {
     const columns = await this.db.queryOne<StoredColumns>(
       `UPDATE organizations
-       SET mainnet_request_notified_at = COALESCE(mainnet_request_notified_at, sdp_iso_now())
-       WHERE id = ? AND mainnet_requested_at = ?
+       SET mainnet_request_notified_at = sdp_iso_now(), mainnet_request_sending_at = NULL
+       WHERE id = ? AND mainnet_request_sending_at = ?
        RETURNING ${COLUMNS}`,
-      [row.organization_id, row.requested_at]
+      [claim.row.organization_id, claim.claimedAt]
     );
     return columns ? requestOf(columns) : null;
+  }
+
+  /** Lets go of a claim whose send failed, so the request can be sent again. */
+  async releaseSend(claim: MainnetAccessSendClaim): Promise<void> {
+    await this.db.execute(
+      `UPDATE organizations SET mainnet_request_sending_at = NULL
+       WHERE id = ? AND mainnet_request_sending_at = ?`,
+      [claim.row.organization_id, claim.claimedAt]
+    );
+  }
+
+  /** Whether a send of the request email holds its claim now; read under the row's lock. */
+  async sendInFlight(organizationId: string): Promise<boolean> {
+    const result = await this.db.queryOne<{ in_flight: boolean }>(
+      `SELECT ${SEND_CLAIM_LIVE} AS in_flight FROM organizations WHERE id = ?`,
+      [organizationId]
+    );
+    return result?.in_flight === true;
   }
 
   async setCountry(organizationId: string, countryCode: CountryCode): Promise<MainnetAccessRow> {
@@ -140,7 +193,8 @@ export class MainnetAccessRepository {
       `UPDATE organizations
        SET jurisdiction_country_code = NULL, terms_accepted_version = NULL,
            mainnet_requested_at = NULL, mainnet_requested_by_user_id = NULL,
-           mainnet_request_notified_at = NULL, updated_at = sdp_datetime_now()
+           mainnet_request_notified_at = NULL, mainnet_request_sending_at = NULL,
+           updated_at = sdp_datetime_now()
        WHERE id = ?`,
       [organizationId]
     );

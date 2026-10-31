@@ -12,7 +12,10 @@ ALTER TABLE organizations
     ADD COLUMN mainnet_requested_at TEXT,
     ADD COLUMN mainnet_requested_by_user_id TEXT,
     -- Set once the alias accepted the email; until then the request can be sent again.
-    ADD COLUMN mainnet_request_notified_at TEXT;
+    ADD COLUMN mainnet_request_notified_at TEXT,
+    -- Set while one send of the request email is in flight, so a second send and an operator's
+    -- correction wait for it; a send that never finished stops holding it after two minutes.
+    ADD COLUMN mainnet_request_sending_at TEXT;
 
 ALTER TABLE organizations
     ADD CONSTRAINT organizations_jurisdiction_country_code_check
@@ -27,6 +30,7 @@ ALTER TABLE organizations
         AND (mainnet_requested_at IS NULL) = (jurisdiction_country_code IS NULL)
         AND (mainnet_requested_at IS NULL) = (terms_accepted_version IS NULL)
         AND (mainnet_requested_at IS NOT NULL OR mainnet_request_notified_at IS NULL)
+        AND (mainnet_requested_at IS NOT NULL OR mainnet_request_sending_at IS NULL)
     )
     NOT VALID;
 
