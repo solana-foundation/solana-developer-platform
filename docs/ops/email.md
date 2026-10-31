@@ -21,6 +21,16 @@ SDP sends email through Iterable, the Foundation's sender for its email domains.
 - **Off unless configured.** `iterableEmailConfig` reads `ITERABLE_API_URL`, `ITERABLE_API_KEY` and `ITERABLE_TRANSACTIONAL_CAMPAIGN_ID`. If any is missing or a placeholder, nothing is sent, mainnet access requests answer 503, and alerts are skipped without retrying.
 - **No idempotency key.** Iterable has none, so a caller that must not send twice keeps its own record of what it sent. Admin alerts keep one per recipient.
 
+## Admin alerts
+
+Every active admin of an organization is emailed when something changes in it (HOO-2299). The Worker cron `admin-alert-emails` (`apps/sdp-api/src/services/admin-alerts/`) runs every 15 seconds, so an email follows its event within about a minute. It builds alerts only from rows that already record each event, so no request or money path calls it:
+- **Configuration changes**, read from the audit ledger: invitations, joins, role changes, removals, API key creation, rotation and revocation, custody connections and wallets, the IP allowlist, mainnet access and the alert setting itself.
+- **Money movement**, read from the payment tables: one summary per project per minute, counting transfers, batch payouts (once each), recurring collections, payment-request settlements, deposits and ramps. A payment that failed before reaching the chain isn't counted. Only deposits SDP records are counted: funds sent straight to a project wallet from outside SDP aren't stored, so they don't alert yet (HOO-2479).
+
+Alerts about a project (money, API keys, custody) cover mainnet projects only. Organization-wide changes always alert.
+- **Opt-out.** An admin turns every alert off in the dashboard's organization settings, which sets `settings.alertEmails = false` on `PATCH /v1/organizations/{id}`. API keys can never change it. Turning alerts off is itself emailed, so it can't happen unnoticed.
+- **No resends.** Each alert is stored once per source event in `admin_alerts`, with one `admin_alert_deliveries` row per admin. A send claims its row, and its status becomes `sent` once Iterable accepts it, so a retry never emails that admin again. Each send also rechecks that the recipient is still an admin and that alerts are on, and marks the row `suppressed` otherwise. Failed sends retry with backoff, and a row is `abandoned` after 8 attempts or a day.
+
 ## Configuration
 
 | Key                                  | Prod (Doppler `prd`, mounted by sdp-infra) | Local development (Doppler `dev`)                | CI (Doppler `dev_ci`) |

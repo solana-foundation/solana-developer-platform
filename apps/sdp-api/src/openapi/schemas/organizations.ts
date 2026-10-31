@@ -56,6 +56,11 @@ const organizationSettingsSchema = z
       })
       .optional()
       .openapi({ description: "Custom rate limit overrides." }),
+    alertEmails: z.boolean().optional().openapi({
+      description:
+        "Whether organization admins are emailed when money moves in a mainnet project or the organization's members, API keys, custody or mainnet access change. Unset means true. Turning it off is itself emailed to the admins.",
+      example: true,
+    }),
   })
   .strict()
   .openapi({ description: "Organization-level settings." });

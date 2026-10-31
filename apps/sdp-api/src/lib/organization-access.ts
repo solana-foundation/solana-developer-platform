@@ -274,5 +274,6 @@ export function projectOrganizationSettings(settings: OrganizationSettings): Org
     providerOverrides: settings.providerOverrides,
     enableProductionProject: settings.enableProductionProject,
     customRateLimits: settings.customRateLimits,
+    alertEmails: settings.alertEmails,
   };
 }
