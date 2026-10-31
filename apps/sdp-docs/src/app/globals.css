@@ -712,6 +712,38 @@ body {
   text-wrap: pretty;
 }
 
+.launch-docs-development-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 28px;
+  padding: 14px 16px;
+  border: 1px solid var(--attention-rule);
+  border-radius: var(--corner-card);
+  background: var(--attention-wash);
+  color: var(--ink-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  text-wrap: pretty;
+}
+
+.launch-docs-development-notice p {
+  margin: 0;
+}
+
+.launch-docs-development-notice strong {
+  color: var(--ink);
+}
+
+.launch-docs-development-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 2px;
+  background: var(--attention);
+}
+
 .launch-docs-body {
   color: var(--ink-secondary);
   font-family: var(--font-sans);

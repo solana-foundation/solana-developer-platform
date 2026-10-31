@@ -62,9 +62,12 @@ overrides:
   vite: 7.3.7
   ws: 8.21.0
 
-packageExtensionsChecksum: sha256-Hq4aG11euVLISXl/NBcyj4016UlEcDZd8BZXkelHdyM=
+packageExtensionsChecksum: sha256-k1vAXwbW7jWvDkBUWRHKCit/nlCbkQsqdkASrsFxjxo=
 
 patchedDependencies:
+  '@solana/keychain-core@1.4.0':
+    hash: db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb
+    path: patches/@solana__keychain-core@1.4.0.patch
   brace-expansion@5.0.12:
     hash: e690b52aead08731a7349e44e5814fe2404d328124a725ff71ada448cadbbc7b
     path: patches/brace-expansion@5.0.12.patch
@@ -244,7 +247,7 @@ importers:
         version: 9.1.0(zod@4.6.7)
       '@solana/keychain-core':
         specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+        version: 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keychain-fireblocks':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
@@ -610,7 +613,7 @@ importers:
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keychain-core':
         specifier: 1.4.0
-        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+        version: 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keychain-fireblocks':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
@@ -13022,14 +13025,14 @@ snapshots:
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
     transitivePeerDependencies:
       - '@solana/codecs-core'
 
-  '@solana/keychain-core@1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))':
+  '@solana/keychain-core@1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))':
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-core': 8.6.0(typescript@6.0.3)
@@ -13037,12 +13040,13 @@ snapshots:
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
+      zod: 4.6.7
 
   '@solana/keychain-fireblocks@1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))':
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -13054,7 +13058,7 @@ snapshots:
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -13066,7 +13070,7 @@ snapshots:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-core': 8.6.0(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -13077,7 +13081,7 @@ snapshots:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-core': 8.6.0(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
@@ -13086,7 +13090,7 @@ snapshots:
     dependencies:
       '@solana/addresses': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/codecs-strings': 8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
-      '@solana/keychain-core': 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-core': 1.4.0(patch_hash=db80167189d4560b1efd7698da2f55f1955fe4a33fad9df8b15f0c7d3d985fdb)(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@solana/keys': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/signers': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)
       '@solana/transactions': 7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)

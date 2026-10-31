@@ -93,6 +93,11 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 - `<DocsPage toc={toc}>` — renders sticky TOC sidebar at 1180px+ (right column, 230px wide)
 - Article max-width is 760px (760px + gap + 230px TOC = ~1060px inside 1240px container)
 
+`DevelopmentNotice` (`src/components/docs-shell/development-notice.tsx`) is the
+shared active development banner. The catch-all route places it below the
+description on the docs home and every `reference/api` page. Reuse the component
+for other placements; its marker, fill and border use the `--attention*` tokens.
+
 ### Page actions and the Markdown agents get
 
 `[[...slug]]/page.tsx` puts the title in `.launch-docs-header` beside `PageActions` (`page-actions.tsx`): **Copy page**, with View as Markdown and Open in ChatGPT or Claude behind its chevron. Copy page fetches the page's `.md` and copies that response, so it always matches what agents get; below 640px it drops its label. The `.md` route (`src/app/api/docs-md`) opens every page, the home included, with a one-line context block linking the docs index (`/docs.md`, every page), `llms.txt` (the key pages) and `SKILL.md`, then the page's title and description.
