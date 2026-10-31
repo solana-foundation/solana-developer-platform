@@ -92,6 +92,20 @@ export interface Env extends ManagedRpcEnv {
   CLERK_API_URL?: string;
   CLERK_WEBHOOK_SECRET?: string;
 
+  // Email (`services/iterable-email.ts`): one Iterable campaign sends every SDP email
+  ITERABLE_API_KEY?: string;
+  /** https://api.iterable.com on deployments; local development points it at a stub. */
+  ITERABLE_API_URL?: string;
+  /** The triggered campaign whose template passes `subject`, `body` and `replyTo` through. */
+  ITERABLE_TRANSACTIONAL_CAMPAIGN_ID?: string;
+  /**
+   * The SDP operators' address: mainnet access requests (HOO-2427) email it, and customers see it
+   * as the contact for changes. Prod sets the operator alias in Doppler `prd`. Doppler `dev` leaves
+   * it unset; to try the flow locally, set your own address in `apps/sdp-api/.env.local`. Unset (or
+   * not an address), the deployment takes no mainnet access requests.
+   */
+  SDP_OPERATOR_EMAIL?: string;
+
   // Allowlist configuration
   ALLOWLIST_ADMIN_KEY?: string;
   ALLOWLIST_ADMIN_ORG_ID?: string;

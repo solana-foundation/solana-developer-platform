@@ -257,3 +257,18 @@ export const COUNTRY_CODES = COUNTRIES.map((c) => c.code) as unknown as readonly
   CountryCode,
   ...CountryCode[],
 ];
+
+const COUNTRIES_BY_CODE: ReadonlyMap<string, Country> = new Map(
+  COUNTRIES.map((country) => [country.code, country])
+);
+
+export function isCountryCode(code: string): code is CountryCode {
+  return COUNTRIES_BY_CODE.has(code);
+}
+
+/** The catalog entry for a code; every `CountryCode` has one. */
+export function countryByCode(code: CountryCode): Country {
+  const country = COUNTRIES_BY_CODE.get(code);
+  if (!country) throw new Error(`Country ${code} is missing from the country catalog`);
+  return country;
+}

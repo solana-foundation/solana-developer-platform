@@ -76,6 +76,7 @@ import {
   createOrganizationResponseSchema,
   inviteMemberResponseSchema,
   listMembersResponseSchema,
+  mainnetAccessSchema,
   memberRoleSchema,
   organizationSchema,
 } from "@/openapi/schemas/organizations";
@@ -112,6 +113,7 @@ import {
 } from "@/openapi/schemas/projects";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
+export const mainnetAccessResponse = successResponseSchema(mainnetAccessSchema);
 export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
 
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);

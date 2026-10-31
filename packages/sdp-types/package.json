@@ -248,6 +248,11 @@
       "types": "./src/fireblocks.ts",
       "import": "./src/fireblocks.ts",
       "default": "./src/fireblocks.ts"
+    },
+    "./mainnet-access": {
+      "types": "./src/mainnet-access.ts",
+      "import": "./src/mainnet-access.ts",
+      "default": "./src/mainnet-access.ts"
     }
   },
   "scripts": {
