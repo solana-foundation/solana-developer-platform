@@ -48,6 +48,15 @@ export function generatePaymentTransferBatchId(): string {
  */
 export const TRANSFER_BATCH_ATTEMPT_LIFETIME_MS = 60 * 60 * 1000;
 
+/**
+ * The audit intent id of a batch chunk's transfer (APE-425). The request
+ * writes the intent before sending; the pending-transfers job appends the
+ * outcome from the chain verdict, so both derive the id from the transfer.
+ */
+export function transferBatchChunkAuditIntentId(transferId: string): string {
+  return `aint_${transferId}`;
+}
+
 export function generatePaymentTransferBatchRetryId(): string {
   return `xbretry_${crypto.randomUUID()}`;
 }

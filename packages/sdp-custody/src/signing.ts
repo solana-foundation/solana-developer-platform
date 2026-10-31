@@ -48,5 +48,5 @@ export type SigningErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "PROVIDER_CREDENTIAL_INVALID"
-  /** The custody provider's own policy declined to sign; nothing was signed. */
+  /** The custody provider declined this signing call because of its policy. */
   | "POLICY_REFUSED";

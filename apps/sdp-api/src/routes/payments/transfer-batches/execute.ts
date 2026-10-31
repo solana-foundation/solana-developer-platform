@@ -1,11 +1,12 @@
 import { simulateTransaction } from "@sdp/rpc/solana";
 import { getBase64EncodedWireTransaction, getTransactionEncoder } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { asTransactionalClient, getDb } from "@/db/client";
+import { asTransactionalClient, type DatabaseClient, getDb } from "@/db/client";
 import type {
   PaymentTransferBatchesRepository,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
+import { transferBatchChunkAuditIntentId } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -13,6 +14,7 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
+import { type AuditIntent, AuditService, criticalOutcomeEntry } from "@/services/audit.service";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -109,6 +111,11 @@ export function applyRecipientRowUpdates(
  * The exact signed bytes and signature are persisted before the durable start
  * marker and first broadcast. Once that marker may exist, failures remain
  * processing for reconciliation rather than falsely failing the recipients.
+ * The audit ledger admits each chunk before its bytes can reach the chain, as
+ * it does a single transfer (APE-425): a refused intent fails the chunk unsent,
+ * and a refusal or failed send closes it as a failure. A chunk that may have
+ * been sent is closed by the pending-transfers job from its chain verdict,
+ * since RPC accepting it is not one.
  *
  * @param params.resolved - Resolved batch request.
  * @param params.chunk - Chunk to sign and submit.
@@ -204,15 +211,63 @@ export async function executeChunk(params: {
   applyRecipientRowUpdates(params.recipientsByIndex, linkedTransfer.linked);
   const transfer = linkedTransfer.created;
 
-  const failChunk = (error: unknown) =>
-    createPostgresPaymentTransferBatchesRepository(getDb(c.env)).settleTransferBatch({
+  const failChunk = (cause: unknown, db: DatabaseClient = getDb(c.env)) =>
+    createPostgresPaymentTransferBatchesRepository(db).settleTransferBatch({
       transferId: transfer.id,
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
       transferStatus: "failed",
-      error: error instanceof Error ? error.message : String(error),
+      error: cause instanceof Error ? cause.message : String(cause),
       slot: null,
       updatedAt: new Date().toISOString(),
+    });
+
+  const auditService = new AuditService(getDb(c.env));
+  let auditIntent: AuditIntent;
+  try {
+    auditIntent = await auditService.beginCritical(
+      c,
+      {
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+        metadata: {
+          batchId: firstRecipient.batch_id,
+          custodyWalletId: resolved.sourceWallet.id,
+          walletId: resolved.sourceWallet.walletId,
+          sourceAddress: resolved.sourceAddress,
+          // Named tokenMint: a bare "token" key is scrubbed as a credential.
+          tokenMint: resolved.tokenContext.token,
+          amount: chunk.amount,
+          recipients: recipientRows.map((row) => ({
+            recipientId: row.id,
+            counterpartyId: row.counterparty_id,
+            counterpartyAccountId: row.counterparty_account_id,
+            destination: row.destination_address,
+            amount: row.amount,
+          })),
+        },
+      },
+      { intentId: transferBatchChunkAuditIntentId(transfer.id) }
+    );
+  } catch (error) {
+    // Nothing was sent: failing the chunk settles its recipients failed, so
+    // the ledger refusal can't leave an unaudited transfer to land or replay.
+    await failChunk(error);
+    return;
+  }
+  // The failed settle and its audit outcome commit together, and only the
+  // writer that settled the chunk closes its intent: a lost race means the
+  // pending-transfers job already closed it from the chain verdict. A ledger
+  // failure rolls the settle back, leaving the chunk for that job to settle.
+  const failAuditedChunk = (cause: unknown) =>
+    auditService.logWithin(c, async (tx) => {
+      const settled = await failChunk(cause, tx);
+      const outcome = criticalOutcomeEntry(auditIntent, {
+        status: "failure",
+        metadata: { error: cause instanceof Error ? cause.message : String(cause) },
+      });
+      return { entry: settled ? outcome : null, result: settled };
     });
 
   if (params.preflight) {
@@ -225,7 +280,7 @@ export async function executeChunk(params: {
         );
       }
     } catch (error) {
-      await failChunk(error);
+      await failAuditedChunk(error);
       return;
     }
   }
@@ -257,7 +312,7 @@ export async function executeChunk(params: {
       });
       return;
     }
-    await failChunk(error);
+    await failAuditedChunk(error);
     return;
   }
 }

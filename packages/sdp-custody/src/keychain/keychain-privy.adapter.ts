@@ -14,25 +14,12 @@ import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainPrivyConfig } from "./types";
 
 /**
- * The remote-error context keychain attaches to a non-2xx Privy answer, read
- * as a Privy policy violation: Privy's error body (`{ error, code }`, see
- * https://docs.privy.io/recipes/using-stateful-policies) with the documented
- * `policy_violation` code (https://docs.privy.io/basics/troubleshooting/error-handling/api-errors).
- * Keychain truncates the body past 256 characters; a truncated body no longer
- * parses, so it stays the provider's own error rather than a policy refusal.
+ * Keychain retains the top-level provider code before truncating the error
+ * body. Only Privy's documented `policy_violation` code is a policy refusal.
+ * https://docs.privy.io/basics/troubleshooting/error-handling/api-errors
  */
 const privyPolicyViolationContextSchema = z.object({
-  response: z
-    .string()
-    .transform((body, ctx): unknown => {
-      try {
-        return JSON.parse(body);
-      } catch {
-        ctx.addIssue({ code: "custom", message: "Privy error body is not JSON" });
-        return z.NEVER;
-      }
-    })
-    .pipe(z.object({ code: z.literal("policy_violation") })),
+  responseCode: z.literal("policy_violation"),
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

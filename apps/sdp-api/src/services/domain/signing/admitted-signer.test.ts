@@ -27,6 +27,7 @@ const CONTEXT = {
   organizationId: "org_admitted_signer",
   projectId: "prj_admitted_signer",
   custodyWalletId: "cwlt_admitted_signer",
+  provider: "privy",
 } as const;
 
 const ADMITTED: MoneyAdmissionDecision = { admitted: true };
@@ -177,30 +178,36 @@ async function signerRejectingWith(
 }
 
 describe("admittedSigner custody policy refusals (HOO-2333)", () => {
-  it.each([
-    ["signTransactions", signTransactions],
-    ["modifyAndSignTransactions", modifyAndSignTransactions],
-    ["signAndSendTransactions", signAndSendTransactions],
-    ["signMessages", signMessages],
-    ["modifyAndSignMessages", modifyAndSignMessages],
-  ] as const)(
-    "raises a policy refusal from %s as CUSTODY_POLICY_REFUSED, keeping the refusal as its cause",
-    async (_method, sign) => {
-      const refusal = new SigningError("Privy policy refused", "POLICY_REFUSED");
-      const signer = admittedSigner(
-        await signerRejectingWith(refusal),
-        async () => ADMITTED,
-        CONTEXT
-      );
+  describe.each([
+    ["privy", "Privy"],
+    ["fireblocks", "Fireblocks"],
+    ["turnkey", "Turnkey"],
+  ] as const)("%s", (provider, label) => {
+    it.each([
+      ["signTransactions", signTransactions],
+      ["modifyAndSignTransactions", modifyAndSignTransactions],
+      ["signAndSendTransactions", signAndSendTransactions],
+      ["signMessages", signMessages],
+      ["modifyAndSignMessages", modifyAndSignMessages],
+    ] as const)(
+      "raises a policy refusal from %s as CUSTODY_POLICY_REFUSED, keeping the refusal as its cause",
+      async (_method, sign) => {
+        const refusal = new SigningError("Private provider failure details", "POLICY_REFUSED");
+        const signer = admittedSigner(await signerRejectingWith(refusal), async () => ADMITTED, {
+          ...CONTEXT,
+          provider,
+        });
 
-      await expect(sign(signer)).rejects.toBeInstanceOf(AppError);
-      await expect(sign(signer)).rejects.toMatchObject({
-        code: "CUSTODY_POLICY_REFUSED",
-        statusCode: 422,
-        cause: refusal,
-      });
-    }
-  );
+        await expect(sign(signer)).rejects.toBeInstanceOf(AppError);
+        await expect(sign(signer)).rejects.toMatchObject({
+          code: "CUSTODY_POLICY_REFUSED",
+          statusCode: 422,
+          message: `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`,
+          cause: refusal,
+        });
+      }
+    );
+  });
 
   it("rethrows any other signing failure unchanged", async () => {
     const unavailable = new SigningError("Privy unreachable", "NETWORK_ERROR");

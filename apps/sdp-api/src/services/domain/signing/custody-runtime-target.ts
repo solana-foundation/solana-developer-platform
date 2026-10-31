@@ -744,6 +744,7 @@ export class CustodyRuntimeTargets {
         organizationId,
         projectId,
         custodyWalletId,
+        provider: target.provider,
       }
     );
   }

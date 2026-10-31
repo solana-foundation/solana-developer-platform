@@ -45,13 +45,12 @@ export function BatchSendRail({
     onExit,
   });
   const finished = Boolean(wizard.batchResult);
-  // As with a single payment, the review step shows the outcome once sent and the progress
-  // names that moment as a third step.
+  // A result can be a refusal before signing, so the final step claims no send.
   const steps = [
     ...wizard.steps,
     {
-      label: t("DashboardPayments.payForm.sent"),
-      title: t("DashboardPayments.batchSend.resultSubmitted"),
+      label: t("DashboardPayments.batchSend.resultStep"),
+      title: "",
     },
   ];
 
