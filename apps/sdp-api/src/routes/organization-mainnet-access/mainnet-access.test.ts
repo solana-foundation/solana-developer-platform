@@ -97,6 +97,34 @@ function failIterable(): () => void {
   return () => iterable.mockImplementation(answer);
 }
 
+/** Holds Iterable's next send until `release`; `sending` settles once that send reached it. */
+function holdIterable(): { sending: Promise<void>; release: () => void } {
+  const answer = iterable.getMockImplementation();
+  if (!answer) throw new Error("the Iterable stub is installed in beforeEach");
+  let reached = (): void => undefined;
+  let release = (): void => undefined;
+  const sending = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  iterable.mockImplementationOnce(async (input, init) => {
+    reached();
+    await released;
+    return answer(input, init);
+  });
+  return { sending, release };
+}
+
+/** Saves a send claim taken `ageMs` ago, as a send in flight (or one that died) leaves it. */
+async function claimSendAgo(ageMs: number): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE organizations SET mainnet_request_sending_at = ? WHERE id = ?")
+    .bind(new Date(Date.now() - ageMs).toISOString(), ORGANIZATION_ID)
+    .run();
+}
+
 /** The organization's request columns, or null while it has not asked. */
 async function storedRow() {
   const row = await getDb(env)
@@ -543,6 +571,49 @@ describe("Organization mainnet access (HOO-2427)", () => {
           ticket: "HOO-2427",
         }),
       ]);
+    });
+
+    it("waits for a request email in flight, so it never lands after the correction", async () => {
+      const restore = failIterable();
+      expect((await post(SUBMISSION)).status).toBe(503);
+      restore();
+
+      const held = holdIterable();
+      const sending = notify();
+      await held.sending;
+      expect((await notify()).status).toBe(409);
+      const reset = { organizationId: ORGANIZATION_ID, operation: "reset", ...operator } as const;
+      await expect(correctMainnetAccess(env, reset)).rejects.toThrow("being sent");
+
+      held.release();
+      expect((await sending).status).toBe(200);
+      await correctMainnetAccess(env, reset);
+      expect(sentEmails().map((email) => email.fields.subject)).toEqual([
+        `Mainnet access request: ${TEST_ORG.name}`,
+        `Mainnet access request: ${TEST_ORG.name}`,
+        `Mainnet access request reset: ${TEST_ORG.name}`,
+      ]);
+    });
+
+    it("sends the corrected request once a send that never finished lets go", async () => {
+      const restore = failIterable();
+      expect((await post(SUBMISSION)).status).toBe(503);
+      restore();
+      const correction = {
+        organizationId: ORGANIZATION_ID,
+        operation: "set-country",
+        countryCode: "GB",
+        ...operator,
+      } as const;
+
+      await claimSendAgo(30_000);
+      expect((await notify()).status).toBe(409);
+      await expect(correctMainnetAccess(env, correction)).rejects.toThrow("being sent");
+
+      await claimSendAgo(3 * 60_000);
+      await correctMainnetAccess(env, correction);
+      expect((await notify()).status).toBe(200);
+      expect(sentEmails().at(-1)?.fields.body).toContain("United Kingdom (GB)");
     });
 
     it("refuses to correct an organization that never asked", async () => {

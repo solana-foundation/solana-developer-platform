@@ -81,7 +81,7 @@ export const requestMainnetAccess = async (
     };
   });
 
-  const notified = await notifyMainnetAccessRequest(c.env, getDb(c.env), row);
+  const notified = await notifyMainnetAccessRequest(c.env, getDb(c.env), row.organization_id);
   return success(c, toMainnetAccess(c.env, notified, false), 201);
 };
 
@@ -90,7 +90,7 @@ export const notifyMainnetAccess = async (c: AppContext) => {
   const { orgId } = requireOwnOrganization(c);
   requireRequestsAvailable(c);
   const db = getDb(c.env);
-  const row = await unsentMainnetAccessRequest(db, orgId);
-  const notified = await notifyMainnetAccessRequest(c.env, db, row);
+  await unsentMainnetAccessRequest(db, orgId);
+  const notified = await notifyMainnetAccessRequest(c.env, db, orgId);
   return success(c, toMainnetAccess(c.env, notified, false));
 };

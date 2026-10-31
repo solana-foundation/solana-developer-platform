@@ -94,19 +94,33 @@ export async function unsentMainnetAccessRequest(
 }
 
 /**
- * Emails the alias for a recorded request and marks it sent.
+ * Emails the alias for a recorded request and marks it sent. A claim saved before the send holds
+ * the request, so a second send and an operator's correction wait for it: the email can never
+ * arrive after a correction's follow-up, and it describes the request as claimed.
  *
- * @throws CONFLICT when the request was reset while it was being sent.
+ * @throws CONFLICT when another send holds the request, or it was sent meanwhile.
  */
 export async function notifyMainnetAccessRequest(
   env: Env,
   db: DatabaseExecutor,
-  row: MainnetAccessRow
+  organizationId: string
 ): Promise<MainnetAccessRow> {
   const repository = new MainnetAccessRepository(db);
-  await sendMainnetAccessRequestEmail(env, requestEmail(row, await repository.emailContext(row)));
+  const claim = await repository.claimSend(organizationId);
+  if (!claim) {
+    throw conflict("This organization's request is already being sent; try again in a minute");
+  }
+  try {
+    await sendMainnetAccessRequestEmail(
+      env,
+      requestEmail(claim.row, await repository.emailContext(claim.row))
+    );
+  } catch (error) {
+    await repository.releaseSend(claim);
+    throw error;
+  }
 
-  const notified = await repository.markNotified(row);
+  const notified = await repository.markNotified(claim);
   if (!notified) throw conflict("The mainnet access request changed while it was being sent");
   return notified;
 }
@@ -174,6 +188,10 @@ export async function correctMainnetAccess(
     const repository = new MainnetAccessRepository(db);
     const before = await repository.get(input.organizationId, { forUpdate: true });
     if (!before) throw new Error("This organization has not requested mainnet access");
+    // A send that started first must land first, or its email would follow this correction's.
+    if (await repository.sendInFlight(input.organizationId)) {
+      throw new Error("The request email is being sent right now; run this again in a minute");
+    }
     const context = await repository.emailContext(before);
 
     let after: MainnetAccessRow | null = null;
