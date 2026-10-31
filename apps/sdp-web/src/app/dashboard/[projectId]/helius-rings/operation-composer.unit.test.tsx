@@ -21,7 +21,7 @@ const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
 const WALLET: RingsWallet = {
   id: "hrw_treasury",
-  sdpWalletId: "wal_treasury",
+  custodyWalletId: "wal_treasury",
   name: "Treasury",
   shieldedAddress: "rings1treasury",
   status: "ready",
@@ -31,7 +31,7 @@ const WALLET: RingsWallet = {
 const RECIPIENT: RingsWallet = {
   ...WALLET,
   id: "hrw_desk",
-  sdpWalletId: "wal_desk",
+  custodyWalletId: "wal_desk",
   name: "Trading desk",
   shieldedAddress: "rings1desk",
 };
@@ -317,6 +317,24 @@ describe("OperationComposer USDC", () => {
       expect(await screen.findByRole("option", { name: "USDC" })).toBeTruthy();
       await user.keyboard("{Escape}");
     }
+  });
+
+  it("withdraws to its custody address", async () => {
+    renderComposer([]);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("tab", { name: "Withdraw" }));
+    await fillShield(user);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mocks.prepareRingsOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        walletId: "hrw_treasury",
+        opType: "withdraw",
+        to: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      })
+    );
   });
 
   it("submits a USDC withdrawal from the default ring", async () => {

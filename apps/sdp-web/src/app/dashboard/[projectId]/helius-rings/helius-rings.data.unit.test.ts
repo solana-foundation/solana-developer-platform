@@ -24,7 +24,7 @@ function respondWith(status: number, body: unknown) {
   );
 }
 
-const INPUT = { walletId: "para_1", name: "Treasury" };
+const INPUT = { custodyWalletId: "cwlt_treasury", name: "Treasury" };
 
 beforeEach(() => {
   setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/helius-rings`);

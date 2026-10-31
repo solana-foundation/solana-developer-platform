@@ -25,7 +25,7 @@ const WALLET_BADGE: Record<RingsWallet["status"], "warning" | "success" | "defau
 };
 
 export interface CustodyWalletOption {
-  walletId: string;
+  id: string;
   label: string | null;
   publicKey: string;
 }
@@ -76,8 +76,8 @@ export function PrivateWalletsCard({
   const [createError, setCreateError] = useState<string | null>(null);
 
   const custodyLabel = useMemo(() => {
-    const byId = new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet]));
-    return (sdpWalletId: string) => byId.get(sdpWalletId)?.label ?? sdpWalletId;
+    const byId = new Map(custodyWallets.map((wallet) => [wallet.id, wallet]));
+    return (custodyWalletId: string) => byId.get(custodyWalletId)?.label ?? custodyWalletId;
   }, [custodyWallets]);
 
   const handleCreate = useCallback(async () => {
@@ -86,7 +86,7 @@ export function PrivateWalletsCard({
     setCreateError(null);
     try {
       const result = await createRingsWallet({
-        walletId: selectedCustodyWallet,
+        custodyWalletId: selectedCustodyWallet,
         name: walletName.trim(),
       });
       if (result.wallet) {
@@ -143,8 +143,8 @@ export function PrivateWalletsCard({
               placeholder={t("DashboardHeliusRings.wallets.createWalletPlaceholder")}
             >
               {availableCustodyWallets.map((wallet) => (
-                <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                  {wallet.label ?? wallet.walletId}
+                <SelectItem key={wallet.id} value={wallet.id}>
+                  {wallet.label ?? wallet.id}
                 </SelectItem>
               ))}
             </Select>
@@ -224,7 +224,7 @@ export function PrivateWalletsCard({
                     key={wallet.id}
                     wallet={wallet}
                     selected={wallet.id === selectedWalletId}
-                    custodyName={custodyLabel(wallet.sdpWalletId)}
+                    custodyName={custodyLabel(wallet.custodyWalletId)}
                     onSelect={() => onSelect(wallet.id)}
                     balancesTick={balancesTick}
                     // Re-key and retry are writes; without one the row only reads.
@@ -264,7 +264,7 @@ function RetryProvisionButton({
       setRetryError(null);
       try {
         const result = await createRingsWallet({
-          walletId: wallet.sdpWalletId,
+          custodyWalletId: wallet.custodyWalletId,
           name: wallet.name,
         });
         if (!result.wallet) {
@@ -277,7 +277,7 @@ function RetryProvisionButton({
       }
       await onRetried();
     },
-    [wallet.sdpWalletId, wallet.name, onRetried, t]
+    [wallet.custodyWalletId, wallet.name, onRetried, t]
   );
 
   return (

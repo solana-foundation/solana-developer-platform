@@ -66,6 +66,15 @@ const WALLET_SHIELDED_IDENTITY = getBase58Decoder().decode(
   Uint8Array.from([...SHIELDED_OWNER_HASH, ...new Uint8Array(33).fill(5)])
 );
 
+async function seedCustodyWallet(id: string, providerWalletId: string, owner: string) {
+  await getDb(env).execute(
+    `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+     VALUES (?, 'cfg_hrs_service_test', ?, ?)`,
+    [id, providerWalletId, owner]
+  );
+  return id;
+}
+
 function operationInput(overrides: Partial<PrivateOperationInput> = {}): PrivateOperationInput {
   const opType = overrides.opType ?? "shield";
   return {
@@ -296,10 +305,18 @@ describe("HeliusRingsService", () => {
       createdBy: TEST_USER.id,
     });
 
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+       VALUES ('cfg_hrs_service_test', ?, ?, 'privy', '{}', 'archived')`,
+      [TEST_ORG.id, TEST_PROJECT_ID]
+    );
+    await seedCustodyWallet("cw_hrs_service_test", "wal_hrs_service_test", WALLET_OWNER);
+
     const wallets = createHeliusRingsWalletRepository(env);
     const wallet = await wallets.createWallet({
       ...tenant,
       sdpWalletId: "wal_hrs_service_test",
+      custodyWalletId: "cw_hrs_service_test",
       name: "Treasury",
       materialTag: "simulated",
     });
@@ -333,6 +350,7 @@ describe("HeliusRingsService", () => {
     it("provisions through the gateway and marks the wallet ready", async () => {
       const wallet = await service({ gateway: new InMemoryRingsGateway() }).provisionPrivateWallet({
         sdpWalletId: "wal_prov_1",
+        custodyWalletId: await seedCustodyWallet("cw_prov_1", "wal_prov_1", "addr1"),
         sdpAddress: "addr1",
         name: "Ops",
       });
@@ -343,7 +361,12 @@ describe("HeliusRingsService", () => {
 
     it("leaves the wallet pending when the gateway is not implemented", async () => {
       const result = await service()
-        .provisionPrivateWallet({ sdpWalletId: "wal_prov_2", sdpAddress: "addr2", name: "Ops" })
+        .provisionPrivateWallet({
+          sdpWalletId: "wal_prov_2",
+          custodyWalletId: await seedCustodyWallet("cw_prov_2", "wal_prov_2", "addr2"),
+          sdpAddress: "addr2",
+          name: "Ops",
+        })
         .then(
           () => null,
           (error: unknown) => error
@@ -388,6 +411,48 @@ describe("HeliusRingsService", () => {
       // resolves the key that signs.
       expect(row?.custody_wallet_id).toBe("cw_prov_3");
       expect(row?.owner_address).toBe("addr3");
+    });
+
+    it("refuses a different custody binding without provisioning another identity", async () => {
+      const db = getDb(env);
+      await db.execute(
+        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cc_prov_bound', ?, ?, 'privy', '{}')`,
+        [tenant.organizationId, tenant.projectId]
+      );
+      await db.execute(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+         VALUES ('cw_prov_bound', 'cc_prov_bound', 'wal_prov_bound', 'bound-owner')`
+      );
+      const gateway = new InMemoryRingsGateway();
+      const rings = service({ gateway });
+      const original = await rings.provisionPrivateWallet({
+        sdpWalletId: "wal_prov_bound",
+        sdpAddress: "bound-owner",
+        custodyWalletId: "cw_prov_bound",
+        name: "Original",
+      });
+      const provision = vi.spyOn(gateway, "provisionIdentity");
+
+      await expect(
+        rings.provisionPrivateWallet({
+          sdpWalletId: "wal_prov_bound",
+          sdpAddress: "bound-owner",
+          custodyWalletId: "cw_other",
+          name: "Replacement",
+        })
+      ).rejects.toMatchObject({ code: "conflict" });
+
+      expect(provision).not.toHaveBeenCalled();
+      expect(await createHeliusRingsWalletRepository(env).listWallets(tenant)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: original.id,
+            custody_wallet_id: "cw_prov_bound",
+            name: "Original",
+          }),
+        ])
+      );
     });
   });
 
@@ -497,6 +562,11 @@ describe("HeliusRingsService", () => {
       const wallet = await createHeliusRingsWalletRepository(env).createWallet({
         ...tenant,
         sdpWalletId: "wal_unprovisioned",
+        custodyWalletId: await seedCustodyWallet(
+          "cw_unprovisioned",
+          "wal_unprovisioned",
+          WALLET_OWNER
+        ),
         name: "Fresh",
         materialTag: "simulated",
       });
@@ -642,9 +712,17 @@ describe("HeliusRingsService", () => {
 
       const result = await rekey(foreignGateway(), paused?.name ?? "");
 
-      expect(result.status).toBe("ready");
+      expect(result).toMatchObject({
+        id: walletId,
+        status: "ready",
+        custodyWalletId: "cw_hrs_service_test",
+        materialTag: "simulated",
+      });
+      expect(result).not.toHaveProperty("sdpWalletId");
+      expect(result).not.toHaveProperty("ownerAddress");
       const row = await wallets().getWalletById({ ...tenant, id: walletId });
       expect(row?.status).toBe("ready");
+      expect(row?.owner_address).toBe(WALLET_OWNER);
       expect(row?.shielded_address).not.toBe(paused?.shielded_address);
     });
 
@@ -654,6 +732,11 @@ describe("HeliusRingsService", () => {
       const fresh = await wallets().createWallet({
         ...tenant,
         sdpWalletId: "wal_never_provisioned",
+        custodyWalletId: await seedCustodyWallet(
+          "cw_never_provisioned",
+          "wal_never_provisioned",
+          WALLET_OWNER
+        ),
         name: "Test 1",
         materialTag: "simulated",
       });
@@ -1335,6 +1418,11 @@ describe("HeliusRingsService", () => {
       const fresh = await wallets.createWallet({
         ...tenant,
         sdpWalletId: "wal_unprovisioned_op",
+        custodyWalletId: await seedCustodyWallet(
+          "cw_unprovisioned_op",
+          "wal_unprovisioned_op",
+          WALLET_OWNER
+        ),
         name: "Fresh",
         materialTag: "simulated",
       });
