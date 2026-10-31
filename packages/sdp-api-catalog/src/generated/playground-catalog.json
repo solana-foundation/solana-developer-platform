@@ -7,14 +7,14 @@
       "Wallets": 10,
       "Projects": 4,
       "Issuance": 37,
-      "Payments": 36,
+      "Payments": 37,
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7
     },
     "modules": {
       "wallets": 10,
-      "payments": 36,
+      "payments": 37,
       "counterparties": 13,
       "issuance": 37
     }
@@ -2364,6 +2364,103 @@
         "shadowedBy": []
       },
       {
+        "id": "list-payment-recurring-payment-collection-attempts",
+        "operationId": "listPaymentRecurringPaymentCollectionAttempts",
+        "title": "List recurring payment collection attempts",
+        "method": "GET",
+        "path": "/v1/payments/recurring-payments/{id}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "pathFields": [
+          {
+            "key": "id",
+            "label": "{id}",
+            "description": "SDP recurring payment record ID.",
+            "defaultValue": "prp_example",
+            "required": true
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Collection attempt status.",
+            "defaultValue": "pending",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "skipped",
+                "value": "skipped"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "collectionAttempts": [
+              {
+                "id": "psca_example",
+                "organizationId": "org_example",
+                "projectId": "prj_example",
+                "subscriptionId": "subscription_example",
+                "transferId": "xfr_example",
+                "token": "example",
+                "amount": "100.00",
+                "dueAt": "2025-01-01T00:00:00.000Z",
+                "attemptedAt": "2025-01-01T00:00:00.000Z",
+                "status": "pending",
+                "signature": "example",
+                "error": "example",
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "recurring_payments",
+        "shadowedBy": []
+      },
+      {
         "id": "create-payment-subscription-plan",
         "operationId": "createPaymentSubscriptionPlan",
         "title": "Create subscription plan",
@@ -2409,7 +2506,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2490,7 +2587,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2554,7 +2651,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2601,7 +2698,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2658,7 +2755,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2707,7 +2804,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2815,7 +2912,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2880,7 +2977,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -2943,7 +3040,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3006,7 +3103,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3090,7 +3187,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3137,7 +3234,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -3234,7 +3331,7 @@
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": []
       },
       {
@@ -7775,7 +7872,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],
@@ -7831,7 +7928,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
             "required": true
           }
         ],

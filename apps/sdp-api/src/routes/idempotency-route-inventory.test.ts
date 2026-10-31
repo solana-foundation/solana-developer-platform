@@ -31,8 +31,6 @@ import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
  */
 const CREDENTIALS =
   "dashboard-internal credential lifecycle: carries credential material, so it must never store a response; it keeps its own provider_credentials key (0034)";
-const PREPARE =
-  "returns an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired; it moves nothing and only records addresses derived deterministically from the request";
 const CONNECTION =
   "dashboard-internal custody connection lifecycle; not part of the public API contract yet";
 
@@ -54,11 +52,6 @@ const EXEMPT = {
   "POST /pay/:token/tx":
     "public and unauthenticated (no organization to scope a key to); the payment request token is the unit of retry",
   "POST /v1/payments/transfer-batches/estimate": "read-only estimate; moves and stores nothing",
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": PREPARE,
 } as const satisfies Record<string, string>;
 
 /**

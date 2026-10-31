@@ -550,6 +550,30 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
+    method: "get",
+    path: "/v1/payments/recurring-payments/{id}/collection-attempts",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
+    summary: "List recurring payment collection attempts",
+    operationId: "listPaymentRecurringPaymentCollectionAttempts",
+    description:
+      "Lists every collection attempt a recurring payment has made over its whole history, newest first: its current subscription and every subscription an edit replaced. A recurring payment that has not been activated has none.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRecurringPaymentIdParamsSchema,
+      query: paymentListSubscriptionCollectionAttemptsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Collection attempt list",
+        content: jsonContent(paymentSubscriptionCollectionAttemptListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],

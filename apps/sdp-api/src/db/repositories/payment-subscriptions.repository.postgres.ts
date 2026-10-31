@@ -19,6 +19,7 @@ import type {
   ListPaymentSubscriptionPlansResult,
   ListPaymentSubscriptionsInput,
   ListPaymentSubscriptionsResult,
+  ListRecurringPaymentCollectionAttemptsInput,
   PaymentSubscriptionCollectionAttemptRow,
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
@@ -86,6 +87,8 @@ const attemptRowSchema = z.object({
   updated_at: z.string(),
 });
 
+type AttemptQueryRow = z.input<typeof attemptRowSchema>;
+
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
   return planRowSchema.parse(row);
 }
@@ -94,7 +97,7 @@ function mapSubscriptionRow(row: Record<string, unknown>): PaymentSubscriptionRo
   return subscriptionRowSchema.parse(row);
 }
 
-function mapAttemptRow(row: Record<string, unknown>): PaymentSubscriptionCollectionAttemptRow {
+function mapAttemptRow(row: AttemptQueryRow): PaymentSubscriptionCollectionAttemptRow {
   return attemptRowSchema.parse(row);
 }
 
@@ -155,7 +158,7 @@ async function getAttemptByIdInternal(
       `SELECT * FROM payment_subscription_collection_attempts WHERE ${clauses.join(" AND ")}`
     )
     .bind(...values)
-    .first<Record<string, unknown>>();
+    .first<AttemptQueryRow>();
 
   return row ? mapAttemptRow(row) : null;
 }
@@ -482,7 +485,7 @@ export function createPostgresPaymentSubscriptionsRepository(
             LIMIT 1`
         )
         .bind(...values)
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -609,7 +612,7 @@ export function createPostgresPaymentSubscriptionsRepository(
         .bind(organizationId, projectId, idempotencyKey, [
           ...COLLECTION_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
         ])
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -680,7 +683,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.status ?? null,
           input.status ?? null
         )
-        .first<Record<string, unknown>>();
+        .first<AttemptQueryRow>();
 
       return row ? mapAttemptRow(row) : null;
     },
@@ -705,7 +708,7 @@ export function createPostgresPaymentSubscriptionsRepository(
               LIMIT ? OFFSET ?`
           )
           .bind(...values, params.limit, params.offset)
-          .all<Record<string, unknown>>(),
+          .all<AttemptQueryRow>(),
         db
           .prepare(
             `SELECT COUNT(*)::int AS total
@@ -719,6 +722,74 @@ export function createPostgresPaymentSubscriptionsRepository(
       return {
         rows: rows.results.map(mapAttemptRow),
         total: countRow?.total ?? 0,
+      } satisfies ListPaymentSubscriptionCollectionAttemptsResult;
+    },
+
+    async listRecurringPaymentCollectionAttempts(
+      params: ListRecurringPaymentCollectionAttemptsInput
+    ) {
+      // UNION deduplicates the subscription ids, so an attempt is counted and paged once;
+      // `id` breaks created_at ties so OFFSET paging is deterministic.
+      const subscriptionIds = `WITH payment AS (
+             SELECT id, subscription_id
+               FROM payment_recurring_payments
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+           ),
+           payment_subscription_ids AS (
+             SELECT subscription_id AS id FROM payment WHERE subscription_id IS NOT NULL
+             UNION
+             SELECT update_attempt.old_subscription_id
+               FROM payment_recurring_payment_update_attempts update_attempt
+               JOIN payment ON payment.id = update_attempt.recurring_payment_id
+              WHERE update_attempt.old_subscription_id IS NOT NULL
+             UNION
+             SELECT update_attempt.new_subscription_id
+               FROM payment_recurring_payment_update_attempts update_attempt
+               JOIN payment ON payment.id = update_attempt.recurring_payment_id
+              WHERE update_attempt.new_subscription_id IS NOT NULL
+           )`;
+      const clauses = [
+        "attempt.organization_id = ?",
+        "attempt.project_id = ?",
+        "attempt.subscription_id IN (SELECT id FROM payment_subscription_ids)",
+      ];
+      const values: unknown[] = [
+        params.recurringPaymentId,
+        params.organizationId,
+        params.projectId,
+        params.organizationId,
+        params.projectId,
+      ];
+      if (params.status) {
+        clauses.push("attempt.status = ?");
+        values.push(params.status);
+      }
+      const attempts = `FROM payment_subscription_collection_attempts attempt
+            WHERE ${clauses.join(" AND ")}`;
+
+      const [rows, countRow] = await Promise.all([
+        db
+          .prepare(
+            `${subscriptionIds}
+           SELECT attempt.* ${attempts}
+            ORDER BY attempt.created_at DESC, attempt.id DESC
+            LIMIT ? OFFSET ?`
+          )
+          .bind(...values, params.limit, params.offset)
+          .all<AttemptQueryRow>(),
+        db
+          .prepare(`${subscriptionIds}
+           SELECT COUNT(*)::int AS total ${attempts}`)
+          .bind(...values)
+          .first<{ total: number }>(),
+      ]);
+
+      if (countRow === null) {
+        throw internalError("Collection attempt count query returned no row");
+      }
+      return {
+        rows: rows.results.map(mapAttemptRow),
+        total: countRow.total,
       } satisfies ListPaymentSubscriptionCollectionAttemptsResult;
     },
   };
