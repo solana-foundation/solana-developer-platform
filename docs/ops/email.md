@@ -25,7 +25,7 @@ SDP sends email through Iterable, the Foundation's sender for its email domains.
 
 Every active admin of an organization is emailed when something changes in it (HOO-2299). The Worker cron `admin-alert-emails` (`apps/sdp-api/src/services/admin-alerts/`) runs every 15 seconds, so an email follows its event within about a minute. It builds alerts only from rows that already record each event, so no request or money path calls it:
 - **Configuration changes**, read from the audit ledger: invitations, joins, role changes, removals, API key creation, rotation and revocation, custody connections and wallets, the IP allowlist, mainnet access and the alert setting itself.
-- **Money movement**, read from the payment tables: one summary per project per minute, counting transfers, batch payouts (once each), recurring collections, payment-request settlements, deposits and ramps. A payment that failed before reaching the chain isn't counted.
+- **Money movement**, read from the payment tables: one summary per project per minute, counting transfers, batch payouts (once each), recurring collections, payment-request settlements, deposits and ramps. A payment that failed before reaching the chain isn't counted. Only deposits SDP records are counted: funds sent straight to a project wallet from outside SDP aren't stored, so they don't alert yet (HOO-2479).
 
 Alerts about a project (money, API keys, custody) cover mainnet projects only. Organization-wide changes always alert.
 - **Opt-out.** An admin turns every alert off in the dashboard's organization settings, which sets `settings.alertEmails = false` on `PATCH /v1/organizations/{id}`. API keys can never change it. Turning alerts off is itself emailed, so it can't happen unnoticed.
