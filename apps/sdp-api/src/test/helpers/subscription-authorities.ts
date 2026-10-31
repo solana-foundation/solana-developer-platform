@@ -3,6 +3,7 @@ import type {
   PaymentRecurringPaymentStatus,
   PaymentRecurringPaymentUpdateAttemptStage,
   PaymentSubscriptionStatus,
+  RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
@@ -176,11 +177,21 @@ export async function seedAuthoritySubscription(
       idempotencyFingerprint: null,
     })
   );
+  const pausedReason: RecurringPaymentPauseReason | null =
+    input.recurring.status === "paused" ? "failed_attempts" : null;
   await db.execute(
     `UPDATE payment_recurring_payments
-        SET status = ?, subscription_id = ?, subscription_authority_address = ?, updated_at = ?
+        SET status = ?, paused_reason = ?, subscription_id = ?, subscription_authority_address = ?,
+            updated_at = ?
       WHERE id = ?`,
-    [input.recurring.status, subscription.id, input.authority, input.changedAt, recurringPaymentId]
+    [
+      input.recurring.status,
+      pausedReason,
+      subscription.id,
+      input.authority,
+      input.changedAt,
+      recurringPaymentId,
+    ]
   );
   return { subscriptionId: subscription.id, recurringPaymentId };
 }

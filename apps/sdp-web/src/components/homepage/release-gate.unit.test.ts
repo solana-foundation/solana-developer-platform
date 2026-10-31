@@ -2,16 +2,37 @@ import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type GatedSurface, isComingSoon } from "./release-gate";
 
-const SURFACES: readonly GatedSurface[] = ["issuance", "markets", "privacy", "compliance", "ramps"];
+const SURFACES: readonly GatedSurface[] = [
+  "issuance",
+  "markets",
+  "privacy",
+  "compliance",
+  "ramps",
+  "subscriptions",
+];
 
 const cases: { channel: SdpReleaseChannel; comingSoon: Record<GatedSurface, boolean> }[] = [
   {
     channel: "stable",
-    comingSoon: { issuance: true, markets: true, privacy: true, compliance: true, ramps: true },
+    comingSoon: {
+      issuance: true,
+      markets: true,
+      privacy: true,
+      compliance: true,
+      ramps: true,
+      subscriptions: true,
+    },
   },
   {
     channel: "beta",
-    comingSoon: { issuance: true, markets: false, privacy: true, compliance: true, ramps: true },
+    comingSoon: {
+      issuance: true,
+      markets: false,
+      privacy: true,
+      compliance: true,
+      ramps: true,
+      subscriptions: false,
+    },
   },
   {
     channel: "experimental",
@@ -21,6 +42,7 @@ const cases: { channel: SdpReleaseChannel; comingSoon: Record<GatedSurface, bool
       privacy: false,
       compliance: false,
       ramps: false,
+      subscriptions: false,
     },
   },
 ];
