@@ -7,6 +7,7 @@ Flask API serving Solana RPC counts and transfer data, backed by Delta tables in
 - `GET /healthz` — liveness check. Never touches S3.
 - `GET /rpc` — transaction count for one SPL mint over a lookback window, cached as a Delta table on S3 (see below).
 - `GET /rpc/series` — per-day counts for the same mint, for plotting. Takes the same query string as `/rpc`. Deliberately a separate route: `/rpc`'s body *is* the `rpc_counts` Delta schema and cannot grow fields, whereas this is a read-only view whose shape is not a table, so it is not cached to Delta.
+- `GET /rpc/transfers` — the last N transfers for a mint with amounts and counterparties, cached as a Delta table on S3 (see below).
 - `POST /insert?table_name=X` — writes a JSON payload to S3 as a Delta table (Databricks-readable). Accepts either a bare array or `{"data": [...]}`; `mode` is `append` (default) or `overwrite`.
 
 ### Writes and overrides are gated
@@ -48,6 +49,25 @@ the body, which keeps the body byte-for-byte the table schema. A cache write tha
 fails (no AWS credentials, say) is logged and the request still succeeds — it just
 costs a live RPC read next time. `include_failed` changes the count but is not one
 of the columns, so those calls are answered live and never cached.
+
+### `GET /rpc/transfers`
+
+Returns recent transactions for one mint, each classified from its token balance changes as `transfer`, `mint`, `burn` or `no_movement`. `kind: null` means not resolved yet.
+
+| param                  | default         | notes                                                 |
+| ---------------------- | --------------- | ----------------------------------------------------- |
+| `mint`                 | required        | base58 address. `token_address` is an alias           |
+| `cluster`              | `devnet`        | same values as `/rpc`                                 |
+| `limit`                | `100`           | 1-1000                                                |
+| `refresh`              | off             | `true` goes to the chain even if the cache could answer |
+| `enrich`               | on              | `false` returns signatures only, with no `getTransaction` calls |
+| `rpc`                  | cluster default | off unless `ALLOW_RPC_URL_OVERRIDE=true`              |
+
+The cache answers (`X-Cache: HIT`, `source: "s3"`) when it holds a full page, or when this process checked the chain for the mint within `TRANSFER_CACHE_TTL_SECONDS`. That second test is held in memory per worker, so a restart or another worker costs one extra check.
+
+Each request resolves at most `ENRICH_BUDGET` rows, so a large page fills in over several requests. `resolved` says how many rows have an answer, which tells you whether a volume total is complete. Open rows are filled on later requests, including when the cache answers.
+
+The table is append-only: a signature first written unresolved is written again with its amount, and reads return the better row. A failed cache write adds `cache_error` and `X-Cache-Write: failed`, and the reply still returns the transfers.
 
 ## Run locally
 

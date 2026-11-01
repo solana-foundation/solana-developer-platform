@@ -39,6 +39,18 @@ S3_RPC_TABLE_PATH = env("S3_RPC_TABLE_PATH") or (
 )
 RPC_CACHE_TTL_SECONDS = int(env("RPC_CACHE_TTL_SECONDS", "3600"))
 
+# GET /rpc/transfers caches one row per transaction here.
+TRANSFERS_TABLE_NAME = env("TRANSFERS_TABLE_NAME", "dev.mlh.rpc")
+S3_TRANSFERS_TABLE_PATH = env("S3_TRANSFERS_TABLE_PATH") or (
+    f"s3://{INSERT_BUCKET}/{TRANSFERS_TABLE_NAME.replace('.', '/')}" if INSERT_BUCKET else None
+)
+# How long after consulting the chain a partial page still counts as complete.
+TRANSFER_CACHE_TTL_SECONDS = int(env("TRANSFER_CACHE_TTL_SECONDS", "300"))
+# Signatures one request may resolve to amounts. Batched ten to an HTTP call, 25
+# is three round trips, which public endpoints serve without rate limiting. Raise
+# it for a paid RPC provider.
+ENRICH_BUDGET = int(env("ENRICH_BUDGET", "25"))
+
 STORAGE_OPTIONS = {
     key: value
     for key, value in {
@@ -81,6 +93,8 @@ ALLOW_RPC_URL_OVERRIDE = (env("ALLOW_RPC_URL_OVERRIDE") or "").lower() == "true"
 DEFAULT_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 DEFAULT_CLUSTER = "devnet"
 DEFAULT_DAYS = 30
+DEFAULT_TRANSFER_LIMIT = 100
+MAX_TRANSFER_LIMIT = 1000
 PAGE_SIZE = 1000
 
 CLUSTER_RPC = {

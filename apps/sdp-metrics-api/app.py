@@ -6,6 +6,9 @@ location while the cache writes another.
 """
 
 import hmac
+import re
+import time
+from collections import OrderedDict
 
 from flask import Flask, jsonify, request
 
@@ -16,9 +19,14 @@ from config import (
     DEFAULT_CLUSTER,
     DEFAULT_DAYS,
     DEFAULT_MINT,
+    DEFAULT_TRANSFER_LIMIT,
+    ENRICH_BUDGET,
     INSERT_BUCKET,
     INSERT_TABLE_PREFIX,
+    MAX_TRANSFER_LIMIT,
     RPC_TABLE_NAME,
+    TRANSFER_CACHE_TTL_SECONDS,
+    TRANSFERS_TABLE_NAME,
 )
 from insert import insert_delta
 from rpc import (
@@ -28,6 +36,13 @@ from rpc import (
     format_timestamp,
 )
 from rpc_cache import read_cached
+from transfer_cache import (
+    TRANSFER_TABLE_SCHEMA,
+    cached_signatures,
+    read_cached_transfers,
+    unresolved_signatures,
+)
+from transfers import enrich_transfers, fetch_transfers
 
 app = Flask(__name__)
 
@@ -36,6 +51,30 @@ app = Flask(__name__)
 RPC_SCHEMA = ("mint", "cluster", "days", "transactionCount", "since")
 
 MAX_DAYS = 365
+
+# Base58, the length of an ed25519 public key. A mint from the query string becomes
+# a key in the table below and a value in the Delta cache, so junk stops here.
+MINT_PATTERN = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+# When the chain was last consulted, keyed by (mint, cluster). A quiet token's rows
+# stop being written once they are cached and resolved, so the age of its newest
+# row cannot say whether it is current, only when it last changed. "How recently
+# did we check" is a fact about this process, so it lives here: losing it on restart
+# costs one re-check per mint. Bounded because the keys come from the caller.
+MAX_TRACKED_MINTS = 10_000
+_last_chain_check = OrderedDict()
+
+
+def _record_chain_check(mint, cluster):
+    _last_chain_check[(mint, cluster)] = time.time()
+    _last_chain_check.move_to_end((mint, cluster))
+    while len(_last_chain_check) > MAX_TRACKED_MINTS:
+        _last_chain_check.popitem(last=False)
+
+
+def _seconds_since_chain_check(mint, cluster):
+    seen = _last_chain_check.get((mint, cluster))
+    return None if seen is None else time.time() - seen
 
 
 @app.get("/healthz")
@@ -154,6 +193,156 @@ def get_rpc_series():
         since=format_timestamp(cutoff),
         series=buckets,
     )
+
+
+def _transfers_response(payload, cache_status, cache_write=None):
+    """Report cache state in headers, so body keys stay facts about the chain."""
+    response = jsonify(**payload)
+    response.headers["X-Cache"] = cache_status
+    # Absent when nothing was written: every signature being cached is a success,
+    # not a failed write.
+    if cache_write is not None:
+        response.headers["X-Cache-Write"] = "ok" if cache_write else "failed"
+    return response
+
+
+def _resolved_count(rows):
+    return sum(1 for row in rows if row.get("kind"))
+
+
+def _write_transfers(rows):
+    """Append rows to the cache. Returns False on failure, which never fails a read."""
+    try:
+        insert_delta(
+            TRANSFERS_TABLE_NAME, rows, evolve_schema=True, schema_overrides=TRANSFER_TABLE_SCHEMA
+        )
+    except Exception as exc:  # noqa: BLE001 - the caller already has a correct answer
+        # Logged, not returned: the message can name buckets and paths, and this
+        # route needs no credential.
+        app.logger.warning("transfer cache write to %s failed: %s", TRANSFERS_TABLE_NAME, exc)
+        return False
+    return True
+
+
+@app.get("/rpc/transfers")
+def get_rpc_transfers():
+    """The last N transfers for a mint, from the Delta cache when it can answer.
+
+    The cache answers when it holds a full page, or when the chain was consulted
+    for this mint within TRANSFER_CACHE_TTL_SECONDS. Without the second test a
+    token with three transactions could never get a hit, and every load would go
+    to the chain for exactly the tokens an issuer wants to measure.
+
+    Separate from /rpc, whose body is the rpc_counts table schema.
+    """
+    # token_address is accepted because silently ignoring it would answer about
+    # the wrong token. There is no default mint for the same reason.
+    mint = (request.args.get("mint") or request.args.get("token_address") or "").strip()
+    if not MINT_PATTERN.match(mint):
+        return jsonify(error="mint must be a base58 address"), 400
+
+    cluster = (request.args.get("cluster") or DEFAULT_CLUSTER).strip()
+    if cluster not in CLUSTER_RPC:
+        return jsonify(error=f"cluster must be one of {', '.join(sorted(CLUSTER_RPC))}"), 400
+
+    # Same reasoning as /rpc: this makes the server connect to the caller's URL.
+    override = (request.args.get("rpc") or "").strip()
+    if override and not ALLOW_RPC_URL_OVERRIDE:
+        return jsonify(error="rpc override is disabled; select a network with cluster"), 400
+    rpc_url = override or CLUSTER_RPC[cluster]
+
+    try:
+        limit = int(request.args.get("limit", DEFAULT_TRANSFER_LIMIT))
+    except ValueError:
+        return jsonify(error="limit must be an integer"), 400
+    if not 1 <= limit <= MAX_TRANSFER_LIMIT:
+        return jsonify(error=f"limit must be between 1 and {MAX_TRANSFER_LIMIT}"), 400
+
+    truthy = ("1", "true", "yes")
+    refresh = (request.args.get("refresh") or "").lower() in truthy
+    # A caller that only wants to know what touched the mint can skip the cost.
+    enrich = (request.args.get("enrich") or "true").lower() in truthy
+
+    base = {"mint": mint, "cluster": cluster, "limit": limit, "table": TRANSFERS_TABLE_NAME}
+
+    cached = read_cached_transfers(mint, cluster, limit)
+
+    if not refresh:
+        full = len(cached) >= limit
+        age = _seconds_since_chain_check(mint, cluster)
+        fresh = age is not None and age <= TRANSFER_CACHE_TTL_SECONDS
+
+        if cached and (full or fresh):
+            # A full page never refetches, so this is the only path able to fill
+            # its open rows. No signature lookup is needed, and the window above
+            # limits a mint to one budgeted burst however often it is loaded.
+            cache_write = None
+            if enrich and not fresh:
+                open_signatures = {row["signature"] for row in cached if not row.get("kind")}
+                if open_signatures:
+                    enrich_transfers(cached, mint, rpc_url, ENRICH_BUDGET)
+                    _record_chain_check(mint, cluster)
+                    now_resolved = [
+                        row for row in cached if row["signature"] in open_signatures and row.get("kind")
+                    ]
+                    if now_resolved:
+                        cache_write = _write_transfers(now_resolved)
+
+            return _transfers_response(
+                {
+                    **base,
+                    "source": "s3",
+                    "count": len(cached),
+                    "newly_cached": 0,
+                    "cache_reason": "full" if full else "fresh",
+                    "cache_age_seconds": None if age is None else round(age),
+                    # Whether a volume total is the whole picture or a floor.
+                    "resolved": _resolved_count(cached),
+                    "transfers": cached,
+                },
+                "HIT",
+                cache_write,
+            )
+
+    unresolved = unresolved_signatures(mint, cluster, limit) if enrich else set()
+
+    try:
+        transfers = fetch_transfers(mint, cluster, rpc_url, limit)
+    except Exception as exc:  # noqa: BLE001 - an upstream failure, not a bad request
+        return jsonify(**base, source="rpc", error="Solana RPC request failed", detail=str(exc)), 502
+
+    # Keep amounts the cache already has, so they are neither lost from this reply
+    # nor paid for twice.
+    known_rows = {row["signature"]: row for row in cached if row.get("kind")}
+    for row in transfers:
+        if row["signature"] in known_rows:
+            row.update(known_rows[row["signature"]])
+
+    if enrich:
+        enrich_transfers(transfers, mint, rpc_url, ENRICH_BUDGET, priority=unresolved)
+
+    _record_chain_check(mint, cluster)
+
+    known = cached_signatures(mint, cluster)
+    to_write = [
+        row
+        for row in transfers
+        if row["signature"] not in known or (row["signature"] in unresolved and row.get("kind"))
+    ]
+    cache_write = _write_transfers(to_write) if to_write else None
+
+    payload = {
+        **base,
+        "source": "rpc",
+        "count": len(transfers),
+        "newly_cached": len(to_write) if cache_write else 0,
+        "resolved": _resolved_count(transfers),
+        "transfers": transfers,
+    }
+    if cache_write is False:
+        payload["cache_error"] = "cache write failed"
+
+    return _transfers_response(payload, "MISS", cache_write)
 
 
 @app.post("/insert")
