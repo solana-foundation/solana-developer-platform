@@ -42,6 +42,11 @@ pnpm-debug.log*
 .env.preview
 .env.*.local
 .env.docker
+# File-manager duplicates carry the same secrets as the original.
+.env copy*
+.env.* copy*
+.env - Copy*
+.env.* - Copy*
 
 # Kora keypairs and secrets (never commit)
 infra/kora/.keypair.json

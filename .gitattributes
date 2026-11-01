@@ -1,0 +1,11 @@
+# Docker builds from the working tree, so on a checkout with core.autocrlf=true
+# these files reach Linux images with CRLF line endings. A CRLF shebang makes the
+# kernel look for an interpreter named "/bin/sh\r", which fails as:
+#
+#     exec /app/entrypoint.sh: no such file or directory
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile  text eol=lf
+Dockerfile.* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
