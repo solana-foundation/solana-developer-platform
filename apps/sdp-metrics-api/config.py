@@ -45,13 +45,25 @@ STORAGE_OPTIONS = {
         "aws_region": env("AWS_REGION", "us-east-1"),
         "aws_access_key_id": env("AWS_ACCESS_KEY_ID"),
         "aws_secret_access_key": env("AWS_SECRET_ACCESS_KEY"),
+        # Temporary credentials are rejected as invalid without this.
+        "aws_session_token": env("AWS_SESSION_TOKEN"),
     }.items()
     if value
 }
 
+# With no static keys and no profile, walk the standard chain. On ECS that is what
+# finds the task role; a None provider hands Delta no credentials at all.
 DELTA_CREDENTIAL_PROVIDER = None
-if not STORAGE_OPTIONS.get("aws_access_key_id") and env("AWS_PROFILE"):
-    DELTA_CREDENTIAL_PROVIDER = pl.CredentialProviderAWS(profile_name=os.environ["AWS_PROFILE"])
+if not STORAGE_OPTIONS.get("aws_access_key_id"):
+    if env("AWS_PROFILE"):
+        DELTA_CREDENTIAL_PROVIDER = pl.CredentialProviderAWS(profile_name=os.environ["AWS_PROFILE"])
+    else:
+        try:
+            DELTA_CREDENTIAL_PROVIDER = pl.CredentialProviderAWS()
+        except Exception:
+            # Nothing resolvable. Let the S3 call report it, rather than failing
+            # at import and taking /healthz down too.
+            DELTA_CREDENTIAL_PROVIDER = None
 
 # POST /insert stays disabled until this is set. A missing token is a
 # misconfiguration, and serving writes anyway would make it a breach.
