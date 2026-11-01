@@ -51,7 +51,7 @@ of the columns, so those calls are answered live and never cached.
 
 ### `GET /rpc/transfers`
 
-Returns recent transactions for one mint, each classified from its token balance changes as `transfer`, `mint`, `burn` or `no_movement`. `kind: null` means not resolved yet.
+Returns recent transactions for one mint, each classified from its token balance changes as `transfer`, `mint`, `burn` or `no_movement`. `kind: null` means not resolved yet. `amount` is an exact decimal string, such as `"1.5"`.
 
 | param     | default         | notes                                                           |
 | --------- | --------------- | --------------------------------------------------------------- |
@@ -62,7 +62,7 @@ Returns recent transactions for one mint, each classified from its token balance
 | `enrich`  | on              | `false` returns signatures only, with no `getTransaction` calls |
 | `rpc`     | cluster default | off unless `ALLOW_RPC_URL_OVERRIDE=true`                        |
 
-The cache answers (`X-Cache: HIT`, `source: "s3"`) when it holds a full page, or when this process checked the chain for the mint within `TRANSFER_CACHE_TTL_SECONDS`. That second test is held in memory per worker, so a restart or another worker costs one extra check.
+The cache answers (`X-Cache: HIT`, `source: "s3"`) when it holds a full page, or when this process checked the chain for the mint within `TRANSFER_CACHE_TTL_SECONDS`. That check must have covered at least `limit` rows or reached the end of the mint's history, so it can't answer a larger page from a smaller one. It's held in memory per worker, so a restart or another worker costs one extra check.
 
 Each request resolves at most `ENRICH_BUDGET` rows, so a large page fills in over several requests. `resolved` says how many rows have an answer, which tells you whether a volume total is complete. Open rows are filled on later requests, including when the cache answers.
 

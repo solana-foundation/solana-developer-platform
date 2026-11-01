@@ -59,8 +59,7 @@ def token_deltas(meta, mint):
 
     Returns (deltas, decimals). Base units rather than ui amounts because ui
     amounts are floats: subtracting two of them for a large balance leaves noise
-    in the low decimal places. The integers are exact, so the division happens
-    once, at the end.
+    in the low decimal places.
     """
     before = {}
     after = {}
@@ -96,6 +95,15 @@ def token_deltas(meta, mint):
     return deltas, decimals
 
 
+def format_amount(base_units, decimals):
+    """Base units as an exact decimal string, using integers throughout."""
+    if not decimals:
+        return str(base_units)
+    whole, fraction = divmod(base_units, 10**decimals)
+    digits = str(fraction).rjust(decimals, "0").rstrip("0")
+    return f"{whole}.{digits}" if digits else str(whole)
+
+
 def classify(deltas, decimals):
     """Turn per-owner deltas into an amount, counterparties and a kind.
 
@@ -120,10 +128,9 @@ def classify(deltas, decimals):
     # What moved, not the sum of every account's change: a transfer counts each
     # token once, on the receiving side.
     moved = sum(gained.values()) if gained else abs(sum(lost.values()))
-    scale = 10 ** decimals if decimals else 1
 
     return {
-        "amount": moved / scale,
+        "amount": format_amount(moved, decimals),
         "source": min(lost, key=lost.get) if lost else None,
         "destination": max(gained, key=gained.get) if gained else None,
         "kind": kind,
@@ -177,7 +184,11 @@ def enrich_transfers(rows, mint, rpc_url, budget, chunk_size=10, priority=None):
             result = (by_id.get(index) or {}).get("result")
             if not result:
                 continue
-            deltas, decimals = token_deltas(result.get("meta") or {}, mint)
+            meta = result.get("meta")
+            if meta is None:
+                # The balances are unknown, which isn't no_movement. Leave it open.
+                continue
+            deltas, decimals = token_deltas(meta, mint)
             row.update(classify(deltas, decimals))
             row["decimals"] = decimals
 

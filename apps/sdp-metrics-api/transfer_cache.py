@@ -23,7 +23,8 @@ TRANSFER_TABLE_SCHEMA = {
     "block_time": pl.Int64,
     "failed": pl.Boolean,
     "fetched_at": pl.Utf8,
-    "amount": pl.Float64,
+    # A decimal string: a float can't hold every amount a u64 token balance allows.
+    "amount": pl.Utf8,
     "decimals": pl.Int64,
     "source": pl.Utf8,
     "destination": pl.Utf8,
@@ -78,6 +79,9 @@ def unresolved_signatures(mint, cluster, limit):
     Backfill appends rather than updates, so a resolved signature still has its
     original null row. Asking only "which signatures have a null row" would keep
     returning it, and every request would append another copy.
+
+    A table with no `kind` column was only ever written without amounts, so all of
+    its signatures are open.
     """
     if not S3_TRANSFERS_TABLE_PATH:
         return set()
@@ -85,7 +89,8 @@ def unresolved_signatures(mint, cluster, limit):
     try:
         frame = _scan(mint, cluster)
         if "kind" not in frame.collect_schema().names():
-            return set()
+            rows = frame.select("signature").unique().limit(limit).collect()
+            return set(rows["signature"].to_list())
 
         rows = (
             frame.group_by("signature")

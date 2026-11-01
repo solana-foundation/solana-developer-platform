@@ -76,3 +76,10 @@ def test_cache_reads_and_writes_resolve_to_one_location(load_config):
         S3_INSERT_BUCKET="bucket", RPC_TABLE_NAME="dev.mlh.counts", S3_RPC_TABLE_PATH="s3://other/place"
     )
     assert loaded.S3_RPC_TABLE_PATH == "s3://bucket/dev/mlh/counts"
+
+
+def test_transfer_cache_reads_and_writes_resolve_to_one_location(load_config):
+    loaded = load_config(
+        S3_INSERT_BUCKET="bucket", TRANSFERS_TABLE_NAME="dev.mlh.moves", S3_TRANSFERS_TABLE_PATH="s3://other/place"
+    )
+    assert loaded.S3_TRANSFERS_TABLE_PATH == "s3://bucket/dev/mlh/moves"

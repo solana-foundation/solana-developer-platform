@@ -103,7 +103,7 @@ def forget_chain_check():
 def test_a_transfer_nets_to_zero_and_counts_each_token_once():
     deltas, decimals = token_deltas(transfer_meta(1_500_000), MINT)
     assert classify(deltas, decimals) == {
-        "amount": 1.5,
+        "amount": "1.5",
         "source": "alice",
         "destination": "bob",
         "kind": "transfer",
@@ -114,14 +114,14 @@ def test_a_mint_nets_positive():
     meta = {"preTokenBalances": [], "postTokenBalances": [balance("treasury", 1_000_000)]}
     result = classify(*token_deltas(meta, MINT))
     assert (result["kind"], result["amount"], result["source"], result["destination"]) == (
-        "mint", 1.0, None, "treasury",
+        "mint", "1", None, "treasury",
     )
 
 
 def test_a_burn_nets_negative():
     meta = {"preTokenBalances": [balance("holder", 2_000_000)], "postTokenBalances": [balance("holder", 500_000)]}
     result = classify(*token_deltas(meta, MINT))
-    assert (result["kind"], result["amount"], result["source"]) == ("burn", 1.5, "holder")
+    assert (result["kind"], result["amount"], result["source"]) == ("burn", "1.5", "holder")
 
 
 def test_other_mints_in_the_transaction_are_ignored():
@@ -136,12 +136,12 @@ def test_base_units_keep_a_large_balance_exact():
     pre = 998_102_430_035_874
     meta = {"preTokenBalances": [balance("a", pre), balance("b", 0)],
             "postTokenBalances": [balance("a", pre - 1), balance("b", 1)]}
-    assert classify(*token_deltas(meta, MINT))["amount"] == 0.000001
+    assert classify(*token_deltas(meta, MINT))["amount"] == "0.000001"
 
 
 def test_zero_decimals_does_not_divide():
     meta = {"preTokenBalances": [], "postTokenBalances": [balance("nft", 1, decimals=0)]}
-    assert classify(*token_deltas(meta, MINT))["amount"] == 1
+    assert classify(*token_deltas(meta, MINT))["amount"] == "1"
 
 
 # ---- input
@@ -182,7 +182,7 @@ def test_first_call_misses_then_a_quiet_token_gets_a_hit(client, chain):
     first = client.get(URL)
     assert first.headers["X-Cache"] == "MISS"
     assert first.headers["X-Cache-Write"] == "ok"
-    assert first.get_json()["transfers"][0]["amount"] == 1.5
+    assert first.get_json()["transfers"][0]["amount"] == "1.5"
     assert first.get_json()["newly_cached"] == 1
 
     second = client.get(URL)
@@ -282,7 +282,7 @@ def test_a_resolved_row_beats_a_newer_unresolved_one(chain):
     base = {"mint": MINT, "cluster": "devnet", "signature": "sig0", "slot": 1, "block_time": 100, "failed": False}
     insert_module.insert_delta(
         "t",
-        [{**base, "fetched_at": "2026-01-01T00:00:00", "amount": 1.5, "decimals": 6,
+        [{**base, "fetched_at": "2026-01-01T00:00:00", "amount": "1.5", "decimals": 6,
           "source": "a", "destination": "b", "kind": "transfer"}],
         schema_overrides=transfer_cache.TRANSFER_TABLE_SCHEMA,
     )
@@ -294,7 +294,7 @@ def test_a_resolved_row_beats_a_newer_unresolved_one(chain):
     )
 
     rows = transfer_cache.read_cached_transfers(MINT, "devnet", 10)
-    assert [(row["signature"], row["amount"]) for row in rows] == [("sig0", 1.5)]
+    assert [(row["signature"], row["amount"]) for row in rows] == [("sig0", "1.5")]
 
 
 def test_a_refetch_keeps_amounts_it_does_not_pay_for_again(client, chain):
@@ -305,7 +305,7 @@ def test_a_refetch_keeps_amounts_it_does_not_pay_for_again(client, chain):
 
     body = client.get(f"{URL}&refresh=true").get_json()
     assert body["source"] == "rpc"
-    assert body["transfers"][0]["amount"] == 1.5
+    assert body["transfers"][0]["amount"] == "1.5"
     assert chain.resolved_calls == ["sig0"]
 
 
@@ -393,10 +393,112 @@ def test_without_a_bucket_it_still_answers_live(client, chain, monkeypatch):
 def test_tracked_mints_are_bounded(chain, monkeypatch):
     monkeypatch.setattr(app_module, "MAX_TRACKED_MINTS", 2)
     for mint in ("a", "b", "c"):
-        app_module._record_chain_check(mint, "devnet")
+        app_module._record_chain_check(mint, "devnet", 1, False)
     assert list(app_module._last_chain_check) == [("b", "devnet"), ("c", "devnet")]
 
 
 def test_counts_on_rpc_are_unchanged_by_this_route():
     """/rpc's body is the rpc_counts schema, and must not grow transfer fields."""
     assert app_module.RPC_SCHEMA == ("mint", "cluster", "days", "transactionCount", "since")
+
+
+# ---- review findings
+
+
+def test_a_small_page_does_not_answer_a_larger_one(client, chain):
+    for index in range(3):
+        chain.add(f"sig{index}", 100 + index)
+
+    assert client.get(f"{URL}&limit=1").get_json()["count"] == 1
+
+    larger = client.get(f"{URL}&limit=100")
+    assert larger.headers["X-Cache"] == "MISS"
+    assert larger.get_json()["count"] == 3
+
+
+def test_a_check_that_reached_the_end_answers_a_larger_page(client, chain):
+    chain.add("only", 100)
+    client.get(f"{URL}&limit=10")
+    calls = chain.signature_calls
+
+    larger = client.get(f"{URL}&limit=1000")
+    assert larger.headers["X-Cache"] == "HIT"
+    assert larger.get_json()["cache_reason"] == "fresh"
+    assert chain.signature_calls == calls
+
+
+def test_a_failed_write_is_not_treated_as_a_check(client, chain, monkeypatch):
+    chain.add("sig0", 100)
+    client.get(URL)
+    forget_chain_check()
+    chain.add("sig1", 200)
+
+    def fail(*a, **k):
+        raise RuntimeError("denied")
+
+    monkeypatch.setattr(app_module, "insert_delta", fail)
+    assert client.get(URL).get_json()["count"] == 2
+
+    # The cache still holds only sig0, so it must not answer as though it were current.
+    again = client.get(URL)
+    assert again.headers["X-Cache"] == "MISS"
+    assert again.get_json()["count"] == 2
+
+
+def test_amounts_first_cached_without_enrichment_are_saved(client, chain):
+    chain.add("sig0", 100)
+    client.get(f"{URL}&enrich=false")
+    forget_chain_check()
+
+    first = client.get(URL)
+    assert first.get_json()["transfers"][0]["amount"] == "1.5"
+    assert chain.resolved_calls == ["sig0"]
+
+    forget_chain_check()
+    second = client.get(URL)
+    assert second.get_json()["transfers"][0]["amount"] == "1.5"
+    assert chain.resolved_calls == ["sig0"]
+    assert second.get_json()["newly_cached"] == 0
+
+
+def test_a_transaction_with_no_metadata_stays_open_and_is_retried(client, chain):
+    chain.add("sig0", 100)
+    original = chain.batch
+
+    def no_meta(_url, calls):
+        return [{"id": call["id"], "result": {"meta": None}} for call in calls]
+
+    transfers_module.solana_rpc_batch = no_meta
+    try:
+        body = client.get(URL).get_json()
+    finally:
+        transfers_module.solana_rpc_batch = original
+
+    assert body["resolved"] == 0
+    assert body["transfers"][0]["kind"] is None
+
+    forget_chain_check()
+    retried = client.get(URL).get_json()
+    assert retried["resolved"] == 1
+    assert retried["transfers"][0]["kind"] == "transfer"
+
+
+def test_an_amount_beyond_float_precision_is_exact(client, chain):
+    huge = 18_446_744_073_709_551_615  # u64 max
+    meta = {
+        "preTokenBalances": [balance("a", huge), balance("b", 0)],
+        "postTokenBalances": [balance("a", 0), balance("b", huge)],
+    }
+    chain.add("sig0", 100, meta=meta)
+
+    assert client.get(URL).get_json()["transfers"][0]["amount"] == "18446744073709.551615"
+    assert client.get(URL).get_json()["source"] == "s3"
+    assert client.get(URL).get_json()["transfers"][0]["amount"] == "18446744073709.551615"
+
+
+@pytest.mark.parametrize(
+    ("base_units", "decimals", "expected"),
+    [(0, 6, "0"), (1, 6, "0.000001"), (1_500_000, 6, "1.5"), (2_000_000, 6, "2"), (7, 0, "7"), (7, None, "7")],
+)
+def test_format_amount(base_units, decimals, expected):
+    assert transfers_module.format_amount(base_units, decimals) == expected

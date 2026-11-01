@@ -39,9 +39,7 @@ RPC_CACHE_TTL_SECONDS = int(env("RPC_CACHE_TTL_SECONDS", "3600"))
 
 # GET /rpc/transfers caches one row per transaction here.
 TRANSFERS_TABLE_NAME = env("TRANSFERS_TABLE_NAME", "dev.mlh.rpc")
-S3_TRANSFERS_TABLE_PATH = env("S3_TRANSFERS_TABLE_PATH") or (
-    f"s3://{INSERT_BUCKET}/{TRANSFERS_TABLE_NAME.replace('.', '/')}" if INSERT_BUCKET else None
-)
+S3_TRANSFERS_TABLE_PATH = f"s3://{INSERT_BUCKET}/{TRANSFERS_TABLE_NAME.replace('.', '/')}" if INSERT_BUCKET else None
 # How long after consulting the chain a partial page still counts as complete.
 TRANSFER_CACHE_TTL_SECONDS = int(env("TRANSFER_CACHE_TTL_SECONDS", "300"))
 # Signatures one request may resolve to amounts. Batched ten to an HTTP call, 25

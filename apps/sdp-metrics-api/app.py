@@ -61,20 +61,29 @@ MINT_PATTERN = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 # row cannot say whether it is current, only when it last changed. "How recently
 # did we check" is a fact about this process, so it lives here: losing it on restart
 # costs one re-check per mint. Bounded because the keys come from the caller.
+#
+# A check also records how much it covered. A check for 1 row says nothing about
+# the next 99, so it only vouches for a larger page if it reached the end of the
+# mint's history.
 MAX_TRACKED_MINTS = 10_000
 _last_chain_check = OrderedDict()
 
 
-def _record_chain_check(mint, cluster):
-    _last_chain_check[(mint, cluster)] = time.time()
+def _record_chain_check(mint, cluster, covered, exhausted):
+    _last_chain_check[(mint, cluster)] = (time.time(), covered, exhausted)
     _last_chain_check.move_to_end((mint, cluster))
     while len(_last_chain_check) > MAX_TRACKED_MINTS:
         _last_chain_check.popitem(last=False)
 
 
-def _seconds_since_chain_check(mint, cluster):
+def _chain_check(mint, cluster, limit):
+    """Seconds since the last check, and whether it vouches for `limit` rows."""
     seen = _last_chain_check.get((mint, cluster))
-    return None if seen is None else time.time() - seen
+    if seen is None:
+        return None, False
+    checked_at, covered, exhausted = seen
+    age = time.time() - checked_at
+    return age, age <= TRANSFER_CACHE_TTL_SECONDS and (exhausted or covered >= limit)
 
 
 @app.get("/healthz")
@@ -270,8 +279,7 @@ def get_rpc_transfers():
 
     if not refresh:
         full = len(cached) >= limit
-        age = _seconds_since_chain_check(mint, cluster)
-        fresh = age is not None and age <= TRANSFER_CACHE_TTL_SECONDS
+        age, fresh = _chain_check(mint, cluster, limit)
 
         if cached and (full or fresh):
             # A full page never refetches, so this is the only path able to fill
@@ -282,7 +290,8 @@ def get_rpc_transfers():
                 open_signatures = {row["signature"] for row in cached if not row.get("kind")}
                 if open_signatures:
                     enrich_transfers(cached, mint, rpc_url, ENRICH_BUDGET)
-                    _record_chain_check(mint, cluster)
+                    # Only a full page gets here, so this vouches for that page.
+                    _record_chain_check(mint, cluster, limit, False)
                     now_resolved = [
                         row for row in cached if row["signature"] in open_signatures and row.get("kind")
                     ]
@@ -322,8 +331,6 @@ def get_rpc_transfers():
     if enrich:
         enrich_transfers(transfers, mint, rpc_url, ENRICH_BUDGET, priority=unresolved)
 
-    _record_chain_check(mint, cluster)
-
     known = cached_signatures(mint, cluster)
     to_write = [
         row
@@ -331,6 +338,11 @@ def get_rpc_transfers():
         if row["signature"] not in known or (row["signature"] in unresolved and row.get("kind"))
     ]
     cache_write = _write_transfers(to_write) if to_write else None
+
+    # If the write failed, the cache doesn't hold what was checked, so it can't
+    # answer on the strength of this check.
+    if cache_write is not False:
+        _record_chain_check(mint, cluster, limit, len(transfers) < limit)
 
     payload = {
         **base,
