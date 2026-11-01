@@ -95,8 +95,9 @@ def get_rpc():
 
     # include_failed changes the count but is not one of the table's columns, so
     # a row written under it would be indistinguishable from a default one.
-    # Those calls stay live-only rather than poisoning the shared cache.
-    cacheable = not options.include_failed
+    # Those calls stay live-only rather than poisoning the shared cache. So do
+    # overrides: a count from another RPC would be stored under this cluster's key.
+    cacheable = not options.include_failed and not (request.args.get("rpc") or "").strip()
 
     if cacheable and not refresh:
         cached = read_cached(options.mint, options.cluster, options.days)

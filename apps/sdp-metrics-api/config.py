@@ -34,9 +34,7 @@ INSERT_BUCKET = env("S3_INSERT_BUCKET")
 # are one-per-window aggregates, so appending them there fails on a 5-vs-7 field
 # schema mismatch -- which app.py swallows, leaving every call a live RPC read.
 RPC_TABLE_NAME = env("RPC_TABLE_NAME", "dev.mlh.rpc_counts")
-S3_RPC_TABLE_PATH = env("S3_RPC_TABLE_PATH") or (
-    f"s3://{INSERT_BUCKET}/{RPC_TABLE_NAME.replace('.', '/')}" if INSERT_BUCKET else None
-)
+S3_RPC_TABLE_PATH = f"s3://{INSERT_BUCKET}/{RPC_TABLE_NAME.replace('.', '/')}" if INSERT_BUCKET else None
 RPC_CACHE_TTL_SECONDS = int(env("RPC_CACHE_TTL_SECONDS", "3600"))
 
 STORAGE_OPTIONS = {
@@ -84,9 +82,10 @@ DEFAULT_DAYS = 30
 PAGE_SIZE = 1000
 
 CLUSTER_RPC = {
-    "devnet": "https://api.devnet.solana.com",
+    # DEFAULT_CLUSTER, so SOLANA_RPC_URL decides where a default request goes.
+    "devnet": RPC_URL,
     "mainnet-beta": "https://api.mainnet-beta.solana.com",
     "testnet": "https://api.testnet.solana.com",
     # A local validator, for tokens that only exist there.
-    "localnet": env("LOCALNET_RPC_URL", RPC_URL),
+    "localnet": env("LOCALNET_RPC_URL", "http://127.0.0.1:8899"),
 }

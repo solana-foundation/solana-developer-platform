@@ -13,9 +13,10 @@ fi
 PORT="${PORT:-8080}"
 BASE="http://127.0.0.1:${PORT}"
 
-python3 app.py > /tmp/sdp-metrics-api-manual-test.log 2>&1 &
+LOG_FILE="$(mktemp)"
+python3 app.py > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null' EXIT
+trap 'kill "$SERVER_PID" 2>/dev/null; rm -f "$LOG_FILE"' EXIT
 
 echo "Waiting for server (pid $SERVER_PID) on port $PORT..."
 for _ in $(seq 1 30); do
