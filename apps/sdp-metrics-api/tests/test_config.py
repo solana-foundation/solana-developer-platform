@@ -12,6 +12,8 @@ AWS_ENV_VARS = (
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
     "AWS_PROFILE",
+    "SOLANA_RPC_URL",
+    "LOCALNET_RPC_URL",
 )
 
 
@@ -57,3 +59,20 @@ def test_no_keys_and_no_profile_uses_the_standard_chain(load_config):
     """This is what finds an ECS task role."""
     loaded = load_config()
     assert isinstance(loaded.DELTA_CREDENTIAL_PROVIDER, pl.CredentialProviderAWS)
+
+
+def test_solana_rpc_url_applies_to_the_default_cluster(load_config):
+    loaded = load_config(SOLANA_RPC_URL="https://rpc.example.com")
+    assert loaded.CLUSTER_RPC[loaded.DEFAULT_CLUSTER] == "https://rpc.example.com"
+
+
+def test_localnet_does_not_fall_back_to_a_public_cluster(load_config):
+    loaded = load_config(SOLANA_RPC_URL="https://rpc.example.com")
+    assert loaded.CLUSTER_RPC["localnet"] == "http://127.0.0.1:8899"
+
+
+def test_cache_reads_and_writes_resolve_to_one_location(load_config):
+    loaded = load_config(
+        S3_INSERT_BUCKET="bucket", RPC_TABLE_NAME="dev.mlh.counts", S3_RPC_TABLE_PATH="s3://other/place"
+    )
+    assert loaded.S3_RPC_TABLE_PATH == "s3://bucket/dev/mlh/counts"

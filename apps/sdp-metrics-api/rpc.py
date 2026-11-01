@@ -33,10 +33,21 @@ def solana_rpc(rpc_url, method, params):
         raise RuntimeError(f"RPC HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"RPC request failed: {exc.reason}") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("RPC request timed out") from exc
+    except ValueError as exc:
+        raise RuntimeError("RPC returned invalid JSON") from exc
 
-    if body.get("error"):
-        message = body["error"].get("message", "Unknown RPC error")
-        raise RuntimeError(message)
+    if not isinstance(body, dict):
+        raise RuntimeError("RPC returned an unexpected response")
+
+    error = body.get("error")
+    if error:
+        message = error.get("message") if isinstance(error, dict) else None
+        raise RuntimeError(message or "Unknown RPC error")
+
+    if "result" not in body:
+        raise RuntimeError("RPC response has no result")
 
     return body["result"]
 
@@ -92,7 +103,8 @@ def daily_transaction_counts(options):
     Returns (buckets, pages, cutoff) where buckets is a list of
     {"date": "YYYY-MM-DD", "transactionCount": int}.
     """
-    cutoff = int(time.time()) - options.days * 24 * 60 * 60
+    now = int(time.time())
+    cutoff = now - options.days * 24 * 60 * 60
     counts = {}
     before = None
     pages = 0
@@ -142,7 +154,7 @@ def daily_transaction_counts(options):
 
     # Zero-fill every day in the window, oldest first.
     start = datetime.fromtimestamp(cutoff, tz=timezone.utc).date()
-    end = datetime.now(tz=timezone.utc).date()
+    end = datetime.fromtimestamp(now, tz=timezone.utc).date()
     buckets = []
     day = start
     while day <= end:

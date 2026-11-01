@@ -236,3 +236,18 @@ def test_insert_confines_the_table_name(client, write_token, name):
 def test_insert_accepts_a_valid_token_and_table(client, write_token):
     resp = client.post(GOOD_TABLE, json=ROWS, headers={"X-API-Token": "test-token"})
     assert resp.status_code == 201
+
+
+def test_rpc_override_never_touches_the_cache(client, monkeypatch):
+    def explode(*a, **k):
+        raise AssertionError("an override must not read or write the shared cache")
+
+    monkeypatch.setattr(app_module, "ALLOW_RPC_URL_OVERRIDE", True)
+    monkeypatch.setattr(app_module, "read_cached", explode)
+    monkeypatch.setattr(app_module, "insert_delta", explode)
+    monkeypatch.setattr(app_module, "count_recent_transactions", lambda options: (7, 1, 1_756_000_000))
+
+    resp = client.get("/rpc?rpc=http://localhost:8899")
+    assert resp.status_code == 200
+    assert resp.headers["X-Cache"] == "MISS"
+    assert resp.get_json()["transactionCount"] == 7
