@@ -1,0 +1,11 @@
+flask>=3.0,<4.0
+gunicorn>=22.0,<24.0
+# Parquet + S3 reads are built into polars — no pyarrow needed.
+polars>=1.9,<2.0
+# polars delegates read_delta/scan_delta/write_delta to this; without it both
+# /insert and the /rpc Delta cache fail at call time, not at import.
+deltalake>=0.20,<2.0
+# polars' CredentialProviderAWS resolves AWS_PROFILE through boto3.
+boto3>=1.34,<2.0
+# config.py resolves the S3 paths and AWS keys from .env at import time.
+python-dotenv>=1.0,<2.0
