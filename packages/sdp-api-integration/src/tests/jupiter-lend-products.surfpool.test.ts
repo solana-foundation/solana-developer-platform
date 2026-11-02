@@ -241,7 +241,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const wallet = await createFundedIntegrationWallet({ label: "Jupiter treasury" });
     await fundUsdt(wallet.publicKey);
 
-    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+    const depositPreview = await post<DepositPreview>("/v1/earn/deposits/preview", {
       strategyId,
       amount: DEPOSIT_AMOUNT,
     });
@@ -270,10 +270,13 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const holding = await waitForShares(wallet.publicKey, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
-    const withdrawalPreview = await post<WithdrawalPreview>("/v1/earn/vault-withdrawal-previews", {
-      positionId: deposited.positionId,
-      shares: holding?.shares ?? "0",
-    });
+    const withdrawalPreview = await post<WithdrawalPreview>(
+      "/v1/earn/withdrawals/provider-signed/preview",
+      {
+        positionId: deposited.positionId,
+        shares: holding?.shares ?? "0",
+      }
+    );
     expect(withdrawalPreview.blockingIssues).toEqual([]);
     const minAmountOut = floorFromQuote(
       withdrawalPreview.assetsOut,
@@ -305,7 +308,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     await fundSol(ownerAddress);
     await fundUsdt(ownerAddress);
 
-    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+    const depositPreview = await post<DepositPreview>("/v1/earn/deposits/preview", {
       strategyId,
       amount: DEPOSIT_AMOUNT,
     });
@@ -330,7 +333,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
     const withdrawalPreview = await post<WithdrawalPreview>(
-      "/v1/earn/external-wallet/withdrawal-previews",
+      "/v1/earn/withdrawals/caller-signed/preview",
       { positionId: depositResult.deposit.positionId, shares: holding?.shares ?? "0" }
     );
     expect(withdrawalPreview.blockingIssues).toEqual([]);

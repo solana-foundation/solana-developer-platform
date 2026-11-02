@@ -131,7 +131,7 @@ export class EmbeddedYieldClient {
       sharesOut: string;
       shareDecimals: number;
       blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/vault-deposit-previews", {
+    }>("/v1/earn/deposits/preview", {
       method: "POST",
       body: { strategyId, amount },
     });
@@ -179,7 +179,7 @@ export class EmbeddedYieldClient {
       assetsOut: string;
       assetDecimals: number;
       blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/external-wallet/withdrawal-previews", {
+    }>("/v1/earn/withdrawals/caller-signed/preview", {
       method: "POST",
       body: { positionId, shares },
     });
@@ -189,7 +189,7 @@ export class EmbeddedYieldClient {
     positionId: string
   ): Promise<YieldWithdrawalOptions> {
     return this.request<YieldWithdrawalOptions>(
-      "/v1/earn/external-wallet/withdrawal-options",
+      "/v1/earn/withdrawals/caller-signed/options",
       { method: "POST", body: { positionId } }
     );
   }
@@ -211,7 +211,7 @@ export class EmbeddedYieldClient {
       maturityTimestamp: string;
       deadlineTimestamp: string;
       blockingIssues: Array<{ code: string; message: string }>;
-    }>("/v1/earn/external-wallet/queued-withdrawal-previews", {
+    }>("/v1/earn/withdrawal-requests/caller-signed/preview", {
       method: "POST",
       body: input,
     });
@@ -281,7 +281,7 @@ export class EmbeddedYieldClient {
     return this.allowUnknownOwner(
       () =>
         this.collectPages<YieldWithdrawalRequest>(
-          "/v1/earn/external-wallet/withdrawal-requests",
+          "/v1/earn/withdrawal-requests/caller-signed",
           "withdrawalRequests",
           ownerAddress,
           { settled: "false" }
@@ -321,7 +321,7 @@ export class EmbeddedYieldClient {
     return this.allowUnknownOwner(
       () =>
         this.collectPages<YieldMovement>(
-          "/v1/earn/external-wallet/movements",
+          "/v1/earn/movements/caller-signed",
           "movements",
           ownerAddress
         ),
@@ -332,7 +332,7 @@ export class EmbeddedYieldClient {
   /** Read one movement through SDP's chain-aware detail endpoint. */
   async getMovement(movementId: string): Promise<YieldMovement> {
     const data = await this.request<{ movement: YieldMovement }>(
-      `/v1/earn/external-wallet/movements/${encodeURIComponent(movementId)}`
+      `/v1/earn/movements/caller-signed/${encodeURIComponent(movementId)}`
     );
     return data.movement;
   }
@@ -342,7 +342,7 @@ export class EmbeddedYieldClient {
     return this.allowUnknownOwner(
       () =>
         this.collectPages<YieldPosition>(
-          "/v1/earn/external-wallet/positions",
+          "/v1/earn/positions/caller-signed",
           "positions",
           ownerAddress
         ),

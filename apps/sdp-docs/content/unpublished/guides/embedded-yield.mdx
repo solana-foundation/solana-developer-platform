@@ -14,11 +14,13 @@ Two properties define the surface:
 
 All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@solana/kit`; nothing here needs `@solana/web3.js`.
 
+`caller-signed` identifies reads and previews for transactions signed by your customer’s wallet. `provider-signed` identifies the connected-wallet flow, where SDP requests signing through your project’s connected signing provider. These names describe signing responsibility. Provider-managed portfolio accounts have their own `/portfolio-accounts` family; existing `programId` parameters and payload fields keep their names.
+
 ## Authenticate
 
 Every request sends `Authorization: Bearer <SDP_API_KEY>` and runs in your project's environment (sandbox runs on devnet). A build can name a `feePayer`, and your backend submits the signed bytes to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
 
-**The key.** Create an API key for your project in the dashboard and grant it Earn `execute` (which includes `earn.read`); grant `earn.manage` too if it builds external-wallet withdrawal cancellations or manages programs. Cancelling a queued withdrawal signs or sponsors a transaction, so it takes `execute`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
+**The key.** Create an API key for your project in the dashboard and grant it Earn `execute` (which includes `earn.read`); grant `earn.manage` too if it builds caller-signed withdrawal cancellations or manages provider portfolio accounts. Cancelling a queued withdrawal signs or sponsors a transaction, so it takes `execute`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
 
 ## Endpoints
 
@@ -27,23 +29,23 @@ The dashboard's **Embedded Yield → Integrate** page generates a complete serve
 | Step | Endpoint |
 | --- | --- |
 | Discover strategies | `GET /v1/earn/strategies` |
-| Preview a deposit | `POST /v1/earn/vault-deposit-previews` |
+| Preview a deposit | `POST /v1/earn/deposits/preview` |
 | Build a deposit | `POST /v1/earn/deposits/build-unsigned-transaction` |
 | Submit the signed deposit | `POST /v1/earn/deposits/submit-signed-transaction` |
-| Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
-| Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
-| Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
-| Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
-| Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
-| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
+| Poll a movement | `GET /v1/earn/movements/caller-signed/{movementId}` |
+| Balance and earnings | `GET /v1/earn/earnings/caller-signed?ownerAddress=…` |
+| Activity feed | `GET /v1/earn/movements/caller-signed?ownerAddress=…` |
+| Live positions | `GET /v1/earn/positions/caller-signed?ownerAddress=…` |
+| Portfolio totals | `GET /v1/earn/positions/caller-signed/project-summary` |
+| Preview a withdrawal | `POST /v1/earn/withdrawals/caller-signed/preview` |
 | Build a withdrawal | `POST /v1/earn/withdrawals/build-unsigned-transaction` |
 | Submit the signed withdrawal | `POST /v1/earn/withdrawals/submit-signed-transaction` |
-| Discover available withdrawal routes | `POST /v1/earn/external-wallet/withdrawal-options` |
-| Preview an asynchronous withdrawal | `POST /v1/earn/external-wallet/queued-withdrawal-previews` |
+| Discover available withdrawal routes | `POST /v1/earn/withdrawals/caller-signed/options` |
+| Preview an asynchronous withdrawal | `POST /v1/earn/withdrawal-requests/caller-signed/preview` |
 | Build an asynchronous request | `POST /v1/earn/withdrawal-requests/build-unsigned-transaction` |
 | Submit an asynchronous request | `POST /v1/earn/withdrawal-requests/submit-signed-transaction` |
-| Restore asynchronous requests | `GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=…&settled=false` |
-| Poll an asynchronous request | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` |
+| Restore asynchronous requests | `GET /v1/earn/withdrawal-requests/caller-signed?ownerAddress=…&settled=false` |
+| Poll an asynchronous request | `GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}` |
 | Build request recovery | `POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` |
 | Submit request recovery | `POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction` |
 
@@ -131,7 +133,7 @@ const { deposit } = await sdpFetch("/v1/earn/deposits/submit-signed-transaction"
 
 ```ts
 const { movement } = await sdpFetch(
-  `/v1/earn/external-wallet/movements/${encodeURIComponent(deposit.movementId)}`,
+  `/v1/earn/movements/caller-signed/${encodeURIComponent(deposit.movementId)}`,
   { headers: sdpHeaders() },
 );
 ```
@@ -215,10 +217,10 @@ The sponsor is a hot key on your backend by design: it has to co-sign inside the
 
 A customer who has not deposited yet is not an error: every per-owner read answers `200` with empty lists and zero counts.
 
-- `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns, per deposit token, `currentValue`, `totalDeposited`, `totalWithdrawn`, and `earned`, where `earned` is current value plus withdrawn minus deposited. It covers positions the customer currently holds; a fully exited position's history lives in the activity feed. `earned` is stated only when exact; while a movement is still pending, while a queued withdrawal request is open (`withdrawals_pending`, which can last days), when a finalized Kamino deposit receipt is unavailable (`deposits_not_valued`), or when a withdrawal's payout could not yet be read from its landed transaction (SDP keeps retrying that read for two weeks), it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
-- `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`. Render `tokenAmount` in `tokenMint` units for both directions; `amount` and `denomination` are the on-chain quantity, which is shares on a withdrawal. A withdrawal's `tokenAmount` is `null` until its finalized payout is observed. A Kamino deposit's `tokenAmount` can also remain `null` after finalization until receipt repair observes the actual debit. Render unknown amounts as a dash, never zero or the requested maximum.
-- `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. When `withdrawableShares` is zero and `unlockTimestamp` is present, show the provider's unlock time and keep exit actions disabled until a fresh position read reports withdrawable shares. A position closes when a withdrawal empties it and drops out of this list (`closedAt` set); a later deposit reopens it. A position can also carry `parIntermediate`: the par-redemption token the owner holds outside any open request, such as Hastra wYLDS after a cancelled par redemption. It keeps the position open, is not part of `tokenValue`, and counts toward earnings `currentValue`. If live RPC hydration fails, `shares`, `withdrawableShares`, `unlockTimestamp`, and `tokenValue` are absent, never zero: show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
-- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token. By default it is address-free: each strategy total carries `walletCount` and token totals, and no `ownerAddresses`. Pass `includeOwnerAddresses=true` only from a surface that has to show per-customer detail; that list is the full set of your customers' wallet addresses, and any `earn.read` key that requests it becomes a holder of personal data. Add `includePositions=true` to receive the hydrated positions inside each strategy total; it is rejected without the explicit `includeOwnerAddresses=true`.
+- `GET /v1/earn/earnings/caller-signed?ownerAddress=…` returns, per deposit token, `currentValue`, `totalDeposited`, `totalWithdrawn`, and `earned`, where `earned` is current value plus withdrawn minus deposited. It covers positions the customer currently holds; a fully exited position's history lives in the activity feed. `earned` is stated only when exact; while a movement is still pending, while a queued withdrawal request is open (`withdrawals_pending`, which can last days), when a finalized Kamino deposit receipt is unavailable (`deposits_not_valued`), or when a withdrawal's payout could not yet be read from its landed transaction (SDP keeps retrying that read for two weeks), it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
+- `GET /v1/earn/movements/caller-signed?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`. Render `tokenAmount` in `tokenMint` units for both directions; `amount` and `denomination` are the on-chain quantity, which is shares on a withdrawal. A withdrawal's `tokenAmount` is `null` until its finalized payout is observed. A Kamino deposit's `tokenAmount` can also remain `null` after finalization until receipt repair observes the actual debit. Render unknown amounts as a dash, never zero or the requested maximum.
+- `GET /v1/earn/positions/caller-signed?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. When `withdrawableShares` is zero and `unlockTimestamp` is present, show the provider's unlock time and keep exit actions disabled until a fresh position read reports withdrawable shares. A position closes when a withdrawal empties it and drops out of this list (`closedAt` set); a later deposit reopens it. A position can also carry `parIntermediate`: the par-redemption token the owner holds outside any open request, such as Hastra wYLDS after a cancelled par redemption. It keeps the position open, is not part of `tokenValue`, and counts toward earnings `currentValue`. If live RPC hydration fails, `shares`, `withdrawableShares`, `unlockTimestamp`, and `tokenValue` are absent, never zero: show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
+- `GET /v1/earn/positions/caller-signed/project-summary` aggregates your whole project across customers, by strategy and token. By default it is address-free: each strategy total carries `walletCount` and token totals, and no `ownerAddresses`. Pass `includeOwnerAddresses=true` only from a surface that has to show per-customer detail; that list is the full set of your customers' wallet addresses, and any `earn.read` key that requests it becomes a holder of personal data. Add `includePositions=true` to receive the hydrated positions inside each strategy total; it is rejected without the explicit `includeOwnerAddresses=true`.
 
   **Changed in 0.77:** earlier releases included `ownerAddresses` unless you passed `includeOwnerAddresses=false`. If your integration reads that field, or passes `includePositions=true` on its own, add `includeOwnerAddresses=true` to the request.
 
@@ -228,7 +230,7 @@ Same build, sign, submit shape. The build names the customer's **position** (nev
 
 ```ts
 // What would these shares pay right now? Read-only; nothing is built.
-const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
+const quote = await sdpFetch("/v1/earn/withdrawals/caller-signed/preview", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({ positionId, shares }),
@@ -258,7 +260,7 @@ There are two distinct mechanisms:
 - **Operator redemption.** The request converts the position shares into the provider's `intermediateMint` and delegates that token for settlement. The provider operator later burns it and pays `assetMint` at par. A cancellation revokes the operator's claim but leaves the owner holding the intermediate token; it does not recreate the original shares.
 
 ```ts
-const options = await sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
+const options = await sdpFetch("/v1/earn/withdrawals/caller-signed/options", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({ positionId }),
@@ -298,7 +300,7 @@ const requestTerms =
         deadlineSeconds,
       };
 
-const preview = await sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+const preview = await sdpFetch("/v1/earn/withdrawal-requests/caller-signed/preview", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify(requestTerms),
@@ -326,7 +328,7 @@ const { transaction } = await sdpFetch(
 // The customer signs transaction.transaction. If feePayer is present, verify
 // the message and fee payer before adding the sponsor signature.
 const { withdrawalRequest } = await sdpFetch(
-  "/v1/earn/external-wallet/withdrawal-requests",
+  "/v1/earn/withdrawal-requests/submit-signed-transaction",
   {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
@@ -341,12 +343,12 @@ Poll the durable request and restore outstanding requests after every startup, r
 
 ```ts
 const { withdrawalRequest: current } = await sdpFetch(
-  `/v1/earn/external-wallet/withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`,
+  `/v1/earn/withdrawal-requests/caller-signed/${encodeURIComponent(withdrawalRequestId)}`,
   { headers: sdpHeaders() },
 );
 
 const query = new URLSearchParams({ ownerAddress, settled: "false" });
-const page = await sdpFetch(`/v1/earn/external-wallet/withdrawal-requests?${query}`, {
+const page = await sdpFetch(`/v1/earn/withdrawal-requests/caller-signed?${query}`, {
   headers: sdpHeaders(),
 });
 // Follow nextCursor until hasMore is false. Refuse a missing or repeated cursor.

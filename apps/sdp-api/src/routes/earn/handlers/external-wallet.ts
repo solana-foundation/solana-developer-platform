@@ -158,7 +158,7 @@ const inFlightExternalWalletPortfolios = new Map<
 >();
 
 /**
- * GET /v1/earn/external-wallet/positions/summary: complete live portfolio for
+ * GET /v1/earn/positions/caller-signed/project-summary: complete live portfolio for
  * one partner project, grouped by strategy and by token.
  *
  * The claim table is keyset-paged to the end before any total is returned. A
@@ -262,7 +262,7 @@ async function loadExternalWalletPortfolio(
 }
 
 /**
- * GET /v1/earn/external-wallet/positions?ownerAddress=…: one end user's
+ * GET /v1/earn/positions/caller-signed?ownerAddress=…: one end user's
  * holdings. The owner is a REQUIRED query filter, the same addressing every
  * per-owner read on this surface uses (see the movements list for the original
  * reasoning).
@@ -357,7 +357,7 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
 }
 
 /**
- * GET /v1/earn/external-wallet/movements: one end user's activity, newest
+ * GET /v1/earn/movements/caller-signed: one end user's activity, newest
  * first, in the ledger's own vocabulary (PRO-1772).
  *
  * The read the cross-provider feed structurally cannot serve: its vault arm
@@ -443,7 +443,7 @@ function requirePositionTokenMint(position: EarnPositionRow): string {
 }
 
 /**
- * GET /v1/earn/external-wallet/movements/:movementId: poll one movement to a
+ * GET /v1/earn/movements/caller-signed/:movementId: poll one movement to a
  * terminal state, with a scoped, fail-soft read-through of its exact Solana
  * signature — the same interactive fast path the treasury detail reads take.
  *
@@ -489,7 +489,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
 }
 
 /**
- * GET /v1/earn/external-wallet/earnings?ownerAddress=…: balance and total
+ * GET /v1/earn/earnings/caller-signed?ownerAddress=…: balance and total
  * earned for one end user, grouped by deposit token (PRO-1772).
  *
  * `earned` is live current value, plus the observed token payouts of
@@ -960,7 +960,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 }
 
 /**
- * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
+ * POST /v1/earn/withdrawals/caller-signed/preview: quote one caller-owned
  * exit without applying a custody wallet scope. The position's exact project
  * scope is the authorization boundary, matching the external build route.
  *

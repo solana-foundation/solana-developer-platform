@@ -380,7 +380,7 @@ function postVaultWithdrawal(
 
 function getWithdrawal(pathSuffix: string, apiKey = TEST_API_KEY.raw) {
   return app.request(
-    `/v1/earn/vault-withdrawals${pathSuffix}`,
+    `/v1/earn/withdrawals/provider-signed${pathSuffix}`,
     { headers: { Authorization: `Bearer ${apiKey}` } },
     env
   );
@@ -1000,7 +1000,7 @@ describe("POST /v1/earn/withdrawals/execute — response shape", () => {
   });
 });
 
-describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
+describe("GET /v1/earn/withdrawals/provider-signed — recorded movements", () => {
   it("404s another project's withdrawal", async () => {
     await seedAuth();
     const { recorded } = await recordWithdrawal({ requestId: "vw-project-scope" });
@@ -1244,16 +1244,16 @@ describe("POST /v1/earn/withdrawals/execute — the exit slippage floor", () => 
 });
 
 /**
- * `POST /v1/earn/vault-withdrawal-previews` — the exit quote. EXIT gates only:
+ * `POST /v1/earn/withdrawals/provider-signed/preview` — the exit quote. EXIT gates only:
  * position scoping (404) and capability (501), nothing money-in-shaped — plus
  * `wallets:read`, which is not a money-in gate: it backs the binding check the
  * read scopes through, and for a key with no wallet bindings that check is a
  * documented no-op.
  */
-describe("POST /v1/earn/vault-withdrawal-previews", () => {
+describe("POST /v1/earn/withdrawals/provider-signed/preview", () => {
   function postVaultWithdrawalPreview(body: Record<string, unknown>) {
     return app.request(
-      "/v1/earn/vault-withdrawal-previews",
+      "/v1/earn/withdrawals/provider-signed/preview",
       {
         method: "POST",
         headers: {
@@ -1346,7 +1346,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     });
 
     const res = await app.request(
-      "/v1/earn/vault-withdrawal-previews",
+      "/v1/earn/withdrawals/provider-signed/preview",
       {
         method: "POST",
         headers: {
@@ -1466,7 +1466,7 @@ describe("POST /v1/earn/withdrawals/execute: audit ledger parity (PRO-1866)", ()
   });
 });
 
-describe("POST /v1/earn/vault-withdrawal-requests: a par request", () => {
+describe("POST /v1/earn/withdrawal-requests/provider-signed: a par request", () => {
   it("refuses a request naming both shares and a held intermediate amount", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "hastra" });

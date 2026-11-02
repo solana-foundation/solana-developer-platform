@@ -88,7 +88,9 @@ function assertVaultDepositEnvironmentOpen(
  */
 export function assertVaultDirectDepositStyle(provider: string): void {
   if (earnDepositStyle(provider) !== "vault_direct") {
-    throw badRequest(`${provider} is a custodial provider; use POST /v1/earn/programs instead.`);
+    throw badRequest(
+      `${provider} is a custodial provider; use POST /v1/earn/portfolio-accounts instead.`
+    );
   }
 }
 
@@ -171,7 +173,7 @@ export function assertDepositFloorPresent(
   if (earnDepositSlippagePolicy(provider, environment, hostCluster) === null) return;
   throw badRequest(
     environment === "production"
-      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut."
-      : `minSharesOut is required: ${provider} deposits carry a share floor wherever the vault program can enforce one. Quote the deposit with POST /v1/earn/vault-deposit-previews and derive the floor from sharesOut.`
+      ? "minSharesOut is required: every production deposit carries a share floor. Quote the deposit with POST /v1/earn/deposits/preview and derive the floor from sharesOut."
+      : `minSharesOut is required: ${provider} deposits carry a share floor wherever the vault program can enforce one. Quote the deposit with POST /v1/earn/deposits/preview and derive the floor from sharesOut.`
   );
 }

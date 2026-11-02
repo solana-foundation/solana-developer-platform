@@ -5,7 +5,7 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.list",
-    path: `/v1/earn/programs${programProxyQuery(request, { provider: true, page: true })}`,
+    path: `/v1/earn/portfolio-accounts${programProxyQuery(request, { provider: true, page: true })}`,
   });
 }
 
@@ -19,6 +19,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.create",
-    path: "/v1/earn/programs",
+    path: "/v1/earn/portfolio-accounts",
   });
 }

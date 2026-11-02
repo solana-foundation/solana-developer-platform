@@ -98,7 +98,7 @@ import {
  * chain rejected the transfer.
  */
 /**
- * POST /v1/earn/vault-deposit-previews — what would this deposit mint right
+ * POST /v1/earn/deposits/preview — what would this deposit mint right
  * now, from the provider's own live accounting. The dashboard derives its
  * `minSharesOut` floor from this quote, so the floor tracks the live share
  * rate instead of assuming one.
@@ -562,7 +562,7 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
 }
 
 /**
- * GET /v1/earn/vault-deposits/:movementId — one recorded deposit, so a caller
+ * GET /v1/earn/deposits/provider-signed/:movementId — one recorded deposit, so a caller
  * that signed something can find out whether it landed.
  *
  * SDP signs vault deposits and records them BEFORE broadcast, which means a
@@ -709,7 +709,7 @@ function toEarnVaultDepositRecord(movement: EarnMovementRow): EarnVaultDepositRe
 }
 
 /**
- * GET /v1/earn/vault-deposits — this workspace's recorded deposits, newest
+ * GET /v1/earn/deposits/provider-signed — this workspace's recorded deposits, newest
  * first, so a client can re-derive what is still in flight.
  *
  * This is the DISCOVERY tier, and it exists because a signed deposit was
@@ -860,7 +860,7 @@ export function toVaultHolding(row: EarnPositionRow): VaultHolding {
 }
 
 /**
- * GET /v1/earn/vault-positions — the org's vault positions, HYDRATED LIVE.
+ * GET /v1/earn/positions/provider-signed — the org's vault positions, HYDRATED LIVE.
  *
  * The DB rows are only the claim set (which wallet holds which vault). Shares
  * and value are read from chain on every request, never persisted: for a
@@ -1153,7 +1153,7 @@ export async function findEarnVaultWithdrawalIdempotentKeyReplay(
 }
 
 /**
- * POST /v1/earn/vault-withdrawal-previews — what redeeming these shares would
+ * POST /v1/earn/withdrawals/provider-signed/preview — what redeeming these shares would
  * pay right now, from the provider's own live accounting. The dashboard derives
  * its `minAmountOut` floor from this quote, exactly as the deposit preview
  * feeds the deposit floor.
@@ -1323,7 +1323,7 @@ function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): E
 }
 
 /**
- * GET /v1/earn/vault-withdrawals/:movementId - one recorded withdrawal.
+ * GET /v1/earn/withdrawals/provider-signed/:movementId - one recorded withdrawal.
  *
  * Same contract as the deposit detail read, mirrored: NO provider gate (it
  * reports on an exit already signed from the org's own wallet), and the same
@@ -1365,7 +1365,7 @@ export async function getEarnVaultWithdrawal(c: AppContext) {
 }
 
 /**
- * GET /v1/earn/vault-withdrawals - this workspace's recorded withdrawals,
+ * GET /v1/earn/withdrawals/provider-signed - this workspace's recorded withdrawals,
  * newest first: the deposits list's mirror, with the same discovery duty
  * (`?requestId=` finds a movement by its `Idempotency-Key`) and the same recovery filter
  * (`?settled=false`). Wire statuses are the ledger's own — `settled` here

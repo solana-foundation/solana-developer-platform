@@ -63,7 +63,7 @@ describe("EmbeddedYieldClient", () => {
       new EmbeddedYieldClient(config).getMovement(movement.movementId)
     ).resolves.toEqual(movement);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://127.0.0.1:8787/v1/earn/external-wallet/movements/movement%2Fwith%20space"
+      "http://127.0.0.1:8787/v1/earn/movements/caller-signed/movement%2Fwith%20space"
     );
   });
 

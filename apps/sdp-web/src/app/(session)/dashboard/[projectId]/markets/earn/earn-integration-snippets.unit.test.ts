@@ -105,12 +105,12 @@ describe("generated Embedded Yield integration", () => {
         const path = new URL(url).pathname;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         requests.push({ path, body });
-        if (path.endsWith("vault-deposit-previews")) {
+        if (path.endsWith("/deposits/preview")) {
           return Response.json({
             data: { sharesOut: "1", shareDecimals: 6, blockingIssues: [] },
           });
         }
-        if (path.endsWith("withdrawal-previews")) {
+        if (path.endsWith("/withdrawals/caller-signed/preview")) {
           return Response.json({
             data: { assetsOut: "0.5", assetDecimals: 6, blockingIssues: [] },
           });
@@ -162,7 +162,7 @@ describe("generated Embedded Yield integration", () => {
 
     expect(requests).toEqual([
       {
-        path: "/v1/earn/vault-deposit-previews",
+        path: "/v1/earn/deposits/preview",
         body: { strategyId: strategy.id, amount: "1" },
       },
       {
@@ -176,7 +176,7 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-previews",
+        path: "/v1/earn/withdrawals/caller-signed/preview",
         body: { positionId: "position", shares: "0.5" },
       },
       {
@@ -200,13 +200,13 @@ describe("generated Embedded Yield integration", () => {
         const path = new URL(url).pathname;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         requests.push({ path, body });
-        if (path.endsWith("vault-deposit-previews")) {
+        if (path.endsWith("/deposits/preview")) {
           return Response.json({
             // Padded past the mint's own scale — providers do not canonicalize.
             data: { sharesOut: "1.2000000", shareDecimals: 6, blockingIssues: [] },
           });
         }
-        if (path.endsWith("withdrawal-previews")) {
+        if (path.endsWith("/withdrawals/caller-signed/preview")) {
           return Response.json({
             // One more SIGNIFICANT digit than the mint has atoms: malformed.
             data: { assetsOut: "1.2345671", assetDecimals: 6, blockingIssues: [] },
@@ -294,9 +294,9 @@ describe("generated Embedded Yield integration", () => {
     await generated.previewEarnDeposit("1");
     await generated.previewEarnWithdrawal("position", "1");
     expect(requests).toEqual([
-      { path: "/v1/earn/vault-deposit-previews", body: { strategyId: strategy.id, amount: "1" } },
+      { path: "/v1/earn/deposits/preview", body: { strategyId: strategy.id, amount: "1" } },
       {
-        path: "/v1/earn/external-wallet/withdrawal-previews",
+        path: "/v1/earn/withdrawals/caller-signed/preview",
         body: { positionId: "position", shares: "1" },
       },
     ]);
@@ -433,7 +433,7 @@ describe("generated Embedded Yield integration", () => {
         const path = new URL(url).pathname;
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         requests.push({ path, body });
-        if (path.endsWith("withdrawal-options")) {
+        if (path.endsWith("/withdrawals/caller-signed/options")) {
           return Response.json({
             data: {
               queued: true,
@@ -448,7 +448,7 @@ describe("generated Embedded Yield integration", () => {
             },
           });
         }
-        if (path.endsWith("queued-withdrawal-previews")) {
+        if (path.endsWith("/withdrawal-requests/caller-signed/preview")) {
           return Response.json({ data: { blockingIssues: [] } });
         }
         return Response.json({ data: { transaction: { transactionId: "queue-build" } } });
@@ -487,11 +487,11 @@ describe("generated Embedded Yield integration", () => {
 
     expect(requests).toEqual([
       {
-        path: "/v1/earn/external-wallet/withdrawal-options",
+        path: "/v1/earn/withdrawals/caller-signed/options",
         body: { positionId: "position" },
       },
       {
-        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        path: "/v1/earn/withdrawal-requests/caller-signed/preview",
         body: {
           positionId: "position",
           shares: "2",
@@ -500,7 +500,7 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        path: "/v1/earn/withdrawal-requests/caller-signed/preview",
         body: {
           positionId: "position",
           shares: "3",
@@ -508,11 +508,11 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-options",
+        path: "/v1/earn/withdrawals/caller-signed/options",
         body: { positionId: "position" },
       },
       {
-        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        path: "/v1/earn/withdrawal-requests/caller-signed/preview",
         body: {
           positionId: "position",
           shares: "2",
@@ -599,8 +599,8 @@ describe("generated Embedded Yield integration", () => {
       })
     ).rejects.toThrow("deadlineSeconds must be between 300 and 7776000");
     expect(paths).toEqual([
-      "/v1/earn/external-wallet/withdrawal-options",
-      "/v1/earn/external-wallet/withdrawal-options",
+      "/v1/earn/withdrawals/caller-signed/options",
+      "/v1/earn/withdrawals/caller-signed/options",
     ]);
   });
 
@@ -657,12 +657,12 @@ describe("generated Embedded Yield integration", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path.endsWith("/withdrawal-requests/request_1")) {
+        if (path.endsWith("/withdrawal-requests/caller-signed/request_1")) {
           return Response.json({
             data: { withdrawalRequest: { withdrawalRequestId: "request_1", status: "fulfilled" } },
           });
         }
-        if (path.endsWith("/movements/movement_1")) {
+        if (path.endsWith("/movements/caller-signed/movement_1")) {
           return Response.json({
             data: { movement: { movementId: "movement_1", status: "finalized" } },
           });

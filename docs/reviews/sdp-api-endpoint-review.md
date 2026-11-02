@@ -5,15 +5,15 @@ Internal working document · October 27, 2026 · original source commit `d735d38
 <!-- API-NAMING-PROPOSALS:START -->
 ## Proposed API naming changes
 
-Naming review · November 2, 2026 · reviewed all **289 endpoints** in this file against the current route inventory, with source checks for ambiguous behavior. **32 proposals cover 110 endpoints.** **80 route names are updated: 79 proposal mappings are complete, plus the execution suffix in N13.** Only N11, N12, and the rest of N13 await your review. The other 179 have no path-only rename recommended in this pass.
+Naming review · November 2, 2026 · reviewed all **289 endpoints** in this file against the current route inventory, with source checks for ambiguous behavior. **32 proposals cover 110 endpoints.** **All 110 proposed endpoint mappings are implemented.** The other 179 have no path-only rename recommended in this pass.
 
-**Implementation status · November 2, 2026.** All proposals except N11, N12, and the remaining N13 family changes are implemented. N13 retains the execution suffix already applied under `/programs`. Endpoint verdicts and review notes are unchanged. Proposal numbers (`N01`–`N32`) are separate from endpoint IDs (`E001`–`E289`); you can approve or reject a proposal as a group, or select individual rows.
+**Implementation status · November 2, 2026.** All 32 naming proposals are implemented. Endpoint verdicts and review notes are unchanged. Proposal numbers (`N01`–`N32`) are separate from endpoint IDs (`E001`–`E289`); you can approve or reject a proposal as a group, or select individual rows.
 
 The goal is to make the route tell the caller what happens: execute through a connected provider, build an unsigned transaction, submit already-signed bytes, read a record, or start a provider-hosted flow. I would keep ordinary resource CRUD and already-clear action verbs; every POST does not need an `/execute` suffix.
 
 The tables show the **same HTTP method** on both sides. Proposed path-only changes retain existing bodies, selectors, response schemas, permissions, idempotency, signing, publication boundaries, and runtime behavior. A new URL still requires updating clients; “name-only” does not mean backward compatible. Body/query IDs are not silently moved into paths.
 
-**Remaining decisions:** N11 (Earn read families), N12 (Earn previews/options), and N13 (Earn portfolio-account naming).
+**Naming implementation complete.** Review each endpoint below and mark it Good or Needs work independently of these naming decisions.
 
 | Proposal | Priority | Decision | Affected endpoints | Status |
 | --- | --- | --- | ---: | --- |
@@ -27,9 +27,9 @@ The tables show the **same HTTP method** on both sides. Proposed path-only chang
 | [N08](#n08-rings-distinguish-starting-execution-from-recovering-an-existing-operation) | 1 | Rings: distinguish starting execution from recovering an existing operation | 2 | Implemented |
 | [N09](#n09-earn-extend-the-explicit-names-to-queued-withdrawal-transactions) | 1 | Earn: extend the explicit names to queued withdrawal transactions | 6 | Implemented |
 | [N10](#n10-fireblocks-setup-vault-discovery-does-not-create-a-vault) | 1 | Fireblocks setup: vault discovery does not create a vault | 1 | Implemented |
-| [N11](#n11-earn-reads-replace-external-wallet-and-vault-prefixes-with-explicit-flow-families) | 2 | Earn reads: replace external-wallet and vault prefixes with explicit flow families | 15 | Pending |
-| [N12](#n12-earn-quotes-place-previews-and-options-beside-the-relevant-action) | 2 | Earn quotes: place previews and options beside the relevant action | 7 | Pending |
-| [N13](#n13-earn-programs-name-the-provider-portfolio-account-and-its-allocation) | 2 | Earn programs: name the provider portfolio account and its allocation | 9 | Partial: execution suffix |
+| [N11](#n11-earn-reads-replace-external-wallet-and-vault-prefixes-with-explicit-flow-families) | 2 | Earn reads: replace external-wallet and vault prefixes with explicit flow families | 15 | Implemented |
+| [N12](#n12-earn-quotes-place-previews-and-options-beside-the-relevant-action) | 2 | Earn quotes: place previews and options beside the relevant action | 7 | Implemented |
+| [N13](#n13-earn-programs-name-the-provider-portfolio-account-and-its-allocation) | 2 | Earn programs: name the provider portfolio account and its allocation | 9 | Implemented |
 | [N14](#n14-earn-reconciliation-say-that-the-endpoint-returns-a-report) | 2 | Earn reconciliation: say that the endpoint returns a report | 1 | Implemented |
 | [N15](#n15-issuance-distinguish-account-freezing-from-token-wide-pausing) | 2 | Issuance: distinguish account freezing from token-wide pausing | 3 | Implemented |
 | [N16](#n16-private-channels-connect-to-an-instance-rather-than-imply-remote-deployment-or-destruction) | 2 | Private Channels: connect to an instance, rather than imply remote deployment or destruction | 5 | Implemented |
@@ -208,9 +208,11 @@ Keep POST and the request body. Switching to GET would be a separate contract ch
 
 ### N11: Earn reads: replace external-wallet and vault prefixes with explicit flow families
 
+**Status: Implemented — path names only.**
+
 After the transaction-path renames, the read paths still mix `/external-wallet`, `/vault-*`, and an unqualified `/movements`. I would group them under the thing being read and identify the signing flow. This is the largest vocabulary decision in this list.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E142](#e142-get-one-external-wallets-balance-and-earnings) | `GET /v1/earn/external-wallet/earnings` | `GET /v1/earn/earnings/caller-signed` |
 | [E143](#e143-list-one-external-wallets-activity) | `GET /v1/earn/external-wallet/movements` | `GET /v1/earn/movements/caller-signed` |
@@ -232,9 +234,11 @@ Keep each endpoint’s exact visibility, filters, and response shape. The caller
 
 ### N12: Earn quotes: place previews and options beside the relevant action
 
+**Status: Implemented — path names only.**
+
 `vault-deposit-previews`, `vault-withdrawal-previews`, and `external-wallet/...` use several different naming styles for read-only planning. Use a consistent preview/options suffix while preserving the distinct caller-signed and provider-signed request shapes.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E170](#e170-preview-a-direct-vault-deposit) | `POST /v1/earn/vault-deposit-previews` | `POST /v1/earn/deposits/preview` |
 | [E147](#e147-preview-an-asynchronous-external-wallet-withdrawal) | `POST /v1/earn/external-wallet/queued-withdrawal-previews` | `POST /v1/earn/withdrawal-requests/caller-signed/preview` |
@@ -248,11 +252,11 @@ These remain POSTs with their existing bodies. A preview or options request stay
 
 ### N13: Earn programs: name the provider portfolio account and its allocation
 
-**Status: Partially implemented.** E166 now uses `POST /v1/earn/programs/{programId}/withdrawals/execute`. The `portfolio-accounts` family rename, allocation path, and preview path remain pending.
+**Status: Implemented — path names only.**
 
 An Earn “program” is a provider-managed portfolio wallet/account, not a Solana program. The PUT retargets its allocation rather than replacing an entire program. `/portfolio-accounts` and `/allocation` expose both facts.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E159](#e159-list-provider-managed-programs) | `GET /v1/earn/programs` | `GET /v1/earn/portfolio-accounts` |
 | [E160](#e160-create-a-provider-managed-program) | `POST /v1/earn/programs` | `POST /v1/earn/portfolio-accounts` |
@@ -276,7 +280,7 @@ The current GET compares scoped connected-wallet share balances with recorded po
 | --- | --- | --- |
 | [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/vault-share-reconciliation` | `GET /v1/earn/positions/provider-signed/share-reconciliation-report` |
 
-The report uses the proposed `provider-signed` path; N11 remains a separate pending decision. Keep this report read-only; the proposed name adds no import or repair behavior.
+The report uses the same `provider-signed` flow label as the N11 reads. Keep this report read-only; the proposed name adds no import or repair behavior.
 
 ### N15: Issuance: distinguish account freezing from token-wide pausing
 
@@ -532,7 +536,7 @@ These five endpoints are included in the 289-endpoint audit, but not in the prop
 
 ### Coverage of the full endpoint inventory
 
-Every endpoint in each section was considered. Of the 110 candidates, 79 mappings are fully implemented, one has its execution suffix implemented, and 30 are untouched. “No path-only proposal” means no naming change is recommended here; it is not a Good verdict or approval of the endpoint’s behavior.
+Every endpoint in each section was considered. All 110 candidate mappings are fully implemented. “No path-only proposal” means no naming change is recommended here; it is not a Good verdict or approval of the endpoint’s behavior.
 
 | Review section | Endpoints considered | Candidates identified | No path-only proposal |
 | --- | ---: | ---: | ---: |
@@ -12268,7 +12272,9 @@ Lists issuance transactions across tokens for the current organization or projec
 
 ## Earn
 
-Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. Held out of public surfaces.
+Strategies, provider portfolio accounts, caller-signed and provider-signed flows, and withdrawal tracking. Held out of public surfaces.
+
+`caller-signed` means the caller’s wallet signs the transaction; `provider-signed` means SDP requests signing through the project’s connected signing provider. These labels identify flow families and signing responsibility. SDP does not custody wallets. The project-wide caller-signed summary and the Treasury movement feed retain their existing, distinct scopes.
 
 **46 pending · 0 good · 0 needs work**
 
@@ -12276,52 +12282,54 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | --- | --- | --- | --- |
 | [E140](#e140-build-an-unsigned-external-wallet-deposit-transaction) | `POST /v1/earn/deposits/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
 | [E141](#e141-submit-a-signed-external-wallet-deposit) | `POST /v1/earn/deposits/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
-| [E142](#e142-get-one-external-wallets-balance-and-earnings) | `GET /v1/earn/external-wallet/earnings` | Unpublished — Earn launch hold | Pending |
-| [E143](#e143-list-one-external-wallets-activity) | `GET /v1/earn/external-wallet/movements` | Unpublished — Earn launch hold | Pending |
-| [E144](#e144-get-one-external-wallet-movement) | `GET /v1/earn/external-wallet/movements/{movementId}` | Unpublished — Earn launch hold | Pending |
-| [E145](#e145-list-one-external-wallets-positions) | `GET /v1/earn/external-wallet/positions` | Unpublished — Earn launch hold | Pending |
-| [E146](#e146-get-external-wallet-position-totals) | `GET /v1/earn/external-wallet/positions/summary` | Unpublished — Earn launch hold | Pending |
-| [E147](#e147-preview-an-asynchronous-external-wallet-withdrawal) | `POST /v1/earn/external-wallet/queued-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
-| [E148](#e148-discover-external-wallet-withdrawal-routes) | `POST /v1/earn/external-wallet/withdrawal-options` | Unpublished — Earn launch hold | Pending |
-| [E149](#e149-preview-an-external-wallet-exit) | `POST /v1/earn/external-wallet/withdrawal-previews` | Unpublished — Earn launch hold | Pending |
+| [E142](#e142-get-one-external-wallets-balance-and-earnings) | `GET /v1/earn/earnings/caller-signed` | Unpublished — Earn launch hold | Pending |
+| [E143](#e143-list-one-external-wallets-activity) | `GET /v1/earn/movements/caller-signed` | Unpublished — Earn launch hold | Pending |
+| [E144](#e144-get-one-external-wallet-movement) | `GET /v1/earn/movements/caller-signed/{movementId}` | Unpublished — Earn launch hold | Pending |
+| [E145](#e145-list-one-external-wallets-positions) | `GET /v1/earn/positions/caller-signed` | Unpublished — Earn launch hold | Pending |
+| [E146](#e146-get-external-wallet-position-totals) | `GET /v1/earn/positions/caller-signed/project-summary` | Unpublished — Earn launch hold | Pending |
+| [E147](#e147-preview-an-asynchronous-external-wallet-withdrawal) | `POST /v1/earn/withdrawal-requests/caller-signed/preview` | Unpublished — Earn launch hold | Pending |
+| [E148](#e148-discover-external-wallet-withdrawal-routes) | `POST /v1/earn/withdrawals/caller-signed/options` | Unpublished — Earn launch hold | Pending |
+| [E149](#e149-preview-an-external-wallet-exit) | `POST /v1/earn/withdrawals/caller-signed/preview` | Unpublished — Earn launch hold | Pending |
 | [E150](#e150-build-an-unsigned-asynchronous-withdrawal-cancellation) | `POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
 | [E151](#e151-submit-a-signed-asynchronous-withdrawal-cancellation) | `POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
 | [E152](#e152-build-an-unsigned-asynchronous-withdrawal-request) | `POST /v1/earn/withdrawal-requests/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
-| [E153](#e153-list-an-external-wallets-asynchronous-withdrawals) | `GET /v1/earn/external-wallet/withdrawal-requests` | Unpublished — Earn launch hold | Pending |
+| [E153](#e153-list-an-external-wallets-asynchronous-withdrawals) | `GET /v1/earn/withdrawal-requests/caller-signed` | Unpublished — Earn launch hold | Pending |
 | [E154](#e154-submit-a-signed-asynchronous-withdrawal-request) | `POST /v1/earn/withdrawal-requests/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
-| [E155](#e155-get-one-asynchronous-withdrawal-request) | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
+| [E155](#e155-get-one-asynchronous-withdrawal-request) | `GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
 | [E156](#e156-build-an-unsigned-external-wallet-exit-transaction) | `POST /v1/earn/withdrawals/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
 | [E157](#e157-submit-a-signed-external-wallet-withdrawal) | `POST /v1/earn/withdrawals/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
-| [E158](#e158-list-all-scoped-earn-movements) | `GET /v1/earn/movements` | Unpublished — Earn launch hold | Pending |
-| [E159](#e159-list-provider-managed-programs) | `GET /v1/earn/programs` | Unpublished — Earn launch hold | Pending |
-| [E160](#e160-create-a-provider-managed-program) | `POST /v1/earn/programs` | Unpublished — Earn launch hold | Pending |
-| [E161](#e161-read-a-provider-managed-program) | `GET /v1/earn/programs/{programId}` | Unpublished — Earn launch hold | Pending |
-| [E162](#e162-change-a-programs-allocation) | `PUT /v1/earn/programs/{programId}` | Unpublished — Earn launch hold | Pending |
-| [E163](#e163-list-program-deposits) | `GET /v1/earn/programs/{programId}/deposits` | Unpublished — Earn launch hold | Pending |
-| [E164](#e164-preview-a-program-withdrawal-or-read-liquidity) | `POST /v1/earn/programs/{programId}/withdrawal-preview` | Unpublished — Earn launch hold | Pending |
-| [E165](#e165-list-recorded-program-withdrawals) | `GET /v1/earn/programs/{programId}/withdrawals` | Unpublished — Earn launch hold | Pending |
-| [E166](#e166-withdraw-from-a-provider-managed-program) | `POST /v1/earn/programs/{programId}/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
-| [E167](#e167-read-a-program-withdrawal) | `GET /v1/earn/programs/{programId}/withdrawals/{withdrawalRef}` | Unpublished — Earn launch hold | Pending |
+| [E158](#e158-list-all-scoped-earn-movements) | `GET /v1/earn/treasury/movements` | Unpublished — Earn launch hold | Pending |
+| [E159](#e159-list-provider-managed-programs) | `GET /v1/earn/portfolio-accounts` | Unpublished — Earn launch hold | Pending |
+| [E160](#e160-create-a-provider-managed-program) | `POST /v1/earn/portfolio-accounts` | Unpublished — Earn launch hold | Pending |
+| [E161](#e161-read-a-provider-managed-program) | `GET /v1/earn/portfolio-accounts/{programId}` | Unpublished — Earn launch hold | Pending |
+| [E162](#e162-change-a-programs-allocation) | `PUT /v1/earn/portfolio-accounts/{programId}/allocation` | Unpublished — Earn launch hold | Pending |
+| [E163](#e163-list-program-deposits) | `GET /v1/earn/portfolio-accounts/{programId}/deposits` | Unpublished — Earn launch hold | Pending |
+| [E164](#e164-preview-a-program-withdrawal-or-read-liquidity) | `POST /v1/earn/portfolio-accounts/{programId}/withdrawals/preview` | Unpublished — Earn launch hold | Pending |
+| [E165](#e165-list-recorded-program-withdrawals) | `GET /v1/earn/portfolio-accounts/{programId}/withdrawals` | Unpublished — Earn launch hold | Pending |
+| [E166](#e166-withdraw-from-a-provider-managed-program) | `POST /v1/earn/portfolio-accounts/{programId}/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
+| [E167](#e167-read-a-program-withdrawal) | `GET /v1/earn/portfolio-accounts/{programId}/withdrawals/{withdrawalRef}` | Unpublished — Earn launch hold | Pending |
 | [E168](#e168-list-yield-strategies) | `GET /v1/earn/strategies` | Unpublished — Earn launch hold | Pending |
 | [E169](#e169-get-one-yield-strategy) | `GET /v1/earn/strategies/{strategyId}` | Unpublished — Earn launch hold | Pending |
-| [E170](#e170-preview-a-direct-vault-deposit) | `POST /v1/earn/vault-deposit-previews` | Unpublished — Earn launch hold | Pending |
-| [E171](#e171-list-custody-deposits) | `GET /v1/earn/vault-deposits` | Unpublished — Earn launch hold | Pending |
+| [E170](#e170-preview-a-direct-vault-deposit) | `POST /v1/earn/deposits/preview` | Unpublished — Earn launch hold | Pending |
+| [E171](#e171-list-custody-deposits) | `GET /v1/earn/deposits/provider-signed` | Unpublished — Earn launch hold | Pending |
 | [E172](#e172-deposit-from-a-connected-wallet) | `POST /v1/earn/deposits/execute` | Unpublished — Earn launch hold | Pending |
-| [E173](#e173-read-one-custody-deposit) | `GET /v1/earn/vault-deposits/{movementId}` | Unpublished — Earn launch hold | Pending |
-| [E174](#e174-list-live-custody-positions) | `GET /v1/earn/vault-positions` | Unpublished — Earn launch hold | Pending |
-| [E175](#e175-preview-a-queued-custody-withdrawal) | `POST /v1/earn/vault-queued-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
+| [E173](#e173-read-one-custody-deposit) | `GET /v1/earn/deposits/provider-signed/{movementId}` | Unpublished — Earn launch hold | Pending |
+| [E174](#e174-list-live-custody-positions) | `GET /v1/earn/positions/provider-signed` | Unpublished — Earn launch hold | Pending |
+| [E175](#e175-preview-a-queued-custody-withdrawal) | `POST /v1/earn/withdrawal-requests/provider-signed/preview` | Unpublished — Earn launch hold | Pending |
 | [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/positions/provider-signed/share-reconciliation-report` | Unpublished — Earn launch hold | Pending |
-| [E177](#e177-discover-custody-withdrawal-routes) | `POST /v1/earn/vault-withdrawal-options` | Unpublished — Earn launch hold | Pending |
-| [E178](#e178-preview-a-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
-| [E179](#e179-list-custody-withdrawal-requests) | `GET /v1/earn/vault-withdrawal-requests` | Unpublished — Earn launch hold | Pending |
+| [E177](#e177-discover-custody-withdrawal-routes) | `POST /v1/earn/withdrawals/provider-signed/options` | Unpublished — Earn launch hold | Pending |
+| [E178](#e178-preview-a-custody-withdrawal) | `POST /v1/earn/withdrawals/provider-signed/preview` | Unpublished — Earn launch hold | Pending |
+| [E179](#e179-list-custody-withdrawal-requests) | `GET /v1/earn/withdrawal-requests/provider-signed` | Unpublished — Earn launch hold | Pending |
 | [E180](#e180-request-a-queued-custody-withdrawal) | `POST /v1/earn/withdrawal-requests/execute` | Unpublished — Earn launch hold | Pending |
-| [E181](#e181-read-a-custody-withdrawal-request) | `GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
+| [E181](#e181-read-a-custody-withdrawal-request) | `GET /v1/earn/withdrawal-requests/provider-signed/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
 | [E182](#e182-recover-a-cancelable-withdrawal-request) | `POST /v1/earn/withdrawal-requests/{withdrawalRequestId}/cancel/execute` | Unpublished — Earn launch hold | Pending |
-| [E183](#e183-list-custody-withdrawals) | `GET /v1/earn/vault-withdrawals` | Unpublished — Earn launch hold | Pending |
+| [E183](#e183-list-custody-withdrawals) | `GET /v1/earn/withdrawals/provider-signed` | Unpublished — Earn launch hold | Pending |
 | [E184](#e184-withdraw-from-a-custody-position) | `POST /v1/earn/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
-| [E185](#e185-read-one-custody-withdrawal) | `GET /v1/earn/vault-withdrawals/{movementId}` | Unpublished — Earn launch hold | Pending |
+| [E185](#e185-read-one-custody-withdrawal) | `GET /v1/earn/withdrawals/provider-signed/{movementId}` | Unpublished — Earn launch hold | Pending |
 
-### E140: Build an unsigned external-wallet deposit transaction
+<a id="e140-build-an-unsigned-external-wallet-deposit-transaction"></a>
+
+### E140: Build an unsigned deposit transaction
 
 `POST /v1/earn/deposits/build-unsigned-transaction`
 
@@ -12343,7 +12351,7 @@ Builds one unsigned vault deposit transaction for the wallet owner to sign. The 
 | Operation ID | `createEarnExternalWalletDepositTransaction` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L397) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L762) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L339)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L405) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L762) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L339)
 
 **Request parameters**
 
@@ -12361,7 +12369,7 @@ Builds one unsigned vault deposit transaction for the wallet owner to sign. The 
 | `ownerAddress` | string | Yes | The external wallet: the customer's own Solana address. It signs and owns the shares. It also pays the network fee unless an authenticated build names a `feePayer`. The pattern is necessary but not sufficient — the string must additionally decode to a 32-byte public key, which no pattern can express, so a well-shaped base58 string that does not decode still answers 400. minLength: `32` maxLength: `44` pattern: `"^[1-9A-HJ-NP-Za-km-z]{32,44}$"` example: `"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"` |
 | `feePayer` | string | No | Authenticated builds only: pay for this transaction from your own wallet instead of the customer's. The named address becomes the transaction's fee payer. It pays the network fee, funds any share-account rent, and must sign alongside the owner. Co-sign server-side with the fee payer's key before submitting. Simulation refuses the build with a 400 naming the fee payer when it cannot pay. Sending the owner's own address uses the default: the owner pays and signs alone. minLength: `32` maxLength: `44` pattern: `"^[1-9A-HJ-NP-Za-km-z]{32,44}$"` example: `"3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF"` |
 | `amount` | string | Yes | Deposit amount as a decimal string — the vault token's units, or the SOURCE token's units when `sourceTokenMint` requests a swap-funded build (the swap consumes it whole and the vault deposit is sized to the swap's guaranteed output). maxLength: `128` pattern: `"^(?=.*[1-9])\\d+(\\.\\d+)?$"` example: `"25"` |
-| `minSharesOut` | string | No | Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount. maxLength: `128` pattern: `"^(?=.*[1-9])\\d+(\\.\\d+)?$"` example: `"24.9"` |
+| `minSharesOut` | string | No | Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/deposits/preview`, never from the deposit amount. maxLength: `128` pattern: `"^(?=.*[1-9])\\d+(\\.\\d+)?$"` example: `"24.9"` |
 | `sourceTokenMint` | string | No | Fund the deposit in a different supported stablecoin (USDC, USDG, PYUSD or USDT on the environment's cluster): a Jupiter swap to the vault's own token is prepended inside the same transaction, so both legs land atomically or not at all. Equal to the strategy's deposit mint it is a no-op, so pickers may always send their selection. minLength: `32` maxLength: `44` pattern: `"^[1-9A-HJ-NP-Za-km-z]{32,44}$"` example: `"2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo"` |
 | `swapSlippageBps` | integer | No | Swap slippage tolerance in basis points (default 2, accepted 1-500). Only valid together with sourceTokenMint. The deposit is sized to the swap's worst-case output, so a wider tolerance leaves a larger possible remainder of the vault token in the owner's account rather than risking the transaction. minimum: `1` maximum: `500` example: `2` |
 
@@ -12392,7 +12400,9 @@ Builds one unsigned vault deposit transaction for the wallet owner to sign. The 
 
 ---
 
-### E141: Submit a signed external-wallet deposit
+<a id="e141-submit-a-signed-external-wallet-deposit"></a>
+
+### E141: Submit a caller-signed deposit
 
 `POST /v1/earn/deposits/submit-signed-transaction`
 
@@ -12414,7 +12424,7 @@ Verifies the signed bytes are exactly the built transaction and that every requi
 | Operation ID | `createEarnExternalWalletDeposit` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L428) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L1011) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L367)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L436) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L1011) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L367)
 
 **Request parameters**
 
@@ -12479,9 +12489,11 @@ Verifies the signed bytes are exactly the built transaction and that every requi
 
 ---
 
-### E142: Get one external wallet's balance and earnings
+<a id="e142-get-one-external-wallets-balance-and-earnings"></a>
 
-`GET /v1/earn/external-wallet/earnings`
+### E142: Get one caller-signed wallet's balance and earnings
+
+`GET /v1/earn/earnings/caller-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -12516,7 +12528,7 @@ Returns live balance and total earned per deposit token for the required `ownerA
 
 | HTTP | Description | Content type | Full schema |
 | --- | --- | --- | --- |
-| 200 | External-wallet earnings | `application/json` | [S153](#schema-s153) |
+| 200 | Caller-signed wallet earnings | `application/json` | [S153](#schema-s153) |
 | 400 | Error | `application/json` | [S002](#schema-s002) |
 | 401 | Error | `application/json` | [S002](#schema-s002) |
 | 403 | Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason. | `application/json` | [S002](#schema-s002) |
@@ -12542,9 +12554,11 @@ Returns live balance and total earned per deposit token for the required `ownerA
 
 ---
 
-### E143: List one external wallet's activity
+<a id="e143-list-one-external-wallets-activity"></a>
 
-`GET /v1/earn/external-wallet/movements`
+### E143: List one caller-signed wallet's activity
+
+`GET /v1/earn/movements/caller-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -12583,7 +12597,7 @@ Returns one keyset page of the wallet's recorded deposits and withdrawals, newes
 
 | HTTP | Description | Content type | Full schema |
 | --- | --- | --- | --- |
-| 200 | External-wallet movement page | `application/json` | [S154](#schema-s154) |
+| 200 | Caller-signed movement page | `application/json` | [S154](#schema-s154) |
 | 400 | Error | `application/json` | [S002](#schema-s002) |
 | 401 | Error | `application/json` | [S002](#schema-s002) |
 | 403 | Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason. | `application/json` | [S002](#schema-s002) |
@@ -12626,9 +12640,11 @@ Returns one keyset page of the wallet's recorded deposits and withdrawals, newes
 
 ---
 
-### E144: Get one external-wallet movement
+<a id="e144-get-one-external-wallet-movement"></a>
 
-`GET /v1/earn/external-wallet/movements/{movementId}`
+### E144: Get one caller-signed movement
+
+`GET /v1/earn/movements/caller-signed/{movementId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -12704,9 +12720,11 @@ Polls one recorded movement to a terminal state — the read that settles a subm
 
 ---
 
-### E145: List one external wallet's positions
+<a id="e145-list-one-external-wallets-positions"></a>
 
-`GET /v1/earn/external-wallet/positions`
+### E145: List one caller-signed wallet's positions
+
+`GET /v1/earn/positions/caller-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -12743,7 +12761,7 @@ Returns one strict keyset page of live positions for an end-user wallet in the a
 
 | HTTP | Description | Content type | Full schema |
 | --- | --- | --- | --- |
-| 200 | External-wallet position page | `application/json` | [S156](#schema-s156) |
+| 200 | Caller-signed position page | `application/json` | [S156](#schema-s156) |
 | 400 | Error | `application/json` | [S002](#schema-s002) |
 | 401 | Error | `application/json` | [S002](#schema-s002) |
 | 403 | Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason. | `application/json` | [S002](#schema-s002) |
@@ -12782,9 +12800,11 @@ Returns one strict keyset page of live positions for an end-user wallet in the a
 
 ---
 
-### E146: Get external-wallet position totals
+<a id="e146-get-external-wallet-position-totals"></a>
 
-`GET /v1/earn/external-wallet/positions/summary`
+### E146: Get caller-signed project position totals
+
+`GET /v1/earn/positions/caller-signed/project-summary`
 
 - [ ] Good
 - [ ] Needs work
@@ -12820,7 +12840,7 @@ Returns a complete live aggregate across the active partner project's end-user w
 
 | HTTP | Description | Content type | Full schema |
 | --- | --- | --- | --- |
-| 200 | Complete external-wallet position aggregate | `application/json` | [S157](#schema-s157) |
+| 200 | Complete caller-signed project position aggregate | `application/json` | [S157](#schema-s157) |
 | 400 | Error | `application/json` | [S002](#schema-s002) |
 | 401 | Error | `application/json` | [S002](#schema-s002) |
 | 403 | Forbidden. Requires the `earn.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason. | `application/json` | [S002](#schema-s002) |
@@ -12847,9 +12867,11 @@ Returns a complete live aggregate across the active partner project's end-user w
 
 ---
 
-### E147: Preview an asynchronous external-wallet withdrawal
+<a id="e147-preview-an-asynchronous-external-wallet-withdrawal"></a>
 
-`POST /v1/earn/external-wallet/queued-withdrawal-previews`
+### E147: Preview an asynchronous caller-signed withdrawal
+
+`POST /v1/earn/withdrawal-requests/caller-signed/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -12869,7 +12891,7 @@ Quotes either a solver queue's discounted payout and timing or an operator redem
 | Operation ID | `createEarnExternalWalletQueuedWithdrawalPreview` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L422) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L657) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L518)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L430) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L657) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L518)
 
 **Request parameters**
 
@@ -12910,9 +12932,11 @@ Schema: one of 3 variants.
 
 ---
 
-### E148: Discover external-wallet withdrawal routes
+<a id="e148-discover-external-wallet-withdrawal-routes"></a>
 
-`POST /v1/earn/external-wallet/withdrawal-options`
+### E148: Discover caller-signed withdrawal routes
+
+`POST /v1/earn/withdrawals/caller-signed/options`
 
 - [ ] Good
 - [ ] Needs work
@@ -12932,7 +12956,7 @@ Reads atomic, provider-order, solver-queue and operator-redemption routes indepe
 | Operation ID | `getEarnExternalWalletWithdrawalOptions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L416) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L648) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L490)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L424) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L648) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L490)
 
 **Request parameters**
 
@@ -13000,9 +13024,11 @@ Reads atomic, provider-order, solver-queue and operator-redemption routes indepe
 
 ---
 
-### E149: Preview an external-wallet exit
+<a id="e149-preview-an-external-wallet-exit"></a>
 
-`POST /v1/earn/external-wallet/withdrawal-previews`
+### E149: Preview a caller-signed withdrawal
+
+`POST /v1/earn/withdrawals/caller-signed/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -13022,7 +13048,7 @@ Quotes what redeeming the shares would pay right now, from the vault's live acco
 | Operation ID | `createEarnExternalWalletWithdrawalPreview` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L404) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L971) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L397)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L412) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L971) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L397)
 
 **Request parameters**
 
@@ -13162,7 +13188,7 @@ Verifies the signed recovery transaction, records it before broadcast and return
 | Operation ID | `createEarnExternalWalletWithdrawalRequestCancellation` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L446) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L752) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L675)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L454) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L752) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L675)
 
 **Request parameters**
 
@@ -13274,9 +13300,11 @@ Schema: one of 3 variants.
 
 ---
 
-### E153: List an external wallet's asynchronous withdrawals
+<a id="e153-list-an-external-wallets-asynchronous-withdrawals"></a>
 
-`GET /v1/earn/external-wallet/withdrawal-requests`
+### E153: List a caller-signed wallet's asynchronous withdrawals
+
+`GET /v1/earn/withdrawal-requests/caller-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -13361,7 +13389,7 @@ Verifies every signature over the exact built message, records the request befor
 | Operation ID | `createEarnExternalWalletWithdrawalRequest` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L440) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L746) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L574)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L448) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L746) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L574)
 
 **Request parameters**
 
@@ -13410,7 +13438,7 @@ Verifies every signature over the exact built message, records the request befor
 
 ### E155: Get one asynchronous-withdrawal request
 
-`GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}`
+`GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -13468,7 +13496,9 @@ Returns the last durable lifecycle observation. Request creation is share escrow
 
 ---
 
-### E156: Build an unsigned external-wallet exit transaction
+<a id="e156-build-an-unsigned-external-wallet-exit-transaction"></a>
+
+### E156: Build an unsigned withdrawal transaction
 
 `POST /v1/earn/withdrawals/build-unsigned-transaction`
 
@@ -13490,7 +13520,7 @@ Builds one unsigned external-wallet exit for a tenant position and persists a su
 | Operation ID | `createEarnExternalWalletWithdrawalTransaction` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L410) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L913) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L427)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L418) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L913) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L427)
 
 **Request parameters**
 
@@ -13550,7 +13580,9 @@ Builds one unsigned external-wallet exit for a tenant position and persists a su
 
 ---
 
-### E157: Submit a signed external-wallet withdrawal
+<a id="e157-submit-a-signed-external-wallet-withdrawal"></a>
+
+### E157: Submit a caller-signed withdrawal
 
 `POST /v1/earn/withdrawals/submit-signed-transaction`
 
@@ -13572,7 +13604,7 @@ The exit mirror of the deposit submit: signature verified over the exact built m
 | Operation ID | `createEarnExternalWalletWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L434) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L1078) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L455)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L442) · [handler](../../apps/sdp-api/src/routes/earn/handlers/external-wallet.ts#L1078) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L455)
 
 **Request parameters**
 
@@ -13639,7 +13671,7 @@ The exit mirror of the deposit submit: signature verified over the exact built m
 
 ### E158: List all scoped Earn movements
 
-`GET /v1/earn/movements`
+`GET /v1/earn/treasury/movements`
 
 - [ ] Good
 - [ ] Needs work
@@ -13659,7 +13691,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `listEarnMovements` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L457) · [handler](../../apps/sdp-api/src/routes/earn/handlers/movements.ts#L39)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L465) · [handler](../../apps/sdp-api/src/routes/earn/handlers/movements.ts#L39)
 
 **Request parameters**
 
@@ -13735,9 +13767,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E159: List provider-managed programs
+<a id="e159-list-provider-managed-programs"></a>
 
-`GET /v1/earn/programs`
+### E159: List provider portfolio accounts
+
+`GET /v1/earn/portfolio-accounts`
 
 - [ ] Good
 - [ ] Needs work
@@ -13757,7 +13791,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `listEarnPrograms` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L470) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L388)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L478) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L388)
 
 **Request parameters**
 
@@ -13808,9 +13842,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E160: Create a provider-managed program
+<a id="e160-create-a-provider-managed-program"></a>
 
-`POST /v1/earn/programs`
+### E160: Create a provider portfolio account
+
+`POST /v1/earn/portfolio-accounts`
 
 - [ ] Good
 - [ ] Needs work
@@ -13830,7 +13866,7 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 | Operation ID | `createEarnProgram` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L476) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L450)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L484) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L450)
 
 **Request parameters**
 
@@ -13908,9 +13944,11 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 
 ---
 
-### E161: Read a provider-managed program
+<a id="e161-read-a-provider-managed-program"></a>
 
-`GET /v1/earn/programs/{programId}`
+### E161: Read a provider portfolio account
+
+`GET /v1/earn/portfolio-accounts/{programId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -13930,7 +13968,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `getEarnProgram` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L482) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L589)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L490) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L589)
 
 **Request parameters**
 
@@ -13976,9 +14014,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E162: Change a program's allocation
+<a id="e162-change-a-programs-allocation"></a>
 
-`PUT /v1/earn/programs/{programId}`
+### E162: Change a portfolio account's allocation
+
+`PUT /v1/earn/portfolio-accounts/{programId}/allocation`
 
 - [ ] Good
 - [ ] Needs work
@@ -13998,7 +14038,7 @@ Tenant-scoped Treasury operation. Requires earn:write.
 | Operation ID | `retargetEarnProgram` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L488) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L541)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L496) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L541)
 
 **Request parameters**
 
@@ -14057,9 +14097,11 @@ Tenant-scoped Treasury operation. Requires earn:write.
 
 ---
 
-### E163: List program deposits
+<a id="e163-list-program-deposits"></a>
 
-`GET /v1/earn/programs/{programId}/deposits`
+### E163: List portfolio-account deposits
+
+`GET /v1/earn/portfolio-accounts/{programId}/deposits`
 
 - [ ] Good
 - [ ] Needs work
@@ -14079,7 +14121,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `listEarnProgramDeposits` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L494) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L600)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L502) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L600)
 
 **Request parameters**
 
@@ -14129,9 +14171,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E164: Preview a program withdrawal or read liquidity
+<a id="e164-preview-a-program-withdrawal-or-read-liquidity"></a>
 
-`POST /v1/earn/programs/{programId}/withdrawal-preview`
+### E164: Preview a portfolio-account withdrawal or read liquidity
+
+`POST /v1/earn/portfolio-accounts/{programId}/withdrawals/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -14151,7 +14195,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `previewEarnProgramWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L500) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L635)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L508) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L635)
 
 **Request parameters**
 
@@ -14203,9 +14247,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E165: List recorded program withdrawals
+<a id="e165-list-recorded-program-withdrawals"></a>
 
-`GET /v1/earn/programs/{programId}/withdrawals`
+### E165: List recorded portfolio-account withdrawals
+
+`GET /v1/earn/portfolio-accounts/{programId}/withdrawals`
 
 - [ ] Good
 - [ ] Needs work
@@ -14225,7 +14271,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `listEarnProgramWithdrawals` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L519) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L1082)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L527) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L1082)
 
 **Request parameters**
 
@@ -14283,9 +14329,11 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ---
 
-### E166: Withdraw from a provider-managed program
+<a id="e166-withdraw-from-a-provider-managed-program"></a>
 
-`POST /v1/earn/programs/{programId}/withdrawals/execute`
+### E166: Withdraw from a provider portfolio account
+
+`POST /v1/earn/portfolio-accounts/{programId}/withdrawals/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -14305,7 +14353,7 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 | Operation ID | `createEarnProgramWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L510) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L834)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L518) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L834)
 
 **Request parameters**
 
@@ -14386,9 +14434,11 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 
 ---
 
-### E167: Read a program withdrawal
+<a id="e167-read-a-program-withdrawal"></a>
 
-`GET /v1/earn/programs/{programId}/withdrawals/{withdrawalRef}`
+### E167: Read a portfolio-account withdrawal
+
+`GET /v1/earn/portfolio-accounts/{programId}/withdrawals/{withdrawalRef}`
 
 - [ ] Good
 - [ ] Needs work
@@ -14408,7 +14458,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `getEarnProgramWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L524) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L960)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L532) · [handler](../../apps/sdp-api/src/routes/earn/handlers/program.ts#L960)
 
 **Request parameters**
 
@@ -14630,7 +14680,7 @@ Returns one catalogue row by id, whatever its cluster; `fundable` still answers 
 
 ### E170: Preview a direct vault deposit
 
-`POST /v1/earn/vault-deposit-previews`
+`POST /v1/earn/deposits/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -14703,9 +14753,9 @@ Quotes how many shares a direct vault deposit would mint from the provider's liv
 
 <a id="e171-list-custody-deposits"></a>
 
-### E171: List wallet deposits
+### E171: List provider-signed deposits
 
-`GET /v1/earn/vault-deposits`
+`GET /v1/earn/deposits/provider-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -14868,9 +14918,9 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 
 <a id="e173-read-one-custody-deposit"></a>
 
-### E173: Read one wallet deposit
+### E173: Read one provider-signed deposit
 
-`GET /v1/earn/vault-deposits/{movementId}`
+`GET /v1/earn/deposits/provider-signed/{movementId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -14942,9 +14992,9 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 <a id="e174-list-live-custody-positions"></a>
 
-### E174: List live wallet positions
+### E174: List live provider-signed positions
 
-`GET /v1/earn/vault-positions`
+`GET /v1/earn/positions/provider-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -14964,7 +15014,7 @@ Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up 
 | Operation ID | `listEarnVaultPositions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L368) · [handler](../../apps/sdp-api/src/routes/earn/handlers/vault.ts#L875)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L376) · [handler](../../apps/sdp-api/src/routes/earn/handlers/vault.ts#L875)
 
 **Request parameters**
 
@@ -15028,9 +15078,9 @@ Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up 
 
 <a id="e175-preview-a-queued-custody-withdrawal"></a>
 
-### E175: Preview a queued wallet withdrawal
+### E175: Preview a queued provider-signed withdrawal
 
-`POST /v1/earn/vault-queued-withdrawal-previews`
+`POST /v1/earn/withdrawal-requests/provider-signed/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -15050,7 +15100,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `createEarnVaultQueuedWithdrawalPreview` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L334) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L428)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L338) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L428)
 
 **Request parameters**
 
@@ -15094,7 +15144,7 @@ Schema: one of 3 variants.
 
 <a id="e176-reconcile-custody-vault-shares-against-recorded-positions"></a>
 
-### E176: Reconcile vault shares against recorded positions
+### E176: Read the provider-signed share reconciliation report
 
 `GET /v1/earn/positions/provider-signed/share-reconciliation-report`
 
@@ -15116,7 +15166,7 @@ Report-only comparison of each scoped connected wallet's on-chain share balances
 | Operation ID | `getEarnVaultShareReconciliation` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L380) · [handler](../../apps/sdp-api/src/routes/earn/handlers/vault-reconciliation.ts#L44) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L170)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L388) · [handler](../../apps/sdp-api/src/routes/earn/handlers/vault-reconciliation.ts#L44) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/earn.ts#L170)
 
 **Request parameters**
 
@@ -15186,9 +15236,9 @@ Report-only comparison of each scoped connected wallet's on-chain share balances
 
 <a id="e177-discover-custody-withdrawal-routes"></a>
 
-### E177: Discover wallet withdrawal routes
+### E177: Discover provider-signed withdrawal routes
 
-`POST /v1/earn/vault-withdrawal-options`
+`POST /v1/earn/withdrawals/provider-signed/options`
 
 - [ ] Good
 - [ ] Needs work
@@ -15208,7 +15258,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `getEarnVaultWithdrawalOptions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L328) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L419)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L332) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L419)
 
 **Request parameters**
 
@@ -15279,9 +15329,9 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 <a id="e178-preview-a-custody-withdrawal"></a>
 
-### E178: Preview a wallet withdrawal
+### E178: Preview a provider-signed withdrawal
 
-`POST /v1/earn/vault-withdrawal-previews`
+`POST /v1/earn/withdrawals/provider-signed/preview`
 
 - [ ] Good
 - [ ] Needs work
@@ -15355,9 +15405,9 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 <a id="e179-list-custody-withdrawal-requests"></a>
 
-### E179: List wallet withdrawal requests
+### E179: List provider-signed withdrawal requests
 
-`GET /v1/earn/vault-withdrawal-requests`
+`GET /v1/earn/withdrawal-requests/provider-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -15377,7 +15427,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `listEarnVaultWithdrawalRequests` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L350) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L536)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L354) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L536)
 
 **Request parameters**
 
@@ -15446,7 +15496,7 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 | Operation ID | `createEarnVaultWithdrawalRequest` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L340) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L510)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L344) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L510)
 
 **Request parameters**
 
@@ -15492,9 +15542,9 @@ Schema: one of 3 variants.
 
 <a id="e181-read-a-custody-withdrawal-request"></a>
 
-### E181: Read a wallet withdrawal request
+### E181: Read a provider-signed withdrawal request
 
-`GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}`
+`GET /v1/earn/withdrawal-requests/provider-signed/{withdrawalRequestId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -15514,7 +15564,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 | Operation ID | `getEarnVaultWithdrawalRequest` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L351) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L596)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L354) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L596)
 
 **Request parameters**
 
@@ -15576,7 +15626,7 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 | Operation ID | `cancelEarnVaultWithdrawalRequest` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L362) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L605)
+**Source:** [route registration](../../apps/sdp-api/src/routes/earn/index.ts#L370) · [handler](../../apps/sdp-api/src/routes/earn/handlers/queued-withdrawals.ts#L605)
 
 **Request parameters**
 
@@ -15623,9 +15673,9 @@ Schema: object.
 
 <a id="e183-list-custody-withdrawals"></a>
 
-### E183: List wallet withdrawals
+### E183: List provider-signed withdrawals
 
-`GET /v1/earn/vault-withdrawals`
+`GET /v1/earn/withdrawals/provider-signed`
 
 - [ ] Good
 - [ ] Needs work
@@ -15790,9 +15840,9 @@ Tenant-scoped Treasury operation. Requires earn:write. A new intentional operati
 
 <a id="e185-read-one-custody-withdrawal"></a>
 
-### E185: Read one wallet withdrawal
+### E185: Read one provider-signed withdrawal
 
-`GET /v1/earn/vault-withdrawals/{movementId}`
+`GET /v1/earn/withdrawals/provider-signed/{movementId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -48689,7 +48739,7 @@ References such as `#/components/schemas/Name` use the following component defin
       "type": "string",
       "maxLength": 128,
       "pattern": "^(?=.*[1-9])\\d+(\\.\\d+)?$",
-      "description": "Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
+      "description": "Slippage floor in share units. Required exactly when the selected strategy's `depositSlippage` is non-null. Derive it from `POST /v1/earn/deposits/preview`, never from the deposit amount.",
       "example": "24.9"
     },
     "sourceTokenMint": {

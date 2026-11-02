@@ -54,7 +54,7 @@ Things worth knowing before changing a movement path:
   provider-order and unknown-provider success rows remain discoverable until an
   authenticated provider-completion fact exists; `failed` is terminal for all.
   Delete the translation when the DTO adopts the ledger vocabulary.
-  `GET /v1/earn/movements` is the one read that speaks the ledger's own words.
+  `GET /v1/earn/treasury/movements` is the one read that speaks the ledger's own words.
 - **Ids are heterogeneous by design.** New rows are `earn_movement_…`, while
   history keeps the `earn_vault_movement_…` / `earn_program_withdrawal_…` ids the
   projection preserved. Nothing may parse an id for its kind — read
@@ -79,7 +79,7 @@ Things worth knowing before changing a movement path:
 
 ## Route map — with each route's single source of truth
 
-`GET /movements` is the cross-provider feed over `earn_movements`: one
+`GET /treasury/movements` is the cross-provider feed over `earn_movements`: one
 chronological history spanning both execution models, which no per-family list can
 serve. It takes NO provider gate (ADR 0002 exit safety — it reports on money that
 already moved) and its visibility is the UNION of what the per-family reads grant,
@@ -303,7 +303,7 @@ widen the surface just to make a test pass.
     cluster). `true` is necessary but not sufficient: a deposit additionally
     needs the provider to expose a money-movement surface — a catalogue-only
     provider like Kamino reads `fundable: true` in production and still answers
-    501 on `POST /programs` — and the org to be entitled. Those are deliberately
+    501 on `POST /portfolio-accounts` — and the org to be entitled. Those are deliberately
     NOT folded in: the field describes the instrument, while entitlement is a
     property of the caller, not of a platform-global catalogue row. The
     capability answer is delivered first and by name (`requirePortfolioClient`),
@@ -316,7 +316,7 @@ widen the surface just to make a test pass.
 one vault, nothing rebalancing across them; moving money between programs is
 explicit (withdraw from one, deposit into the other). A program is addressed by
 its OWN id — `mapProgram` puts `id` first in the envelope, and every
-`/programs/:programId` route resolves it through `getProviderWalletById`, which
+`/portfolio-accounts/:programId` route resolves it through `getProviderWalletById`, which
 scopes to organization **and** environment (the old triple lookup made a guessed
 id structurally impossible; an addressable id does not, so the scoping is
 explicit). `provider` therefore appears ONLY on the create body and as a list
@@ -326,7 +326,7 @@ be captured as an id. Uniqueness moved to a GLOBAL `UNIQUE (provider,
 provider_wallet_ref)` (migration 0056) — one link row may claim a provider wallet
 platform-wide, because two orgs pointing at one wallet would each read the
 other's balance.
-- `GET /programs` — **DB list** (`earn_provider_wallets`) + a **live provider**
+- `GET /portfolio-accounts` — **DB list** (`earn_provider_wallets`) + a **live provider**
   wallet snapshot per row, `{programs, total, page, pageSize}`. Optional
   `provider` filter and page window. Ordered **oldest first** (`created_at ASC,
   id ASC` — `selectPage`'s `order` param, which every other list leaves at
@@ -344,7 +344,7 @@ other's balance.
     credentials" was a 404; a collection cannot 404 for emptiness, so without
     the assert a missing key would read as "this org has no programs" and the
     dashboard would show onboarding instead of its 503 notice.
-- `POST /programs` — **explicit create**: provider call + row insert, then a
+- `POST /portfolio-accounts` — **explicit create**: provider call + row insert, then a
   live snapshot. **201** on a real create, **200** when the provider replayed
   (there is no `created` boolean on the wire any more — the status carries it).
   Body is `{provider, allocations, label?, requestId?}`.
@@ -422,7 +422,7 @@ other's balance.
     could turn a replay into a payload conflict.
   - `label` stays write-once — no repository update path, so the re-target body
     does not accept one.
-- `PUT /programs/:programId` — **re-target this program's single vault in
+- `PUT /portfolio-accounts/:programId/allocation` — **re-target this program's single vault in
   place**, body `{allocations, requestId?}` (no provider, no label). 200 with the
   live snapshot. Money-in, so it takes the full availability gate +
   `assertKnownYieldSources`. The idempotency key is OPTIONAL here — re-targeting
@@ -446,14 +446,14 @@ other's balance.
   that work returns. Concurrent exposure to several strategies is what the
   _programs_ are for. Every `yieldSourceId` must exist as an **active** synced
   strategy for that provider+environment.
-- `GET /programs/:programId` — **live provider** snapshot (+ best-effort yield);
+- `GET /portfolio-accounts/:programId` — **live provider** snapshot (+ best-effort yield);
   balances/positions/yield are never persisted. A miss is 404 in every case — a
   foreign org's id, a sandbox id presented by a production session, and a typo
   are indistinguishable to the caller on purpose.
-- `GET /programs/:programId/deposits` — **live provider** (provider-observed
+- `GET /portfolio-accounts/:programId/deposits` — **live provider** (provider-observed
   on-chain deposits; cursor passthrough). Deposits are customer-initiated, so SDP
   never sees them at intent time — they are deliberately NOT ledgered in V1.
-- `POST /programs/:programId/withdrawal-preview` — **live provider**. `amountUsd`
+- `POST /portfolio-accounts/:programId/withdrawals/preview` — **live provider**. `amountUsd`
   is **OPTIONAL** (PRO-1675): omitted, this is the LIQUIDITY read — what the
   `token` lane can pay right now, answered as `withdrawableUsd` with no
   `amountRequestedUsd`; present, it also validates that amount and returns its
@@ -471,7 +471,7 @@ other's balance.
     the provider client normalizes onto `SdpEarnError.details.balance` and
     `app.ts` already serializes into `error.details`. Consumers should read it
     rather than surfacing the provider's message.
-- **`POST /programs/:programId/withdrawals/execute` — live provider call + SDP ledger
+- **`POST /portfolio-accounts/:programId/withdrawals/execute` — live provider call + SDP ledger
   write.**
   **It refuses a wallet-scoped key** (HOO-1559). It pays a
   caller-supplied `destinationAddress` out of the organization's provider
@@ -514,7 +514,7 @@ other's balance.
   be a definitively-rejected intent (provider 4xx rethrows and leaves the row
   untouched) — the sweep must discriminate or verify with the provider before
   re-driving, or it could execute an intent the caller abandoned.
-- `GET /programs/:programId/withdrawals/:withdrawalRef` — **live provider**, and
+- `GET /portfolio-accounts/:programId/withdrawals/:withdrawalRef` — **live provider**, and
   persist-on-observation: the response is always the provider's live object; the
   matching ledger row (found via the global (provider, provider_reference)
   unique) is advanced best-effort as a side effect. Unknown refs serve live state
@@ -529,7 +529,7 @@ other's balance.
   entirely the provider's to decide. Program scope is strictly stronger and still
   lets an unknown ref fall through. Cross-tenant scoping stays SDP's job, never
   delegated to the provider's own path scoping.
-- `GET /programs/:programId/withdrawals` — **DB ledger list** (custodial
+- `GET /portfolio-accounts/:programId/withdrawals` — **DB ledger list** (custodial
   `earn_movements` rows), the house `{withdrawals, total, page, pageSize}`
   envelope, newest first. Scoped to the path program through its holding: every
   project in the environment reaches the same programs, so one program = one
@@ -792,7 +792,7 @@ transaction signed by the organization custody wallet or external owner.
   followed by an ordinary unswapped build for `followUp.amount`. Jupiter
   routes MAINNET only: on devnet the mints are pinned per cluster but Jupiter
   answers "not tradable", surfaced as a 400.
-- `POST /vault-deposit-previews` — the deposit QUOTE: what the vault's own
+- `POST /deposits/preview` — the deposit QUOTE: what the vault's own
   live accounting would mint for `{strategyId, amount}`, from which the
   dashboard derives its `minSharesOut` floor. A live read SHAPED LIKE MONEY-IN:
   no wallet, no request gate, no idempotency key — it moves nothing — but it
@@ -827,7 +827,7 @@ transaction signed by the organization custody wallet or external owner.
   POST because the parameters are a body, like the custodial
   withdrawal-preview. See "Gate asymmetry" for why this preview alone carries
   money-in gates.
-- `GET /vault-deposits` — this workspace's recorded deposits, **DB only**,
+- `GET /deposits/provider-signed` — this workspace's recorded deposits, **DB only**,
   newest first, keyset-paged. The DISCOVERY tier: it is what lets a client
   re-derive which of its deposits are still in flight after losing local state,
   the way the custodial side re-derives withdrawals from its ledger. Scoped by
@@ -869,13 +869,13 @@ transaction signed by the organization custody wallet or external owner.
     environment, direction, created_at DESC, id DESC)`) is what orders this
     page; the sweep, replay, chain and per-position lookups each have their own
     index — none of them can.
-- `GET /vault-deposits/:movementId`: one recorded movement with a scoped,
+- `GET /deposits/provider-signed/:movementId`: one recorded movement with a scoped,
   fail-soft read-through of its exact Solana signature. Chain truth advances the
   same guarded ledger row immediately; an RPC failure returns the last durable
   row and leaves recovery to the scheduled reconciler. The read never
   rebroadcasts or expires an unknown signature. `pending` here means "SDP could
   not establish that this reached the network", never "failed".
-  - **No provider gate**, same ADR 0002 reason as `/vault-positions`: it reports
+  - **No provider gate**, same ADR 0002 reason as `/positions/provider-signed`: it reports
     on money that has already left the customer's wallet, so un-offering the
     provider must not take away the answer to "did my deposit land". Deliberately
     no strategy lookup either — an un-catalogued strategy must not cost anyone
@@ -894,10 +894,10 @@ transaction signed by the organization custody wallet or external owner.
     it would make a deleted project's deposits addressable through sibling
     projects' reads).
   - Wallet-binding scope comes from `listReadableEarnVaultWallets`, **shared with
-    `/vault-positions`**. Keep it shared: a binding that hides a position has to
+    `/positions/provider-signed`**. Keep it shared: a binding that hides a position has to
     hide that position's deposits too, and two copies of that rule is how they
     drift. Both routes are pinned together in `../earn.vault-positions.test.ts`.
-- `GET /vault-positions` — DB claim rows **hydrated live from chain**. Shares and
+- `GET /positions/provider-signed` — DB claim rows **hydrated live from chain**. Shares and
   value are never persisted: for a non-custodial vault the chain IS the provider.
   Takes **no provider gate at all** — it is a read of money the org already
   holds, and hiding it when a provider is un-offered would close the door out.
@@ -963,7 +963,7 @@ transaction signed by the organization custody wallet or external owner.
   attribution, and a scan that writes money records fabricates claims the moment it has a
   bug. Claim visibility is the positions read's EXACT predicate by construction
   (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
-  recorded while `/vault-positions` still hides it), and wallet-binding scope is
+  recorded while `/positions/provider-signed` still hides it), and wallet-binding scope is
   the same `listReadableEarnVaultWallets`. No provider gate (ADR 0002: money the
   org already holds). Every balance read goes to the environment's own cluster
   pool, whose genesis guard refuses a wrong-cluster endpoint before it answers
@@ -975,13 +975,13 @@ transaction signed by the organization custody wallet or external owner.
   request and not a silent skip. Registered in the INTERNAL OpenAPI document
   only — partners hold no custody wallets for this read to reconcile.
 
-- `POST /vault-withdrawal-previews` — the exit QUOTE the dashboard derives its
+- `POST /withdrawals/provider-signed/preview` — the exit QUOTE the dashboard derives its
   `minAmountOut` floor from (`supportsVaultWithdrawQuote`; 501 for a provider
   without the capability), the deposit preview's mirror with deliberately
   DIFFERENT gates: EXIT gates only (ADR 0002) — position scoping (404) — no
   surfacing, no entitlement, no admission, no environment capability.
   Registered as `requireAction("earn.read")` and project-scoped, exactly as
-  `GET /vault-positions` answers the same key.
+  `GET /positions/provider-signed` answers the same key.
   The dashboard fingerprints each flow's idempotency key on the USER'S
   tolerance (reproducible after a reload) and remembers the floor a held key
   was minted with separately, because the API's own fingerprint includes the
@@ -1138,7 +1138,7 @@ expiry describes of `services/jobs/reconcile-earn-vault-movements.test.ts`.
     `chain_finalized_at` without advancing the economic status, so chain polling
     stops while the movement stays open for authenticated provider completion.
     `failed` stops every route.
-- `GET /vault-withdrawals` / `GET /vault-withdrawals/:movementId` — the deposit
+- `GET /withdrawals/provider-signed` / `GET /withdrawals/provider-signed/:movementId` — the deposit
   reads mirrored: the list is DB discovery and the scoped detail is a fail-soft
   signature read-through. Both have NO provider gate (ADR 0002), the same four
   404 scoping rules with `direction = 'withdrawal'`, and the same wallet-binding
@@ -1271,7 +1271,7 @@ request before broadcast and can guarantee durable status and recovery
     or concurrent reconciler may already have sent the same signed bytes.
     Every broadcast error leaves the durable row for signature reconciliation
     instead of immediately recording a terminal failure.
-- `POST /external-wallet/withdrawal-previews`: the exit QUOTE
+- `POST /withdrawals/caller-signed/preview`: the exit QUOTE
   (`supportsVaultWithdrawQuote`, 501 without it): what redeeming the shares
   would pay from the vault's live accounting, from which the partner derives
   a truthful `minAmountOut`. Read-only, no idempotency key, and it takes the
@@ -1319,12 +1319,12 @@ org/project/environment scoped, so a foreign claim is the same empty bytes as
 no claim (nothing leaks that the content would not). The old
 `hasExternalWalletPositionOwner` gate is gone; only the path-addressed retired
 shapes and the movement-by-id detail still 404. None of the three is reachable
-through `GET /movements`, whose vault arm requires a custody-wallet match an
+through `GET /treasury/movements`, whose vault arm requires a custody-wallet match an
 owner-signed row can never satisfy
 (`idx_earn_movements_external_wallet_owner`, migration 0073, serves all
 three).
 
-`GET /external-wallet/positions/summary` is the one read on this surface that
+`GET /positions/caller-signed/project-summary` is the one read on this surface that
 is project-wide rather than per-owner, and its `totalsByStrategy[].ownerAddresses`
 is the project's entire end-user address book (threat model EARN-028). It is
 OMITTED by default (PRO-1908; PRO-1873 shipped the flag as an opt-out and the
@@ -1360,7 +1360,7 @@ the movements collection keeps its `:movementId` detail route unambiguous. The
 retired path-addressed shapes (`positions/:ownerAddress`,
 `earnings/:ownerAddress`) are pinned 404 in
 `../earn.external-wallet-positions.test.ts`.
-- `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
+- `GET /movements/caller-signed?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
   `direction`/`status` equality filters. `amount`/`denomination` preserves the
   requested quantity (token maximum for a Kamino deposit, SHARES for a
@@ -1370,7 +1370,7 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   `token_amount_settled`, or null until valued. Other providers' deposits
   retain their requested-amount fallback. A requested maximum must never be
   presented as a receipt.
-- `GET /external-wallet/movements/:movementId` — the poll that makes the
+- `GET /movements/caller-signed/:movementId` — the poll that makes the
   submit's record-before-broadcast answerable on this surface: a scoped,
   fail-soft read-through of the movement's exact Solana signature (the same
   `reconcileEarnVaultMovementReadThrough` the treasury detail reads adopted).
@@ -1383,7 +1383,7 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   the external-wallet shape itself (`owner_address IS NOT NULL` — a
   custody-signed movement guessed by id reads as missing). `replayed` is
   POST-only and never appears on reads.
-- `GET /external-wallet/earnings?ownerAddress=…` — **DB ledger + live chain**,
+- `GET /earnings/caller-signed?ownerAddress=…` — **DB ledger + live chain**,
   balance and total earned per deposit token. `earned` = live `currentValue`
   plus `totalWithdrawn` (Σ observed token payouts of finalized withdrawals)
   minus `totalDeposited` (Σ finalized SDP deposits), stated ONLY when exact and
@@ -1497,7 +1497,7 @@ signature for reconciliation; do not instruct the client to sign a new intent.
 ## Metered quotas
 
 The Earn reads that fan out to a PAID upstream carry `meteredQuota`: the
-provider's API on a program read (`GET /programs` is 2N round trips per page
+provider's API on a program read (`GET /portfolio-accounts` is 2N round trips per page
 against the shared provider account), Solana RPC on a live-hydrated one. Two
 counters, `earn-provider-read` (programs list/detail/deposits, the deposit
 quote, the external-wallet deposit build) and `earn-chain-read` (vault
@@ -1558,14 +1558,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Gate asymmetry — DO NOT BREAK (ADR 0002 exit-safety)
 
-- **Money-in** (`POST /programs`, `PUT /programs/:programId`):
+- **Money-in** (`POST /portfolio-accounts`, `PUT /portfolio-accounts/:programId/allocation`):
   `assertProviderAvailable` (entitlement + enablement + credentials).
-- **New positions only** (`POST /programs`, vault deposits): surfacing, the
+- **New positions only** (`POST /portfolio-accounts`, vault deposits): surfacing, the
   `provider_not_offered` check inside `assertProviderAvailable`. `PUT`
   passes `program: "existing"`, which skips it.
   Surfacing gates the way IN and nothing else — every read, every money-out
   route, and `PUT` (re-target) ignore it, so un-surfacing a provider can never
-  strand a position taken while it was offered. `POST /programs` is the only
+  strand a position taken while it was offered. `POST /portfolio-accounts` is the only
   route that opens a _new_ commitment, which is why it is the only one that
   refuses. Pinned by the "un-surfaced provider" describe in
   `../earn-program.test.ts`, whose second test asserts read/re-target/withdraw
@@ -1590,7 +1590,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   only provider-shaped refusal. It also ignores
   `assertVaultDepositEnvironmentOpen`: the environment fail-close guards the
   way IN only.
-- **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
+- **The vault deposit preview** (`POST /deposits/preview`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the
   deposit's own gates — environment fail-close, surfacing, entitlement,
@@ -1612,7 +1612,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   or credentials are missing) and the money-out half (the "withdrawals (ADR 0002
   exit safety)" describe, plus the credentials-absent ledger-list case). The
   per-strategy quote exit-safety tests left with the quotes surface.
-- Money-in also has an ORDER contract, not just a gate: `POST /programs`
+- Money-in also has an ORDER contract, not just a gate: `POST /portfolio-accounts`
   resolves the idempotency key LAST, so the entitlement 403 and the capability
   501 both win over the missing-key 400. Keep that pinned by a test — it is the
   difference between an actionable error and one that hides why the call could
@@ -1651,7 +1651,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   provider account per environment), so exposing list/request/vote under
   `/v1/earn` would hand org API keys an approval surface they must never
   hold. Orgs see a parked withdrawal as `status: pending_approval` on
-  `GET /programs/:programId/withdrawals/:withdrawalRef` (derived by the provider client from payout
+  `GET /portfolio-accounts/:programId/withdrawals/:withdrawalRef` (derived by the provider client from payout
   legs; approval is policy-conditional, not default — see
   `packages/sdp-earn/README.md` → "Withdrawals unwind in reverse").
 - Provider ids from DB rows are open strings — always dispatch via
@@ -1686,7 +1686,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - Whole-stack local setup (ports, flags, provider credentials, entitlement,
   troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** No registered
-  provider is portfolio-capable today, so `POST /programs` answers 501 in the
+  provider is portfolio-capable today, so `POST /portfolio-accounts` answers 501 in the
   shipped config. Idempotency, replay, gate order and environment isolation still
   have to work for whichever provider is offered next. `earn-program.test.ts`
   therefore installs a portfolio-capable test double under a stub id and
@@ -1704,7 +1704,7 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ### Treasury balance confirmation context
 
-Authenticated `GET /vault-positions?afterMovementIds=id1,id2` accepts at most 100
+Authenticated `GET /positions/provider-signed?afterMovementIds=id1,id2` accepts at most 100
 movement ids. Resolve organization, project, environment and readable custody
 wallet scope before looking up their confirmed/finalized signature slots. A
 finalized status that passed those checks is memoised per (cluster, signature),

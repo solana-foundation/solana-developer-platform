@@ -12,7 +12,7 @@ import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks
 import { clearKVStores } from "@/test/mocks/kv";
 
 /**
- * GET /v1/earn/movements — the cross-provider feed (PRO-1705).
+ * GET /v1/earn/treasury/movements — the cross-provider feed (PRO-1705).
  *
  * Two things need proving. That it actually unifies: one chronological list
  * carrying both execution models, in the ledger's own vocabulary. And that it
@@ -316,7 +316,7 @@ async function seedForeignLedgerMovement(overrides: {
 
 function listMovements(query = "") {
   return app.request(
-    `/v1/earn/movements${query}`,
+    `/v1/earn/treasury/movements${query}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -324,7 +324,7 @@ function listMovements(query = "") {
 
 function listMovementsAsProduction() {
   return app.request(
-    "/v1/earn/movements",
+    "/v1/earn/treasury/movements",
     { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
     env
   );
@@ -351,7 +351,7 @@ beforeEach(async () => {
   await seedScope();
 });
 
-describe("GET /v1/earn/movements", () => {
+describe("GET /v1/earn/treasury/movements", () => {
   it("projects only fulfilled queued exits as finalized solver payouts", async () => {
     const fulfilled = await seedFulfilledQueuedWithdrawal({
       fulfilledAt: "2026-09-18T08:00:00.000Z",

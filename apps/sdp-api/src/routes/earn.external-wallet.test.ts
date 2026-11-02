@@ -820,7 +820,7 @@ describe("POST /v1/earn/deposits/build-unsigned-transaction — money-in gates",
       error: { code: string; message: string };
     };
     expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
-    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/deposits/preview");
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
 
     const res = await post(
@@ -979,7 +979,7 @@ describe("POST /v1/earn/withdrawals/build-unsigned-transaction — scoping", () 
   });
 
   it.each([
-    ["withdrawal preview", "external-wallet/withdrawal-previews"],
+    ["withdrawal preview", "withdrawals/caller-signed/preview"],
     ["withdrawal transaction", "withdrawals/build-unsigned-transaction"],
   ])("404s another project's position for %s", async (_name, path) => {
     await seedAuth();
@@ -992,7 +992,7 @@ describe("POST /v1/earn/withdrawals/build-unsigned-transaction — scoping", () 
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
 
-    const res = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
+    const res = await post("withdrawals/caller-signed/preview", { positionId, shares: "10" });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
@@ -1181,7 +1181,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
       await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
     }
 
-    const preview = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
+    const preview = await post("withdrawals/caller-signed/preview", { positionId, shares: "10" });
     expect(preview.status).toBe(200);
     const exit = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
     expect(exit.status).toBe(200);
@@ -1202,7 +1202,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const positionId = await seedExternalWalletPosition();
     rateLimitStoreDown.value = true;
 
-    const preview = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
+    const preview = await post("withdrawals/caller-signed/preview", { positionId, shares: "10" });
     expect(preview.status).toBe(200);
     const exit = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
     expect(exit.status).toBe(200);

@@ -8,7 +8,7 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.get",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}`,
   });
 }
 
@@ -21,6 +21,6 @@ export async function PUT(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.retarget",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}/allocation`,
   });
 }
