@@ -2,6 +2,7 @@
   "title": "Solana Developer Platform Docs",
   "pages": [
     "index",
+    "guides/go-to-mainnet",
     "---Learn---",
     "tutorials/index",
     "developing-with-sdp/index",
