@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
@@ -74,8 +75,8 @@ const TEST_SEEDED_API_KEY: SeededApiKey = {
   expiresAt: null,
 };
 
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SHARE_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const SHARE_MINT = SOL_MINT;
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const WALLET_ADDRESS = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const CUSTODY_WALLET_ID = "cwlt_earn_pa_scope";

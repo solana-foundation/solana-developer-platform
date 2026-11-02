@@ -1,113 +1,25 @@
 "use client";
 
-import type { EarnVaultWithdrawal } from "@sdp/types/earn";
-import {
-  type EarnProviderAction,
-  isTerminalEarnProviderActionStatus,
-} from "@sdp/types/earn-provider-orders";
-import { earnCanCancelProviderOrder } from "@sdp/types/provider-access";
 import { Button } from "@sdp/ui/button";
 import { Card } from "@sdp/ui/card";
 import { Modal } from "@sdp/ui/modal";
-import { useEffect, useState } from "react";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
-import { useProjectId } from "@/lib/use-dashboard-project";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { shortenMarketAddress } from "./earn-format";
-import { useEarnVaultWithdrawals } from "./earn-program-data";
-import { createEarnProviderAction, fetchEarnProviderAction } from "./earn-provider-actions";
-
-const cancellationKeys = createIdempotencyKeyStore("sdp:earn:provider-order-cancellation:v1");
+import { useEarnProviderOrders } from "./earn-provider-orders-data";
 
 export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations(),
-    canWrite = useCanWrite(),
-    projectId = useProjectId();
-  const { withdrawals, error, refresh } = useEarnVaultWithdrawals();
-  const [selected, setSelected] = useState<EarnVaultWithdrawal | null>(null);
-  const [busy, setBusy] = useState(false),
-    [failure, setFailure] = useState<string | null>(null);
-  const [actions, setActions] = useState<Record<string, EarnProviderAction>>({});
+    canWrite = useCanWrite();
+  const { orders, actions, error, failure, busy, selected, setSelected, setFailure, cancel } =
+    useEarnProviderOrders(onChanged);
   const contentRef = useModalFocus({
     focusKey: selected?.movementId ?? "closed",
     initialFocusSelector: "[data-keep-provider-order]",
     fallbackAttribute: "data-earn-provider-order",
     fallbackValue: selected?.movementId ?? "closed",
   });
-  const orders = (withdrawals ?? []).filter(
-    (row) => earnCanCancelProviderOrder(row.provider) && row.redemptionMode === "standard"
-  );
-  useEffect(() => {
-    const pending = Object.entries(actions).filter(
-      ([, action]) => !isTerminalEarnProviderActionStatus(action.status)
-    );
-    if (pending.length === 0) return;
-    let active = true;
-    const timer = setTimeout(() => {
-      void Promise.all(
-        pending.map(async ([movementId, action]) => {
-          try {
-            const next = await fetchEarnProviderAction(action.actionId);
-            if (!active) return;
-            setActions((current) => ({ ...current, [movementId]: next }));
-            if (isTerminalEarnProviderActionStatus(next.status)) {
-              // The attempt under this key concluded, so polling retires the
-              // key the moment it first sees the outcome — the next confirmed
-              // submit must be free to do new work, not replay a dead one.
-              const fingerprint = JSON.stringify([projectId, movementId]);
-              const { key } = cancellationKeys.claim(fingerprint);
-              cancellationKeys.release(fingerprint, key);
-              if (next.status === "failed")
-                setFailure(next.error ?? t("DashboardEarn.providerAction.error"));
-              refresh();
-              onChanged?.();
-            }
-          } catch (cause) {
-            if (active)
-              setFailure(
-                cause instanceof Error ? cause.message : t("DashboardEarn.providerAction.error")
-              );
-          }
-        })
-      );
-    }, 5_000);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [actions, onChanged, projectId, refresh, t]);
-
-  async function cancel() {
-    if (!selected || busy) return;
-    const fingerprint = JSON.stringify([projectId, selected.movementId]);
-    const { key, persisted } = cancellationKeys.claim(fingerprint);
-    if (!persisted) {
-      setFailure(t("DashboardEarn.intentStorageUnavailable"));
-      return;
-    }
-    setBusy(true);
-    setFailure(null);
-    try {
-      const action = await createEarnProviderAction(
-        "cancellations",
-        { movementId: selected.movementId },
-        key
-      );
-      setActions((current) => ({ ...current, [selected.movementId]: action }));
-      if (action.status === "failed") {
-        cancellationKeys.release(fingerprint, key);
-        setFailure(action.error);
-      }
-      setSelected(null);
-      refresh();
-    } catch (cause) {
-      setFailure(cause instanceof Error ? cause.message : t("DashboardEarn.providerAction.error"));
-    } finally {
-      setBusy(false);
-    }
-  }
   if (orders.length === 0 && !error) return null;
   return (
     <section>
