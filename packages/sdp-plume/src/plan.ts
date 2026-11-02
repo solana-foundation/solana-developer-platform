@@ -22,6 +22,7 @@ import {
   getU64Decoder,
   type Instruction,
   isSome,
+  isTransactionWithinSizeLimit,
   verifySignature,
 } from "@solana/kit";
 import {
@@ -97,8 +98,10 @@ export async function admitPlumeTransaction(
   input: PlumePlanInput
 ): Promise<EarnVaultTransactionPlan> {
   const bytes = Buffer.from(input.transactionBase64, "base64");
-  if (bytes.length > 1232 || bytes.length === 0) refuse("Invalid Plume transaction size");
+  if (bytes.length === 0) refuse("Invalid Plume transaction size");
   const transaction = getTransactionDecoder().decode(bytes);
+  // Kit's own packet limit per transaction version, never a hand-written constant.
+  if (!isTransactionWithinSizeLimit(transaction)) refuse("Invalid Plume transaction size");
   const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
   if (compiled.version !== 0) refuse("Plume must return a versioned transaction");
   requireEqual(compiled.staticAccounts[0], input.feePayer);

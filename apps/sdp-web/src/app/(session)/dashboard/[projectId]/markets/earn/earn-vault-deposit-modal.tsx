@@ -67,7 +67,11 @@ import {
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
-import { EarnVaultPreparationFailedError, prepareEarnVaultAccount } from "./earn-provider-actions";
+import {
+  EarnVaultPreparationFailedError,
+  EarnVaultPreparationPendingError,
+  prepareEarnVaultAccount,
+} from "./earn-provider-actions";
 import {
   forgetVaultDepositFloor,
   recallVaultDepositFloor,
@@ -1256,6 +1260,33 @@ export function EarnVaultDepositModal({
     return false;
   }
 
+  /** Runs the sponsored strategy's one-time account setup under the deposit's key. */
+  async function prepareVaultAccountForKey(
+    controller: AbortController,
+    wallet: EarnFundingWallet,
+    fingerprint: string,
+    key: string
+  ): Promise<void> {
+    try {
+      await prepareEarnVaultAccount(
+        { strategyId: strategy.id, custodyWalletId: wallet.id },
+        key,
+        controller.signal
+      );
+    } catch (cause) {
+      // Setup copy is catalog-backed at this boundary: the helper throws typed
+      // errors, never user-facing words. Only a terminal refusal releases the
+      // key; pending outcomes keep it for the retry.
+      if (cause instanceof EarnVaultPreparationFailedError) {
+        vaultDepositIdempotencyKeyStore.release(fingerprint, key);
+        forgetVaultDepositFloor(fingerprint);
+        throw new Error(t("DashboardEarn.deposit.vaultPreparationFailed"));
+      }
+      if (cause instanceof EarnVaultPreparationPendingError) throw new Error(t(cause.messageKey));
+      throw cause;
+    }
+  }
+
   async function submitResolvedIntent(
     controller: AbortController,
     wallet: EarnFundingWallet,
@@ -1312,19 +1343,7 @@ export function EarnVaultDepositModal({
       return;
     }
     if (strategy.feeSponsored && earnRequiresVaultPreparation(strategy.provider)) {
-      try {
-        await prepareEarnVaultAccount(
-          { strategyId: strategy.id, custodyWalletId: wallet.id },
-          key,
-          controller.signal
-        );
-      } catch (cause) {
-        if (cause instanceof EarnVaultPreparationFailedError) {
-          vaultDepositIdempotencyKeyStore.release(fingerprint, key);
-          forgetVaultDepositFloor(fingerprint);
-        }
-        throw cause;
-      }
+      await prepareVaultAccountForKey(controller, wallet, fingerprint, key);
       if (controller.signal.aborted) return;
     }
     const result = await createEarnVaultDeposit(

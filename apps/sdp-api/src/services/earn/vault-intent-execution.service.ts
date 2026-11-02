@@ -294,6 +294,7 @@ async function executeSponsoredProviderIntent<TResult extends SignedVaultIntentR
   const ownerSigned = await signVaultOwnerOnly({ ...input, owner: signer, prepared });
   let recorded: TResult | undefined;
   let signed: SignedVaultTransaction | undefined;
+  let persistenceUnknown = false;
   try {
     await ownedPayment.prepareOwnedSubmission(ownerSigned.bytes, {
       async persistSigned(submission) {
@@ -303,8 +304,20 @@ async function executeSponsoredProviderIntent<TResult extends SignedVaultIntentR
           signature: submission.signature,
           lastValidBlockHeight: ownerSigned.lastValidBlockHeight,
         };
-        recorded = await input.persist(getDb(env), signed);
-        if (recorded.replayed) throw new Error("Vault intent already recorded");
+        try {
+          recorded = await input.persist(getDb(env), signed);
+        } catch (cause) {
+          // A commit whose reply was lost still leaves recorded bytes the shared
+          // reconciler can send. Swallowing keeps the sponsorship reservation that
+          // spending must stay accountable to instead of releasing it to a possibly
+          // sent transaction; the error surfaces once this callback has returned.
+          persistenceUnknown = true;
+          getLogger().error(
+            { error: cause, operation },
+            `vault ${operation}: persistence outcome unknown after signing`
+          );
+        }
+        if (recorded?.replayed) throw new Error("Vault intent already recorded");
       },
       async markStarted() {
         // The ledger owns these bytes from persistSigned onward. Its
@@ -312,6 +325,10 @@ async function executeSponsoredProviderIntent<TResult extends SignedVaultIntentR
         // ambiguous and must never release a possibly spent reservation.
       },
     });
+    if (persistenceUnknown)
+      throw internalError(
+        `Vault ${operation} intent could not be recorded durably; its outcome is ambiguous`
+      );
   } catch (cause) {
     if (recorded?.replayed) return recorded;
     throw cause;

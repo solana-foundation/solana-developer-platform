@@ -1,8 +1,14 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { PLUME_PROGRAMS, PLUME_VAULTS } from "@sdp/types/plume-programs";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
-import { address, getAddressEncoder } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
+import {
+  address,
+  createSolanaRpcFromTransport,
+  getAddressEncoder,
+  type RpcTransport,
+} from "@solana/kit";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { readPlumeVault } from "./chain";
 
 const vault = PLUME_VAULTS[0],
@@ -36,33 +42,60 @@ function fixture() {
   pubkey(deployment.tokenEscrow).copy(store, 49);
   pubkey(PLUME_PROGRAMS.endpoint).copy(store, 81);
   let shares = 10_000_000n;
-  const send = vi.fn(async (keys: readonly string[]) => ({
-    context: { slot: 1n },
-    value: keys.map((key) => {
-      const data =
-        key === deployment.oftStore
-          ? store
-          : key === deployment.tokenEscrow
-            ? token(deployment.shareMint, deployment.oftStore, 100_000_000n)
-            : key === deployment.shareMint || key === depositMint
-              ? mint()
-              : token(deployment.shareMint, owner, shares);
-      return {
-        owner: key === deployment.oftStore ? PLUME_PROGRAMS.oft : tokenProgram,
-        data: [data.toString("base64"), "base64"],
-        lamports: 1n,
-        executable: false,
-        space: BigInt(data.length),
-      };
-    }),
-  }));
-  // SAFETY: the proof uses only getMultipleAccounts; this fixture returns its account envelope.
-  const rpc = {
-    getMultipleAccounts: (keys: readonly string[]) => ({ send: () => send(keys) }),
-  } as unknown as SolanaRpc;
+  const keyCounts: number[] = [];
+  let failNext = false;
+  const accountFor = (key: string): Buffer => {
+    switch (key) {
+      case deployment.oftStore:
+        return store;
+      case deployment.tokenEscrow:
+        return token(deployment.shareMint, deployment.oftStore, 100_000_000n);
+      case deployment.shareMint:
+      case depositMint:
+        return mint();
+      default:
+        return token(deployment.shareMint, owner, shares);
+    }
+  };
+  const transport: RpcTransport = async <T>({
+    payload,
+  }: Parameters<RpcTransport>[0]): Promise<T> => {
+    const p = z
+      .object({
+        method: z.literal("getMultipleAccounts"),
+        params: z.array(z.unknown()),
+        id: z.union([z.string(), z.number()]),
+      })
+      .parse(payload);
+    const keys = z.array(z.string()).parse(p.params[0]);
+    keyCounts.push(keys.length);
+    if (failNext) {
+      failNext = false;
+      throw new Error("RPC unavailable");
+    }
+    const result = {
+      context: { slot: 1n },
+      value: keys.map((key) => {
+        const data = accountFor(key);
+        return {
+          owner: key === deployment.oftStore ? PLUME_PROGRAMS.oft : tokenProgram,
+          data: [data.toString("base64"), "base64"],
+          lamports: 1n,
+          executable: false,
+          space: BigInt(data.length),
+        };
+      }),
+    };
+    // SAFETY: this test transport supplies exactly the JSON-RPC envelope for this one Kit method.
+    return { jsonrpc: "2.0", id: p.id, result } as T;
+  };
+  const rpc: SolanaRpc = createSolanaRpcFromTransport(transport);
   return {
     rpc,
-    send,
+    keyCounts,
+    failNext() {
+      failNext = true;
+    },
     setShares: (value: bigint) => {
       shares = value;
     },
@@ -76,7 +109,7 @@ describe("Plume RPC budget", () => {
     const next = await readPlumeVault(f.rpc, vault, owner, usdc);
     expect(initial.shares).toBe(10_000_000n);
     expect(next.shares).toBe(5_000_000n);
-    expect(f.send.mock.calls.map(([keys]) => keys.length)).toEqual([5, 3]);
+    expect(f.keyCounts).toEqual([5, 3]);
   });
   it("shares identical concurrent reads", async () => {
     const f = fixture();
@@ -84,13 +117,13 @@ describe("Plume RPC budget", () => {
       readPlumeVault(f.rpc, vault, owner, usdc),
       readPlumeVault(f.rpc, vault, owner, usdc),
     ]);
-    expect(f.send).toHaveBeenCalledOnce();
+    expect(f.keyCounts).toHaveLength(1);
   });
   it("never caches a failed identity proof", async () => {
     const f = fixture();
-    f.send.mockRejectedValueOnce(new Error("RPC unavailable"));
+    f.failNext();
     await expect(readPlumeVault(f.rpc, vault, owner, usdc)).rejects.toThrow();
     await readPlumeVault(f.rpc, vault, owner, usdc);
-    expect(f.send.mock.calls.map(([keys]) => keys.length)).toEqual([5, 5]);
+    expect(f.keyCounts).toEqual([5, 5]);
   });
 });

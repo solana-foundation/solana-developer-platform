@@ -37,6 +37,21 @@ export const EARN_PROVIDER_ACTION_TRANSITIONS = {
   finalized: [],
   failed: [],
 } as const satisfies Record<EarnProviderActionStatus, readonly EarnProviderActionStatus[]>;
+/** The statuses the reconciler still owns: an on-chain follow-up plus settlement delivery. */
+export const EARN_PROVIDER_ACTION_DUE_STATUSES = [
+  ...EARN_PROVIDER_ACTION_CHAIN_STATUSES,
+  "awaiting_delivery",
+] as const satisfies readonly EarnProviderActionStatus[];
+
+/** Reports whether a provider action reached a status nothing can advance. */
+export function isTerminalEarnProviderActionStatus(status: EarnProviderActionStatus): boolean {
+  return EARN_PROVIDER_ACTION_TERMINAL_STATUSES.some((candidate) => candidate === status);
+}
+
+/** Reports whether a provider action's source transaction still needs chain follow-up. */
+export function isEarnProviderActionChainStatus(status: EarnProviderActionStatus): boolean {
+  return EARN_PROVIDER_ACTION_CHAIN_STATUSES.some((candidate) => candidate === status);
+}
 
 /** Recorded only after a provider-correlated destination transaction is verified at finality. */
 export const earnProviderSettlementSchema = z.object({

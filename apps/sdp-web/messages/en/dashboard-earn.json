@@ -818,7 +818,10 @@
       "vaultPendingBody": "SDP signed the deposit but could not establish its final network state. Do not retry with a new idempotency key; inspect the transaction first.",
       "vaultPendingStatus": "Status unknown",
       "vaultTransaction": "Transaction",
-      "vaultFloorUnavailable": "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment."
+      "vaultFloorUnavailable": "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment.",
+      "vaultPreparationFailed": "Account setup failed. Check the transaction before retrying.",
+      "vaultPreparationBackground": "Account setup continues in the background. Reopen the deposit to continue.",
+      "vaultPreparationPending": "Account setup is still pending. Retry this deposit to check the same setup transaction."
     },
     "vaultWithdraw": {
       "flowDetails": "Details",

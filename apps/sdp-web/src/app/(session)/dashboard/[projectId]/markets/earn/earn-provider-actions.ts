@@ -1,6 +1,10 @@
 "use client";
 
-import { type EarnProviderAction, earnProviderActionSchema } from "@sdp/types/earn-provider-orders";
+import {
+  type EarnProviderAction,
+  earnProviderActionSchema,
+  isTerminalEarnProviderActionStatus,
+} from "@sdp/types/earn-provider-orders";
 import { z } from "zod";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
@@ -26,27 +30,54 @@ export async function fetchEarnProviderAction(id: string): Promise<EarnProviderA
   return responseSchema.parse(result.data).data.action;
 }
 
-/** A deterministic child key keeps uncertain setup retries attached to the deposit intent. */
-export class EarnVaultPreparationFailedError extends Error {}
+/**
+ * Terminal provider refusal: setup failed on-chain. The deposit's idempotency
+ * key is released, so a retry is a new request. The helper carries the
+ * provider's own refusal as `reason` for diagnostics; UI copy comes from the
+ * catalog, translated where the error is caught.
+ */
+export class EarnVaultPreparationFailedError extends Error {
+  readonly reason: string | null;
+  constructor(reason: string | null) {
+    super("Vault account preparation failed");
+    this.name = "EarnVaultPreparationFailedError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Setup is still in flight or was cut short without an outcome: the deposit's
+ * idempotency key stays claimed, so a retry replays the same setup attempt.
+ * `messageKey` is the catalog entry the UI boundary translates.
+ */
+export class EarnVaultPreparationPendingError extends Error {
+  readonly messageKey:
+    | "DashboardEarn.deposit.vaultPreparationBackground"
+    | "DashboardEarn.deposit.vaultPreparationPending";
+  constructor(messageKey: EarnVaultPreparationPendingError["messageKey"]) {
+    super(messageKey);
+    this.name = "EarnVaultPreparationPendingError";
+    this.messageKey = messageKey;
+  }
+}
 
 export async function prepareEarnVaultAccount(
   body: { strategyId: string; custodyWalletId: string },
   depositKey: string,
   signal: AbortSignal
 ): Promise<void> {
+  // A deterministic child key keeps uncertain setup retries attached to the
+  // deposit intent that waits on them.
   let action = await createEarnProviderAction("preparations", body, `${depositKey}:prepare`);
   const deadline = Date.now() + 180_000;
-  while (action.status !== "finalized" && action.status !== "not_required") {
+  while (!isTerminalEarnProviderActionStatus(action.status)) {
     if (signal.aborted)
-      throw new Error("Account setup continues in the background. Reopen the deposit to continue.");
-    if (action.status === "failed")
-      throw new Error(
-        action.error ?? "Account setup failed. Check the transaction before retrying."
+      throw new EarnVaultPreparationPendingError(
+        "DashboardEarn.deposit.vaultPreparationBackground"
       );
+    if (action.status === "failed") throw new EarnVaultPreparationFailedError(action.error);
     if (Date.now() > deadline)
-      throw new Error(
-        "Account setup is still pending. Retry this deposit to check the same setup transaction."
-      );
+      throw new EarnVaultPreparationPendingError("DashboardEarn.deposit.vaultPreparationPending");
     await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
     action = await fetchEarnProviderAction(action.actionId);
   }

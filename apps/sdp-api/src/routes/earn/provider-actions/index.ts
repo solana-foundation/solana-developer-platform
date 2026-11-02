@@ -24,11 +24,11 @@ import {
   listReadableEarnVaultWallets,
   resolveEarnVaultCustodyWallet,
 } from "@/routes/earn/handlers/vault";
-import { getLogger } from "@/runtime/logger";
-import { AuditService } from "@/services/audit.service";
+import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import {
-  createProviderAction,
+  claimProviderAction,
+  executeClaimedProviderAction,
   readProviderAction,
   submitExternalProviderAction,
 } from "@/services/earn/provider-actions.service";
@@ -192,44 +192,49 @@ export function providerActionWire(row: EarnProviderActionRow) {
     transaction: row.status === "prepared" ? row.unsigned_transaction : null,
   };
 }
+/** The audit record for a claimed action, written with its claim row. */
+function claimAuditEntry(row: EarnProviderActionRow): AuditLogEntry {
+  return {
+    organizationId: row.organization_id,
+    userId: row.created_by === null ? undefined : row.created_by,
+    apiKeyId: row.initiated_by_key_id === null ? undefined : row.initiated_by_key_id,
+    action: row.action === "preparation" ? "create" : "withdraw_cancel",
+    resourceType: "earn_provider_action",
+    resourceId: row.id,
+    metadata: {
+      provider: row.provider,
+      status: row.status,
+      parentMovementId: row.parent_movement_id,
+      signature: row.signature,
+    },
+  };
+}
 async function create(c: AppContext) {
   const { admit, ...target } = getAuthorized<Target>(c),
     auth = getAuth(c);
   const claimed = getIdempotencyClaim(c),
     key = getIdempotencyRecordKey(c);
   if (!claimed || !key) throw internalError("Provider actions require an idempotency claim");
-  const row = await createProviderAction(
-    c.env,
-    {
-      ...target,
-      request_id: key,
-      fingerprint: claimed.fingerprint,
-      created_by: auth.userId === undefined ? null : auth.userId,
-      initiated_by_key_id: auth.apiKeyId === undefined ? null : auth.apiKeyId,
-    },
-    admit
-  );
-  try {
-    await new AuditService(getDb(c.env)).log(c, {
-      organizationId: row.organization_id,
-      userId: row.created_by === null ? undefined : row.created_by,
-      apiKeyId: row.initiated_by_key_id === null ? undefined : row.initiated_by_key_id,
-      action: row.action === "preparation" ? "create" : "withdraw_cancel",
-      resourceType: "earn_provider_action",
-      resourceId: row.id,
-      metadata: {
-        provider: row.provider,
-        status: row.status,
-        parentMovementId: row.parent_movement_id,
-        signature: row.signature,
+  // The audit record commits with the action's claim row, and an audit failure
+  // escapes: an accepted command never commits unaudited. Only a claim this
+  // request owns is audited; a replay answers from recorded rows. The provider
+  // tail (builds, signatures, RPC) runs after that transaction returns the
+  // ledger's writer lock.
+  const claim = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const result = await claimProviderAction(
+      c.env,
+      {
+        ...target,
+        request_id: key,
+        fingerprint: claimed.fingerprint,
+        created_by: auth.userId === undefined ? null : auth.userId,
+        initiated_by_key_id: auth.apiKeyId === undefined ? null : auth.apiKeyId,
       },
-    });
-  } catch {
-    getLogger().error(
-      { event: "earn_audit_write_failed", actionId: row.id },
-      "Provider action audit could not be persisted"
+      tx
     );
-  }
+    return { entry: result.owned ? claimAuditEntry(result.row) : null, result };
+  });
+  const row = await executeClaimedProviderAction(c.env, claim, admit);
   return success(c, { action: providerActionWire(row) });
 }
 function authorizeSubmission(kind: EarnProviderActionKind) {
@@ -292,6 +297,7 @@ providerActions.post(
   validateBody(providerActionSubmitSchema),
   authorizeSubmission("preparation"),
   idempotent({ key: "required", serverErrors: "rerun" }),
+  meteredQuota({ name: "earn-provider-action-submit", actorMax: 30, orgMax: 120 }),
   submit
 );
 providerActions.post(
@@ -302,11 +308,16 @@ providerActions.post(
   idempotent({ key: "required", serverErrors: "rerun" }),
   submit
 );
-providerActions.get("/:actionId", requireAction("earn.read"), async (c) => {
-  const { actionId } = parseParams(c, providerActionParamsSchema);
-  return success(c, {
-    action: providerActionWire(
-      await readProviderAction(c.env, await requireScopedAction(c, actionId))
-    ),
-  });
-});
+providerActions.get(
+  "/:actionId",
+  requireAction("earn.read"),
+  meteredQuota({ name: "earn-chain-read", actorMax: 30, orgMax: 120 }),
+  async (c) => {
+    const { actionId } = parseParams(c, providerActionParamsSchema);
+    return success(c, {
+      action: providerActionWire(
+        await readProviderAction(c.env, await requireScopedAction(c, actionId))
+      ),
+    });
+  }
+);
