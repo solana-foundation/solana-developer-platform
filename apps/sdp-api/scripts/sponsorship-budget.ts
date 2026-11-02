@@ -6,6 +6,7 @@ import {
   type SponsorshipNetwork,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getProcessEnv } from "@/lib/runtime-env";
+import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import {
   isPolicyControlInSync,
@@ -158,4 +159,4 @@ runWithSystemDatabaseIdentity("script:sponsorship-budget", main)
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   })
-  .finally(closeDatabasePools);
+  .finally(() => Promise.all([closeDatabasePools(), closeAllRedisClients()]));
