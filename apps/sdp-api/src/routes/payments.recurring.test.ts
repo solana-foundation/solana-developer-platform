@@ -31,8 +31,10 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   findAssociatedTokenPda,
   getApproveInstructionDataDecoder,
   identifyToken2022Instruction,
@@ -4943,25 +4945,78 @@ describe("Payments routes — recurring", () => {
     // SPL Token's custom errors for the pull: a drained source has too little to move
     // (`InsufficientFunds`), and with its delegation revoked the program's signature no longer
     // matches the account's owner or delegate (`OwnerMismatch`). Neither clears on a retry, and
-    // both are the payer's. Any other program error proves nothing about who refused.
+    // both are the payer's. The runtime logs a failure line per program the error unwinds
+    // through, innermost first; the same code raised by any other program proves nothing.
+    const failedWith = (code: number, ...programs: string[]) =>
+      programs.map(
+        (program) => `Program ${program} failed: custom program error: 0x${code.toString(16)}`
+      );
+    const TRANSFER_HOOK_PROGRAM = TEST_SOLANA_ADDRESSES.wallet2;
     it.each([
-      { case: "a drained source wallet", tokenError: 1, failureSource: "payer" },
-      { case: "a revoked delegation", tokenError: 4, failureSource: "payer" },
+      {
+        case: "a drained source wallet",
+        tokenError: 1,
+        logs: failedWith(
+          1,
+          TOKEN_PROGRAM_ADDRESS,
+          subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+        ),
+        failureSource: "payer",
+      },
+      {
+        case: "a revoked delegation",
+        tokenError: 4,
+        logs: failedWith(
+          4,
+          TOKEN_PROGRAM_ADDRESS,
+          subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+        ),
+        failureSource: "payer",
+      },
+      {
+        case: "a pull a Token-2022 transfer hook refuses with InsufficientFunds' code",
+        tokenError: 1,
+        logs: failedWith(
+          1,
+          TRANSFER_HOOK_PROGRAM,
+          TOKEN_2022_PROGRAM_ADDRESS,
+          subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+        ),
+        failureSource: "unconfirmed",
+      },
+      {
+        case: "a pull whose receiver account the sponsor cannot fund",
+        tokenError: 1,
+        logs: failedWith(1, SYSTEM_PROGRAM_ADDRESS, ASSOCIATED_TOKEN_PROGRAM_ADDRESS),
+        failureSource: "unconfirmed",
+      },
       {
         case: "a pull the subscriptions program refuses for its account data",
         tokenError: subscriptionsProgram.SUBSCRIPTIONS_ERROR__INVALID_ACCOUNT_DATA,
+        logs: failedWith(
+          subscriptionsProgram.SUBSCRIPTIONS_ERROR__INVALID_ACCOUNT_DATA,
+          subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+        ),
+        failureSource: "unconfirmed",
+      },
+      {
+        case: "a refused pull whose logs do not name the program",
+        tokenError: 1,
+        logs: null,
         failureSource: "unconfirmed",
       },
     ])(
       "pauses $case at the period's fifth failed attempt (SDP-023 RE-5)",
-      async ({ tokenError, failureSource }) => {
+      async ({ tokenError, logs, failureSource }) => {
         const pauseEvents = capturePauseEvents();
         const { activated, dueAt } = await dueRecurringPayment();
         await seedEarlierFailures(activated, dueAt, maxFailedAttemptsBeforePause - 2);
         mockDistinctRecentBlockhashes();
 
         async function pullRefused() {
-          sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(tokenError));
+          sendTransactionMock.mockRejectedValueOnce(
+            sendTransactionPreflightError(tokenError, logs)
+          );
           const response = await app.request(
             `/v1/payments/recurring-payments/${activated.id}/collect`,
             { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
@@ -4970,7 +5025,9 @@ describe("Payments routes — recurring", () => {
           expect(response.status).toBe(400);
           const body = errorResponseSchema.parse(await response.json());
           expect(body.error.code).toBe("TRANSACTION_FAILED");
-          expect(body.error.message).toContain(`#${tokenError}`);
+          expect(body.error.message).toContain(
+            logs === null ? `#${tokenError}` : `0x${tokenError.toString(16)}`
+          );
           return (await recurringPaymentDueAt(activated.id)).status;
         }
 

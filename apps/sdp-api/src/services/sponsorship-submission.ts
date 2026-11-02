@@ -8,7 +8,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   unwrapSimulationError,
 } from "@solana/kit";
-import { AppError, accountFrozen, solanaRpcError } from "@/lib/errors";
+import { AppError, solanaRpcError } from "@/lib/errors";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 
 const PROGRAM_ERROR_LINE = /^Program log: Error: /;
@@ -71,7 +71,7 @@ export function mapPreflightError(error: unknown): AppError | null {
   const cause = unwrapSimulationError(error);
   const message = cause instanceof Error ? cause.message : error.message;
   if (isSolanaError(cause, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) && cause.context.code === 17) {
-    return accountFrozen(message);
+    return new AppError("ACCOUNT_FROZEN", message, undefined, { cause: error });
   }
   const logs = error.context.logs;
   const lines = logs === null ? [] : logs;
