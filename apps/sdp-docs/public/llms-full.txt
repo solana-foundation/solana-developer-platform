@@ -1972,6 +1972,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
+| `counterpartyId` | Set when the transfer is tied to a counterparty, for example a transfer batch recipient or a transfer sent with `counterpartyAccountId`. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
 | `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
@@ -2185,6 +2186,12 @@ curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
 </Step>
 
 </HowItWorks>
+
+## Pay a counterparty
+
+When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
+
+The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
 
 ## SOL and the rent-exempt minimum
 
@@ -2446,6 +2453,8 @@ For destinations that are not registered counterparty accounts, a run can send o
 5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
+
+To tie a single transfer to a registered counterparty account, pass `counterpartyAccountId` with it. See [Pay a counterparty](/docs/payments/send-basic-payment#pay-a-counterparty).
 
 ### Dedup and retries for single transfers
 
@@ -20501,6 +20510,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 - **`destination`** · `string` · required · example `7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU`
 
   Destination wallet address.
+
+- **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
+
+  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 

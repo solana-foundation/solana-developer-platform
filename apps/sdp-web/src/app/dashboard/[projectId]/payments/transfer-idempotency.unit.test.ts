@@ -41,6 +41,14 @@ describe("transferRequestFingerprint", () => {
     expect(fingerprint("1.01")).not.toBe(fingerprint("1"));
     expect(fingerprint("10")).not.toBe(fingerprint("1"));
   });
+
+  // Naming the contact account pays the same address: a retry that only changes
+  // it must reuse the key, so the API refuses it (422) instead of paying twice.
+  it("is one payment whether or not it names the contact account", () => {
+    expect(transferRequestFingerprint({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" })).toBe(
+      transferRequestFingerprint(SUBMISSION)
+    );
+  });
 });
 
 describe("sendTransferUnderKey", () => {
