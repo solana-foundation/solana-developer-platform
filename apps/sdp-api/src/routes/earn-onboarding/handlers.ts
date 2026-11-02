@@ -120,8 +120,9 @@ export async function registerOnboardingWallet(
   c: ValidatedBodyContext<typeof onboardingWalletSchema>
 ) {
   const customer = activeCustomer(c);
+  const body = c.req.valid("json");
   return success(
     c,
-    await service(c).registerWallet(scope(c, customer.id), c.req.valid("json").owner)
+    await service(c).registerWallet(scope(c, customer.id), body.owner, body.signature)
   );
 }

@@ -1,6 +1,7 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { WisdomTreeOnboardingClient } from "@sdp/earn/providers/wisdomtree/onboarding";
+import { generateKeyPairSigner, getBase58Decoder, signBytes } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithDatabaseIdentity } from "@/db/identity";
@@ -14,7 +15,10 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
-import { WisdomTreeOnboardingService } from "./wisdomtree-onboarding.service";
+import {
+  WisdomTreeOnboardingService,
+  wisdomTreeWalletRegistrationMessage,
+} from "./wisdomtree-onboarding.service";
 
 const moderatorGuid = "a3c9d5b7-8a4d-4e35-9c1e-417cba654e2c";
 const childGuid = "8b6f0d3e-2c71-4f5a-a1d9-3e4c7b2f9a10";
@@ -43,9 +47,42 @@ const draft = {
 };
 const form = { can_create: true, submission_template: {}, sections: [] };
 
-async function linkBusiness() {
-  await repo.claim(scope, { moderatorGuid, entityType: "business" });
-  await repo.link(scope, { moderatorGuid, organizationGuid: childGuid, personGuid: null });
+async function linkBusiness(s: EarnOnboardingScope = scope) {
+  await repo.claim(s, { moderatorGuid, entityType: "business" });
+  await repo.link(s, { moderatorGuid, organizationGuid: childGuid, personGuid: null });
+}
+
+/** A fresh wallet plus its valid base58 proof-of-control signature for a scope. */
+async function controlledWallet(forScope: EarnOnboardingScope = scope) {
+  const wallet = await generateKeyPairSigner();
+  return {
+    owner: wallet.address,
+    signature: await signRegistration(wallet, forScope),
+  };
+}
+
+async function signRegistration(
+  wallet: Awaited<ReturnType<typeof generateKeyPairSigner>>,
+  forScope: EarnOnboardingScope
+) {
+  return getBase58Decoder().decode(
+    await signBytes(
+      wallet.keyPair.privateKey,
+      wisdomTreeWalletRegistrationMessage(forScope, wallet.address)
+    )
+  );
+}
+
+async function activeBusiness() {
+  vi.spyOn(provider, "getModerator").mockResolvedValue({
+    guid: moderatorGuid,
+    client_organizations: [{ guid: childGuid }],
+  });
+  vi.spyOn(provider, "getBusiness").mockResolvedValue({
+    org_guid: childGuid,
+    onboarding_status: "active",
+    sensitive_data_redacted: true,
+  });
 }
 beforeEach(async () => {
   await seedTestDatabase(env);
@@ -278,79 +315,115 @@ describe("wallet onboarding and deposit admission", () => {
       guid: moderatorGuid,
       client_organizations: [{ guid: childGuid }],
     });
+    vi.spyOn(provider, "getBusiness").mockResolvedValue({
+      org_guid: childGuid,
+      onboarding_status: "submitted",
+      sensitive_data_redacted: true,
+    });
     const register = vi.spyOn(provider, "registerSolanaWallet");
-    await expect(service.registerWallet(scope, "owner")).rejects.toThrow(/not active/);
+    const { owner, signature } = await controlledWallet();
+    await expect(service.registerWallet(scope, owner, signature)).rejects.toThrow(/not active/);
+    expect(register).not.toHaveBeenCalled();
+  });
+  it("refuses an address the caller cannot prove control of, claiming nothing", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
+    const owner = await generateKeyPairSigner();
+    // The attacker signs the scope-bound message with the WRONG key for `owner`.
+    const attacker = await generateKeyPairSigner();
+    const stolen = getBase58Decoder().decode(
+      await signBytes(
+        attacker.keyPair.privateKey,
+        wisdomTreeWalletRegistrationMessage(scope, owner.address)
+      )
+    );
+    await expect(service.registerWallet(scope, owner.address, stolen)).rejects.toThrow(
+      /does not prove control/
+    );
+    await expect(service.registerWallet(scope, owner.address, "not-a-signature")).rejects.toThrow(
+      /does not prove control/
+    );
+    expect(register).not.toHaveBeenCalled();
+    // Nothing was claimed: the real owner can still register the address.
+    await expect(
+      service.registerWallet(scope, owner.address, await signRegistration(owner, scope))
+    ).resolves.toMatchObject({ registered: true });
+    expect(register).toHaveBeenCalledTimes(1);
+  });
+  it("binds the proof of control to the exact customer scope", async () => {
+    await linkBusiness();
+    // Each customer carries its own provider identity (unique per environment).
+    const siblingChildGuid = "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f";
+    await repo.claim(sibling, { moderatorGuid, entityType: "business" });
+    await repo.link(sibling, {
+      moderatorGuid,
+      organizationGuid: siblingChildGuid,
+      personGuid: null,
+    });
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
+    const { owner, signature } = await controlledWallet(scope);
+    // A signature captured for one customer cannot register any wallet for another.
+    await expect(service.registerWallet(sibling, owner, signature)).rejects.toThrow(
+      /does not prove control/
+    );
     expect(register).not.toHaveBeenCalled();
   });
   it("claims a wallet once, then passes only its stored child context to admission", async () => {
     await linkBusiness();
-    vi.spyOn(provider, "getModerator").mockResolvedValue({
-      guid: moderatorGuid,
-      client_organizations: [{ guid: childGuid }],
-    });
-    vi.spyOn(provider, "getBusiness").mockResolvedValue({
-      org_guid: childGuid,
-      onboarding_status: "active",
-      sensitive_data_redacted: true,
-    });
+    await activeBusiness();
     vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
-    await service.registerWallet(scope, "owner");
-    await expect(service.registerWallet(scope, "owner")).rejects.toThrow(/already claimed/);
+    const { owner, signature } = await controlledWallet();
+    await service.registerWallet(scope, owner, signature);
+    await expect(service.registerWallet(scope, owner, signature)).rejects.toThrow(
+      /already claimed/
+    );
     expect(provider.registerSolanaWallet).toHaveBeenCalledTimes(1);
     const earn = new WisdomTreeEarnClient();
     const check = vi.spyOn(earn, "checkDepositEligibility").mockResolvedValue({ eligible: true });
     await assertVaultDepositEligible(
       earn,
       runtime,
-      { providerReference: "fund", owner: "owner" },
+      { providerReference: "fund", owner },
       { ...scope, database: env }
     );
     expect(check).toHaveBeenCalledWith(runtime, {
       providerReference: "fund",
-      owner: "owner",
+      owner,
       customer: { moderatorReference: moderatorGuid, customerReference: childGuid },
     });
-    expect(await repo.findByWallet({ ...scope, projectId: "other" }, "owner")).toBeNull();
+    expect(await repo.findByWallet({ ...scope, projectId: "other" }, owner)).toBeNull();
   });
   it("releases the shared address when WisdomTree rejects the registration", async () => {
     await linkBusiness();
-    vi.spyOn(provider, "getModerator").mockResolvedValue({
-      guid: moderatorGuid,
-      client_organizations: [{ guid: childGuid }],
-    });
-    vi.spyOn(provider, "getBusiness").mockResolvedValue({
-      org_guid: childGuid,
-      onboarding_status: "active",
-      sensitive_data_redacted: true,
-    });
+    await activeBusiness();
     const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
     register.mockRejectedValueOnce(new SdpEarnError("BAD_REQUEST", "wallet already registered"));
-    await expect(service.registerWallet(scope, "owner")).rejects.toThrow("already registered");
+    const { owner, signature } = await controlledWallet();
+    await expect(service.registerWallet(scope, owner, signature)).rejects.toThrow(
+      "already registered"
+    );
     // The address is globally unique per environment: an unverified claim must
     // not block the real owner, so another customer can win it after a reject.
-    expect(await repo.claimWallet(sibling, "owner")).toBe(true);
-    await repo.releaseWallet(sibling, "owner");
-    await service.registerWallet(scope, "owner");
+    expect(await repo.claimWallet(sibling, owner)).toBe(true);
+    await repo.releaseWallet(sibling, owner);
+    await service.registerWallet(scope, owner, signature);
     expect(register).toHaveBeenCalledTimes(2);
   });
   it("keeps the claim for reconciliation when the registration outcome is unknown", async () => {
     await linkBusiness();
-    vi.spyOn(provider, "getModerator").mockResolvedValue({
-      guid: moderatorGuid,
-      client_organizations: [{ guid: childGuid }],
-    });
-    vi.spyOn(provider, "getBusiness").mockResolvedValue({
-      org_guid: childGuid,
-      onboarding_status: "active",
-      sensitive_data_redacted: true,
-    });
+    await activeBusiness();
     vi.spyOn(provider, "registerSolanaWallet").mockRejectedValue(
       new SdpEarnError("PROVIDER_UNAVAILABLE", "timeout")
     );
-    await expect(service.registerWallet(scope, "owner")).rejects.toThrow("timeout");
+    const { owner, signature } = await controlledWallet();
+    await expect(service.registerWallet(scope, owner, signature)).rejects.toThrow("timeout");
     // A timeout may have registered the wallet: the claim stays so no other
     // provider write starts before an operator reconciles the outcome.
-    await expect(service.registerWallet(scope, "owner")).rejects.toThrow(/already claimed/);
+    await expect(service.registerWallet(scope, owner, signature)).rejects.toThrow(
+      /already claimed/
+    );
     expect(provider.registerSolanaWallet).toHaveBeenCalledTimes(1);
   });
   it("refuses an unlinked wallet before contacting the eligibility provider", async () => {
