@@ -106,7 +106,30 @@ export function createEarnProviderActionsRepository(db: DatabaseClient) {
           )
           .bind(input.organization_id, input.project_id, input.parent_movement_id)
           .first();
-        if (active !== null) return { row: rowSchema.parse(active), owned: false };
+        if (active !== null) {
+          const found = rowSchema.parse(active);
+          // An abandoned claim still holds the parent's one-active-cancellation
+          // slot: its creator crashed or refused before filing, so a NEW key
+          // lands here with `request_id` unknown. Reclaim it under the same
+          // guarded lease the request_id path uses, or losing the original key
+          // (or rotating credentials) blocks cancellation forever.
+          if (found.status === "preparing") {
+            const reclaimed = await db
+              .prepare(
+                "UPDATE earn_provider_actions SET lease_until=? WHERE id=? AND organization_id=? AND project_id=? AND status='preparing' AND lease_until<? RETURNING *"
+              )
+              .bind(
+                new Date(Date.now() + 120_000).toISOString(),
+                found.id,
+                input.organization_id,
+                input.project_id,
+                new Date().toISOString()
+              )
+              .first();
+            if (reclaimed !== null) return { row: rowSchema.parse(reclaimed), owned: true };
+          }
+          return { row: found, owned: false };
+        }
       }
       const existing = rowSchema.parse(prior);
       if (existing.fingerprint !== input.fingerprint)

@@ -1317,6 +1317,7 @@ function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): E
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
+    ownerAddress: movement.owner_address,
     status: status as EarnVaultWithdrawal["status"],
     signature: movement.signature,
     redemptionMode:

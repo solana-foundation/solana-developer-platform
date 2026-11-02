@@ -26,9 +26,14 @@ export class PlumeEarnClient extends StubEarnClient {
           `/vaults/${encodeURIComponent(vault.slug)}`,
           plumeVaultInfoSchema
         );
+        // Strict V2 selection: a legacy entry's absent metadata never equals
+        // the chain id, and an enabled deposit is required, so the one allowed
+        // composer is a fully-formed V2 entry for Plume's chain.
         const composers = info.nestComposers.filter(
           (c) =>
-            c.chainId === PLUME_CHAIN_ID && c.complianceVersion === "v2" && c.cctpDepositEnabled
+            c.complianceVersion === "v2" &&
+            c.chainId === PLUME_CHAIN_ID &&
+            c.cctpDepositEnabled === true
         );
         if (
           info.slug !== vault.slug ||

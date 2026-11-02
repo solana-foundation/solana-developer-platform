@@ -1,7 +1,15 @@
 import { supportsProviderOrderCancellation } from "@sdp/earn/capabilities";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { getSignatureStatuses, getTransaction, sendTransaction } from "@sdp/rpc/solana";
+import {
+  getChainHeight,
+  getSignatureStatuses,
+  getTransaction,
+  reReadExpiredStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+  sendTransaction,
+} from "@sdp/rpc/solana";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { isEarnProviderActionChainStatus } from "@sdp/types/earn-provider-orders";
 import { signature } from "@solana/kit";
@@ -141,14 +149,37 @@ async function reconcileProviderActionSource(env: Env, row: EarnProviderActionRo
     throw new Error("Provider action outbox is incomplete");
   const rpc = createClusterRpc({ timeoutMs: 5_000 });
 
-  const [status] = await getSignatureStatuses(rpc, [signature(row.signature)], {
+  const [observed] = await getSignatureStatuses(rpc, [signature(row.signature)], {
     searchTransactionHistory: true,
   });
+  const status = observed ?? null;
+  if (await judgeSourceStatus(repo, scope, row, status)) return;
+  if (row.status === "confirmed") return; // Missing history cannot disprove a landed transaction.
+  const height = await getChainHeight(rpc, "finalized");
+  if (height.blockHeight <= BigInt(row.last_valid_block_height)) {
+    if (status === null) await rebroadcastSourceAction(rpc, row.id, row.signed_transaction);
+    return;
+  }
+  await expireProviderActionSource(repo, scope, row, rpc, height, row.signature, status);
+}
+
+/**
+ * One chain observation's verdict for an action's source transaction — shared
+ * by the live status read and the expiry re-reads, so a re-read that finds the
+ * landed transaction judges it exactly like a first observation would. Returns
+ * false when the observation does not yet decide the action.
+ */
+async function judgeSourceStatus(
+  repo: ReturnType<typeof createEarnProviderActionsRepository>,
+  scope: { organizationId: string; projectId: string; actionId: string },
+  row: EarnProviderActionRow,
+  status: SignatureStatusInfo | null
+): Promise<boolean> {
   if (status?.err && status.confirmationStatus === "finalized") {
     await repo.advance(scope, row.status, "failed", {
       error: "Source transaction failed on chain",
     });
-    return;
+    return true;
   }
   if (status?.confirmationStatus === "finalized") {
     await repo.advance(
@@ -156,30 +187,79 @@ async function reconcileProviderActionSource(env: Env, row: EarnProviderActionRo
       row.status,
       row.action === "preparation" ? "finalized" : "awaiting_delivery"
     );
-    return;
+    return true;
   }
   if (status?.confirmationStatus === "confirmed") {
     if (row.status !== "confirmed") await repo.advance(scope, row.status, "confirmed");
-    return;
+    return true;
   }
-  if (row.status === "confirmed") return; // Missing history cannot disprove a landed transaction.
-  const height = await rpc.getBlockHeight({ commitment: "finalized" }).send();
-  if (height > BigInt(row.last_valid_block_height)) {
-    // Two history-aware observations on separate due ticks, after finalized expiry.
-    if (row.unknown_signature_observed_at === null)
-      await repo.observeUnknownSignature(scope, row.status);
-    else if (Date.parse(row.unknown_signature_observed_at) < Date.now() - 60_000)
-      await repo.advance(scope, row.status, "failed", {
-        error: "Source transaction expired without a confirmed signature",
-      });
-  } else if (status == null) {
-    try {
-      await sendTransaction(rpc, Uint8Array.from(Buffer.from(row.signed_transaction, "base64")));
-    } catch (cause) {
-      getLogger().warn(
-        { actionId: row.id, errorName: cause instanceof Error ? cause.name : "unknown" },
-        "Provider action rebroadcast outcome remains unknown"
-      );
+  return false;
+}
+
+async function rebroadcastSourceAction(
+  rpc: SolanaRpc,
+  actionId: string,
+  signedTransaction: string
+): Promise<void> {
+  try {
+    await sendTransaction(rpc, Uint8Array.from(Buffer.from(signedTransaction, "base64")));
+  } catch (cause) {
+    getLogger().warn(
+      { actionId, errorName: cause instanceof Error ? cause.name : "unknown" },
+      "Provider action rebroadcast outcome remains unknown"
+    );
+  }
+}
+
+/**
+ * The finalized height proves the blockhash expired while the status read
+ * stayed silent. A null status alone never proves a transaction absent: the
+ * pool endpoint answering statuses can lag the node that answered the height.
+ * Re-read the signature at the height's slot (`minContextSlot`), then consult
+ * finalized transaction history, before closing the intent — a landed
+ * cancellation recorded as failed would permit filing another one. A re-read
+ * or history outage throws and leaves the action recoverable.
+ */
+async function expireProviderActionSource(
+  repo: ReturnType<typeof createEarnProviderActionsRepository>,
+  scope: { organizationId: string; projectId: string; actionId: string },
+  row: EarnProviderActionRow,
+  rpc: SolanaRpc,
+  height: Awaited<ReturnType<typeof getChainHeight>>,
+  signatureText: string,
+  status: SignatureStatusInfo | null
+): Promise<void> {
+  if (status === null) {
+    const [reRead] = await reReadExpiredStatuses(
+      rpc,
+      [null],
+      [{ index: 0, signature: signature(signatureText) }],
+      height.absoluteSlot
+    );
+    if (await judgeSourceStatus(repo, scope, row, reRead ?? null)) return;
+    const transaction = await getTransaction(rpc, signature(signatureText), "finalized");
+    if (transaction !== null) {
+      if (!transaction.executionResultKnown)
+        throw new Error(`Provider action ${row.id} has no historical execution result`);
+      if (transaction.err === null) {
+        await repo.advance(
+          scope,
+          row.status,
+          row.action === "preparation" ? "finalized" : "awaiting_delivery"
+        );
+      } else {
+        await repo.advance(scope, row.status, "failed", {
+          error: "Source transaction failed on chain",
+        });
+      }
+      return;
     }
   }
+  // Two history-aware observations on separate due ticks, after finalized expiry.
+  if (row.unknown_signature_observed_at === null)
+    await repo.observeUnknownSignature(scope, row.status);
+  else if (Date.parse(row.unknown_signature_observed_at) < Date.now() - 60_000)
+    await repo.advance(scope, row.status, "failed", {
+      error: "Source transaction expired without a confirmed signature",
+    });
 }

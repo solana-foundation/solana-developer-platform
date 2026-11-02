@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { EarnVaultWithdrawal } from "@sdp/types/earn";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
 import { setWindowPathname } from "@/test/window-location";
@@ -26,6 +26,7 @@ const order: EarnVaultWithdrawal = {
   positionId: "position",
   provider: "plume",
   providerReference: "vault",
+  ownerAddress: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
   status: "confirmed",
   signature: "source",
   shares: "10",
@@ -66,6 +67,46 @@ describe("provider cancellation controls", () => {
         expect.any(String)
       )
     );
+  });
+  it("identifies the wallet and vault before confirming", () => {
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel pending redemption" }));
+    // Equal-sized redemptions from different wallets render identical rows,
+    // so the confirmation names exactly whose shares it would cancel.
+    expect(screen.getByText("Wallet 7WLcnn…Aoxnpg · vault vault")).toBeTruthy();
+  });
+  it("keeps polling when every read fails identically", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.read.mockRejectedValue(new Error("read failed"));
+      renderCard();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel pending redemption" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mocks.create).toHaveBeenCalledWith(
+        "cancellations",
+        { movementId: "order" },
+        expect.any(String)
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.read).toHaveBeenCalledTimes(1);
+      // The second and third failures change no state and render nothing:
+      // each next attempt is scheduled by the poll itself.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.read).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.read).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("hides cancellation from viewers", () => {
     mocks.canWrite = false;

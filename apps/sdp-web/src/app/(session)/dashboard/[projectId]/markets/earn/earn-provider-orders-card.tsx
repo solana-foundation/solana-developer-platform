@@ -45,6 +45,13 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
                   <p className="text-sm font-medium text-primary">
                     {shortenMarketAddress(order.providerReference)} · {order.shares}
                   </p>
+                  {order.ownerAddress !== null ? (
+                    <p className="text-xs text-secondary">
+                      {t("DashboardEarn.providerAction.cancelWallet", {
+                        wallet: shortenMarketAddress(order.ownerAddress),
+                      })}
+                    </p>
+                  ) : null}
                   {pending ? (
                     <p className="mt-1 text-xs text-secondary" role="status">
                       {t("DashboardEarn.providerAction.checking")}
@@ -82,6 +89,14 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
           <h2 className="text-lg font-medium text-primary">
             {t("DashboardEarn.providerAction.cancel")}
           </h2>
+          {selected !== null && selected.ownerAddress !== null ? (
+            <p className="text-sm font-medium text-primary">
+              {t("DashboardEarn.providerAction.cancelTarget", {
+                wallet: shortenMarketAddress(selected.ownerAddress),
+                vault: shortenMarketAddress(selected.providerReference),
+              })}
+            </p>
+          ) : null}
           <p className="text-sm text-secondary">
             {t("DashboardEarn.providerAction.cancelWarning")}
           </p>

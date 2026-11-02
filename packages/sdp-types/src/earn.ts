@@ -600,6 +600,8 @@ export interface EarnVaultWithdrawal {
   provider: string;
   /** The vault's on-chain address — the instrument, not the payout. */
   providerReference: string;
+  /** The wallet that owns the redeemed position — the identity a cancellation acts for. */
+  ownerAddress: string | null;
   status: EarnVaultDirectMovementStatus;
   signature: string;
   /** Total shares requested by the caller, decimal string, share units. */

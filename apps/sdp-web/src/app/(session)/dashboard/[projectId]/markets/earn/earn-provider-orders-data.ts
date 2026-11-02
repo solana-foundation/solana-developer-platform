@@ -38,7 +38,14 @@ export function useEarnProviderOrders(onChanged?: () => void) {
     );
     if (pending.length === 0) return;
     let active = true;
-    const timer = setTimeout(() => {
+    let inFlight = false;
+    const poll = () => {
+      // One read at a time: a tick landing mid-flight is skipped, and the
+      // interval keeps firing whatever each attempt observed — repeated
+      // identical read errors must not idle polling until an unrelated
+      // render restarts it.
+      if (inFlight) return;
+      inFlight = true;
       void Promise.all(
         pending.map(async ([movementId, action]) => {
           try {
@@ -64,11 +71,14 @@ export function useEarnProviderOrders(onChanged?: () => void) {
               );
           }
         })
-      );
-    }, 5_000);
+      ).finally(() => {
+        inFlight = false;
+      });
+    };
+    const timer = setInterval(poll, 5_000);
     return () => {
       active = false;
-      clearTimeout(timer);
+      clearInterval(timer);
     };
   }, [actions, onChanged, projectId, refresh, t]);
 

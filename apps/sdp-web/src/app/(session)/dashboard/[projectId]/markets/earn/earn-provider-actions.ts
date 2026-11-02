@@ -75,10 +75,14 @@ export async function prepareEarnVaultAccount(
       throw new EarnVaultPreparationPendingError(
         "DashboardEarn.deposit.vaultPreparationBackground"
       );
-    if (action.status === "failed") throw new EarnVaultPreparationFailedError(action.error);
     if (Date.now() > deadline)
       throw new EarnVaultPreparationPendingError("DashboardEarn.deposit.vaultPreparationPending");
     await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
     action = await fetchEarnProviderAction(action.actionId);
   }
+  // `failed` is terminal, so the loop above exits on it: judge the outcome
+  // AFTER the loop, or a failed setup would fall through and let the deposit
+  // proceed. Throwing releases the deposit's idempotency key, so the next
+  // attempt can prepare again.
+  if (action.status === "failed") throw new EarnVaultPreparationFailedError(action.error);
 }

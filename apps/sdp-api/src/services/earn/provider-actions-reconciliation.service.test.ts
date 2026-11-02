@@ -1,9 +1,8 @@
 import * as rpcFactory from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solana from "@sdp/rpc/solana";
-import { createSolanaRpcFromTransport, type RpcTransport } from "@solana/kit";
+import { createSolanaRpcFromTransport } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import * as dbClient from "@/db/client";
 import type { EarnProviderActionRow } from "@/db/repositories/earn-provider-actions.repository";
 import * as repoModule from "@/db/repositories/earn-provider-actions.repository";
@@ -16,6 +15,8 @@ const claim = vi.fn(),
   observe = vi.fn(),
   statuses = vi.fn(),
   height = vi.fn(),
+  reRead = vi.fn(),
+  history = vi.fn(),
   send = vi.fn();
 
 /** A client whose every statement throws: the dependencies under test are spied. */
@@ -33,20 +34,9 @@ const unusedExecutor: dbClient.DatabaseExecutor = {
     throw new Error("This test runs no SQL");
   },
 };
-/** The one call a chain-status sweep makes off the module spies is the block height. */
-const heightTransport: RpcTransport = async <T>({
-  payload,
-}: Parameters<RpcTransport>[0]): Promise<T> => {
-  const p = z
-    .object({
-      method: z.literal("getBlockHeight"),
-      id: z.union([z.string(), z.number()]),
-    })
-    .parse(payload);
-  // SAFETY: this test transport supplies exactly the JSON-RPC envelope for this one Kit method.
-  return { jsonrpc: "2.0", id: p.id, result: 200 } as T;
-};
-const unusedRpc = createSolanaRpcFromTransport(heightTransport);
+const unusedRpc = createSolanaRpcFromTransport(async () => {
+  throw new Error("This test spies every chain read");
+});
 const repo = {
   get: vi.fn(),
   claim: vi.fn(),
@@ -62,6 +52,9 @@ function installSpies(): void {
   vi.spyOn(executionRegistry, "resolveEarnExecutionClient").mockReturnValue(null);
   vi.spyOn(rpcFactory, "createClusterRpc").mockReturnValue(unusedRpc);
   vi.spyOn(solana, "getSignatureStatuses").mockImplementation(statuses);
+  vi.spyOn(solana, "getChainHeight").mockImplementation(height);
+  vi.spyOn(solana, "reReadExpiredStatuses").mockImplementation(reRead);
+  vi.spyOn(solana, "getTransaction").mockImplementation(history);
   vi.spyOn(solana, "sendTransaction").mockImplementation(send);
 }
 const row: EarnProviderActionRow = {
@@ -107,7 +100,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   installSpies();
   statuses.mockResolvedValue([null]);
-  height.mockResolvedValue(200n);
+  height.mockResolvedValue({ blockHeight: 200n, absoluteSlot: 200n });
+  reRead.mockResolvedValue([null]);
+  history.mockResolvedValue(null);
 });
 describe("provider action source recovery", () => {
   it("finalizes account setup only at finalized source success", async () => {
@@ -141,6 +136,41 @@ describe("provider action source recovery", () => {
       "failed",
       expect.objectContaining({ error: expect.any(String) })
     );
+  });
+  it("re-reads an expired signature at the finalized height before judging absence", async () => {
+    claimOne();
+    reRead.mockResolvedValue([
+      { slot: 200n, confirmations: null, confirmationStatus: "finalized", err: null },
+    ]);
+    await run();
+    expect(reRead).toHaveBeenCalledWith(
+      expect.anything(),
+      [null],
+      [{ index: 0, signature: row.signature }],
+      200n
+    );
+    // The lagging node's null status did not vote the landed transaction dead.
+    expect(advance).toHaveBeenCalledWith(expect.anything(), "submitted", "finalized");
+    expect(observe).not.toHaveBeenCalled();
+  });
+  it("recovers a landed cancellation from finalized transaction history", async () => {
+    claimOne({ action: "cancellation", parent_movement_id: "parent" });
+    history.mockResolvedValue({
+      slot: 200n,
+      executionResultKnown: true,
+      err: null,
+    });
+    await run();
+    expect(history).toHaveBeenCalledWith(expect.anything(), row.signature, "finalized");
+    expect(advance).toHaveBeenCalledWith(expect.anything(), "submitted", "awaiting_delivery");
+    expect(observe).not.toHaveBeenCalled();
+  });
+  it("leaves the action open when the height-slot re-read cannot be served", async () => {
+    claimOne();
+    reRead.mockRejectedValue(new Error("minContextSlot not reached"));
+    await expect(run()).rejects.toThrow();
+    expect(advance).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
   });
   it("rebroadcasts only the recorded bytes while the blockhash is valid", async () => {
     claimOne({ last_valid_block_height: "300" });
