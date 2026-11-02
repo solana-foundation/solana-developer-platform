@@ -74,6 +74,7 @@ const KEY_PAGE_SLUGS = [
   "introduction",
   "guides/setup-organization",
   "guides/setup-wallets",
+  "guides/go-to-mainnet",
   "developing-with-sdp/manage-api-keys",
   "tokens/tokenize-an-asset",
   "tokens/create-a-token",
