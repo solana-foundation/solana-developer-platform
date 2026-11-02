@@ -7333,7 +7333,11 @@ describe("Issuance Routes", () => {
             body: JSON.stringify({ authorityCustodyWalletIds: authorities }),
           };
           try {
-            const first = await app.request(`/v1/issuance/tokens/${token.id}/deploy/execute`, request, env);
+            const first = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/execute`,
+              request,
+              env
+            );
             expect(first.status).toBe(metadataFails ? 400 : 200);
             expect(createToken).toHaveBeenCalledWith(
               expect.objectContaining({
@@ -7688,8 +7692,16 @@ describe("Issuance Routes", () => {
         };
 
         try {
-          const first = await app.request(`/v1/issuance/tokens/${token.id}/deploy/execute`, request, env);
-          const replay = await app.request(`/v1/issuance/tokens/${token.id}/deploy/execute`, request, env);
+          const first = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
+            request,
+            env
+          );
+          const replay = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/execute`,
+            request,
+            env
+          );
           const mismatch = await app.request(
             `/v1/issuance/tokens/${token.id}/deploy/execute`,
             {
