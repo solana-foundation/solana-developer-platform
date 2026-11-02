@@ -512,7 +512,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
     vaultDirectClientOverride.current = quoteCapableClient();
 
-    const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const text = await res.text();
@@ -532,7 +532,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     vaultDirectClientOverride.current = quoteCapableClient();
 
     for (let i = 0; i < 3; i += 1) {
-      const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+      const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
       expect(res.status).toBe(200);
     }
     // Every evaluation ran; the aggregate itself was read once (the TTL is
@@ -540,7 +540,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     // wired into the request path).
     expect(evaluatedEvents()).toHaveLength(3);
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
-    const cached = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const cached = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
     expect(
       ((await cached.json()) as { data: { blockingIssues: unknown[] } }).data.blockingIssues
     ).toEqual([{ code: "PROVIDER_ISSUE", message: "From the provider" }]);
@@ -600,7 +600,7 @@ describe("vault exposure cap (ADR 0004 layer 1): shadow mode", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
     vaultDirectClientOverride.current = quoteCapableClient();
 
-    const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { blockingIssues: unknown[] } };
