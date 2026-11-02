@@ -9,7 +9,10 @@ import { PlumeEarnClient } from "./client";
  * null when the vault has none. A schema that required V2 fields on every
  * entry rejected this body, so strategy sync failed against production.
  */
-function vaultInfoBody(vault: (typeof PLUME_VAULTS)[number]) {
+function vaultInfoBody(
+  vault: (typeof PLUME_VAULTS)[number],
+  overrides: { tvl?: number | null } = {}
+) {
   return {
     slug: vault.slug,
     name: vault.name,
@@ -29,7 +32,7 @@ function vaultInfoBody(vault: (typeof PLUME_VAULTS)[number]) {
       },
     ],
     targetApy: null,
-    tvl: 1234.5,
+    tvl: overrides.tvl === undefined ? 1234.5 : overrides.tvl,
   };
 }
 
@@ -54,6 +57,17 @@ describe("Plume strategy sync", () => {
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0].providerReference, vault.shareMint);
     assert.equal(snapshots[0].name, vault.name);
+    // TVL rides along as a JSON number — catalogue ranking and Treasury read
+    // `tvlUsd` as a number and reject strings.
+    assert.equal(snapshots[0].riskMetadata?.tvlUsd, 1234.5);
+  });
+  it("omits a null TVL instead of stringifying it", async () => {
+    const body = vaultInfoBody(vault, { tvl: null });
+    mock.method(globalThis, "fetch", async () => jsonResponse(200, { data: body }));
+
+    const snapshots = await client.listStrategies(ctx);
+    assert.equal(snapshots.length, 1);
+    assert.equal("tvlUsd" in (snapshots[0].riskMetadata ?? {}), false);
   });
   it("refuses a V2 composer whose chain metadata is missing", async () => {
     const body = vaultInfoBody(vault);

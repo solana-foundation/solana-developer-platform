@@ -59,8 +59,10 @@ export class PlumeEarnClient extends StubEarnClient {
           riskMetadata: { curator: "plume" },
         };
         // Reported target yield is not a measured current yield. Keep it out of currentApy.
-        if (info.tvl !== undefined)
-          snapshot.riskMetadata = { curator: "plume", tvlUsd: String(info.tvl) };
+        // A null figure is absence — omit it instead of stringifying it, and
+        // store the number itself: catalogue ranking and Treasury read
+        // `tvlUsd` as a JSON number and reject strings.
+        if (info.tvl != null) snapshot.riskMetadata = { curator: "plume", tvlUsd: info.tvl };
         return snapshot;
       })
     );

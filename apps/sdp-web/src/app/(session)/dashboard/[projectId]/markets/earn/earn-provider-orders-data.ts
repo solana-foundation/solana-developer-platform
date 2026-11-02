@@ -15,6 +15,63 @@ import { createEarnProviderAction, fetchEarnProviderAction } from "./earn-provid
 
 const cancellationKeys = createIdempotencyKeyStore("sdp:earn:provider-order-cancellation:v1");
 
+/** One tick's read of a single filed action: the reply, or the read error. */
+type PollOutcome = { movementId: string; next: EarnProviderAction | null; cause?: unknown };
+
+async function readProviderAction(
+  movementId: string,
+  action: EarnProviderAction
+): Promise<PollOutcome> {
+  try {
+    return { movementId, next: await fetchEarnProviderAction(action.actionId) };
+  } catch (caught) {
+    return { movementId, next: null, cause: caught };
+  }
+}
+
+/**
+ * One tick's replies, split so the batch applies in a single state update —
+ * applying the first reply on its own would restart the polling effect and
+ * strand the slower replies behind its retired `active` flag.
+ */
+function splitPollResults(results: PollOutcome[]): {
+  updates: Record<string, EarnProviderAction>;
+  concluded: Array<[string, EarnProviderAction]>;
+  readError: unknown;
+} {
+  const updates: Record<string, EarnProviderAction> = {};
+  const concluded: Array<[string, EarnProviderAction]> = [];
+  let readError: unknown = null;
+  for (const result of results) {
+    if (result.next === null) readError ??= result.cause;
+    else {
+      updates[result.movementId] = result.next;
+      if (isTerminalEarnProviderActionStatus(result.next.status))
+        concluded.push([result.movementId, result.next]);
+    }
+  }
+  return { updates, concluded, readError };
+}
+
+/**
+ * Retires the idempotency key of every attempt this batch saw conclude —
+ * the next confirmed submit must be free to do new work, not replay a dead
+ * one. Returns the first failed action, if any, for the failure surface.
+ */
+function retireConcludedCancellationKeys(
+  concluded: Array<[string, EarnProviderAction]>,
+  projectId: string
+): EarnProviderAction | null {
+  let failed: EarnProviderAction | null = null;
+  for (const [movementId, next] of concluded) {
+    const fingerprint = JSON.stringify([projectId, movementId]);
+    const { key } = cancellationKeys.claim(fingerprint);
+    cancellationKeys.release(fingerprint, key);
+    if (next.status === "failed") failed ??= next;
+  }
+  return failed;
+}
+
 /**
  * Owns the behavior behind the provider-orders card: which withdrawals offer
  * a standard cancellation, the cancellation request under its idempotency
@@ -46,34 +103,34 @@ export function useEarnProviderOrders(onChanged?: () => void) {
       // render restarts it.
       if (inFlight) return;
       inFlight = true;
+      // Every reply of one tick applies together, in a single state update:
+      // applying the first reply on its own would restart this effect and
+      // strand the slower replies behind its retired `active` flag, hiding a
+      // completed or failed result and keeping its retry button disabled.
       void Promise.all(
-        pending.map(async ([movementId, action]) => {
-          try {
-            const next = await fetchEarnProviderAction(action.actionId);
-            if (!active) return;
-            setActions((current) => ({ ...current, [movementId]: next }));
-            if (isTerminalEarnProviderActionStatus(next.status)) {
-              // The attempt under this key concluded, so polling retires the
-              // key the moment it first sees the outcome — the next confirmed
-              // submit must be free to do new work, not replay a dead one.
-              const fingerprint = JSON.stringify([projectId, movementId]);
-              const { key } = cancellationKeys.claim(fingerprint);
-              cancellationKeys.release(fingerprint, key);
-              if (next.status === "failed")
-                setFailure(next.error ?? t("DashboardEarn.providerAction.error"));
-              refresh();
-              onChanged?.();
-            }
-          } catch (cause) {
-            if (active)
-              setFailure(
-                cause instanceof Error ? cause.message : t("DashboardEarn.providerAction.error")
-              );
+        pending.map(([movementId, action]) => readProviderAction(movementId, action))
+      )
+        .then((results) => {
+          if (!active) return;
+          const { updates, concluded, readError } = splitPollResults(results);
+          if (Object.keys(updates).length > 0)
+            setActions((current) => ({ ...current, ...updates }));
+          const failed = retireConcludedCancellationKeys(concluded, projectId);
+          if (failed !== null) setFailure(failed.error ?? t("DashboardEarn.providerAction.error"));
+          if (concluded.length > 0) {
+            refresh();
+            onChanged?.();
           }
+          if (readError !== null)
+            setFailure(
+              readError instanceof Error
+                ? readError.message
+                : t("DashboardEarn.providerAction.error")
+            );
         })
-      ).finally(() => {
-        inFlight = false;
-      });
+        .finally(() => {
+          inFlight = false;
+        });
     };
     const timer = setInterval(poll, 5_000);
     return () => {
