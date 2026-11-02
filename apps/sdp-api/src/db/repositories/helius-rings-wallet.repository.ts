@@ -36,12 +36,8 @@ export interface HeliusRingsWalletRow {
    * taken too early describes a moment before the last operation existed.
    */
   last_indexed_slot: string | null;
-  /**
-   * The custody_wallets row that signs for this identity. Null only on wallets
-   * created before live provisioning existed; `sdp_wallet_id` is the provider's
-   * id and can be reissued, so the immutable row id is what a signer resolves.
-   */
-  custody_wallet_id: string | null;
+  /** The immutable custody_wallets row linked to this identity. */
+  custody_wallet_id: string;
   material_tag: MaterialTag;
   created_at: string;
   updated_at: string;
@@ -60,8 +56,7 @@ export interface CreateHeliusRingsWalletInput extends HeliusRingsProjectScope {
   sdpWalletId: string;
   name: string;
   materialTag: MaterialTag;
-  /** Null where the caller could not resolve one, as legacy callers cannot. */
-  custodyWalletId?: string | null;
+  custodyWalletId: string;
 }
 
 export interface MarkHeliusRingsWalletProvisionedInput extends HeliusRingsProjectScope {
@@ -132,7 +127,7 @@ export interface HeliusRingsWalletRepository {
   /**
    * Reserves the one wallet allowed per (project, sdpWalletId). On a replay it
    * returns the wallet already there rather than a second one, so provisioning
-   * is safe to retry.
+   * is safe to retry. A different custody binding returns null.
    */
   createWallet(input: CreateHeliusRingsWalletInput): Promise<HeliusRingsWalletRow | null>;
   getWalletById(
@@ -211,7 +206,7 @@ export interface HeliusRingsWalletRepository {
 export function mapHeliusRingsWalletRow(row: HeliusRingsWalletRow): PrivateWallet {
   return {
     id: row.id,
-    sdpWalletId: row.sdp_wallet_id,
+    custodyWalletId: row.custody_wallet_id,
     name: row.name,
     shieldedAddress: row.shielded_address ?? null,
     status: row.status,

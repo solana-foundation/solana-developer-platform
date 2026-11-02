@@ -21,7 +21,7 @@ vi.mock("./helius-rings.data", async (importOriginal) => ({
 
 const WALLET: RingsWallet = {
   id: "hrw_treasury",
-  sdpWalletId: "wal_treasury",
+  custodyWalletId: "wal_treasury",
   name: "Treasury",
   shieldedAddress: "rings1treasury",
   status: "ready",

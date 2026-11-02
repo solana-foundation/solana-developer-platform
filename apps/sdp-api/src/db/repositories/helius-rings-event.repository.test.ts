@@ -119,9 +119,20 @@ describe("HeliusRingsEventRepository (postgres)", () => {
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
 
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_hre_repo_test', ?, ?, 'privy', '{}')`,
+      [TEST_ORG.id, TEST_PROJECT_ID]
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES ('cw_hre_repo_test', 'cfg_hre_repo_test', 'wal_hre_repo_test', 'Owner')`
+    );
+
     const wallet = await createPostgresHeliusRingsWalletRepository(db).createWallet({
       ...scope,
       sdpWalletId: "wal_hre_repo_test",
+      custodyWalletId: "cw_hre_repo_test",
       name: "Treasury",
       materialTag: "simulated",
     });

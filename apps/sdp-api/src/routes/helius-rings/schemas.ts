@@ -4,9 +4,9 @@ import { SDP_NATIVE_MINT, SDP_USDC_MINT } from "@sdp/helius-rings-sdk/flows/mint
 import { z } from "zod";
 import { solanaAddressSchema } from "@/routes/payments/schemas";
 
-export const createRingsWalletSchema = z.object({
-  /** SDP custody wallet id (`walletId` from GET /v1/wallets). */
-  walletId: z.string().min(1),
+export const createRingsWalletSchema = z.strictObject({
+  /** Exact internal `id` from GET /v1/wallets. */
+  custodyWalletId: z.string().min(1),
   name: z.string().min(1).max(120),
 });
 

@@ -330,9 +330,181 @@ describe("Helius Rings routes", () => {
     expect(body.data.wallets[0]).toMatchObject({ id: ringsWalletId, status: "pending" });
   });
 
+  it("creates and reads the exact internal Custody link without changing the Rings identity", async () => {
+    await provisionRouteWallet();
+    const created = await post("/v1/helius-rings/wallets", {
+      custodyWalletId: "cw_hr_route",
+      name: "Ops",
+    });
+    expect(created.status).toBe(201);
+    const detail = await app.request(
+      `/v1/helius-rings/wallets/${ringsWalletId}`,
+      {
+        headers: authHeaders(),
+      },
+      env
+    );
+    const list = await app.request("/v1/helius-rings/wallets", { headers: authHeaders() }, env);
+    const walletSchema = z.object({
+      data: z.object({ wallet: z.record(z.string(), z.unknown()) }),
+    });
+    const listSchema = z.object({
+      data: z.object({ wallets: z.array(z.record(z.string(), z.unknown())) }),
+    });
+    const wallets = [
+      walletSchema.parse(await created.json()).data.wallet,
+      walletSchema.parse(await detail.json()).data.wallet,
+      ...listSchema.parse(await list.json()).data.wallets,
+    ];
+    expect(wallets).toHaveLength(3);
+    for (const wallet of wallets) {
+      expect(wallet).toMatchObject({
+        id: ringsWalletId,
+        custodyWalletId: "cw_hr_route",
+        shieldedAddress: "rings1route_test",
+        materialTag: "simulated",
+      });
+      expect(wallet).not.toHaveProperty("sdpWalletId");
+      expect(wallet).not.toHaveProperty("ownerAddress");
+    }
+  });
+
   it("POST /wallets 404s for an unknown custody wallet", async () => {
-    const res = await post("/v1/helius-rings/wallets", { walletId: "wal_missing", name: "Ops" });
+    const res = await post("/v1/helius-rings/wallets", {
+      custodyWalletId: "cw_missing",
+      name: "Ops",
+    });
     expect(res.status).toBe(404);
+  });
+
+  it("provisions a new internal selection once and retries the same Rings identity", async () => {
+    await getDb(env).execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES ('cw_hr_new', 'cfg_hr_route', 'wal_hr_new', 'NewOwner')`
+    );
+    const gateway = new InMemoryRingsGateway();
+    const provision = vi.spyOn(gateway, "provisionIdentity");
+    gatewayOverride.current = gateway;
+    const input = { custodyWalletId: "cw_hr_new", name: "New wallet" };
+    const schema = z.object({
+      data: z.object({
+        wallet: z.object({
+          id: z.string(),
+          custodyWalletId: z.string(),
+          shieldedAddress: z.string(),
+          status: z.string(),
+          materialTag: z.string(),
+        }),
+      }),
+    });
+    const first = await post("/v1/helius-rings/wallets", input);
+    expect(first.status).toBe(201);
+    const wallet = schema.parse(await first.json()).data.wallet;
+    expect(wallet).toMatchObject({
+      custodyWalletId: "cw_hr_new",
+      status: "ready",
+    });
+    const replay = await post("/v1/helius-rings/wallets", input);
+    expect(replay.status).toBe(201);
+    expect(schema.parse(await replay.json()).data.wallet).toEqual(wallet);
+    expect(provision).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { source: { walletId: "wal_hr_route" }, status: 400 },
+    { source: { custodyWalletId: "cw_hr_route", walletId: "wal_hr_route" }, status: 400 },
+    { source: { custodyWalletId: "wal_hr_route" }, status: 404 },
+    { source: { custodyWalletId: "HrRouteTestPublicKey111111111111111111111111" }, status: 404 },
+  ])("rejects retired or mixed source selectors: $source", async ({ source, status }) => {
+    const res = await post("/v1/helius-rings/wallets", { ...source, name: "Ops" });
+    expect(res.status).toBe(status);
+    const list = await app.request("/v1/helius-rings/wallets", { headers: authHeaders() }, env);
+    const body = z
+      .object({ data: z.object({ wallets: z.array(z.object({ id: z.string() })) }) })
+      .parse(await list.json());
+    expect(body.data.wallets).toEqual([expect.objectContaining({ id: ringsWalletId })]);
+  });
+
+  it("does not select an internal Custody wallet from another organization and project", async () => {
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO organizations (id, name, slug) VALUES ('org_hr_foreign', 'Foreign', 'rings-foreign')`
+    );
+    await seedDefaultProjects(db, {
+      organizationId: "org_hr_foreign",
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: "prj_hr_foreign", production: "prj_hr_foreign_production" },
+    });
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_hr_foreign_project', 'org_hr_foreign', 'prj_hr_foreign', 'privy', 'test-encrypted')`
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key)
+       VALUES ('cw_hr_foreign_project', 'cfg_hr_foreign_project', 'wal_hr_route', 'SameOwner')`
+    );
+    const res = await post("/v1/helius-rings/wallets", {
+      custodyWalletId: "cw_hr_foreign_project",
+      name: "Ops",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("prepares a migrated wallet withdrawal without an owner field in the wallet response", async () => {
+    await provisionRouteWallet();
+    gatewayOverride.current = new InMemoryRingsGateway();
+    const prepared = await post("/v1/helius-rings/operations", {
+      walletId: ringsWalletId,
+      opType: "withdraw",
+      clientNonce: "migrated-wallet-exit",
+      asset: { mint: SOL_MINT, amountRaw: "1" },
+      to: "HrRouteTestPublicKey111111111111111111111111",
+    });
+    expect(prepared.status).toBe(201);
+    const operation = z
+      .object({
+        data: z.object({
+          operation: z.object({
+            walletId: z.string(),
+            input: z.object({ to: z.string() }),
+          }),
+        }),
+      })
+      .parse(await prepared.json()).data.operation;
+    expect(operation).toMatchObject({
+      walletId: ringsWalletId,
+      input: { to: "HrRouteTestPublicKey111111111111111111111111" },
+    });
+  });
+
+  it("authorizes the exact stored link when a retained sibling shares its provider reference", async () => {
+    await provisionRouteWallet();
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+       VALUES ('cfg_hr_retained', ?, ?, 'turnkey', 'test-encrypted', 'inactive')`,
+      [TEST_ORG.id, TEST_PROJECT.id]
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       VALUES ('cw_hr_retained', 'cfg_hr_retained', 'wal_hr_route',
+         'HrRouteTestPublicKey111111111111111111111111', 'inactive')`
+    );
+    await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
+      ...TEST_SEEDED_API_KEY,
+      walletScope: "selected",
+      walletIds: ["cw_hr_route"],
+    });
+    gatewayOverride.current = new InMemoryRingsGateway();
+    const res = await post("/v1/helius-rings/operations", {
+      walletId: ringsWalletId,
+      opType: "withdraw",
+      clientNonce: "scoped-migrated-link-exit",
+      asset: { mint: SOL_MINT, amountRaw: "1" },
+      to: "HrRouteTestPublicKey111111111111111111111111",
+    });
+    expect(res.status).toBe(201);
   });
 
   it("zone create and list round-trips, idempotently", async () => {
@@ -401,6 +573,12 @@ describe("Helius Rings routes", () => {
       const first = (await (await post("/v1/helius-rings/operations", input)).json()) as {
         data: { operation: { id: string } };
       };
+      // C1 retained-key check: refusing an old source payload keeps the saved intent reusable.
+      const retired = await post("/v1/helius-rings/wallets", {
+        walletId: "wal_hr_route",
+        name: "Ops",
+      });
+      expect(retired.status).toBe(400);
       const replay = (await (await post("/v1/helius-rings/operations", input)).json()) as {
         data: { operation: { id: string } };
       };
@@ -418,6 +596,7 @@ describe("Helius Rings routes", () => {
       const kinds = detailBody.data.operation.events.map((event) => event.kind);
       expect(kinds).toContain("operation.created");
       expect(kinds).toContain("operation.failed");
+      expect(kinds.filter((kind) => kind === "operation.created")).toHaveLength(1);
     });
 
     it("retries a failed operation with lineage and lists the activity feed", async () => {
@@ -873,7 +1052,7 @@ describe("Helius Rings routes", () => {
       {
         route: "POST /wallets",
         path: () => "/v1/helius-rings/wallets",
-        body: () => ({ walletId: "wal_hr_route", name: "Ops" }),
+        body: () => ({ custodyWalletId: "cw_hr_route", name: "Ops" }),
       },
       {
         route: "POST /wallets/:walletId/sync",
@@ -1037,16 +1216,7 @@ describe("Helius Rings routes", () => {
 
     // 400, not 503: the fix is to provision the wallet, not to wait.
     it("409s a wallet with no shielded identity yet", async () => {
-      const pending = await createHeliusRingsWalletRepository(env).createWallet({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        sdpWalletId: "wal_hr_route_pending",
-        name: "Pending",
-        materialTag: "simulated",
-      });
-      if (!pending) throw new Error("pending wallet fixture was not created");
-
-      const res = await post(`/v1/helius-rings/wallets/${pending.id}/sync`, {});
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
       expect(res.status).toBe(409);
     });
 
@@ -1072,6 +1242,107 @@ describe("Helius Rings routes", () => {
         env
       );
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("Custody owner selection", () => {
+    async function seedCustodySibling() {
+      const db = getDb(env);
+      await db.execute(
+        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+         VALUES ('cfg_hr_sibling', ?, ?, 'turnkey', '{}')`,
+        [TEST_ORG.id, TEST_PROJECT.id]
+      );
+      // A provider-reference lookup would pick this older sibling first.
+      await db.execute(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, created_at)
+         VALUES ('cw_hr_sibling', 'cfg_hr_sibling', 'wal_hr_route', 'SiblingOwner',
+           '2000-01-01T00:00:00.000Z')`
+      );
+    }
+
+    it("reads the saved owner when its Custody config is inactive", async () => {
+      await provisionRouteWallet();
+      await getDb(env).execute(
+        "UPDATE custody_configs SET status = 'inactive' WHERE id = 'cfg_hr_route'"
+      );
+      const gateway = new InMemoryRingsGateway();
+      const read = vi.spyOn(gateway, "readIdentity");
+      gatewayOverride.current = gateway;
+
+      const res = await app.request(
+        `/v1/helius-rings/wallets/${ringsWalletId}/identity`,
+        {
+          headers: authHeaders(),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(read).toHaveBeenCalledExactlyOnceWith({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+      });
+    });
+
+    it("rekeys a pending wallet through its exact Custody ID despite a shared provider reference", async () => {
+      await seedCustodySibling();
+      const gateway = new InMemoryRingsGateway();
+      const read = vi.spyOn(gateway, "readIdentity").mockResolvedValue({
+        status: "foreign",
+        derivedShieldedAddress: "rings1route_derived",
+        publishedShieldedAddress: "rings1route_published",
+        mismatch: "nullifier_key",
+      });
+      const rekey = vi.spyOn(gateway, "rekeyIdentity");
+      gatewayOverride.current = gateway;
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/rekey`, {
+        confirmation: "Treasury",
+      });
+
+      expect(res.status).toBe(200);
+      expect(read).toHaveBeenCalledExactlyOnceWith({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+      });
+      expect(rekey).toHaveBeenCalledExactlyOnceWith({
+        walletId: ringsWalletId,
+        owner: "HrRouteTestPublicKey111111111111111111111111",
+      });
+      const wallet = z
+        .object({
+          data: z.object({
+            wallet: z.object({ id: z.string(), custodyWalletId: z.string(), status: z.string() }),
+          }),
+        })
+        .parse(await res.json()).data.wallet;
+      expect(wallet).toEqual({
+        id: ringsWalletId,
+        custodyWalletId: "cw_hr_route",
+        status: "ready",
+      });
+    });
+
+    it("refuses a pending wallet whose exact Custody ID is inactive instead of using its sibling", async () => {
+      await seedCustodySibling();
+      await getDb(env).execute(
+        "UPDATE custody_configs SET status = 'inactive' WHERE id = 'cfg_hr_route'"
+      );
+      const gateway = new InMemoryRingsGateway();
+      const read = vi.spyOn(gateway, "readIdentity");
+      gatewayOverride.current = gateway;
+
+      const res = await app.request(
+        `/v1/helius-rings/wallets/${ringsWalletId}/identity`,
+        {
+          headers: authHeaders(),
+        },
+        env
+      );
+
+      expect(res.status).toBe(404);
+      expect(read).not.toHaveBeenCalled();
     });
   });
 

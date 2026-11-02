@@ -1,17 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
+import { z } from "zod";
 import { heliusRings } from "@/flags";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import { HeliusRingsWorkspace } from "./helius-rings-workspace";
+import type { CustodyWalletOption } from "./private-wallets-card";
 
 export const dynamic = "force-dynamic";
-
-interface CustodyWalletOption {
-  walletId: string;
-  label: string | null;
-  publicKey: string;
-}
 
 /**
  * Helius Rings overview — devnet-only shielded wallet workspace. Live data
@@ -38,13 +34,17 @@ export default async function HeliusRingsPage() {
     const { projectClient } = await createRequestScopedSdpApiClients({});
     const response = await projectClient.request("/v1/wallets?view=summary", { method: "GET" });
     if (response.ok) {
-      const body = (await response.json()) as {
-        data?: {
-          wallets?: Array<{ walletId: string; label?: string | null; publicKey: string }>;
-        };
-      };
-      custodyWallets = (body.data?.wallets ?? []).map((wallet) => ({
-        walletId: wallet.walletId,
+      const body = z
+        .object({
+          data: z.object({
+            wallets: z.array(
+              z.object({ id: z.string(), label: z.string().nullish(), publicKey: z.string() })
+            ),
+          }),
+        })
+        .parse(await response.json());
+      custodyWallets = body.data.wallets.map((wallet) => ({
+        id: wallet.id,
         label: wallet.label ?? null,
         publicKey: wallet.publicKey,
       }));

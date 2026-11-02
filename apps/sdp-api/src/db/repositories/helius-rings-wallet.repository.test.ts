@@ -19,9 +19,57 @@ const OWNER_ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 let repo: HeliusRingsWalletRepository;
 
 async function createWallet(sdpWalletId: string, name = "Treasury") {
-  const wallet = await repo.createWallet({ ...scope, sdpWalletId, name, materialTag: "simulated" });
+  const custodyWalletId = `cw_${sdpWalletId}`;
+  await seedCustodyWallet(custodyWalletId, "config", sdpWalletId, TEST_PROJECT_ID, OWNER_ADDRESS);
+  const wallet = await repo.createWallet({
+    ...scope,
+    sdpWalletId,
+    name,
+    materialTag: "simulated",
+    custodyWalletId,
+  });
   if (!wallet) throw new Error("wallet fixture was not created");
   return wallet;
+}
+
+async function seedCustodyWallet(
+  id: string,
+  ownerKind: "config" | "connection",
+  providerWalletId: string,
+  projectId: string,
+  publicKey: string
+) {
+  const db = getDb(env);
+  if (ownerKind === "config") {
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+       VALUES (?, ?, ?, 'privy', '{}', 'archived') ON CONFLICT (id) DO NOTHING`,
+      [`cfg_${id}`, TEST_ORG.id, projectId]
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       VALUES (?, ?, ?, ?, 'inactive') ON CONFLICT (id) DO NOTHING`,
+      [id, `cfg_${id}`, providerWalletId, publicKey]
+    );
+    return;
+  }
+  await db.execute(
+    `INSERT INTO provider_credentials
+       (id, organization_id, project_id, provider, label, scope, source, storage_backend, encrypted_secret_payload)
+     VALUES (?, ?, ?, 'privy', 'Retained', 'project', 'stored', 'encrypted_db', 'test-only')`,
+    [`cred_${id}`, TEST_ORG.id, projectId]
+  );
+  await db.execute(
+    `INSERT INTO custody_connections
+       (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, deactivated_at)
+     VALUES (?, ?, ?, 'privy', 'project', ?, ?, 'deactivated', sdp_iso_now())`,
+    [`conn_${id}`, TEST_ORG.id, projectId, `cred_${id}`, projectId]
+  );
+  await db.execute(
+    `INSERT INTO custody_wallets (id, custody_connection_id, wallet_id, public_key, status)
+     VALUES (?, ?, ?, ?, 'inactive')`,
+    [id, `conn_${id}`, providerWalletId, publicKey]
+  );
 }
 
 describe("HeliusRingsWalletRepository (postgres)", () => {
@@ -78,9 +126,17 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
 
   it("allows the same sdp wallet id under a different project", async () => {
     await createWallet("wal_shared");
+    await seedCustodyWallet(
+      "cw_other_shared",
+      "connection",
+      "wal_shared",
+      OTHER_PROJECT_ID,
+      OWNER_ADDRESS
+    );
     const other = await repo.createWallet({
       organizationId: TEST_ORG.id,
       projectId: OTHER_PROJECT_ID,
+      custodyWalletId: "cw_other_shared",
       sdpWalletId: "wal_shared",
       name: "Treasury",
       materialTag: "simulated",
@@ -105,6 +161,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
       expect(provisioned).toMatchObject({
         status: "ready",
         shielded_address: "shielded-1",
+        owner_address: OWNER_ADDRESS,
         material_tag: "live",
       });
     });
@@ -160,6 +217,87 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
     expect(await repo.listWallets({ ...scope, limit: 1 })).toHaveLength(1);
   });
 
+  it("rejects an unmigrated wallet instead of reconstructing its custody link", async () => {
+    const wallet = await createWallet("wal_unmigrated");
+    await getDb(env).execute(
+      "UPDATE helius_rings_wallets SET custody_wallet_id = NULL WHERE id = ?",
+      [wallet.id]
+    );
+
+    await expect(repo.getWalletById({ ...scope, id: wallet.id })).rejects.toThrow();
+  });
+
+  it("refuses a different binding without changing the existing wallet", async () => {
+    const wallet = await createWallet("wal_bound");
+    await seedCustodyWallet(
+      "cw_sibling",
+      "connection",
+      "wal_bound",
+      TEST_PROJECT_ID,
+      OWNER_ADDRESS
+    );
+
+    expect(
+      await repo.createWallet({
+        ...scope,
+        sdpWalletId: "wal_bound",
+        custodyWalletId: "cw_sibling",
+        name: "Replacement",
+        materialTag: "live",
+      })
+    ).toBeNull();
+    expect(await repo.getWalletById({ ...scope, id: wallet.id })).toEqual(wallet);
+    expect(mapHeliusRingsWalletRow(wallet).custodyWalletId).toBe("cw_wal_bound");
+  });
+
+  it("refuses an unmigrated binding without filling it during a retry", async () => {
+    const wallet = await createWallet("wal_unmigrated_retry");
+    await getDb(env).execute(
+      "UPDATE helius_rings_wallets SET custody_wallet_id = NULL WHERE id = ?",
+      [wallet.id]
+    );
+
+    expect(
+      await repo.createWallet({
+        ...scope,
+        sdpWalletId: "wal_unmigrated_retry",
+        custodyWalletId: wallet.custody_wallet_id,
+        name: "Replacement",
+        materialTag: "live",
+      })
+    ).toBeNull();
+    const stored = await getDb(env).queryOne<{ custody_wallet_id: string | null }>(
+      "SELECT custody_wallet_id FROM helius_rings_wallets WHERE id = ?",
+      [wallet.id]
+    );
+    expect(stored?.custody_wallet_id).toBeNull();
+  });
+
+  it("lets only one concurrent exact selection establish the provider-unique binding", async () => {
+    await seedCustodyWallet("cw_race_config", "config", "wal_race", TEST_PROJECT_ID, OWNER_ADDRESS);
+    await seedCustodyWallet(
+      "cw_race_connection",
+      "connection",
+      "wal_race",
+      TEST_PROJECT_ID,
+      OWNER_ADDRESS
+    );
+    const results = await Promise.all(
+      ["cw_race_config", "cw_race_connection"].map((custodyWalletId) =>
+        repo.createWallet({
+          ...scope,
+          sdpWalletId: "wal_race",
+          name: custodyWalletId,
+          materialTag: "simulated",
+          custodyWalletId,
+        })
+      )
+    );
+
+    expect(results.filter((row) => row !== null)).toHaveLength(1);
+    expect(await repo.listWallets(scope)).toEqual(results.filter((row) => row !== null));
+  });
+
   describe("mapHeliusRingsWalletRow", () => {
     it("projects the row onto the domain wallet without tenant columns", async () => {
       const wallet = await createWallet("wal_1");
@@ -175,7 +313,7 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
 
       expect(mapHeliusRingsWalletRow(provisioned)).toEqual({
         id: wallet.id,
-        sdpWalletId: "wal_1",
+        custodyWalletId: "cw_wal_1",
         name: "Treasury",
         shieldedAddress: "shielded-1",
         status: "ready",

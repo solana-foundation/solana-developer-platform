@@ -26,7 +26,7 @@ const PAYROLL_RING = "RingProgram2111111111111111111111111111111";
 
 const WALLET: RingsWallet = {
   id: "hrw_treasury",
-  sdpWalletId: "wal_treasury",
+  custodyWalletId: "wal_treasury",
   name: "Treasury",
   shieldedAddress: "rings1treasury",
   status: "ready",

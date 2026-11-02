@@ -68,7 +68,7 @@ export async function createProjectRing(input: {
 
 export interface RingsWallet {
   id: string;
-  sdpWalletId: string;
+  custodyWalletId: string;
   name: string;
   shieldedAddress: string | null;
   status: RingsWalletStatus;
@@ -206,7 +206,7 @@ export interface CreateRingsWalletResult {
 }
 
 export async function createRingsWallet(input: {
-  walletId: string;
+  custodyWalletId: string;
   name: string;
 }): Promise<CreateRingsWalletResult> {
   const result = await postJson<{ wallet: RingsWallet }>(
