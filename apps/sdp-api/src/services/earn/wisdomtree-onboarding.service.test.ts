@@ -333,6 +333,26 @@ describe("wallet onboarding and deposit admission", () => {
     await service.registerWallet(scope, "owner");
     expect(register).toHaveBeenCalledTimes(2);
   });
+  it("keeps the claim for reconciliation when the registration outcome is unknown", async () => {
+    await linkBusiness();
+    vi.spyOn(provider, "getModerator").mockResolvedValue({
+      guid: moderatorGuid,
+      client_organizations: [{ guid: childGuid }],
+    });
+    vi.spyOn(provider, "getBusiness").mockResolvedValue({
+      org_guid: childGuid,
+      onboarding_status: "active",
+      sensitive_data_redacted: true,
+    });
+    vi.spyOn(provider, "registerSolanaWallet").mockRejectedValue(
+      new SdpEarnError("PROVIDER_UNAVAILABLE", "timeout")
+    );
+    await expect(service.registerWallet(scope, "owner")).rejects.toThrow("timeout");
+    // A timeout may have registered the wallet: the claim stays so no other
+    // provider write starts before an operator reconciles the outcome.
+    await expect(service.registerWallet(scope, "owner")).rejects.toThrow(/already claimed/);
+    expect(provider.registerSolanaWallet).toHaveBeenCalledTimes(1);
+  });
   it("refuses an unlinked wallet before contacting the eligibility provider", async () => {
     const earn = new WisdomTreeEarnClient();
     const check = vi.spyOn(earn, "checkDepositEligibility");
