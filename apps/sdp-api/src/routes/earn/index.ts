@@ -259,7 +259,7 @@ earn.get(
 // so the gate must sit AFTER `requireAction` and `validateBody`, and immediately before the handler, so a refusal is
 // decided before any KMS or relay access.
 earn.post(
-  "/vault-deposits",
+  "/deposits/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultDepositSchema),
   requestGate({
@@ -295,7 +295,7 @@ earn.get("/vault-deposits/:movementId", requireAction("earn.read"), getEarnVault
 // any catalogue dependency — the position row names the instrument, so a
 // delisted vault stays exitable.
 earn.post(
-  "/vault-withdrawals",
+  "/withdrawals/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultWithdrawalSchema),
   requestGate({
@@ -395,7 +395,7 @@ earn.get(
 // value-moving conformance inventory to find. `earn.execute` gates the builds
 // and submits because they create and broadcast recorded movements.
 earn.post(
-  "/external-wallet/deposit-transactions",
+  "/deposits/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletDepositTransactionSchema),
   meteredQuota(EARN_PROVIDER_READ_QUOTA),
@@ -408,7 +408,7 @@ earn.post(
   createEarnExternalWalletWithdrawalPreview
 );
 earn.post(
-  "/external-wallet/withdrawal-transactions",
+  "/withdrawals/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
   createEarnExternalWalletWithdrawalTransaction
@@ -426,13 +426,13 @@ earn.post(
   createEarnExternalWalletQueuedWithdrawalPreview
 );
 earn.post(
-  "/external-wallet/deposits",
+  "/deposits/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletDeposit
 );
 earn.post(
-  "/external-wallet/withdrawals",
+  "/withdrawals/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawal

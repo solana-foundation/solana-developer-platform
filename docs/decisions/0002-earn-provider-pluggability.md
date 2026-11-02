@@ -713,7 +713,7 @@ expecting zero differences.
 
 ## Addendum — 2026-08-20 The vault exit route (PRO-1702)
 
-The vault-direct model's money-out half ships: `POST /v1/earn/vault-withdrawals`
+The vault-direct model's money-out half ships: `POST /v1/earn/withdrawals/execute`
 plus the treasury exit action, with Kamino the first `EarnVaultWithdrawProvider`
 implementor. The builder preserves Kamino's complete instruction sequence and
 the vault lookup table. The API appends the idempotency memo, compiles and signs
@@ -1006,7 +1006,7 @@ signed transaction is submitted back, before SDP broadcasts it.**
 The vault runtime is built around record-before-broadcast, and a caller-signed
 flow moves the point at which the signature becomes knowable. The answer that
 preserves the invariant is that **SDP stays the broadcaster**: the partner
-returns the signed bytes to `POST /v1/earn/external-wallet/deposits` (or
+returns the signed bytes to `POST /v1/earn/deposits/submit-signed-transaction` (or
 `/withdrawals`), SDP verifies them, records the `earn_movements` row durably —
 signature, wire bytes, blockhash window — and only then sends. Every recovery
 property carries over unchanged: an ambiguous send leaves a reconcilable

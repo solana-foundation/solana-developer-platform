@@ -168,7 +168,7 @@ describe("EarnIntegrationGuide", () => {
 
     // The snippet is the REAL B2B2C contract (PRO-1722): build the unsigned
     // transaction, the customer's wallet signs, submit the signed bytes. The
-    // treasury route (vault-deposits + custodyWalletId) must not appear here —
+    // treasury route (deposits/execute + custodyWalletId) must not appear here —
     // a B2B2C partner cannot name a custody wallet.
     const snippets: string[] = [];
     for (const navigationName of navigationNames) {
@@ -179,10 +179,10 @@ describe("EarnIntegrationGuide", () => {
       snippets.push(figures[1]?.textContent ?? "");
     }
     const code = snippets.join("\n");
-    expect(code).toContain("/v1/earn/external-wallet/deposit-transactions");
+    expect(code).toContain("/v1/earn/deposits/build-unsigned-transaction");
     expect(code).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
     expect(code).not.toContain('const SDP_API_URL = "https://api.solana.com"');
-    expect(code).toContain("/v1/earn/external-wallet/deposits");
+    expect(code).toContain("/v1/earn/deposits/submit-signed-transaction");
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
@@ -208,7 +208,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
     expect(code.match(/return data\.transaction;/g)).toHaveLength(5);
     expect(code).not.toContain("custodyWalletId");
-    expect(code).not.toContain("vault-deposits");
+    expect(code).not.toContain("deposits/execute");
     expect(code).not.toContain("requestId");
     // ... and the guide is the WHOLE loop (PRO-1772), not just the deposit:
     // poll the movement, read balance + earned, list activity, withdraw the
@@ -221,8 +221,8 @@ describe("EarnIntegrationGuide", () => {
     // snippet regression here would hand partners a 404ing example.
     expect(code).not.toContain("/v1/earn/external-wallet/earnings/");
     expect(code).not.toContain("/v1/earn/external-wallet/positions/");
-    expect(code).toContain("/v1/earn/external-wallet/withdrawal-transactions");
-    expect(code).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(code).toContain("/v1/earn/withdrawals/build-unsigned-transaction");
+    expect(code).toContain("/v1/earn/withdrawals/submit-signed-transaction");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
     expect(code).toContain("previewEarnParRedemption");
@@ -265,9 +265,9 @@ describe("EarnIntegrationGuide", () => {
     expect(copied).toBe(buildEarnServerIntegration(liveStrategy, "http://127.0.0.1:8787"));
     // Every section rides along even though only the Client tab is rendered.
     expect(copied).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
-    expect(copied).toContain("/v1/earn/external-wallet/deposit-transactions");
+    expect(copied).toContain("/v1/earn/deposits/build-unsigned-transaction");
     expect(copied).toContain("/v1/earn/external-wallet/earnings?");
-    expect(copied).toContain("/v1/earn/external-wallet/withdrawals");
+    expect(copied).toContain("/v1/earn/withdrawals/submit-signed-transaction");
     expect(copied).not.toContain("custodyWalletId");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });

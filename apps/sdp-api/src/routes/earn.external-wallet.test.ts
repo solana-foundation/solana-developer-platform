@@ -335,9 +335,10 @@ function post(
   body: Record<string, unknown>,
   options: { idempotencyKey?: string | null; apiKey?: string; ip?: string } = {}
 ) {
-  const requestBody = path === "deposit-transactions" ? { minSharesOut: "1", ...body } : body;
+  const requestBody =
+    path === "deposits/build-unsigned-transaction" ? { minSharesOut: "1", ...body } : body;
   return app.request(
-    `/v1/earn/external-wallet/${path}`,
+    `/v1/earn/${path}`,
     {
       method: "POST",
       headers: {
@@ -388,13 +389,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates", () => {
+describe("POST /v1/earn/deposits/build-unsigned-transaction — money-in gates", () => {
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
     const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy();
 
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -426,7 +427,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("404s an unknown strategy", async () => {
     await seedAuth();
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: "strat_missing",
       ownerAddress: OWNER,
       amount: "25",
@@ -445,7 +446,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         built: builtRow({ fee_payer: FEE_PAYER, share_ata_rent_funder: FEE_PAYER }),
       });
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         feePayer: FEE_PAYER,
@@ -465,7 +466,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       await seedAuth();
       const strategy = await seedStrategy();
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         feePayer: OWNER,
@@ -481,7 +482,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     it("400s a malformed fee payer before any build", async () => {
       await seedAuth();
       const strategy = await seedStrategy();
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         feePayer: "not-a-real-address",
@@ -516,7 +517,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         swap: swapLeg,
       });
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         amount: "25",
@@ -548,7 +549,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       await seedAuth();
       const strategy = await seedStrategy();
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         amount: "25",
@@ -565,7 +566,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       const strategy = await seedStrategy();
 
       for (const swapSlippageBps of [0, 501]) {
-        const res = await post("deposit-transactions", {
+        const res = await post("deposits/build-unsigned-transaction", {
           strategyId: strategy.id,
           ownerAddress: OWNER,
           amount: "25",
@@ -578,7 +579,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
       // The bounds are inclusive: both edges build.
       for (const swapSlippageBps of [1, 500]) {
-        const res = await post("deposit-transactions", {
+        const res = await post("deposits/build-unsigned-transaction", {
           strategyId: strategy.id,
           ownerAddress: OWNER,
           amount: "25",
@@ -599,7 +600,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       await seedAuth();
       const strategy = await seedStrategy();
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         amount: "25",
@@ -624,7 +625,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         },
       });
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         amount: "25",
@@ -672,7 +673,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         },
       });
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         feePayer,
@@ -705,7 +706,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         },
       });
 
-      const res = await post("deposit-transactions", {
+      const res = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: OWNER,
         amount: "25",
@@ -728,7 +729,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   it("refuses a paused strategy (catalogue admission)", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ status: "paused" });
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -743,7 +744,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     // why the admission gate must refuse it here too.
     await seedAuth();
     const strategy = await seedStrategy({ status: "deprecated" });
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -756,7 +757,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   it("refuses a strategy whose host cluster is not fundable here", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -768,7 +769,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     await seedAuth();
     surfacingEnabled.value = false;
     const strategy = await seedStrategy();
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -780,7 +781,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   it("refuses an unentitled organization", async () => {
     await seedAuth({ entitled: false });
     const strategy = await seedStrategy();
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -792,7 +793,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   it("refuses an invalid ownerAddress at the schema", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: "not-an-address",
       amount: "25",
@@ -805,7 +806,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
     const missingFloor = await post(
-      "deposit-transactions",
+      "deposits/build-unsigned-transaction",
       {
         strategyId: strategy.id,
         ownerAddress: OWNER,
@@ -823,7 +824,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
 
     const res = await post(
-      "deposit-transactions",
+      "deposits/build-unsigned-transaction",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
       { apiKey: PROD_API_KEY.raw }
     );
@@ -844,7 +845,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       hostCluster: "mainnet-beta",
     });
     const res = await post(
-      "deposit-transactions",
+      "deposits/build-unsigned-transaction",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
       { apiKey: PROD_API_KEY.raw }
     );
@@ -869,7 +870,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       environment: "production",
     });
     const missingFloor = await post(
-      "deposit-transactions",
+      "deposits/build-unsigned-transaction",
       {
         strategyId: strategy.id,
         ownerAddress: OWNER,
@@ -882,7 +883,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
 
     const res = await post(
-      "deposit-transactions",
+      "deposits/build-unsigned-transaction",
       { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "24.9" },
       { apiKey: PROD_API_KEY.raw }
     );
@@ -896,10 +897,13 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
   });
 });
 
-describe("POST /v1/earn/external-wallet/deposits — the submit contract", () => {
+describe("POST /v1/earn/deposits/submit-signed-transaction — the submit contract", () => {
   it("requires the Idempotency-Key header", async () => {
     await seedAuth();
-    const res = await post("deposits", { transactionId: "earn_ext_tx", signedTransaction: "AQ==" });
+    const res = await post("deposits/submit-signed-transaction", {
+      transactionId: "earn_ext_tx",
+      signedTransaction: "AQ==",
+    });
     expect(res.status).toBe(400);
     expect(submitExternalWalletDeposit).not.toHaveBeenCalled();
   });
@@ -907,7 +911,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
   it("rejects a body requestId", async () => {
     await seedAuth();
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       {
         transactionId: "earn_ext_tx",
         signedTransaction: "AQ==",
@@ -921,7 +925,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
   it("rejects a non-base64 signedTransaction at the schema", async () => {
     await seedAuth();
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "not base64!!" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -933,7 +937,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
     const scopes = recordCallScopes(submitExternalWalletDeposit);
     const key = crypto.randomUUID();
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: key }
     );
@@ -960,11 +964,11 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
   });
 });
 
-describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
+describe("POST /v1/earn/withdrawals/build-unsigned-transaction — scoping", () => {
   it("refuses an exit body that names a strategy instead of a position", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
-    const res = await post("withdrawal-transactions", {
+    const res = await post("withdrawals/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       shares: "10",
@@ -975,8 +979,8 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
   });
 
   it.each([
-    ["withdrawal preview", "withdrawal-previews"],
-    ["withdrawal transaction", "withdrawal-transactions"],
+    ["withdrawal preview", "external-wallet/withdrawal-previews"],
+    ["withdrawal transaction", "withdrawals/build-unsigned-transaction"],
   ])("404s another project's position for %s", async (_name, path) => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
@@ -988,7 +992,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
 
-    const res = await post("withdrawal-previews", { positionId, shares: "10" });
+    const res = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
@@ -1007,7 +1011,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
 
   it("404s an unknown position", async () => {
     await seedAuth();
-    const res = await post("withdrawal-transactions", {
+    const res = await post("withdrawals/build-unsigned-transaction", {
       positionId: "earn_position_missing",
       shares: "10",
     });
@@ -1017,7 +1021,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
   it("404s a custody position: the treasury exit is a different surface", async () => {
     await seedAuth();
     const positionId = await seedCustodyPosition();
-    const res = await post("withdrawal-transactions", {
+    const res = await post("withdrawals/build-unsigned-transaction", {
       positionId,
       shares: "10",
       minAmountOut: "9.5",
@@ -1029,7 +1033,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
   it("builds the exit from the recorded position facts", async () => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition();
-    const res = await post("withdrawal-transactions", {
+    const res = await post("withdrawals/build-unsigned-transaction", {
       positionId,
       shares: "10",
       minAmountOut: "9.5",
@@ -1064,7 +1068,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     await seedAuth();
     const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
 
-    const res = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const res = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
@@ -1077,7 +1081,7 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     await seedAuth();
     const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
 
-    const res = await post("withdrawal-transactions", {
+    const res = await post("withdrawals/build-unsigned-transaction", {
       positionId,
       shares: "10",
       minAmountOut: "9.5",
@@ -1095,12 +1099,12 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     await seedStrategy({ status: "paused" });
     const positionId = await seedExternalWalletPosition();
 
-    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const exit = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
     expect(exit.status).toBe(200);
 
     // The CONTRAST under identical conditions: the deposit build is refused.
     const strategy = await seedStrategy();
-    const deposit = await post("deposit-transactions", {
+    const deposit = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -1112,7 +1116,7 @@ describe("exit safety (ADR 0002): the exit outlives every money-in gate", () => 
     await seedAuth({ entitled: false });
     surfacingEnabled.value = false;
     const res = await post(
-      "withdrawals",
+      "withdrawals/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1140,7 +1144,7 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const strategy = await seedStrategy();
     await seedRateLimit(env, ACTOR_SCOPE, 60);
 
-    const res = await post("deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -1156,7 +1160,10 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     await seedAuth();
     const strategy = await seedStrategy();
 
-    const res = await post("deposit-transactions", { strategyId: strategy.id, amount: "25" });
+    const res = await post("deposits/build-unsigned-transaction", {
+      strategyId: strategy.id,
+      amount: "25",
+    });
 
     expect(res.status).toBe(400);
     // The org pool is shared: malformed requests must not be able to drain it.
@@ -1174,14 +1181,14 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
       await seedRateLimit(env, `metered:${quota}:org:${TEST_ORG.id}`, 1000);
     }
 
-    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    const preview = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
     expect(preview.status).toBe(200);
-    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const exit = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
     expect(exit.status).toBe(200);
     expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledTimes(1);
 
     // The CONTRAST under identical conditions: the deposit build is refused.
-    const deposit = await post("deposit-transactions", {
+    const deposit = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -1195,12 +1202,12 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     const positionId = await seedExternalWalletPosition();
     rateLimitStoreDown.value = true;
 
-    const preview = await post("withdrawal-previews", { positionId, shares: "10" });
+    const preview = await post("external-wallet/withdrawal-previews", { positionId, shares: "10" });
     expect(preview.status).toBe(200);
-    const exit = await post("withdrawal-transactions", { positionId, shares: "10" });
+    const exit = await post("withdrawals/build-unsigned-transaction", { positionId, shares: "10" });
     expect(exit.status).toBe(200);
 
-    const deposit = await post("deposit-transactions", {
+    const deposit = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: OWNER,
       amount: "25",
@@ -1226,7 +1233,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     submitExternalWalletDeposit.mockResolvedValue(result);
 
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1254,7 +1261,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     submitExternalWalletWithdrawal.mockResolvedValue(result);
 
     const res = await post(
-      "withdrawals",
+      "withdrawals/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1279,7 +1286,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     submitExternalWalletWithdrawal.mockResolvedValue({ ...result, replayed: true });
 
     const first = await post(
-      "withdrawals",
+      "withdrawals/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1290,7 +1297,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     expect(String(rows[0]?.metadata)).toContain("backfilledOnReplay");
 
     const second = await post(
-      "withdrawals",
+      "withdrawals/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1303,7 +1310,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     submitExternalWalletDeposit.mockRejectedValue(badRequest("signature verification failed"));
 
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1324,7 +1331,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
 
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1343,7 +1350,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
 
     const res = await post(
-      "withdrawals",
+      "withdrawals/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );
@@ -1363,7 +1370,7 @@ describe("external-wallet submits: audit ledger parity (PRO-1866)", () => {
     );
 
     const res = await post(
-      "deposits",
+      "deposits/submit-signed-transaction",
       { transactionId: "earn_ext_tx", signedTransaction: "AQ==" },
       { idempotencyKey: crypto.randomUUID() }
     );

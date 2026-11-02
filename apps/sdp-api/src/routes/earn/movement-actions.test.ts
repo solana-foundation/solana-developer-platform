@@ -62,7 +62,7 @@ describe("Earn routes declare an action their movement admits (HOO-2099)", () =>
   it("finds the custody routes that sign a start", () => {
     expect(routes.map(({ route }) => route)).toEqual(
       expect.arrayContaining([
-        "POST /v1/earn/vault-deposits",
+        "POST /v1/earn/deposits/execute",
         "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel",
       ])
     );

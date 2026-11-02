@@ -166,7 +166,7 @@ describe("generated Embedded Yield integration", () => {
         body: { strategyId: strategy.id, amount: "1" },
       },
       {
-        path: "/v1/earn/external-wallet/deposit-transactions",
+        path: "/v1/earn/deposits/build-unsigned-transaction",
         body: {
           strategyId: strategy.id,
           ownerAddress: "customer",
@@ -180,7 +180,7 @@ describe("generated Embedded Yield integration", () => {
         body: { positionId: "position", shares: "0.5" },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-transactions",
+        path: "/v1/earn/withdrawals/build-unsigned-transaction",
         body: {
           positionId: "position",
           shares: "0.5",
@@ -225,8 +225,9 @@ describe("generated Embedded Yield integration", () => {
     await expect(
       generated.buildEarnDepositTransaction({ ownerAddress: "customer", amount: "1" })
     ).resolves.toMatchObject({ transactionId: "build" });
-    const depositFloor = requests.find(({ path }) => path.endsWith("deposit-transactions"))?.body
-      .minSharesOut;
+    const depositFloor = requests.find(({ path }) =>
+      path.endsWith("deposits/build-unsigned-transaction")
+    )?.body.minSharesOut;
     expect(depositFloor).toBe("1.1988");
 
     // A genuinely finer quote is still a thrown error, never a miscount.
@@ -258,7 +259,7 @@ describe("generated Embedded Yield integration", () => {
 
     expect(requests).toEqual([
       {
-        path: "/v1/earn/external-wallet/deposit-transactions",
+        path: "/v1/earn/deposits/build-unsigned-transaction",
         body: { strategyId: strategy.id, ownerAddress: "customer", amount: "1" },
       },
     ]);

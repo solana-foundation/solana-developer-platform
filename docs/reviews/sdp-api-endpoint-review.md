@@ -11690,8 +11690,8 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
-| [E140](#e140-build-an-unsigned-external-wallet-deposit-transaction) | `POST /v1/earn/external-wallet/deposit-transactions` | Unpublished — Earn launch hold | Pending |
-| [E141](#e141-submit-a-signed-external-wallet-deposit) | `POST /v1/earn/external-wallet/deposits` | Unpublished — Earn launch hold | Pending |
+| [E140](#e140-build-an-unsigned-external-wallet-deposit-transaction) | `POST /v1/earn/deposits/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
+| [E141](#e141-submit-a-signed-external-wallet-deposit) | `POST /v1/earn/deposits/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
 | [E142](#e142-get-one-external-wallets-balance-and-earnings) | `GET /v1/earn/external-wallet/earnings` | Unpublished — Earn launch hold | Pending |
 | [E143](#e143-list-one-external-wallets-activity) | `GET /v1/earn/external-wallet/movements` | Unpublished — Earn launch hold | Pending |
 | [E144](#e144-get-one-external-wallet-movement) | `GET /v1/earn/external-wallet/movements/{movementId}` | Unpublished — Earn launch hold | Pending |
@@ -11706,8 +11706,8 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E153](#e153-list-an-external-wallets-asynchronous-withdrawals) | `GET /v1/earn/external-wallet/withdrawal-requests` | Unpublished — Earn launch hold | Pending |
 | [E154](#e154-submit-a-signed-asynchronous-withdrawal-request) | `POST /v1/earn/external-wallet/withdrawal-requests` | Unpublished — Earn launch hold | Pending |
 | [E155](#e155-get-one-asynchronous-withdrawal-request) | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
-| [E156](#e156-build-an-unsigned-external-wallet-exit-transaction) | `POST /v1/earn/external-wallet/withdrawal-transactions` | Unpublished — Earn launch hold | Pending |
-| [E157](#e157-submit-a-signed-external-wallet-withdrawal) | `POST /v1/earn/external-wallet/withdrawals` | Unpublished — Earn launch hold | Pending |
+| [E156](#e156-build-an-unsigned-external-wallet-exit-transaction) | `POST /v1/earn/withdrawals/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
+| [E157](#e157-submit-a-signed-external-wallet-withdrawal) | `POST /v1/earn/withdrawals/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
 | [E158](#e158-list-all-scoped-earn-movements) | `GET /v1/earn/movements` | Unpublished — Earn launch hold | Pending |
 | [E159](#e159-list-provider-managed-programs) | `GET /v1/earn/programs` | Unpublished — Earn launch hold | Pending |
 | [E160](#e160-create-a-provider-managed-program) | `POST /v1/earn/programs` | Unpublished — Earn launch hold | Pending |
@@ -11722,7 +11722,7 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E169](#e169-get-one-yield-strategy) | `GET /v1/earn/strategies/{strategyId}` | Unpublished — Earn launch hold | Pending |
 | [E170](#e170-preview-a-direct-vault-deposit) | `POST /v1/earn/vault-deposit-previews` | Unpublished — Earn launch hold | Pending |
 | [E171](#e171-list-custody-deposits) | `GET /v1/earn/vault-deposits` | Unpublished — Earn launch hold | Pending |
-| [E172](#e172-deposit-from-a-connected-wallet) | `POST /v1/earn/vault-deposits` | Unpublished — Earn launch hold | Pending |
+| [E172](#e172-deposit-from-a-connected-wallet) | `POST /v1/earn/deposits/execute` | Unpublished — Earn launch hold | Pending |
 | [E173](#e173-read-one-custody-deposit) | `GET /v1/earn/vault-deposits/{movementId}` | Unpublished — Earn launch hold | Pending |
 | [E174](#e174-list-live-custody-positions) | `GET /v1/earn/vault-positions` | Unpublished — Earn launch hold | Pending |
 | [E175](#e175-preview-a-queued-custody-withdrawal) | `POST /v1/earn/vault-queued-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
@@ -11734,12 +11734,12 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E181](#e181-read-a-custody-withdrawal-request) | `GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
 | [E182](#e182-recover-a-cancelable-withdrawal-request) | `POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel` | Unpublished — Earn launch hold | Pending |
 | [E183](#e183-list-custody-withdrawals) | `GET /v1/earn/vault-withdrawals` | Unpublished — Earn launch hold | Pending |
-| [E184](#e184-withdraw-from-a-custody-position) | `POST /v1/earn/vault-withdrawals` | Unpublished — Earn launch hold | Pending |
+| [E184](#e184-withdraw-from-a-custody-position) | `POST /v1/earn/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
 | [E185](#e185-read-one-custody-withdrawal) | `GET /v1/earn/vault-withdrawals/{movementId}` | Unpublished — Earn launch hold | Pending |
 
 ### E140: Build an unsigned external-wallet deposit transaction
 
-`POST /v1/earn/external-wallet/deposit-transactions`
+`POST /v1/earn/deposits/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -11810,7 +11810,7 @@ Builds one unsigned vault deposit transaction for the wallet owner to sign. The 
 
 ### E141: Submit a signed external-wallet deposit
 
-`POST /v1/earn/external-wallet/deposits`
+`POST /v1/earn/deposits/submit-signed-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -12886,7 +12886,7 @@ Returns the last durable lifecycle observation. Request creation is share escrow
 
 ### E156: Build an unsigned external-wallet exit transaction
 
-`POST /v1/earn/external-wallet/withdrawal-transactions`
+`POST /v1/earn/withdrawals/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -12968,7 +12968,7 @@ Builds one unsigned external-wallet exit for a tenant position and persists a su
 
 ### E157: Submit a signed external-wallet withdrawal
 
-`POST /v1/earn/external-wallet/withdrawals`
+`POST /v1/earn/withdrawals/submit-signed-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -14200,7 +14200,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ### E172: Deposit from a connected wallet
 
-`POST /v1/earn/vault-deposits`
+`POST /v1/earn/deposits/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -15123,7 +15123,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ### E184: Withdraw from a wallet position
 
-`POST /v1/earn/vault-withdrawals`
+`POST /v1/earn/withdrawals/execute`
 
 - [ ] Good
 - [ ] Needs work

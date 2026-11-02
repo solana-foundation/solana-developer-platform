@@ -116,7 +116,7 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "vault-deposits",
+    "deposits/execute",
     "createEarnVaultDeposit",
     "Deposit from a connected wallet",
     deposit,
@@ -162,7 +162,7 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "vault-withdrawals",
+    "withdrawals/execute",
     "createEarnVaultWithdrawal",
     "Withdraw from a wallet position",
     withdrawal,

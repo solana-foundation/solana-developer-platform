@@ -751,7 +751,7 @@ export async function resolveExternalWalletExit(
 }
 
 /**
- * POST /v1/earn/external-wallet/deposit-transactions — build one unsigned deposit
+ * POST /v1/earn/deposits/build-unsigned-transaction — build one unsigned deposit
  * transaction for an external wallet.
  *
  * MONEY-IN GATES preserve the custody deposit order (routes/earn/CLAUDE.md,
@@ -897,10 +897,10 @@ function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDe
 }
 
 /**
- * POST /v1/earn/external-wallet/withdrawal-transactions — build one unsigned exit
+ * POST /v1/earn/withdrawals/build-unsigned-transaction — build one unsigned exit
  * transaction for an external-wallet position.
  *
- * ADR 0002 exit safety, the same strongest form as `POST /vault-withdrawals`:
+ * ADR 0002 exit safety, the same strongest form as `POST /withdrawals/execute`:
  * no surfacing, entitlement, availability, or environment capability gate.
  * The caller names its position, which carries the vault, owner, and mints.
  * Capability (501, inside the service) is the only provider-shaped refusal
@@ -1000,7 +1000,7 @@ export async function createEarnExternalWalletWithdrawalPreview(
 }
 
 /**
- * POST /v1/earn/external-wallet/deposits — submit the signed deposit transaction.
+ * POST /v1/earn/deposits/submit-signed-transaction — submit the signed deposit transaction.
  *
  * `Idempotency-Key` is REQUIRED, exactly as on the custody vault routes and
  * for the same reason: the chain has no request dedupe, and the recorded
@@ -1075,7 +1075,7 @@ export async function createEarnExternalWalletDeposit(
   return success(c, response);
 }
 
-/** POST /v1/earn/external-wallet/withdrawals — submit the signed exit transaction. */
+/** POST /v1/earn/withdrawals/submit-signed-transaction — submit the signed exit transaction. */
 export async function createEarnExternalWalletWithdrawal(
   c: ValidatedBodyContext<typeof earnExternalWalletSubmitSchema>
 ) {

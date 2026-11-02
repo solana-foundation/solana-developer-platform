@@ -146,7 +146,7 @@ export class EmbeddedYieldClient {
     minSharesOut?: string;
   }): Promise<BuiltTransaction> {
     const data = await this.request<DepositBuildResult>(
-      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/deposits/build-unsigned-transaction",
       { method: "POST", body: input }
     );
     if (data.requiresSeparateSwap || !data.transaction) {
@@ -163,7 +163,7 @@ export class EmbeddedYieldClient {
     idempotencyKey: string
   ): Promise<YieldMovement> {
     const data = await this.request<{ deposit: YieldMovement }>(
-      "/v1/earn/external-wallet/deposits",
+      "/v1/earn/deposits/submit-signed-transaction",
       {
         method: "POST",
         body: { transactionId, signedTransaction },
@@ -224,7 +224,7 @@ export class EmbeddedYieldClient {
     feePayer?: string;
   }): Promise<BuiltTransaction> {
     const data = await this.request<WithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/withdrawals/build-unsigned-transaction",
       { method: "POST", body: input }
     );
     return data.transaction;
@@ -236,7 +236,7 @@ export class EmbeddedYieldClient {
     idempotencyKey: string
   ): Promise<YieldMovement> {
     const data = await this.request<{ withdrawal: YieldMovement }>(
-      "/v1/earn/external-wallet/withdrawals",
+      "/v1/earn/withdrawals/submit-signed-transaction",
       {
         method: "POST",
         body: { transactionId, signedTransaction },

@@ -338,7 +338,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/deposit-transactions",
+    path: "/v1/earn/deposits/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned external-wallet deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
@@ -366,7 +366,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/deposits",
+    path: "/v1/earn/deposits/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed external-wallet deposit",
     operationId: "createEarnExternalWalletDeposit",
@@ -426,7 +426,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-transactions",
+    path: "/v1/earn/withdrawals/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned external-wallet exit transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
@@ -454,7 +454,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawals",
+    path: "/v1/earn/withdrawals/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed external-wallet withdrawal",
     operationId: "createEarnExternalWalletWithdrawal",

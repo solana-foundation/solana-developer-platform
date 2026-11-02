@@ -87,7 +87,7 @@ import {
 } from "./vault-position-hydration";
 
 /**
- * POST /v1/earn/vault-deposits — open or add to a non-custodial vault position,
+ * POST /v1/earn/deposits/execute — open or add to a non-custodial vault position,
  * funded from an SDP custody wallet and signed by SDP.
  *
  * A separate collection from `/programs` on purpose. A "program" is the
@@ -1219,7 +1219,7 @@ export async function createEarnVaultWithdrawalPreview(
 }
 
 /**
- * POST /v1/earn/vault-withdrawals — exit a vault position, signed by the
+ * POST /v1/earn/withdrawals/execute — exit a vault position, signed by the
  * custody wallet that holds it. Build, simulate, sign, record, then broadcast;
  * the reconciliation sweep finishes an ambiguous send.
  */
