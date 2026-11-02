@@ -68,11 +68,11 @@ describe("TokenService", () => {
       .run()
       .catch(() => {});
     await db
-      .prepare("DELETE FROM users")
+      .prepare("DELETE FROM organizations")
       .run()
       .catch(() => {});
     await db
-      .prepare("DELETE FROM organizations")
+      .prepare("DELETE FROM users")
       .run()
       .catch(() => {});
 

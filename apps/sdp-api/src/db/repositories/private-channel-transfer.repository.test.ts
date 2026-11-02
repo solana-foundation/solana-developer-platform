@@ -79,8 +79,8 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     await db.prepare("DELETE FROM private_channels").run();
     await db.prepare("DELETE FROM private_channel_instances").run();
     await db.prepare("DELETE FROM projects").run();
-    await db.prepare("DELETE FROM users").run();
     await db.prepare("DELETE FROM organizations").run();
+    await db.prepare("DELETE FROM users").run();
 
     const users = [
       [TEST_USER.id, TEST_USER.email, "Sender User"],
