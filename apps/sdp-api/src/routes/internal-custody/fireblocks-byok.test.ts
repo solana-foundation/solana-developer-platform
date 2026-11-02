@@ -83,7 +83,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete-installation`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -226,7 +230,10 @@ describe("Fireblocks BYOK lifecycle", () => {
         [fields.signingKeyId]
       )
     ).toEqual({ encrypted_private_key: null });
-    const replay = await request(`/connections/${connected.connectionId}/complete-installation`, {});
+    const replay = await request(
+      `/connections/${connected.connectionId}/complete-installation`,
+      {}
+    );
     expect(replay.status).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(1);
     const listed = await request("/connections?provider=fireblocks");
@@ -674,7 +681,9 @@ describe("Fireblocks vault discovery and selection", () => {
       vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
       nextCursor: "page&2",
     });
-    expect((await request("/fireblocks/vaults/discover", { ...input, after: "page&2" })).status).toBe(200);
+    expect(
+      (await request("/fireblocks/vaults/discover", { ...input, after: "page&2" })).status
+    ).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(new URL(String(fetch.mock.calls[1]?.[0])).searchParams.get("after")).toBe("page&2");
     expect(
@@ -688,9 +697,9 @@ describe("Fireblocks vault discovery and selection", () => {
   it("refuses cross-project and expired discovery before calling Fireblocks", async () => {
     const fetch = providerResponse();
     const input = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    expect((await request("/fireblocks/vaults/discover", input, `${PROJECT_ID}_production`)).status).toBe(
-      404
-    );
+    expect(
+      (await request("/fireblocks/vaults/discover", input, `${PROJECT_ID}_production`)).status
+    ).toBe(404);
     await getDb(env).execute(
       "UPDATE fireblocks_csr_requests SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?",
       [fields.signingKeyId]
@@ -937,7 +946,9 @@ describe("Fireblocks vault discovery and selection", () => {
       { wallet_id: "fb_0", public_key: ADDRESS, label: "Treasury", purpose: "transfer" },
       { wallet_id: "fb_7", public_key: OTHER_ADDRESS, label: "Operations", purpose: "transfer" },
     ]);
-    expect((await request(`/connections/${connectionId}/complete-installation`, {})).status).toBe(200);
+    expect((await request(`/connections/${connectionId}/complete-installation`, {})).status).toBe(
+      200
+    );
     expect(
       (await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey)).status
     ).toBe(201);

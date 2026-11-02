@@ -752,7 +752,11 @@ describe("payment transfer batches", () => {
       const recipients = await seedRentRecipients();
       const idempotencyKey = crypto.randomUUID();
 
-      const refused = await postBatch("/v1/payments/transfer-batches/execute", recipients, idempotencyKey);
+      const refused = await postBatch(
+        "/v1/payments/transfer-batches/execute",
+        recipients,
+        idempotencyKey
+      );
 
       expect(refused.status).toBe(409);
       expect(await refused.json()).toMatchObject({
@@ -782,7 +786,11 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-      const accepted = await postBatch("/v1/payments/transfer-batches/execute", recipients, idempotencyKey);
+      const accepted = await postBatch(
+        "/v1/payments/transfer-batches/execute",
+        recipients,
+        idempotencyKey
+      );
       expect(accepted.status).toBe(200);
     });
 
