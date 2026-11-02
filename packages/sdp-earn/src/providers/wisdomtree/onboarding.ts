@@ -34,7 +34,7 @@ const documentInputSchema = z.object({
 });
 const jsonObject = z.record(z.string(), z.json());
 
-function input<T>(schema: z.ZodType<T>, value: unknown): T {
+function input<S extends z.ZodType>(schema: S, value: z.input<S>): z.output<S> {
   const result = schema.safeParse(value);
   if (!result.success) throw badRequest("Invalid WisdomTree onboarding input");
   return result.data;
