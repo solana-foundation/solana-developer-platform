@@ -165,7 +165,9 @@ describe("WisdomTree onboarding wire contract", () => {
     const init = f.mock.calls[1].arguments[1];
     assert.ok(init?.body instanceof FormData);
     assert.equal(init.body.get("document_type"), "formation_document");
-    assert.equal(await (init.body.get("file") as File).text(), "%PDF-test");
+    const file = init.body.get("file");
+    assert.ok(file instanceof File);
+    assert.equal(await file.text(), "%PDF-test");
     assert.equal(new Headers(init.headers).has("Content-Type"), false);
   });
   it("rejects empty, unsupported and oversized files before authentication", async () => {

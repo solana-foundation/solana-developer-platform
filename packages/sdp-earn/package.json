@@ -101,7 +101,7 @@
   "dependencies": {
     "@sdp/redaction": "workspace:*",
     "@sdp/types": "workspace:*",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
