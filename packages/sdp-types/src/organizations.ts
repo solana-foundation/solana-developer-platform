@@ -77,13 +77,7 @@ export interface Organization {
 }
 
 export interface OrganizationSettings {
-  defaultEnvironment?: "sandbox" | "production";
   allowedIpAddresses?: string[];
-  /**
-   * Pre-enforcement allowlist parked by migration 0055 — never applied, any
-   * shape (predates validation). Re-apply by sending it as `allowedIpAddresses`.
-   */
-  legacyAllowedIpAddresses?: unknown;
   providerOverrides?: OrganizationProviderOverrides;
   /**
    * Set from Clerk org `private_metadata.sdp.enableProductionProject` by the
@@ -92,10 +86,6 @@ export interface OrganizationSettings {
    * list hides them.
    */
   enableProductionProject?: boolean;
-  customRateLimits?: {
-    requestsPerMinute?: number;
-    requestsPerDay?: number;
-  };
 }
 
 /**
@@ -104,11 +94,7 @@ export interface OrganizationSettings {
  * active BYOK connection in the default sandbox project.
  */
 export interface OrganizationOnboardingSetup {
-  status: "not_started" | "in_progress" | "complete";
-  currentStep: "custody" | "complete";
   custodyProviders: CustodyProvider[];
-  completedAt: string | null;
-  version: number;
   canManage: boolean;
 }
 

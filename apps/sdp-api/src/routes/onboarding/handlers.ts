@@ -1,5 +1,5 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
-import type { OrganizationSettings } from "@sdp/types/organizations";
+import type { OrganizationOnboardingSetup, OrganizationSettings } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
@@ -9,15 +9,13 @@ import { success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { Env } from "@/types/env";
 import type { OnboardingAccess } from "./access";
-import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
 
 type AppContext = Context<{ Bindings: Env }>;
 
 async function fetchOrganization(db: DatabaseClient, orgId: string) {
   const org = await db
     .prepare(
-      `SELECT id, name, slug, status, settings, onboarding_completed_at,
-              onboarding_version, created_at, updated_at
+      `SELECT id, name, slug, status, settings, created_at, updated_at
        FROM organizations WHERE id = ?`
     )
     .bind(orgId)
@@ -27,8 +25,6 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
       slug: string;
       status: string;
       settings: string | null;
-      onboarding_completed_at: string | null;
-      onboarding_version: number;
       created_at: string;
       updated_at: string;
     }>();
@@ -46,8 +42,6 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     settings: storedSettings === null ? null : projectOrganizationSettings(storedSettings),
     createdAt: org.created_at,
     updatedAt: org.updated_at,
-    onboardingCompletedAt: org.onboarding_completed_at,
-    onboardingVersion: org.onboarding_version,
   };
 }
 
@@ -97,14 +91,9 @@ async function buildOnboardingSetup(params: {
   canManage: boolean;
   db: DatabaseClient;
   organization: Awaited<ReturnType<typeof fetchOrganization>>;
-}) {
+}): Promise<OrganizationOnboardingSetup> {
   const custodyProviders = await fetchCustodyProviders(params.db, params.organization.id);
-  return resolveOnboardingSetup({
-    completedAt: params.organization.onboardingCompletedAt,
-    custodyProviders,
-    version: params.organization.onboardingVersion ?? ONBOARDING_VERSION,
-    canManage: params.canManage,
-  });
+  return { custodyProviders, canManage: params.canManage };
 }
 
 export const getOnboardingStatus = async (c: AppContext) => {
@@ -121,6 +110,5 @@ export const getOnboardingStatus = async (c: AppContext) => {
     db,
     organization,
   });
-  const { onboardingCompletedAt: _, onboardingVersion: __, ...organizationResponse } = organization;
-  return success(c, { linked: true, organization: organizationResponse, setup });
+  return success(c, { linked: true, organization, setup });
 };

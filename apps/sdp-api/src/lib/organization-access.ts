@@ -268,11 +268,8 @@ export async function authorizeApiKey(
  */
 export function projectOrganizationSettings(settings: OrganizationSettings): OrganizationSettings {
   return {
-    defaultEnvironment: settings.defaultEnvironment,
     allowedIpAddresses: settings.allowedIpAddresses,
-    legacyAllowedIpAddresses: settings.legacyAllowedIpAddresses,
     providerOverrides: settings.providerOverrides,
     enableProductionProject: settings.enableProductionProject,
-    customRateLimits: settings.customRateLimits,
   };
 }

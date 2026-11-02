@@ -20,10 +20,6 @@ import {
 
 const organizationSettingsSchema = z
   .object({
-    defaultEnvironment: z.enum(["sandbox", "production"]).optional().openapi({
-      description: "Default environment for new resources.",
-      example: "production",
-    }),
     allowedIpAddresses: z
       .array(z.string())
       .optional()
@@ -32,27 +28,6 @@ const organizationSettingsSchema = z
           "IPv4/IPv6 addresses and CIDR ranges the organization's API keys may be used from. It applies to every API-key request, intersected with each key's own `allowedIps`, and never to signed-in members. An empty or absent list places no restriction. Entries are stored in canonical form, so a range with host bits set is returned as the network it selects.",
         example: ["203.0.113.0/24"],
       }),
-    legacyAllowedIpAddresses: z
-      .unknown()
-      .optional()
-      .openapi({
-        description:
-          "Read-only. An allowlist recorded before this setting was enforced, retained for reference and never applied. Send it back as `allowedIpAddresses` to put it into effect, which validates it first.",
-        example: ["203.0.113.0/24"],
-      }),
-    customRateLimits: z
-      .object({
-        requestsPerMinute: z.number().int().positive().optional().openapi({
-          description: "Maximum requests allowed per minute.",
-          example: 60,
-        }),
-        requestsPerDay: z.number().int().positive().optional().openapi({
-          description: "Maximum requests allowed per day.",
-          example: 10000,
-        }),
-      })
-      .optional()
-      .openapi({ description: "Custom rate limit overrides." }),
   })
   .strict()
   .openapi({ description: "Organization-level settings." });
@@ -249,7 +224,6 @@ export const updateOrganizationRequestSchema = updateOrgSchemaBase
     settings: withOpenApi(updateOrgSchemaBase.shape.settings, {
       description: "Organization settings to update.",
       example: {
-        defaultEnvironment: "production",
         allowedIpAddresses: ["203.0.113.0/24"],
       },
     }),
