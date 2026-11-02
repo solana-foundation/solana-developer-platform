@@ -1,4 +1,5 @@
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
+import { EARN_PROVIDER_REDEMPTION_MODES } from "@sdp/types/earn-provider-orders";
 import { z } from "zod";
 import { isoDateTimeSchema, successResponseSchema } from "@/openapi/schemas/base";
 
@@ -597,6 +598,7 @@ export const earnQueuedWithdrawalOptionsFields = {
   instant: z.boolean().openapi({
     description: "Whether an atomic withdrawal is independently available.",
   }),
+  providerRedemptionModes: z.array(z.enum(EARN_PROVIDER_REDEMPTION_MODES)).optional(),
   providerOrder: z.boolean().openapi({
     description: "Whether a provider-managed delayed order is independently available.",
   }),
@@ -961,6 +963,7 @@ const earnExternalWalletWithdrawalTransactionSchema = earnExternalWalletTransact
 
 const earnExternalWalletMovementSchema = z
   .object({
+    settlementOutcome: z.enum(["delivered", "cancelled"]).optional(),
     movementId: z.string().openapi({ example: "earn_movement_example" }),
     positionId: z.string().openapi({ example: "earn_position_example" }),
     provider: z.string().openapi({ example: "kamino" }),

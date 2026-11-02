@@ -9,7 +9,10 @@ import {
   type EarnSwapSourceToken,
   earnSwapSourceTokens,
 } from "@sdp/types/earn";
-import { earnProviderDepositSettlement } from "@sdp/types/provider-access";
+import {
+  earnProviderDepositSettlement,
+  earnRequiresVaultPreparation,
+} from "@sdp/types/provider-access";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
@@ -64,6 +67,7 @@ import {
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
+import { EarnVaultPreparationFailedError, prepareEarnVaultAccount } from "./earn-provider-actions";
 import {
   forgetVaultDepositFloor,
   recallVaultDepositFloor,
@@ -215,6 +219,7 @@ type DepositSubmissionResolution =
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
 
 function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
+  if (outcome?.movement.settlementOutcome === "delivered") return 4;
   if (
     outcome?.kind === "deposit" &&
     earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
@@ -488,7 +493,8 @@ function depositMovementCopy(outcome: DepositOutcome, t: Translation) {
 
   if (
     earnProviderDepositSettlement(outcome.movement.strategy.provider) === "provider_order" &&
-    outcome.movement.status === "confirmed"
+    outcome.movement.status === "confirmed" &&
+    outcome.movement.settlementOutcome !== "delivered"
   ) {
     return {
       title: t("DashboardEarn.deposit.providerOrderConfirmedTitle"),
@@ -1053,6 +1059,11 @@ function DepositReviewStep(props: DepositReviewStepProps) {
         />
       ) : null}
 
+      {strategy.feeSponsored && earnRequiresVaultPreparation(strategy.provider) ? (
+        <p className="text-sm text-secondary" role="status">
+          {t("DashboardEarn.providerAction.preparationNote")}
+        </p>
+      ) : null}
       <DepositConfirmNote feeSponsored={strategy.feeSponsored} swapActive={swapActive} />
       {submitError ? <EarnErrorNote message={submitError} /> : null}
 
@@ -1300,6 +1311,22 @@ export function EarnVaultDepositModal({
       setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
       return;
     }
+    if (strategy.feeSponsored && earnRequiresVaultPreparation(strategy.provider)) {
+      try {
+        await prepareEarnVaultAccount(
+          { strategyId: strategy.id, custodyWalletId: wallet.id },
+          key,
+          controller.signal
+        );
+      } catch (cause) {
+        if (cause instanceof EarnVaultPreparationFailedError) {
+          vaultDepositIdempotencyKeyStore.release(fingerprint, key);
+          forgetVaultDepositFloor(fingerprint);
+        }
+        throw cause;
+      }
+      if (controller.signal.aborted) return;
+    }
     const result = await createEarnVaultDeposit(
       {
         strategyId: strategy.id,
@@ -1315,6 +1342,18 @@ export function EarnVaultDepositModal({
       },
       key
     );
+    applyDepositAnswer(result, fingerprint, key, controller, amount, wallet, submittedAt);
+  }
+
+  function applyDepositAnswer(
+    result: Awaited<ReturnType<typeof createEarnVaultDeposit>>,
+    fingerprint: string,
+    key: string,
+    controller: AbortController,
+    amount: string,
+    wallet: EarnFundingWallet,
+    submittedAt: number
+  ) {
     // Key bookkeeping FIRST and unconditionally: the store outlives the
     // component, so an unmount mid-flight must not skip recording what the
     // server just answered.

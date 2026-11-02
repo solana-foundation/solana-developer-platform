@@ -30,6 +30,7 @@ export type EarnVaultAsyncWithdrawalRoute =
     }
   | {
       kind: "provider_order";
+      redemptionModes?: readonly ("standard" | "instant")[];
       summary: EarnVaultAsyncWithdrawalSummary;
     }
   | {
@@ -81,6 +82,9 @@ export function earnVaultAsyncWithdrawalRoute(
   if (options.providerOrder) {
     return {
       kind: "provider_order",
+      ...(options.providerRedemptionModes === undefined
+        ? {}
+        : { redemptionModes: options.providerRedemptionModes }),
       summary: {
         titleKey: "DashboardEarn.exitRoute.providerOrderTitle",
         messageKey: "DashboardEarn.exitRoute.providerOrderDescription",

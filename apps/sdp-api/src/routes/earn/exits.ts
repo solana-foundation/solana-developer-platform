@@ -16,6 +16,14 @@ const EARN_MOUNT_PATH = "/v1/earn";
  * can hold its route's action to the movement's.
  */
 const EARN_POST_ROUTES: readonly { path: RegExp; movement: MovementOf<"earn"> | "read" }[] = [
+  {
+    path: /^\/provider-actions\/(?:preparations|external\/(?:preparation-transactions|preparations))$/,
+    movement: "earn.prepare",
+  },
+  {
+    path: /^\/provider-actions\/(?:cancellations|external\/(?:cancellation-transactions|cancellations))$/,
+    movement: "earn.provider_order_cancel",
+  },
   { path: /^\/vault-deposits$/, movement: "earn.deposit" },
   { path: /^\/external-wallet\/deposit-transactions$/, movement: "earn.deposit" },
   { path: /^\/external-wallet\/deposits$/, movement: "earn.deposit" },

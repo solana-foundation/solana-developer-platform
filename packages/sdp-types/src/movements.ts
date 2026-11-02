@@ -149,6 +149,8 @@ export const MOVEMENTS = {
   "dvp.cancel": { module: "dvp", kind: "exit" },
   "dvp.reclaim": { module: "dvp", kind: "exit" },
 
+  "earn.prepare": { module: "earn", kind: "start", actions: ["earn.execute"] },
+  "earn.provider_order_cancel": { module: "earn", kind: "start", actions: ["earn.manage"] },
   "earn.deposit": { module: "earn", kind: "start", actions: ["earn.execute"] },
   "earn.withdraw": { module: "earn", kind: "exit" },
   /** Requests a queued withdrawal; the proceeds go to the owner. */

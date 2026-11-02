@@ -152,6 +152,24 @@ describe("provider-order settlement watches", () => {
     settledAt: TIMESTAMP,
   } satisfies EarnVaultWithdrawal;
 
+  it("keeps Plume mints open until verified delivery", () => {
+    expect(isEarnVaultDepositInFlight({ ...deposit, provider: "plume" })).toBe(true);
+    expect(
+      isEarnVaultDepositInFlight({ ...deposit, provider: "plume", settlementOutcome: "delivered" })
+    ).toBe(false);
+  });
+  it("keeps Plume redemptions open after source finality", () => {
+    expect(
+      isEarnVaultWithdrawalInFlight({ ...withdrawal, provider: "plume", status: "confirmed" })
+    ).toBe(true);
+    expect(
+      isEarnVaultWithdrawalInFlight({
+        ...withdrawal,
+        provider: "plume",
+        settlementOutcome: "cancelled",
+      })
+    ).toBe(false);
+  });
   it("watches a confirmed provider-order deposit like any other wire-terminal row", () => {
     expect(isEarnVaultDepositInFlight(deposit)).toBe(false);
     expect(isEarnVaultDepositInFlight({ ...deposit, provider: "retired_provider" })).toBe(false);

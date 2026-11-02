@@ -7,6 +7,10 @@ import type {
 } from "@sdp/types/earn";
 import { EARN_MOVEMENT_TRANSITIONS } from "@sdp/types/earn";
 import {
+  type EarnProviderSettlement,
+  earnProviderSettlementSchema,
+} from "@sdp/types/earn-provider-orders";
+import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   EARN_PROVIDER_WITHDRAWAL_SETTLEMENT,
 } from "@sdp/types/provider-access";
@@ -658,6 +662,12 @@ export interface EarnMovementsRepository {
    * claiming that the provider has economically settled it. Guarded to a
    * confirmed vault row; null means a concurrent transition won first.
    */
+  claimProviderOrderMovements(input: {
+    environment: SdpEnvironment;
+    providers: readonly string[];
+    limit: number;
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
   recordVaultMovementChainFinalization(input: {
     movementId: string;
     organizationId: string;
@@ -795,6 +805,7 @@ export interface ExternalWalletMovementTotals {
 }
 
 interface AdvanceVaultMovementInput {
+  providerSettlement?: EarnProviderSettlement;
   movementId: string;
   organizationId: string;
   toStatus: string;
@@ -812,6 +823,7 @@ interface AdvanceVaultMovementInput {
 }
 
 interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
+  redemptionMode?: "standard" | "instant";
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -986,7 +998,7 @@ function vaultSettlementFilter(
 ): { clause: string; values: readonly unknown[] } {
   if (settled === undefined) return { clause: "", values: [] };
   const predicate =
-    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])) OR (status = 'finalized' AND provider_data -> 'providerSettlement' IS NOT NULL))";
   return {
     clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
     values: [
@@ -2558,6 +2570,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async advanceVaultMovement(input) {
       assertVaultTransitionMetadata(input);
+      const cancelled = input.providerSettlement?.outcome === "cancelled";
       const sources = allowedSourceStatuses("vault_direct", input.toStatus);
       const guards = sources.map(() => "?").join(", ");
 
@@ -2573,6 +2586,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           values.push(value);
         }
       }
+      appendProviderSettlementMetadata(input, assignments, values);
       if (input.confirmedAt !== undefined) {
         // COALESCEd rather than overwritten: a sweep whose first observation is
         // already finalized never saw a separate commitment, and 0062 requires the
@@ -2581,7 +2595,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
         values.push(input.confirmedAt);
       }
-      if (input.toStatus === "confirmed" || input.toStatus === "finalized") {
+      if (cancelled) {
+        assignments.push("amount_settled = '0'", "token_amount_settled = '0'");
+      }
+      if (["confirmed", "finalized"].includes(input.toStatus) && !cancelled) {
         // Kamino encodes a maximum deposit. Only a finalized receipt establishes
         // its actual debit; confirmation alone never supplies an amount.
         assignments.push(`amount_settled = CASE
@@ -2589,7 +2606,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           ELSE COALESCE(amount_settled, amount_requested) END`);
         values.push(input.depositReceipt?.amount ?? null);
       }
-      if (input.toStatus === "finalized") {
+      if (input.toStatus === "finalized" && !cancelled) {
         assignments.push(
           `token_amount_settled = CASE
              WHEN provider = 'kamino' AND direction = 'deposit' THEN ?
@@ -2604,6 +2621,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
       }
 
+      const providerGuard = providerSettlementPredicate(input.providerSettlement);
       const advance = (target: AppDb) =>
         target
           .prepare(
@@ -2613,6 +2631,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND organization_id = ?
                 AND execution_model = 'vault_direct'
                 AND status IN (${guards})
+                ${providerGuard.sql}
                 ${input.depositReceipt ? "AND provider = 'kamino' AND direction = 'deposit' AND ?::numeric <= amount_requested::numeric" : ""}
               RETURNING *`
           )
@@ -2621,6 +2640,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             input.movementId,
             input.organizationId,
             ...sources,
+            ...providerGuard.bindings,
             ...(input.depositReceipt ? [input.depositReceipt.amount] : [])
           )
           .first<Record<string, unknown>>();
@@ -2679,7 +2699,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             movement.position_id,
             input.organizationId
           );
-        } else if (candidate.direction === "deposit") {
+        } else if (shouldActivateVaultPosition(candidate.direction, cancelled)) {
           await transaction
             .prepare(
               `UPDATE earn_positions
@@ -2693,6 +2713,25 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         }
         return movement;
       });
+    },
+
+    async claimProviderOrderMovements(input) {
+      if (input.providers.length === 0) return [];
+      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 256)
+        throw new Error("Invalid provider-order batch limit");
+      const rows = await db
+        .prepare(`WITH candidates AS (
+        SELECT id FROM earn_movements WHERE execution_model='vault_direct'
+          AND status='confirmed' AND chain_finalized_at IS NOT NULL AND environment=?
+          AND provider=ANY(?::text[])
+          AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at < ?)
+        ORDER BY COALESCE(reconciliation_attempted_at,created_at),id
+        LIMIT ? FOR UPDATE SKIP LOCKED
+      ) UPDATE earn_movements m SET reconciliation_attempted_at=sdp_iso_now()
+        FROM candidates c WHERE m.id=c.id RETURNING m.*`)
+        .bind(input.environment, [...input.providers], input.retryBefore, input.limit)
+        .all<Record<string, unknown>>();
+      return rows.results.map(mapMovementRow);
     },
 
     async recordVaultMovementChainFinalization(input) {
@@ -2895,10 +2934,7 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   ) {
     throw new Error("confirmedAt is only valid when confirming an earn vault movement");
   }
-  if (
-    (input.toStatus === "confirmed" || input.toStatus === "finalized") &&
-    !input.confirmedAt?.trim()
-  ) {
+  if (["confirmed", "finalized"].includes(input.toStatus) && !input.confirmedAt?.trim()) {
     throw new Error("confirmedAt is required when confirming an earn vault movement");
   }
   if (input.tokenAmountSettled !== undefined && input.toStatus !== "finalized") {
@@ -2942,9 +2978,9 @@ async function insertVaultWithdrawalMovement(
          signature, signed_transaction, last_valid_block_height,
          request_id, idempotency_fingerprint,
          created_by, initiated_by_key_id,
-         creates_share_account, share_ata_rent_funder
+         creates_share_account, share_ata_rent_funder, provider_data
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'withdrawal', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -2971,7 +3007,10 @@ async function insertVaultWithdrawalMovement(
       input.idempotencyFingerprint,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
-      ...shareAccountClaimBindings(input)
+      ...shareAccountClaimBindings(input),
+      JSON.stringify(
+        input.redemptionMode === undefined ? {} : { redemptionMode: input.redemptionMode }
+      )
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
@@ -3419,4 +3458,41 @@ async function insertVaultMovement(
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
+}
+
+function shouldActivateVaultPosition(direction: string, cancelled: boolean): boolean {
+  return direction === "deposit" || cancelled;
+}
+
+function providerSettlementPredicate(evidence: AdvanceVaultMovementInput["providerSettlement"]): {
+  sql: string;
+  bindings: string[];
+} {
+  if (evidence === undefined) return { sql: "", bindings: [] };
+  return {
+    sql: `AND signature = ? AND vault_address = ?
+    AND (CASE WHEN direction = 'deposit' THEN source_address ELSE destination_address END) = ?
+    AND (SELECT CASE WHEN ? = 'cancelled' OR earn_movements.direction = 'deposit' THEN p.share_mint ELSE p.token_mint END FROM earn_positions p WHERE p.id = earn_movements.position_id) = ?`,
+    bindings: [
+      evidence.sourceSignature,
+      evidence.providerReference,
+      evidence.ownerAddress,
+      evidence.outcome,
+      evidence.tokenMint,
+    ],
+  };
+}
+
+function appendProviderSettlementMetadata(
+  input: AdvanceVaultMovementInput,
+  assignments: string[],
+  values: unknown[]
+): void {
+  if (input.providerSettlement !== undefined) {
+    const evidence = earnProviderSettlementSchema.parse(input.providerSettlement);
+    if (input.toStatus !== "finalized")
+      throw new Error("Provider completion requires finalization");
+    assignments.push("provider_data = jsonb_set(provider_data, '{providerSettlement}', ?::jsonb)");
+    values.push(JSON.stringify(evidence));
+  }
 }
