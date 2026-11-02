@@ -63,12 +63,27 @@ const SENSITIVE_ASSIGNMENT_PATTERN =
 // the generic rule. Punctuation stays INSIDE the value exactly as the generic
 // rule keeps it: `password=alpha;bravo` is one value, and a `;`, `)`, `]` or
 // quote that follows a word is that word's tail while the `=` that opens the
-// next assignment is not. Every quantified part has one forced parse — the
-// whitespace and word classes are disjoint, so their split cannot move, and
-// the lookahead rejects every shorter prefix of a continuation run — so the
-// scan stays linear.
-const SENSITIVE_WORD_ASSIGNMENT_PATTERN =
-  /\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[^\S\n\r]+[^,\s}=]+(?![\w=-]))*/gi;
+// next assignment is not. That boundary also has to preserve a multi-word
+// credential name whole: a word followed by a space otherwise reads as more
+// value, so `password=foo api key=SECRET` redacted `foo api` and left the
+// mangled remainder `key=SECRET` — a name no rule recognizes — readable. A
+// continuation word therefore must not OPEN a complete space-separated name
+// assignment (the two-word keys the generic and word rules recognize): the
+// lookahead at the word's start rejects it, which ends the value before the
+// name so the name's own rule redacts the pair. A word before an unknown
+// `name=` pair (`beta key=`) is still value: only complete credential names
+// are protected. Every quantified part has one forced parse — the whitespace
+// and word classes are disjoint, so their split cannot move, and both
+// lookaheads reject every shorter parse of a continuation word (a prefix is
+// followed by a word character, and a word that opens a name assignment is
+// rejected whole) — so the scan stays linear.
+const MULTI_WORD_CREDENTIAL_ASSIGNMENT = String.raw`(?:app[^\S\n\r]+secret|api[^\S\n\r]+(?:secret|key)|client[^\S\n\r]+secret|wallet[^\S\n\r]+(?:secret|passphrase)|signing[^\S\n\r]+secret|private[^\S\n\r]+key|secret[^\S\n\r]+key|access[^\S\n\r]+token|refresh[^\S\n\r]+token|id[^\S\n\r]+token|set[^\S\n\r]+cookie|seed[^\S\n\r]+(?:phrase|mnemonic))[^\S\n\r]*[:=]`;
+const SENSITIVE_WORD_ASSIGNMENT_PATTERN = new RegExp(
+  String.raw`\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[^\S\n\r]+(?!` +
+    MULTI_WORD_CREDENTIAL_ASSIGNMENT +
+    String.raw`)[^,\s}=]+(?![\w=-]))*`,
+  "gi"
+);
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =

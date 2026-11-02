@@ -370,6 +370,33 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.equal(scrubbed, "seed=[REDACTED] token=[REDACTED]");
   });
 
+  it("ends a space-separated assignment value before a complete credential name", () => {
+    // The boundary must not fall inside a multi-word credential name: a word
+    // followed by a space used to read as more value, so
+    // `password=foo api key=SECRET` redacted `foo api` and left the mangled
+    // remainder `key=SECRET` — a name no rule recognizes — readable. The
+    // value ends before the complete name, which its own rule then redacts.
+    const scrubbed = scrubTelemetryString("password=foo api key=SECRET");
+
+    assert.equal(scrubbed, "password=[REDACTED] api key=[REDACTED]");
+
+    const secretKey = scrubTelemetryString("password=foo secret key=SECRET");
+
+    assert.equal(secretKey, "password=[REDACTED] secret key=[REDACTED]");
+
+    const privateKey = scrubTelemetryString("password=foo private key=KEYVAL");
+
+    assert.equal(privateKey, "password=[REDACTED] private key=[REDACTED]");
+
+    const walletPassphrase = scrubTelemetryString("password=foo wallet passphrase=words here");
+
+    assert.equal(walletPassphrase, "password=[REDACTED] wallet passphrase=[REDACTED]");
+
+    const insideMnemonic = scrubTelemetryString("seed=legal winner api key=SECRET status=502");
+
+    assert.equal(insideMnemonic, "seed=[REDACTED] api key=[REDACTED] status=502");
+  });
+
   it("ends a space-separated assignment value at structure", () => {
     const scrubbed = scrubTelemetryString(
       "Import failed (walletPassphrase=correct horse battery staple, retrying)"
