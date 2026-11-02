@@ -1,20 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as walletActivityServer from "@/app/dashboard/[projectId]/custody/wallet-activity.server";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
-  issuance: vi.fn(),
-  loadWalletActivity: vi.fn(),
 }));
 
-vi.mock("@/flags", () => ({
-  issuance: mocks.issuance,
-}));
-
-vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", () => ({
-  loadWalletActivity: mocks.loadWalletActivity,
-  WALLET_ACTIVITY_LIMIT: 20,
-  WALLET_ACTIVITY_MAX_LIMIT: 500,
-}));
+// The loader's module reads the Issuance flag; the spy below stands in for the loader itself.
+vi.mock("@/flags", () => ({ issuance: vi.fn() }));
 vi.mock("@/i18n/server", () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
 }));
@@ -24,10 +16,11 @@ vi.mock("@/lib/sdp-api", () => ({
 
 import { GET } from "./route";
 
+const loadWalletActivity = vi.spyOn(walletActivityServer, "loadWalletActivity");
+
 describe("GET /api/dashboard/wallets/:walletId/activity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.issuance.mockResolvedValue(false);
   });
 
   it.each([
@@ -58,7 +51,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
 
     expect(response.status).toBe(502);
     expect(apiRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.loadWalletActivity).not.toHaveBeenCalled();
+    expect(loadWalletActivity).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -75,7 +68,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
       })
     );
     mocks.createSdpApiClient.mockResolvedValue({ request: apiRequest });
-    mocks.loadWalletActivity.mockResolvedValue({
+    loadWalletActivity.mockResolvedValue({
       ok: true,
       data: { activityRows: [], activityError: null, activityNotice: null, hasMore: false },
     });
@@ -86,11 +79,11 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.loadWalletActivity).toHaveBeenCalledWith(
+    expect(loadWalletActivity).toHaveBeenCalledWith(
       apiRequest,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
       expect.any(Function),
-      { issuanceEnabled: false, pageSize }
+      { pageSize }
     );
   });
 });

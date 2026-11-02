@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  loadWalletActivity,
   WALLET_ACTIVITY_LIMIT,
   WALLET_ACTIVITY_MAX_LIMIT,
   type WalletActivityIdentity,
 } from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
-import { issuance } from "@/flags";
+import { loadWalletActivity } from "@/app/dashboard/[projectId]/custody/wallet-activity.server";
 import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import type { TranslationValues } from "@/i18n/translate";
@@ -142,9 +141,8 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     const pageSize = walletActivityLimitSchema.parse(
       new URL(request.url).searchParams.get("limit") ?? undefined
     );
-    const issuanceEnabled = await issuance();
     const result = await trace.step("load_wallet_activity", () =>
-      loadWalletActivity(apiClient.request, wallet, t, { issuanceEnabled, pageSize })
+      loadWalletActivity(apiClient.request, wallet, t, { pageSize })
     );
     const status = result.ok ? 200 : (result.status ?? 500);
     const response = NextResponse.json(

@@ -8,6 +8,7 @@ import type { ComplianceSnapshot } from "@/app/dashboard/[projectId]/payments/pa
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { NewSolanaAddressForm } from "./new-solana-address-form";
+import * as addressScreening from "./use-address-screening";
 
 const screening = vi.hoisted(() => ({
   next: null as ComplianceSnapshot | null,
@@ -26,9 +27,10 @@ vi.mock("@/app/dashboard/[projectId]/payments/payments-workspace.data", async (i
     return screening.next;
   }),
 }));
-vi.mock("./use-address-screening", () => ({
-  useAddressScreeningEnabled: () => screening.enabled,
-}));
+// Whether this deployment screens addresses (its Compliance channel), per test.
+vi.spyOn(addressScreening, "useAddressScreeningEnabled").mockImplementation(
+  () => screening.enabled
+);
 
 const ADDRESS = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 

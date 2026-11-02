@@ -58,7 +58,7 @@ export const WALLET_ACTIVITY_LIMIT = 20;
 export const WALLET_ACTIVITY_MAX_LIMIT = 500;
 /** `/v1/payments/transfers` serves at most this many rows a page. */
 const PAYMENT_TRANSFERS_MAX_PAGE_SIZE = 100;
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
+export type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 function resolvePaymentOperation(transfer: PaymentTransferSummary, t: Translate): string {
   if (transfer.direction === "inbound") {
@@ -103,7 +103,7 @@ function resolveIssuanceAmount(transaction: PublicTokenTransaction): string | un
   return amount === null ? undefined : String(amount);
 }
 
-function buildWalletActivityRows(
+export function buildWalletActivityRows(
   transfers: PaymentTransferSummary[],
   issuanceTransactions: TokenTransactionListItem[],
   t: Translate,
@@ -144,7 +144,7 @@ function buildWalletActivityRows(
     .slice(0, limit);
 }
 
-async function fetchWalletIssuanceActivity(
+export async function fetchWalletIssuanceActivity(
   request: SdpApiClient["request"],
   custodyWalletId: string,
   t: Translate,
@@ -185,7 +185,7 @@ async function fetchWalletIssuanceActivity(
  * The wallet's newest `limit` transfers. Transfers serve 100 rows a page, so a larger window
  * reads its pages in parallel and fails as a whole when any page fails.
  */
-async function fetchWalletPaymentActivity(
+export async function fetchWalletPaymentActivity(
   request: SdpApiClient["request"],
   custodyWalletId: string,
   limit: number
@@ -209,68 +209,6 @@ async function fetchWalletPaymentActivity(
     return failed;
   }
   return { ok: true, data: pages.flatMap((page) => page.data ?? []).slice(0, limit) };
-}
-
-/**
- * One wallet's activity: payment transfers merged with issuance transactions, newest first.
- *
- * @param request - The request-scoped SDP API client's `request`.
- * @param wallet - The wallet's SDP and provider ids.
- * @param t - Translator for row labels and notices.
- * @param options - `issuanceEnabled` (the `issuance` flag for this request) decides whether issuance
- *   is a source at all: off, it is never read, so a deployment without Issuance shows payments
- *   alone rather than an "issuance unavailable" notice. `pageSize` widens the window.
- * @returns The merged rows, a notice for a source that failed, and whether older rows exist.
- */
-export async function loadWalletActivity(
-  request: SdpApiClient["request"],
-  wallet: WalletActivityIdentity,
-  t: Translate,
-  options: { issuanceEnabled: boolean; pageSize?: number }
-): Promise<FetchResult<WalletActivityPayload>> {
-  const pageSize = options.pageSize ?? WALLET_ACTIVITY_LIMIT;
-
-  const [paymentsResult, issuanceResult] = await Promise.all([
-    fetchWalletPaymentActivity(request, wallet.custodyWalletId, pageSize),
-    options.issuanceEnabled
-      ? fetchWalletIssuanceActivity(request, wallet.custodyWalletId, t, pageSize)
-      : Promise.resolve<FetchResult<TokenTransactionListItem[]>>({ ok: true, data: [] }),
-  ]);
-
-  const transfers = paymentsResult.data ?? [];
-  const issuanceTransactions = issuanceResult.data ?? [];
-  const activityRows = buildWalletActivityRows(transfers, issuanceTransactions, t, pageSize);
-  const hasMore =
-    transfers.length >= pageSize ||
-    issuanceTransactions.length >= pageSize ||
-    transfers.length + issuanceTransactions.length > pageSize;
-  const hasAvailableSource = paymentsResult.ok || issuanceResult.ok;
-  const noticeParts: string[] = [];
-
-  if (hasAvailableSource) {
-    if (!paymentsResult.ok) {
-      noticeParts.push(t("DashboardCustody.paymentsActivityUnavailable"));
-    }
-    if (!issuanceResult.ok) {
-      noticeParts.push(t("DashboardCustody.issuanceActivityUnavailable"));
-    }
-  }
-
-  const activityError = hasAvailableSource
-    ? null
-    : paymentsResult.status === 403 && issuanceResult.status === 403
-      ? t("DashboardCustody.noActivitySources")
-      : t("DashboardCustody.walletActivityUnavailable");
-
-  return {
-    ok: true,
-    data: {
-      activityRows,
-      activityError,
-      activityNotice: noticeParts.length > 0 ? noticeParts.join(" ") : null,
-      hasMore,
-    },
-  };
 }
 
 export async function fetchWalletActivity(

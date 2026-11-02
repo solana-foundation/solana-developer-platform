@@ -13,6 +13,7 @@ import {
   getHighRiskProviders,
   runComplianceCheck,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -21,6 +22,26 @@ import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useAddressScreeningEnabled } from "./use-address-screening";
 
 type Phase = "idle" | "screening" | "flagged" | "adding";
+
+/** The primary button's words for each phase; idle names what pressing it does here. */
+function primaryLabelKey(phase: Phase, screeningEnabled: boolean): MessageKey {
+  switch (phase) {
+    case "screening":
+      return "DashboardPayments.counterparty.screening";
+    case "adding":
+      return "DashboardPayments.counterparty.adding";
+    case "flagged":
+      return "DashboardPayments.counterparty.addAnyway";
+    case "idle":
+      return screeningEnabled
+        ? "DashboardPayments.counterparty.screenAndAdd"
+        : "DashboardPayments.counterparty.addAddress";
+    default: {
+      const unreachable: never = phase;
+      throw new Error(`Unknown phase: ${String(unreachable)}`);
+    }
+  }
+}
 
 interface NewSolanaAddressFormProps {
   counterpartyId: string;
@@ -127,16 +148,7 @@ export function NewSolanaAddressForm({
     }
   }
 
-  const primaryLabel =
-    phase === "screening"
-      ? t("DashboardPayments.counterparty.screening")
-      : phase === "adding"
-        ? t("DashboardPayments.counterparty.adding")
-        : flagged
-          ? t("DashboardPayments.counterparty.addAnyway")
-          : screeningEnabled
-            ? t("DashboardPayments.counterparty.screenAndAdd")
-            : t("DashboardPayments.counterparty.addAddress");
+  const primaryLabel = t(primaryLabelKey(phase, screeningEnabled));
 
   return (
     <div

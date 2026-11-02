@@ -1,5 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
-import { loadWalletActivity } from "./wallet-activity.data";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const flags = vi.hoisted(() => ({ issuance: vi.fn() }));
+
+// The deployment's Issuance flag, the one ambient input the loader reads.
+vi.mock("@/flags", () => ({ issuance: flags.issuance }));
+
+import { loadWalletActivity } from "./wallet-activity.server";
+
+beforeEach(() => {
+  flags.issuance.mockResolvedValue(true);
+});
 
 describe("loadWalletActivity", () => {
   it("uses the exact wallet identity for Payments and Issuance", async () => {
@@ -13,8 +23,7 @@ describe("loadWalletActivity", () => {
     await loadWalletActivity(
       request,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2],
-      { issuanceEnabled: true }
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
     );
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
@@ -24,6 +33,7 @@ describe("loadWalletActivity", () => {
   });
 
   it("never reads Issuance when it is off, and raises no issuance notice", async () => {
+    flags.issuance.mockResolvedValue(false);
     const request = vi.fn(
       async (_path: string) => new Response(JSON.stringify({ data: [] }), { status: 200 })
     );
@@ -31,8 +41,7 @@ describe("loadWalletActivity", () => {
     const result = await loadWalletActivity(
       request,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2],
-      { issuanceEnabled: false }
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
     );
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
@@ -40,6 +49,25 @@ describe("loadWalletActivity", () => {
     ]);
     expect(result.data?.activityNotice).toBeNull();
     expect(result.data?.activityError).toBeNull();
+  });
+
+  // An Issuance read that never ran counted as a loaded source, so a failed payments read
+  // showed an empty history instead of its error.
+  it("reports a failed payments read as the error when Issuance is off", async () => {
+    flags.issuance.mockResolvedValue(false);
+    const request = vi.fn(
+      async (_path: string) =>
+        new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 })
+    );
+
+    const result = await loadWalletActivity(
+      request,
+      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
+    );
+
+    expect(result.data?.activityError).toBe("DashboardCustody.walletActivityUnavailable");
+    expect(result.data?.activityNotice).toBeNull();
   });
 });
 
@@ -90,10 +118,7 @@ describe("loadWalletActivity windows", () => {
   it("reads a window wider than a transfers page across parallel pages of 100", async () => {
     const request = requestWith(250, 3);
 
-    const result = await loadWalletActivity(request, wallet, t, {
-      issuanceEnabled: true,
-      pageSize: 220,
-    });
+    const result = await loadWalletActivity(request, wallet, t, { pageSize: 220 });
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=100&custodyWalletId=cwlt_1&includeObserved=true",
@@ -109,18 +134,14 @@ describe("loadWalletActivity windows", () => {
   });
 
   it("reports older rows while a source fills the window or the merge drops rows", async () => {
-    const full = await loadWalletActivity(requestWith(20, 0), wallet, t, { issuanceEnabled: true });
+    const full = await loadWalletActivity(requestWith(20, 0), wallet, t);
     expect(full.data?.hasMore).toBe(true);
 
-    const merged = await loadWalletActivity(requestWith(15, 10), wallet, t, {
-      issuanceEnabled: true,
-    });
+    const merged = await loadWalletActivity(requestWith(15, 10), wallet, t);
     expect(merged.data?.activityRows).toHaveLength(20);
     expect(merged.data?.hasMore).toBe(true);
 
-    const complete = await loadWalletActivity(requestWith(12, 3), wallet, t, {
-      issuanceEnabled: true,
-    });
+    const complete = await loadWalletActivity(requestWith(12, 3), wallet, t);
     expect(complete.data?.activityRows).toHaveLength(15);
     expect(complete.data?.hasMore).toBe(false);
   });
@@ -133,10 +154,7 @@ describe("loadWalletActivity windows", () => {
       return new Response(JSON.stringify({ data: [] }), { status: 200 });
     });
 
-    const result = await loadWalletActivity(request, wallet, t, {
-      issuanceEnabled: true,
-      pageSize: 150,
-    });
+    const result = await loadWalletActivity(request, wallet, t, { pageSize: 150 });
 
     expect(result.data?.activityRows).toEqual([]);
     expect(result.data?.activityNotice).toBe("DashboardCustody.paymentsActivityUnavailable");
