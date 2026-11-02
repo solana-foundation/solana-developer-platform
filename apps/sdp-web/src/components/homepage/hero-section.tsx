@@ -7,7 +7,6 @@ import { HeroHeadline } from "./hero/hero-headline";
 import { HeroLogos } from "./hero/hero-logos";
 import shared from "./homepage.module.css";
 import { externalLinkProps, type HomepageLinks } from "./homepage-links";
-import { heroLedeKey } from "./release-gate";
 
 /**
  * The first screen: the statement beside the network itself. The globe is the brand's device; a
@@ -26,7 +25,7 @@ export async function HeroSection({ links }: { links: HomepageLinks }) {
             secondLead={t("Homepage.hero.title.secondLead")}
             chosen={t("Homepage.hero.title.chosen")}
           />
-          <p className={styles.lede}>{t(heroLedeKey())}</p>
+          <p className={styles.lede}>{t("Homepage.hero.lede")}</p>
           <div className={styles.cta}>
             <a
               className={cn(shared.btn, shared.btnFill, shared.btnLg)}
