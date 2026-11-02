@@ -65,6 +65,32 @@ function autoRouteChoice(
 }
 
 /**
+ * The route-relevant view of provider capabilities: held intermediate has
+ * exactly one way out, so its capabilities never offer the instant share exit,
+ * and its operator-redemption route is dropped as it is not a user-facing exit.
+ */
+function resolveExitRoutes(options: ExitOptions, intermediateOnly: boolean) {
+  const offered = options?.kind === "ready" ? options.value : null;
+  const ready = offered && intermediateOnly ? { ...offered, instant: false } : offered;
+  const route = ready ? earnVaultAsyncWithdrawalRoute(ready) : null;
+  const asyncRoute = intermediateOnly && route?.kind !== "operator_redemption" ? null : route;
+  return { asyncRoute, ready };
+}
+
+/** Intermediate-only par redemption forces the async route or shows no choice. */
+function resolveActiveChoice(
+  choice: RouteChoice | null,
+  intermediateOnly: boolean,
+  asyncRoute: ReturnType<typeof earnVaultAsyncWithdrawalRoute>,
+  ready: ExitOptionsValue | null
+): RouteChoice | null {
+  if (intermediateOnly) {
+    return asyncRoute ? "async" : null;
+  }
+  return choice ?? autoRouteChoice(asyncRoute, ready);
+}
+
+/**
  * Reads provider withdrawal capabilities once per position, with manual retry.
  * A retry reruns this same effect instead of issuing its own unguarded fetch,
  * so every attempt — initial or retried — owns one AbortController: the
@@ -249,17 +275,8 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
   const { options, retry } = useEarnVaultExitOptions(position.id);
   const [choice, setChoice] = useState<RouteChoice | null>(null);
   const intermediateOnly = props.parSource === "intermediate";
-  const offered = options?.kind === "ready" ? options.value : null;
-  // Held intermediate has exactly one way out, so its entry never offers the
-  // share exits or waits on a choice.
-  const ready = offered && intermediateOnly ? { ...offered, instant: false } : offered;
-  const route = ready ? earnVaultAsyncWithdrawalRoute(ready) : null;
-  const asyncRoute = intermediateOnly && route?.kind !== "operator_redemption" ? null : route;
-  const activeChoice = intermediateOnly
-    ? asyncRoute
-      ? "async"
-      : null
-    : (choice ?? autoRouteChoice(asyncRoute, ready));
+  const { asyncRoute, ready } = resolveExitRoutes(options, intermediateOnly);
+  const activeChoice = resolveActiveChoice(choice, intermediateOnly, asyncRoute, ready);
 
   if (activeChoice === "instant" || activeChoice === "provider_instant") {
     return (
@@ -300,7 +317,7 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
       asyncRoute={asyncRoute}
       onClose={props.onClose}
       onChoose={setChoice}
-      options={options?.kind === "ready" && ready ? { kind: "ready", value: ready } : options}
+      options={ready ? { kind: "ready", value: ready } : options}
       position={position}
       retry={retry}
     />
