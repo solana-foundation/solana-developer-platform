@@ -50,6 +50,20 @@ export function registerEarnOnboardingPaths(registry: OpenAPIRegistry) {
     };
     if (body !== undefined) request.body = { required: true, content: jsonContent(body) };
     const code = path.endsWith("/documents") ? 201 : 200;
+    const responses: NonNullable<Parameters<OpenAPIRegistry["registerPath"]>[0]["responses"]> = {
+      200: {
+        description: "Onboarding result",
+        content: jsonContent(successResponseSchema(response)),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 413, 429, 500, 503]),
+    };
+    // Document storage creates a reference; every other route returns 200.
+    if (code === 201) {
+      responses[201] = {
+        description: "Document stored",
+        content: jsonContent(successResponseSchema(response)),
+      };
+    }
     registry.registerPath({
       method,
       path: `/v1/earn/onboarding/wisdomtree/${path}`,
@@ -64,22 +78,7 @@ export function registerEarnOnboardingPaths(registry: OpenAPIRegistry) {
         "A submitted application is not approval. A timeout requires reconciliation before another create. " +
         "Child organization and person GUIDs are derived from the durable mapping; callers cannot select them.",
       request,
-      responses: {
-        200: {
-          description: "Onboarding result",
-          content: jsonContent(successResponseSchema(response)),
-        },
-        // Document storage creates a reference; every other route returns 200.
-        ...(code === 201
-          ? {
-              201: {
-                description: "Document stored",
-                content: jsonContent(successResponseSchema(response)),
-              },
-            }
-          : {}),
-        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 413, 429, 500, 503]),
-      },
+      responses,
     });
   }
   route(
