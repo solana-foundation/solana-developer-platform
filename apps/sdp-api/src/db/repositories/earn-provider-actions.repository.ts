@@ -68,6 +68,27 @@ type Scope = {
   preparationLeaseUntil?: string;
 };
 
+/**
+ * Whether the request claims a different payload than a pending row holds, on
+ * every field the builder reads back from the row (`request_id`, `fingerprint`,
+ * `created_by` and `initiated_by_key_id` identify the caller, so a recovery
+ * under a new key is expected to differ there and never blocks).
+ */
+function claimsDiverge(row: EarnProviderActionRow, input: EarnProviderActionClaim): boolean {
+  return (
+    row.environment !== input.environment ||
+    row.provider !== input.provider ||
+    row.action !== input.action ||
+    row.parent_movement_id !== input.parent_movement_id ||
+    row.custody_wallet_id !== input.custody_wallet_id ||
+    row.owner_address !== input.owner_address ||
+    row.vault_address !== input.vault_address ||
+    row.token_mint !== input.token_mint ||
+    row.share_mint !== input.share_mint ||
+    row.fee_payer !== input.fee_payer
+  );
+}
+
 export function createEarnProviderActionsRepository(db: DatabaseClient) {
   return {
     async get(scope: Scope): Promise<EarnProviderActionRow | null> {
@@ -114,6 +135,11 @@ export function createEarnProviderActionsRepository(db: DatabaseClient) {
           // guarded lease the request_id path uses, or losing the original key
           // (or rotating credentials) blocks cancellation forever.
           if (found.status === "preparing") {
+            // Claimed fields are immutable: the builder reads the row, not
+            // this request, so a recovery whose payload differs (a new fee
+            // payer, a different wallet) must never own the old claim's bytes.
+            if (claimsDiverge(found, input))
+              throw conflict("Provider action claimed with a different request payload");
             const reclaimed = await db
               .prepare(
                 "UPDATE earn_provider_actions SET lease_until=? WHERE id=? AND organization_id=? AND project_id=? AND status='preparing' AND lease_until<? RETURNING *"

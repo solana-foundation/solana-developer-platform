@@ -257,6 +257,24 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(reclaimed.owned).toBe(true);
       expect(reclaimed.row.id).toBe(first.id);
     });
+    it("conflicts with a recovery claiming different fields than the abandoned claim", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const { row: first } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      // Claimed fields are immutable: the builder reads the row, not the
+      // request, so a recovery naming a different fee payer must conflict
+      // instead of owning a build that spends from the original claim's payer.
+      const changed = {
+        ...actionClaim(movement.id, "cancel-2"),
+        fee_payer: "FeePayerPublicKey1111111111111111111111111111",
+      };
+      await expect(repo.claim(changed)).rejects.toMatchObject({ code: "CONFLICT" });
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", first.id)
+        .run();
+      await expect(repo.claim(changed)).rejects.toMatchObject({ code: "CONFLICT" });
+    });
     it("records a cancelled redemption as returned shares with zero payout", async () => {
       const { position } = await ledger.createSignedVaultDepositIntent(
         intent({ provider: "plume" })
