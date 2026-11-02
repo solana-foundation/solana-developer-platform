@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -49,14 +50,17 @@ describe("tenant isolation through the HTTP stack", () => {
       .bind(USER_ID)
       .run();
 
-    for (const tenant of TENANTS) {
-      await db
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, status)
-           VALUES (?, ?, ?, 'active')`
-        )
-        .bind(tenant.org, tenant.org, tenant.org.replaceAll("_", "-"))
-        .run();
+    for (const [index, tenant] of TENANTS.entries()) {
+      await seedOrganization(db, {
+        id: tenant.org,
+        name: tenant.org,
+        slug: tenant.org.replaceAll("_", "-"),
+        status: "active",
+        creator:
+          index === 0
+            ? { id: USER_ID, email: "http-isolation@example.com" }
+            : organizationCreator(tenant.org),
+      });
       await seedDefaultProjects(db, {
         organizationId: tenant.org,
         createdBy: USER_ID,

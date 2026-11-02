@@ -9,6 +9,7 @@ import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { ensureTestClerkIssuer, seedClerkIdentity, signTestClerkJwt } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -50,22 +51,14 @@ describe("Clerk auth and the organization IP allowlist", () => {
     await issuerReady;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
-        )
-        .bind(
-          TEST_ORG.id,
-          TEST_ORG.name,
-          TEST_ORG.slug,
-          TEST_ORG.status,
-          JSON.stringify({ allowedIpAddresses: ["203.0.113.0/24"] })
-        ),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(USER_ID, EMAIL),
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: TEST_USER,
+      settings: JSON.stringify({ allowedIpAddresses: ["203.0.113.0/24"] }),
+    });
     await seedClerkIdentity(db, {
       userId: USER_ID,
       email: EMAIL,

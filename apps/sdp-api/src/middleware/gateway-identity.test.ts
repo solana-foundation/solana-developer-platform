@@ -17,6 +17,7 @@ import { invalidGatewayIdentityLimiter } from "@/middleware/gateway-identity";
 import { TEST_REVOKED_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -105,10 +106,14 @@ describe("gateway identity (X-SF-Identity)", () => {
   beforeEach(async () => {
     invalidGatewayIdentityLimiter.resetForTesting();
     await seedTestDatabase(env);
-    await getDb(env)
-      .prepare("INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
-      .run();
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: organizationCreator(TEST_ORG.id),
+      onConflict: "update",
+    });
   });
 
   afterEach(async () => {

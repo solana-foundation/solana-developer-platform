@@ -8,6 +8,7 @@ import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/h
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -179,19 +180,13 @@ async function seedScope(): Promise<void> {
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   const db = getDb(env);
 
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "Custody Config Connection Compat",
-        "custody-config-connection-compat",
-        "active"
-      ),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "custody-config-connection-compat@example.com", 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Custody Config Connection Compat",
+    slug: "custody-config-connection-compat",
+    status: "active",
+    creator: { id: USER_ID, email: "custody-config-connection-compat@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

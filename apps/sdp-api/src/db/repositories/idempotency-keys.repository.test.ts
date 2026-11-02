@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -23,14 +24,18 @@ async function seed(): Promise<void> {
     )
     .bind(USER)
     .run();
-  for (const org of [ORG, OTHER_ORG]) {
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(org, org, org)
-      .run();
+  for (const [org, creator] of [
+    [ORG, { id: USER, email: "idem-repo@example.com" }],
+    [OTHER_ORG, organizationCreator(OTHER_ORG)],
+  ] as const) {
+    await seedOrganization(db, {
+      id: org,
+      name: org,
+      slug: org,
+      status: "active",
+      creator,
+      onConflict: "do-nothing",
+    });
   }
   await seedDefaultProjects(db, { organizationId: ORG, createdBy: USER, members: [USER] });
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { applyRampSettlementEvent } from "./ramp-settlements";
@@ -53,14 +54,13 @@ async function readRow(id: string) {
 describe("applyRampSettlementEvent delivered asset", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(ORG_ID, "Ramp Settlement Asset", "ramp-settlement-asset", "active"),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-        .bind(USER_ID, "ramp-settlement-asset@example.com", 1, "active"),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: ORG_ID,
+      name: "Ramp Settlement Asset",
+      slug: "ramp-settlement-asset",
+      status: "active",
+      creator: { id: USER_ID, email: "ramp-settlement-asset@example.com" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG_ID,
       createdBy: USER_ID,

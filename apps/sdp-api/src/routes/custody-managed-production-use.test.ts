@@ -7,6 +7,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -116,16 +117,13 @@ describe("Managed custody use by project environment", () => {
 
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, status)
-     VALUES (?, 'Managed production use', 'managed-production-use', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'managed-production-use@example.com', 1, 'active')`,
-    [USER_ID]
-  );
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Managed production use",
+    slug: "managed-production-use",
+    status: "active",
+    creator: { id: USER_ID, email: "managed-production-use@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

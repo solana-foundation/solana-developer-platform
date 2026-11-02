@@ -78,10 +78,10 @@ afterEach(async () => {
 describe("0078 counterparty provider-account kinds", () => {
   it("backfills customer and payout kinds, removes BVNK JSON, and drops the legacy column", async () => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug) VALUES ('org_0078', 'Org 0078', 'org-0078')`
+      `INSERT INTO users (id, email) VALUES ('usr_0078', 'owner-0078@example.test')`
     );
     await client.query(
-      `INSERT INTO users (id, email) VALUES ('usr_0078', 'owner-0078@example.test')`
+      `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0078', 'Org 0078', 'org-0078', 'usr_0078')`
     );
     await client.query(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
@@ -130,10 +130,10 @@ describe("0078 counterparty provider-account kinds", () => {
 
   it("rejects a funding wallet with destination country data", async () => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug) VALUES ('org_0078_check', 'Org 0078 Check', 'org-0078-check')`
+      `INSERT INTO users (id, email) VALUES ('usr_0078_check', 'owner-0078-check@example.test')`
     );
     await client.query(
-      `INSERT INTO users (id, email) VALUES ('usr_0078_check', 'owner-0078-check@example.test')`
+      `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0078_check', 'Org 0078 Check', 'org-0078-check', 'usr_0078_check')`
     );
     await client.query(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

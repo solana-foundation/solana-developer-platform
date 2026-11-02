@@ -50,17 +50,17 @@ describe("0080 provider Credential secret retention", () => {
     await seedTestDatabase(env);
     await getDb(env)
       .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Credential retention', 'credential-retention', 'active')`
-      )
-      .bind(ORGANIZATION_ID)
-      .run();
-    await getDb(env)
-      .prepare(
         `INSERT INTO users (id, email, email_verified, status)
          VALUES (?, 'credential-retention@example.test', 1, 'active')`
       )
       .bind(USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, status, created_by_user_id)
+         VALUES (?, 'Credential retention', 'credential-retention', 'active', ?)`
+      )
+      .bind(ORGANIZATION_ID, USER_ID)
       .run();
     await seedDefaultProjects(getDb(env), {
       organizationId: ORGANIZATION_ID,

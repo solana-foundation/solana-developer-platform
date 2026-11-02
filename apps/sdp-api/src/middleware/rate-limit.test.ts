@@ -22,6 +22,7 @@ import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { middlewareTestApp, TEST_CLIENT_IP } from "@/test/helpers/middleware-app";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
@@ -44,10 +45,14 @@ describe("Rate limiting", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
 
-    await getDb(env)
-      .prepare("INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
-      .run();
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: organizationCreator(TEST_ORG.id),
+      onConflict: "update",
+    });
 
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   });

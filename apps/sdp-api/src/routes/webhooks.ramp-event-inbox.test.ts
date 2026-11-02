@@ -20,6 +20,7 @@ import {
 import { TerminalRampWebhookError } from "@/services/ramps/webhooks/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/services/ramps/webhooks/registry";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -118,14 +119,13 @@ describe("Ramp webhook event inbox", () => {
   }
 
   async function seedMoonpayOnrampTransfer() {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG_ID, "Ramp Inbox Org", "ramp-inbox-org", "active")
-      .run();
-    await getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "ramp-inbox-user@example.com", 1, "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: ORG_ID,
+      name: "Ramp Inbox Org",
+      slug: "ramp-inbox-org",
+      status: "active",
+      creator: { id: USER_ID, email: "ramp-inbox-user@example.com" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG_ID,
       createdBy: USER_ID,

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -109,14 +110,13 @@ function position(id: string, ownerAddress: string, custodyWalletId: string | nu
 
 async function seed(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Par Intermediate Org", "par-intermediate", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER, "par-intermediate@example.com", 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: ORG,
+    name: "Par Intermediate Org",
+    slug: "par-intermediate",
+    status: "active",
+    creator: { id: USER, email: "par-intermediate@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,

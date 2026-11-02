@@ -9,6 +9,7 @@ import { resetNetworkCachesForTests } from "@/services/network/network.service";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -70,14 +71,13 @@ const sourceCalls = (spy: ReturnType<typeof mockSources>, host: string) =>
 
 async function dashboardHeaders(): Promise<Record<string, string>> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG.id, ORG.name, ORG.slug, "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER.id, USER.email),
-  ]);
+  await seedOrganization(db, {
+    id: ORG.id,
+    name: ORG.name,
+    slug: ORG.slug,
+    status: "active",
+    creator: USER,
+  });
   await seedDefaultProjects(db, { organizationId: ORG.id, createdBy: USER.id, members: [USER.id] });
   const actor = await authenticateTestClerkUser(env, db, {
     userId: USER.id,

@@ -9,6 +9,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   seedPaymentRequestTransfer,
   setPaymentRequestColumns,
@@ -69,12 +70,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
     await db.prepare("DELETE FROM api_keys").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
 
     await db
       .prepare(

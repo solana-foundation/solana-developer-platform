@@ -18,6 +18,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -310,14 +311,13 @@ async function seedFixture(): Promise<void> {
   const db = getDb(env);
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORGANIZATION_ID, "API key provisioning", "api-key-provisioning", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "api-key-provisioning@example.com"),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "API key provisioning",
+    slug: "api-key-provisioning",
+    status: "active",
+    creator: { id: USER_ID, email: "api-key-provisioning@example.com" },
+  });
   ({ token: adminToken } = await authenticateTestClerkUser(env, db, {
     userId: USER_ID,
     email: "api-key-provisioning@example.com",

@@ -8,6 +8,7 @@ import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations"
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -15,16 +16,12 @@ import { clearKVStores } from "@/test/mocks/kv";
 let clerkToken: string;
 
 async function seedOrganizationMember(role: "admin" | "member"): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
-    getDb(env)
-      .prepare(
-        "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
-      )
-      .bind(TEST_MEMBER.id, TEST_ORG.id, TEST_USER.id, role, "active"),
-  ]);
+  await getDb(env)
+    .prepare(
+      "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(TEST_MEMBER.id, TEST_ORG.id, TEST_USER.id, role, "active")
+    .run();
   clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
 }
 
@@ -47,10 +44,13 @@ describe("Organizations routes", () => {
   });
   describe("GET /v1/organizations/:orgId", () => {
     beforeEach(async () => {
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
-        .run();
+      await seedOrganization(getDb(env), {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: TEST_ORG.status,
+        creator: organizationCreator(TEST_ORG.id),
+      });
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
     });
     it("returns organization details", async () => {
@@ -138,10 +138,13 @@ describe("Organizations routes", () => {
   });
   describe("PATCH /v1/organizations/:orgId", () => {
     beforeEach(async () => {
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
-        .run();
+      await seedOrganization(getDb(env), {
+        id: TEST_ORG.id,
+        name: TEST_ORG.name,
+        slug: TEST_ORG.slug,
+        status: TEST_ORG.status,
+        creator: TEST_USER,
+      });
       await seedOrganizationMember("admin");
     });
     afterEach(() => {

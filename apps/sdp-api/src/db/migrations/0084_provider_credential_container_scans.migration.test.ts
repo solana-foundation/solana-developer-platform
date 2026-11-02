@@ -8,11 +8,11 @@ describe("0084 Provider Credential container scans", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).execute(
-      `INSERT INTO organizations (id, name, slug, status)
-       VALUES ('org_scans', 'Scans', 'scans', 'active')`
+      "INSERT INTO users (id, email) VALUES ('usr_scans', 'scans@example.test')"
     );
     await getDb(env).execute(
-      "INSERT INTO users (id, email) VALUES ('usr_scans', 'scans@example.test')"
+      `INSERT INTO organizations (id, name, slug, status, created_by_user_id)
+       VALUES ('org_scans', 'Scans', 'scans', 'active', 'usr_scans')`
     );
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_scans",

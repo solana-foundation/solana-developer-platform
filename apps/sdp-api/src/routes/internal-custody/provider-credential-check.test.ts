@@ -17,6 +17,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -110,23 +111,14 @@ function buildApp() {
 
 async function seedActor(): Promise<void> {
   const db = getDb(env);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Provider Credential Installation",
+    slug: "provider-credential-installation",
+    status: "active",
+    creator: { id: USER_ID, email: "provider-credential-installation@example.com" },
+  });
   await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active')`
-      )
-      .bind(
-        ORGANIZATION_ID,
-        "Provider Credential Installation",
-        "provider-credential-installation"
-      ),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')`
-      )
-      .bind(USER_ID, "provider-credential-installation@example.com"),
     db
       .prepare(
         `INSERT INTO auth_user_identities (

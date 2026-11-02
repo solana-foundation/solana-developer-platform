@@ -13,6 +13,7 @@ import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { DEFAULT_PROJECT_NAME, seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -53,12 +54,14 @@ describe("Projects Routes", () => {
     await db.prepare("DELETE FROM projects").run();
 
     // Seed organization
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
 
     // Seed user
     await db

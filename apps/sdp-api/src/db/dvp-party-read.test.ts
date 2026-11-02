@@ -24,6 +24,7 @@ import { getDb } from "@/db/client";
 import { runWithoutDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -56,19 +57,19 @@ async function seed(): Promise<void> {
     .bind(USER_ID)
     .run();
 
-  for (const [org, project, slug] of [
-    [AGENT_ORG, AGENT_PROJECT, "dvp-party-agent"],
-    [PARTY_ORG, PARTY_PROJECT, "dvp-party-holder"],
-    [STRANGER_ORG, STRANGER_PROJECT, "dvp-party-stranger"],
+  for (const [org, project, slug, creator] of [
+    [AGENT_ORG, AGENT_PROJECT, "dvp-party-agent", { id: USER_ID, email: "dvp-party@example.com" }],
+    [PARTY_ORG, PARTY_PROJECT, "dvp-party-holder", organizationCreator(PARTY_ORG)],
+    [STRANGER_ORG, STRANGER_PROJECT, "dvp-party-stranger", organizationCreator(STRANGER_ORG)],
   ] as const) {
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active')
-         ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(org, slug, slug)
-      .run();
+    await seedOrganization(db, {
+      id: org,
+      name: slug,
+      slug,
+      status: "active",
+      creator,
+      onConflict: "do-nothing",
+    });
     await seedDefaultProjects(db, {
       organizationId: org,
       createdBy: USER_ID,

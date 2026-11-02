@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -81,11 +82,6 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     await db.prepare("DELETE FROM users").run();
     await db.prepare("DELETE FROM organizations").run();
 
-    await db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-
     const users = [
       [TEST_USER.id, TEST_USER.email, "Sender User"],
       [RECIPIENT_USER_ID, "recipient@example.com", "Recipient User"],
@@ -99,6 +95,14 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
         .bind(id, email, name)
         .run();
     }
+
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
 
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,

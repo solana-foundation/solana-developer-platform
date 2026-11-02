@@ -15,6 +15,7 @@ import {
   ensureTestClerkIssuer,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -51,14 +52,13 @@ describe("projectContextMiddleware", () => {
     await issuerReady;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email),
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: TEST_USER,
+    });
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
@@ -139,10 +139,13 @@ describe("projectContextMiddleware", () => {
   });
 
   it("rejects a Clerk member requesting another organization's project", async () => {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-      .bind("org_test_inaccessible", "Other Organization", "test-inaccessible")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_test_inaccessible",
+      name: "Other Organization",
+      slug: "test-inaccessible",
+      status: "active",
+      creator: organizationCreator("org_test_inaccessible"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_test_inaccessible",
       createdBy: TEST_USER.id,

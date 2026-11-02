@@ -7,6 +7,7 @@ import { app } from "@/index";
 import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -70,17 +71,20 @@ function cachedKey(): SeededApiKey {
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, cachedKey());
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Earn Feed", "earn-feed", "active"),
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG_OTHER, "Earn Feed Other", "earn-feed-other", "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER, "earn-feed@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORG,
+    name: "Earn Feed",
+    slug: "earn-feed",
+    status: "active",
+    creator: { id: USER, email: "earn-feed@example.com" },
+  });
+  await seedOrganization(getDb(env), {
+    id: ORG_OTHER,
+    name: "Earn Feed Other",
+    slug: "earn-feed-other",
+    status: "active",
+    creator: organizationCreator(ORG_OTHER),
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORG,
     createdBy: USER,

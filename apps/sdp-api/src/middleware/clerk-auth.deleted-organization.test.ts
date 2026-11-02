@@ -12,6 +12,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { ensureTestClerkIssuer, seedClerkIdentity, signTestClerkJwt } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -61,14 +62,13 @@ describe("Clerk auth into a deleted organization", () => {
     await issuerReady;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(USER_ID, EMAIL),
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
     await seedClerkIdentity(db, {
       userId: USER_ID,
       email: EMAIL,

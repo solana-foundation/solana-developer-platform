@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
@@ -52,12 +53,14 @@ describe("PrivateChannelInstanceRepository (postgres)", () => {
     await db.prepare("DELETE FROM private_channel_instances").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
     await db
       .prepare(
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"

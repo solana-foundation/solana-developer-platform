@@ -8,6 +8,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -27,14 +28,13 @@ const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.st
 
 async function seedSandboxWalletAndApiKey(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORGANIZATION_ID, "Custody Wallet Faucet Org", "custody-wallet-faucet", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "custody-wallet-faucet@example.com", 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Custody Wallet Faucet Org",
+    slug: "custody-wallet-faucet",
+    status: "active",
+    creator: { id: USER_ID, email: "custody-wallet-faucet@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

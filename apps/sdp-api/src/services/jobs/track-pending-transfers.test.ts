@@ -27,6 +27,7 @@ import {
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedProcessingBatchChunk } from "@/test/helpers/transfer-batches";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -82,14 +83,13 @@ function trackSandboxTransfers(): Promise<void> {
 
 async function seedOrg(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(TEST_USER_ID, "job-test@example.com"),
-  ]);
+  await seedOrganization(db, {
+    id: TEST_ORG_ID,
+    name: "Job Test Org",
+    slug: "job-test-org",
+    status: "active",
+    creator: { id: TEST_USER_ID, email: "job-test@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: TEST_ORG_ID,
     createdBy: TEST_USER_ID,

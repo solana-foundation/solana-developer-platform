@@ -30,6 +30,7 @@ import { type RouteOwner, routeOwnerOf } from "@/routes/route-modules";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -194,10 +195,13 @@ async function refusedAction(res: Response): Promise<string | null> {
 
 async function seedTestKey(): Promise<void> {
   await seedTestDatabase(env);
-  await getDb(env)
-    .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
-    .run();
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: TEST_ORG.status,
+    creator: organizationCreator(TEST_ORG.id),
+  });
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_SEEDED_API_KEY,
     grants: ALL_API_KEY_GRANTS,

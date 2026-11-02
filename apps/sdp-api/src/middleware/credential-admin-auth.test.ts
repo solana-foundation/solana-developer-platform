@@ -15,6 +15,7 @@ import {
   signTestClerkClaims,
 } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -45,14 +46,13 @@ describe("credentialAdminAuthMiddleware", () => {
   beforeEach(async () => {
     await issuerReady;
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: TEST_USER,
+    });
   });
 
   afterEach(async () => {

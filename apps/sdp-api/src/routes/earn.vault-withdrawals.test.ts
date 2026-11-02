@@ -31,6 +31,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -134,17 +135,15 @@ async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
-      )
-      // NO providerOverrides: the exit route must never need entitlement.
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active", "{}"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(TEST_USER.id, TEST_USER.email),
-  ]);
+  // NO providerOverrides: the exit route must never need entitlement.
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    settings: "{}",
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
@@ -680,11 +679,13 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
 
   it("404s a sibling organization's position (BOLA)", async () => {
     await seedAuth();
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-        .bind("org_earn_vw_other", "Other Org", "earn-vw-other"),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: "org_earn_vw_other",
+      name: "Other Org",
+      slug: "earn-vw-other",
+      status: "active",
+      creator: organizationCreator("org_earn_vw_other"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_earn_vw_other",
       createdBy: TEST_USER.id,

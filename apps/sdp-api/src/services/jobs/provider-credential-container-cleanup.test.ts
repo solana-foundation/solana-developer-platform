@@ -9,6 +9,7 @@ import {
 } from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { scanGcpCredentialContainers } from "./provider-credential-container-cleanup";
@@ -92,14 +93,13 @@ describe("shared-container orphan cleanup", () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).execute(
-      "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Prototype', 'shared-prototype', 'active')",
-      [ORG]
-    );
-    await getDb(env).execute(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'shared-prototype@example.test', 1, 'active')",
-      [USER]
-    );
+    await seedOrganization(getDb(env), {
+      id: ORG,
+      name: "Prototype",
+      slug: "shared-prototype",
+      status: "active",
+      creator: { id: USER, email: "shared-prototype@example.test" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG,
       createdBy: USER,

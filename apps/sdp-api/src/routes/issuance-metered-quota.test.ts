@@ -11,6 +11,7 @@ import {
   TEST_PROJECT_CACHED_KEY,
 } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
@@ -22,12 +23,14 @@ describe("Issuance routes — metered quota", () => {
     await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
     await clearKVStores(env);
     const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "do-nothing",
+    });
     await db
       .prepare(
         "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active') ON CONFLICT (id) DO NOTHING"

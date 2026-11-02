@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -24,15 +25,15 @@ const OTHER_SCOPE: ConfigScope = {
   projectId: OTHER_PROJECT_ID,
 };
 
-async function seedOrganization(scope: ConfigScope): Promise<void> {
+async function seedOrganizationForScope(scope: ConfigScope): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare(
-      `INSERT INTO organizations (id, name, slug, status)
-       VALUES (?, ?, ?, 'active')`
-    )
-    .bind(scope.organizationId, scope.organizationId, scope.organizationId)
-    .run();
+  await seedOrganization(db, {
+    id: scope.organizationId,
+    name: scope.organizationId,
+    slug: scope.organizationId,
+    status: "active",
+    creator: organizationCreator(scope.organizationId),
+  });
   await seedDefaultProjects(db, {
     organizationId: scope.organizationId,
     createdBy: USER_ID,
@@ -49,8 +50,8 @@ async function seedScope(): Promise<void> {
     )
     .bind(USER_ID)
     .run();
-  await seedOrganization(SCOPE);
-  await seedOrganization(OTHER_SCOPE);
+  await seedOrganizationForScope(SCOPE);
+  await seedOrganizationForScope(OTHER_SCOPE);
 }
 
 async function insertConfig(

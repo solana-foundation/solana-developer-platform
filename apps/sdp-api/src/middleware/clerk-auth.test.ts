@@ -18,6 +18,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
 import { middlewareTestApp } from "@/test/helpers/middleware-app";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
@@ -50,14 +51,13 @@ describe("Clerk auth request cache", () => {
     await issuerReady;
     await ensureTestClerkIssuer(env);
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: TEST_USER,
+    });
     await seedClerkIdentity(getDb(env), {
       userId: TEST_USER.id,
       email: TEST_USER.email,

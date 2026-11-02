@@ -19,6 +19,7 @@ import { getDb } from "@/db/client";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { installClusterRpcResponder, signatureStatusesReplyAt } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
@@ -177,14 +178,13 @@ function depositInput(
 
 async function seedTenancy(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "External Wallet Org", "ext-wallet", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER, "ext-wallet@example.com"),
-  ]);
+  await seedOrganization(db, {
+    id: ORG,
+    name: "External Wallet Org",
+    slug: "ext-wallet",
+    status: "active",
+    creator: { id: USER, email: "ext-wallet@example.com" },
+  });
   projects = await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,
@@ -893,10 +893,13 @@ describe("submitExternalWalletDeposit", () => {
       await signBuiltTransaction(built),
       crypto.randomUUID()
     );
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind("org_ext_wallet_unclaimed", "Unclaimed Org", "ext-wallet-unclaimed", "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_ext_wallet_unclaimed",
+      name: "Unclaimed Org",
+      slug: "ext-wallet-unclaimed",
+      status: "active",
+      creator: organizationCreator("org_ext_wallet_unclaimed"),
+    });
     const unclaimed = await seedDefaultProjects(getDb(env), {
       organizationId: "org_ext_wallet_unclaimed",
       createdBy: USER,

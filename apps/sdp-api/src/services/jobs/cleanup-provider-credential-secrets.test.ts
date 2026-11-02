@@ -5,6 +5,7 @@ import type { CredentialSecretStore } from "@/services/credential-secret-store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { ProviderCredentialSecretCleanupStore } from "@/services/stores/provider-credential-secret-cleanup.store";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { cleanupRetiredProviderCredentialSecrets } from "./cleanup-provider-credential-secrets";
@@ -116,20 +117,13 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
       listVersions: listVersions.mockReset().mockResolvedValue({ versions: [] }),
     } satisfies CredentialSecretStore);
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, status)
-           VALUES (?, 'Credential cleanup', 'credential-cleanup', 'active')`
-        )
-        .bind(ORGANIZATION_ID),
-      getDb(env)
-        .prepare(
-          `INSERT INTO users (id, email, email_verified, status)
-           VALUES (?, 'credential-cleanup@example.test', 1, 'active')`
-        )
-        .bind(USER_ID),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: ORGANIZATION_ID,
+      name: "Credential cleanup",
+      slug: "credential-cleanup",
+      status: "active",
+      creator: { id: USER_ID, email: "credential-cleanup@example.test" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,

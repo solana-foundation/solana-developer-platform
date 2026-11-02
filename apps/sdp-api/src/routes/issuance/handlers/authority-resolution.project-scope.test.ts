@@ -7,6 +7,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -143,22 +144,20 @@ async function seedRequesterProjectWallet(): Promise<void> {
 describe("issuance authority resolution across an organization's projects", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(ORGANIZATION_ID, "Issuance Project Scope", "issuance-project-scope", "active"),
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(
-          OTHER_ORGANIZATION_ID,
-          "Issuance Project Scope Other",
-          "issuance-project-scope-other",
-          "active"
-        ),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-        .bind(USER_ID, "issuance-project-scope@example.com", 1, "active"),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: ORGANIZATION_ID,
+      name: "Issuance Project Scope",
+      slug: "issuance-project-scope",
+      status: "active",
+      creator: { id: USER_ID, email: "issuance-project-scope@example.com" },
+    });
+    await seedOrganization(getDb(env), {
+      id: OTHER_ORGANIZATION_ID,
+      name: "Issuance Project Scope Other",
+      slug: "issuance-project-scope-other",
+      status: "active",
+      creator: organizationCreator(OTHER_ORGANIZATION_ID),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,

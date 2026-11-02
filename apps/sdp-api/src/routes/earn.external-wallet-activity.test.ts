@@ -10,6 +10,7 @@ import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vau
 import { app } from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -86,14 +87,13 @@ function cachedKey(): SeededApiKey {
 async function seedScope() {
   const keyHash = await hashString(KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, cachedKey());
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "External activity", "external-activity", "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER, "external-activity@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORG,
+    name: "External activity",
+    slug: "external-activity",
+    status: "active",
+    creator: { id: USER, email: "external-activity@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORG,
     createdBy: USER,
@@ -645,10 +645,13 @@ describe("external-wallet activity", () => {
     // "not yours" from "never seen".
     const foreignOrg = "org_external_activity_foreign";
     const foreignProject = "prj_external_activity_foreign";
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(foreignOrg, "Foreign", "external-activity-foreign", "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: foreignOrg,
+      name: "Foreign",
+      slug: "external-activity-foreign",
+      status: "active",
+      creator: organizationCreator(foreignOrg),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: foreignOrg,
       createdBy: USER,

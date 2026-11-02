@@ -8,6 +8,7 @@ import {
 } from "@/services/earn-withdrawal-ledger.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
@@ -61,12 +62,14 @@ describe("EarnRepository (postgres)", () => {
     await db.prepare("DELETE FROM earn_provider_wallets").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
 
     await db
       .prepare(
@@ -1039,12 +1042,14 @@ describe("EarnRepository (postgres)", () => {
 
     async function seedSiblingOrg(): Promise<void> {
       const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-        )
-        .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
-        .run();
+      await seedOrganization(db, {
+        id: OTHER_ORG.id,
+        name: OTHER_ORG.name,
+        slug: OTHER_ORG.slug,
+        status: "active",
+        creator: organizationCreator(OTHER_ORG.id),
+        onConflict: "update",
+      });
       await seedDefaultProjects(db, {
         organizationId: OTHER_ORG.id,
         createdBy: TEST_USER.id,

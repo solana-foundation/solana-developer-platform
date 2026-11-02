@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
@@ -34,18 +35,22 @@ describe("custodyWalletForParty", () => {
     await db.prepare("DELETE FROM custody_configs").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(OTHER_ORG_ID, OTHER_ORG_ID, OTHER_ORG_ID)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
+    await seedOrganization(db, {
+      id: OTHER_ORG_ID,
+      name: OTHER_ORG_ID,
+      slug: OTHER_ORG_ID,
+      status: "active",
+      creator: organizationCreator(OTHER_ORG_ID),
+      onConflict: "update",
+    });
     await db
       .prepare(
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"

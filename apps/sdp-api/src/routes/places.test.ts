@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 
@@ -52,12 +53,13 @@ async function requestAutocomplete(): Promise<Response> {
 describe("Places routes — metered quota", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Places', 'places-test', 'active')"
-      )
-      .bind(TEST_ORG_ID)
-      .run();
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG_ID,
+      name: "Places",
+      slug: "places-test",
+      status: "active",
+      creator: organizationCreator(TEST_ORG_ID),
+    });
   });
 
   afterEach(async () => {

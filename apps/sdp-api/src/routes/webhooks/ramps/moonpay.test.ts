@@ -8,6 +8,7 @@ import * as events from "@/runtime/money-path-events";
 import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -63,14 +64,13 @@ describe("moonpayWebhook.process", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(ORGANIZATION_ID, "MoonPay Webhook Test", "moonpay-webhook-test", "active"),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-        .bind(USER_ID, "moonpay-webhook@example.com", 1, "active"),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: ORGANIZATION_ID,
+      name: "MoonPay Webhook Test",
+      slug: "moonpay-webhook-test",
+      status: "active",
+      creator: { id: USER_ID, email: "moonpay-webhook@example.com" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,

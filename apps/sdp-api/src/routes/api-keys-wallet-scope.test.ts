@@ -7,6 +7,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser, clerkHeaders } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -72,14 +73,13 @@ async function seedAuthAndWallets(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+  });
   ({ token: clerkToken } = await authenticateTestClerkUser(env, getDb(env), {
     userId: TEST_USER.id,
     email: TEST_USER.email,
@@ -394,10 +394,13 @@ describe("API key wallet scope routes", () => {
   });
 
   it("hides API keys outside the authenticated organization", async () => {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind("org_other_api_key_policy", "Other Organization", "other-api-key-policy", "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_other_api_key_policy",
+      name: "Other Organization",
+      slug: "other-api-key-policy",
+      status: "active",
+      creator: organizationCreator("org_other_api_key_policy"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_other_api_key_policy",
       createdBy: TEST_USER.id,

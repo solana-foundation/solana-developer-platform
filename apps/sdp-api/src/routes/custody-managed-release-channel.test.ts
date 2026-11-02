@@ -8,6 +8,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -196,16 +197,13 @@ async function auditRows() {
 
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, status)
-     VALUES (?, 'Managed release channel', 'managed-release-channel', 'active')`,
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, 'managed-release-channel@example.com', 1, 'active')`,
-    [USER_ID]
-  );
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Managed release channel",
+    slug: "managed-release-channel",
+    status: "active",
+    creator: { id: USER_ID, email: "managed-release-channel@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

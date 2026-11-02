@@ -13,6 +13,7 @@ import { internalCustody } from "@/routes/internal-custody";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -101,14 +102,13 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   await clearKVStores(env);
   const db = getDb(env);
-  await db.execute(
-    "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Fireblocks BYOK', 'fireblocks-byok', 'active')",
-    [ORGANIZATION_ID]
-  );
-  await db.execute(
-    "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'fireblocks-byok@example.com', 1, 'active')",
-    [USER_ID]
-  );
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Fireblocks BYOK",
+    slug: "fireblocks-byok",
+    status: "active",
+    creator: { id: USER_ID, email: "fireblocks-byok@example.com" },
+  });
   await db.execute(
     "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_fireblocks_byok', ?, ?, 'admin', 'active')",
     [ORGANIZATION_ID, USER_ID]

@@ -18,6 +18,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -65,14 +66,13 @@ const originalEncryptionKey = env.CUSTODY_ENCRYPTION_KEY;
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-      .bind(ORGANIZATION_ID, "Connection wallets", "connection-wallets"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "connection-wallets@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Connection wallets",
+    slug: "connection-wallets",
+    status: "active",
+    creator: { id: USER_ID, email: "connection-wallets@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

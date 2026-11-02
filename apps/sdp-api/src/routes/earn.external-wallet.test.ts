@@ -9,6 +9,7 @@ import { badRequest, conflict } from "@/lib/errors";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
@@ -129,24 +130,16 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, prodKeyHash, PROD_CACHED_API_KEY);
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
-      )
-      .bind(
-        TEST_ORG.id,
-        TEST_ORG.name,
-        TEST_ORG.slug,
-        "active",
-        entitled
-          ? JSON.stringify({ providerOverrides: { earn: { kamino: true, jupiter_lend: true } } })
-          : "{}"
-      ),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(TEST_USER.id, TEST_USER.email),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    settings: entitled
+      ? JSON.stringify({ providerOverrides: { earn: { kamino: true, jupiter_lend: true } } })
+      : "{}",
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,

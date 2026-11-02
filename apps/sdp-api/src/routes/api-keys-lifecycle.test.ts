@@ -7,6 +7,7 @@ import { getLogger } from "@/runtime/logger";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -155,18 +156,13 @@ describe("API key lifecycle", () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Lifecycle', 'api-key-lifecycle', 'active')"
-        )
-        .bind(ORGANIZATION_ID),
-      db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'lifecycle@example.com', 1, 'active')"
-        )
-        .bind(USER_ID),
-    ]);
+    await seedOrganization(db, {
+      id: ORGANIZATION_ID,
+      name: "Lifecycle",
+      slug: "api-key-lifecycle",
+      status: "active",
+      creator: { id: USER_ID, email: "lifecycle@example.com" },
+    });
     const session = await authenticateTestClerkUser(env, db, {
       userId: USER_ID,
       email: "lifecycle@example.com",

@@ -41,6 +41,7 @@ import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { gatewayStub } from "@/test/fixtures/rings-gateway";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { RingsAdapterError } from "./adapter-error";
@@ -244,12 +245,14 @@ describe("HeliusRingsService", () => {
     await seedTestDatabase(env);
     const db = getDb(env);
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
     await db
       .prepare(
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"

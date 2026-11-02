@@ -12,6 +12,7 @@ import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -22,14 +23,13 @@ const CREATED_AT = "2026-09-15T10:00:00.000Z";
 
 async function seedBase(): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-    .run();
-  await db
-    .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-    .bind(TEST_USER.id, TEST_USER.email)
-    .run();
+  await seedOrganization(db, {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+  });
   await seedDefaultProjects(db, {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,

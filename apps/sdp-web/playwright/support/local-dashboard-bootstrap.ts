@@ -610,8 +610,8 @@ async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations
-           (id, name, slug, status, settings)
-         VALUES ($1, $2, $3, 'active', $4)
+           (id, name, slug, status, settings, created_by_user_id)
+         VALUES ($1, $2, $3, 'active', $4, $5)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
@@ -623,6 +623,7 @@ async function ensureLinkedOrg(
           organization.name,
           organization.slug,
           JSON.stringify(PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS),
+          userId,
         ]
       );
 

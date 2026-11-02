@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -184,14 +185,13 @@ describe("sweepRampTransferStatuses", () => {
     });
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(ORG, "Ramp Status Sweep", "ramp-status-sweep", "active"),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(USER, "ramp-status-sweep@example.com"),
-    ]);
+    await seedOrganization(db, {
+      id: ORG,
+      name: "Ramp Status Sweep",
+      slug: "ramp-status-sweep",
+      status: "active",
+      creator: { id: USER, email: "ramp-status-sweep@example.com" },
+    });
     await seedDefaultProjects(db, {
       organizationId: ORG,
       createdBy: USER,

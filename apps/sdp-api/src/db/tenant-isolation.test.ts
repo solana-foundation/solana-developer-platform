@@ -19,6 +19,7 @@ import { createCounterpartiesRepository } from "@/db/repositories/repository-fac
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -32,26 +33,20 @@ const COUNTERPARTY_B = "ctp_tenant_isolation_b";
 
 async function seedTwoTenants(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Tenant isolation A', ?, 'active')`
-      )
-      .bind(ORG_A, "tenant-isolation-a"),
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Tenant isolation B', ?, 'active')`
-      )
-      .bind(ORG_B, "tenant-isolation-b"),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'tenant-isolation@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(db, {
+    id: ORG_A,
+    name: "Tenant isolation A",
+    slug: "tenant-isolation-a",
+    status: "active",
+    creator: { id: USER_ID, email: "tenant-isolation@example.com" },
+  });
+  await seedOrganization(db, {
+    id: ORG_B,
+    name: "Tenant isolation B",
+    slug: "tenant-isolation-b",
+    status: "active",
+    creator: organizationCreator(ORG_B),
+  });
   await seedDefaultProjects(db, {
     organizationId: ORG_A,
     createdBy: USER_ID,

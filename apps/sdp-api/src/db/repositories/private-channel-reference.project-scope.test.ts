@@ -3,6 +3,7 @@ import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PrivateChannelReferenceWalletScope } from "./private-channel-reference.repository";
@@ -33,14 +34,13 @@ describe("PrivateChannelReferenceRepository wallet project scope (postgres)", ()
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email),
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,

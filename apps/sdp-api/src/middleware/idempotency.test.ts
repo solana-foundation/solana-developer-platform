@@ -6,6 +6,7 @@ import * as idempotencyKeysRepository from "@/db/repositories/idempotency-keys.r
 import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
 import type { JsonValue } from "@/lib/idempotency";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -42,13 +43,14 @@ async function seed(): Promise<void> {
     )
     .bind(USER)
     .run();
-  await db
-    .prepare(
-      `INSERT INTO organizations (id, name, slug, status)
-       VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(ORG, ORG, ORG)
-    .run();
+  await seedOrganization(db, {
+    id: ORG,
+    name: ORG,
+    slug: ORG,
+    status: "active",
+    creator: { id: USER, email: "idempotency@example.com" },
+    onConflict: "do-nothing",
+  });
   await seedDefaultProjects(db, { organizationId: ORG, createdBy: USER, members: [USER] });
 }
 

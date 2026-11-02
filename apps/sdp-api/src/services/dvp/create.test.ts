@@ -38,6 +38,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -210,12 +211,14 @@ describe("createDvpTrade", () => {
     originalSettlementAuthority = env.DVP_SETTLEMENT_AUTHORITY;
     env.DVP_SETTLEMENT_AUTHORITY = SETTLEMENT_AUTHORITY;
     const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
     await db.execute("UPDATE organizations SET settings = ? WHERE id = ?", [
       JSON.stringify({ providerOverrides: { custody: { local: true } } }),
       TEST_ORG.id,

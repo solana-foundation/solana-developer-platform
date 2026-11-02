@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -107,20 +108,13 @@ function depositIntent(params: {
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Earn custody scope', 'earn-custody-scope', 'active')`
-      )
-      .bind(ORGANIZATION_ID),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'earn-custody-scope@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Earn custody scope",
+    slug: "earn-custody-scope",
+    status: "active",
+    creator: { id: USER_ID, email: "earn-custody-scope@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

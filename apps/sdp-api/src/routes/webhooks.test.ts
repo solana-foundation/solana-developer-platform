@@ -13,6 +13,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -341,21 +342,18 @@ describe("Clerk webhooks", () => {
     const keyId = "key_webhook_cache_invalidation";
     const keyHash = await hashString(rawKey, env.API_KEY_PEPPER);
     const db = getDb(env);
+    await seedOrganization(db, {
+      id: orgId,
+      name: "Cache Invalidation Org",
+      slug: orgId,
+      status: "active",
+      creator: { id: userId, email: "webhook-cache@example.com" },
+    });
     await db.batch([
-      db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Cache Invalidation Org', ?, 'active')"
-        )
-        .bind(orgId, orgId),
       db
         .prepare(`INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
            VALUES (?, 'clerk', ?, ?, ?)`)
         .bind(`aoi_${orgId}`, clerkOrgId, orgId, orgId),
-      db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'webhook-cache@example.com', 1, 'active')"
-        )
-        .bind(userId),
     ]);
     await seedDefaultProjects(db, {
       organizationId: orgId,
@@ -571,14 +569,13 @@ describe("MoonPay ramp webhook", () => {
     return res;
   }
   async function seedMoonpayOnrampTransfer() {
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG_ID, "MoonPay Webhook Org", "moonpay-webhook-org", "active")
-      .run();
-    await getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "moonpay-webhook-user@example.com", 1, "active")
-      .run();
+    await seedOrganization(getDb(env), {
+      id: ORG_ID,
+      name: "MoonPay Webhook Org",
+      slug: "moonpay-webhook-org",
+      status: "active",
+      creator: { id: USER_ID, email: "moonpay-webhook-user@example.com" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG_ID,
       createdBy: USER_ID,

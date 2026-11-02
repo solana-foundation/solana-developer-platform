@@ -26,6 +26,7 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import {
   type SeededDefaultProjects,
   type SeededProject,
@@ -165,15 +166,13 @@ describe("provider-availability.service", () => {
 
     await seedTestDatabase(env);
 
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(
-        TEST_ORG_ID,
-        "Provider Availability Test Org",
-        "provider-availability-test-org",
-        "active"
-      )
-      .run();
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG_ID,
+      name: "Provider Availability Test Org",
+      slug: "provider-availability-test-org",
+      status: "active",
+      creator: organizationCreator(TEST_ORG_ID),
+    });
   });
 
   afterEach(async () => {

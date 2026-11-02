@@ -46,6 +46,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -180,13 +181,15 @@ async function seedIssuanceTransaction(input: {
     .run();
 }
 
-async function seedOrganization(input: { id: string; name: string; slug: string }) {
-  await getDb(env)
-    .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-    )
-    .bind(input.id, input.name, input.slug)
-    .run();
+async function seedOrganizationRow(input: { id: string; name: string; slug: string }) {
+  await seedOrganization(getDb(env), {
+    id: input.id,
+    name: input.name,
+    slug: input.slug,
+    status: "active",
+    creator: organizationCreator(input.id),
+    onConflict: "update",
+  });
 }
 
 async function seedProject(input: {
@@ -294,13 +297,15 @@ describe("Issuance Routes", () => {
     await seedTestDatabase(env);
 
     // Seed organization
-    await db
-      .prepare(
-        `INSERT OR REPLACE INTO organizations (id, name, slug, status, settings)
-         VALUES (?, ?, ?, 'active', '{"providerOverrides":{"custody":{"local":true}}}')`
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      settings: '{"providerOverrides":{"custody":{"local":true}}}',
+      onConflict: "update",
+    });
 
     // Seed user
     await db
@@ -1411,7 +1416,11 @@ describe("Issuance Routes", () => {
       "%s rejects wallets outside the project or organization before signing",
       async (operation) => {
         const request = await prepareAction(operation);
-        await seedOrganization({ id: "org_other_selector", name: "Other", slug: "other-selector" });
+        await seedOrganizationRow({
+          id: "org_other_selector",
+          name: "Other",
+          slug: "other-selector",
+        });
         await getDb(env).transaction((tx) =>
           seedTestPrivyConnection(tx, {
             organizationId: TEST_ORG.id,
@@ -1693,7 +1702,7 @@ describe("Issuance Routes", () => {
 
     it("keeps unrestricted project keys org/project scoped when walletId is omitted", async () => {
       const token = await seedIssuedToken();
-      await seedOrganization({
+      await seedOrganizationRow({
         id: "org_issuance_other",
         name: "Other Org",
         slug: "issuance-other-org",
@@ -2186,7 +2195,7 @@ describe("Issuance Routes", () => {
       const foreignProjectId = "prj_foreign_issuance_wallet";
       const foreignConfigId = "cust_cfg_foreign_issuance_wallet";
       const foreignWalletId = "cwlt_foreign_issuance_wallet";
-      await seedOrganization({
+      await seedOrganizationRow({
         id: foreignOrgId,
         name: "Foreign issuance org",
         slug: "foreign-issuance-org",

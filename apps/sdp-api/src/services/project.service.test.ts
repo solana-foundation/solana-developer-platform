@@ -8,6 +8,7 @@ import { ProjectService } from "@/services/project.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   DEFAULT_PROJECT_NAME,
   DEFAULT_PROJECT_SLUG,
@@ -49,12 +50,14 @@ describe("ProjectService", () => {
       .catch(() => {});
 
     // Seed org and user
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
 
     await db
       .prepare(

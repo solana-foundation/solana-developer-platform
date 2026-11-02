@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { authenticateTestClerkUser, ensureTestClerkIssuer } from "@/test/helpers/clerk";
 import { env as baseEnv } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { isEarnExitOrRead } from "./earn/exits";
@@ -80,14 +81,13 @@ describe("production entitlement covers every project route (APE-351)", () => {
     await ensureTestClerkIssuer(env);
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(TEST_USER.id, TEST_USER.email),
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: TEST_USER,
+    });
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,

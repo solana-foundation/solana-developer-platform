@@ -13,6 +13,7 @@ import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -94,14 +95,19 @@ async function seed(): Promise<void> {
     )
     .bind(USER_ID)
     .run();
-  for (const org of [CREATOR_ORG, PARTY_ORG, STRANGER_ORG]) {
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-      )
-      .bind(org, org, org)
-      .run();
+  for (const [org, creator] of [
+    [CREATOR_ORG, { id: USER_ID, email: "ledger@example.com" }],
+    [PARTY_ORG, organizationCreator(PARTY_ORG)],
+    [STRANGER_ORG, organizationCreator(STRANGER_ORG)],
+  ] as const) {
+    await seedOrganization(db, {
+      id: org,
+      name: org,
+      slug: org,
+      status: "active",
+      creator,
+      onConflict: "do-nothing",
+    });
     await seedDefaultProjects(db, {
       organizationId: org,
       createdBy: USER_ID,

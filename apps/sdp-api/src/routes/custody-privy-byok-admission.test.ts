@@ -12,6 +12,7 @@ import {
   type TestStoredProviderCredential,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -41,20 +42,13 @@ const CACHED_API_KEY: SeededApiKey = {
 async function seedActor(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active')`
-      )
-      .bind(ORGANIZATION_ID, "Privy BYOK Admission", "privy-byok-admission"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')`
-      )
-      .bind(USER_ID, "privy-byok-admission@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Privy BYOK Admission",
+    slug: "privy-byok-admission",
+    status: "active",
+    creator: { id: USER_ID, email: "privy-byok-admission@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

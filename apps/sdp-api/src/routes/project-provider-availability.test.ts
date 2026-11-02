@@ -18,6 +18,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   archiveProject,
   type SeededDefaultProjects,
@@ -370,18 +371,15 @@ async function seedApiKey(
   });
 }
 
-async function seedOrganization(organizationId: string, userId: string): Promise<void> {
+async function seedOrganizationWithMember(organizationId: string, userId: string): Promise<void> {
   const db = getDb(env);
-  await db.execute(
-    `INSERT INTO organizations (id, name, slug, status)
-     VALUES (?, ?, ?, 'active')`,
-    [organizationId, organizationId, organizationId.replaceAll("_", "-")]
-  );
-  await db.execute(
-    `INSERT INTO users (id, email, email_verified, status)
-     VALUES (?, ?, 1, 'active')`,
-    [userId, `${userId}@example.com`]
-  );
+  await seedOrganization(db, {
+    id: organizationId,
+    name: organizationId,
+    slug: organizationId.replaceAll("_", "-"),
+    status: "active",
+    creator: { id: userId, email: `${userId}@example.com` },
+  });
   await db.execute(
     `INSERT INTO organization_members (id, organization_id, user_id, role, status)
      VALUES (?, ?, ?, 'admin', 'active')`,
@@ -391,8 +389,8 @@ async function seedOrganization(organizationId: string, userId: string): Promise
 
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
-  await seedOrganization(ORGANIZATION_ID, USER_ID);
-  await seedOrganization(OTHER_ORGANIZATION_ID, OTHER_USER_ID);
+  await seedOrganizationWithMember(ORGANIZATION_ID, USER_ID);
+  await seedOrganizationWithMember(OTHER_ORGANIZATION_ID, OTHER_USER_ID);
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

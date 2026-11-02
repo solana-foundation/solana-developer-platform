@@ -13,6 +13,7 @@ import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import * as events from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { applyRampSettlementEvent } from "./ramp-settlements";
@@ -199,14 +200,13 @@ describe("RAMP_TRANSFER_TRANSITIONS", () => {
 describe("PaymentsRepository.transitionRampTransfer (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind(ORG_ID, "Ramp Transitions Test", "ramp-transitions-test", "active"),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-        .bind(USER_ID, "ramp-transitions@example.com", 1, "active"),
-    ]);
+    await seedOrganization(getDb(env), {
+      id: ORG_ID,
+      name: "Ramp Transitions Test",
+      slug: "ramp-transitions-test",
+      status: "active",
+      creator: { id: USER_ID, email: "ramp-transitions@example.com" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG_ID,
       createdBy: USER_ID,

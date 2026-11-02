@@ -12,6 +12,7 @@ import { app } from "@/index";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -118,20 +119,23 @@ async function seedAuth(): Promise<void> {
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   const settings = JSON.stringify({ providerOverrides: { earn: { kamino: true, veda: true } } });
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    settings,
+  });
+  await seedOrganization(getDb(env), {
+    id: OTHER_ORG.id,
+    name: OTHER_ORG.name,
+    slug: OTHER_ORG.slug,
+    status: "active",
+    creator: organizationCreator(OTHER_ORG.id),
+    settings,
+  });
   await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, settings),
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
-      )
-      .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, settings),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(TEST_USER.id, TEST_USER.email),
     getDb(env)
       .prepare(
         `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

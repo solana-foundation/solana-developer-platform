@@ -22,6 +22,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as gatewayAuth from "./auth/gateway-auth";
@@ -125,13 +126,14 @@ beforeEach(async () => {
   env.PRIVY_APP_ID = "pc-verification-app";
   env.PRIVY_APP_SECRET = "pc-verification-secret";
   const db = getDb(env);
+  await seedOrganization(db, {
+    id: "org_test_pc_wallet",
+    name: "PC",
+    slug: "pc-verify",
+    status: "active",
+    creator: { id: "usr_test_pc_wallet", email: "pc-verify@example.com" },
+  });
   await db.batch([
-    db.prepare(
-      "INSERT INTO organizations (id, name, slug, status) VALUES ('org_test_pc_wallet', 'PC', 'pc-verify', 'active')"
-    ),
-    db.prepare(
-      "INSERT INTO users (id, email, status) VALUES ('usr_test_pc_wallet', 'pc-verify@example.com', 'active')"
-    ),
     db.prepare(
       "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES ('om_pc_wallet', 'org_test_pc_wallet', 'usr_test_pc_wallet', 'admin', 'active')"
     ),

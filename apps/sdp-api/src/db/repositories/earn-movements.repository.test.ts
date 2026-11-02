@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
@@ -114,14 +115,20 @@ describe("Unified earn movement ledger (postgres)", () => {
       )
       .bind(USER)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status) VALUES
-           (?, 'Earn Movements', 'earn-movements', 'active'),
-           (?, 'Earn Movements Other', 'earn-movements-other', 'active')`
-      )
-      .bind(ORG, ORG_OTHER)
-      .run();
+    await seedOrganization(db, {
+      id: ORG,
+      name: "Earn Movements",
+      slug: "earn-movements",
+      status: "active",
+      creator: { id: USER, email: "earn-movements@example.com" },
+    });
+    await seedOrganization(db, {
+      id: ORG_OTHER,
+      name: "Earn Movements Other",
+      slug: "earn-movements-other",
+      status: "active",
+      creator: organizationCreator(ORG_OTHER),
+    });
     await seedDefaultProjects(db, {
       organizationId: ORG,
       createdBy: USER,

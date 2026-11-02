@@ -70,6 +70,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   cancelSeededPaymentRequest,
@@ -268,12 +269,14 @@ function installSettlementHooks() {
     await db.prepare("DELETE FROM payment_transfers").run();
     await db.prepare("DELETE FROM projects").run();
 
-    await db
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+      onConflict: "update",
+    });
     await db
       .prepare(
         "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"

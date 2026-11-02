@@ -9,6 +9,7 @@ import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queue
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -71,14 +72,20 @@ describe("Earn queued withdrawal repository", () => {
       )
       .bind(USER)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status) VALUES
-          (?, 'Queued Withdrawal Repo', 'queued-withdrawal-repo', 'active'),
-          (?, 'Queued Withdrawal Other', 'queued-withdrawal-other', 'active')`
-      )
-      .bind(ORG, OTHER_ORG)
-      .run();
+    await seedOrganization(db, {
+      id: ORG,
+      name: "Queued Withdrawal Repo",
+      slug: "queued-withdrawal-repo",
+      status: "active",
+      creator: { id: USER, email: "queued-withdrawal-repo@example.com" },
+    });
+    await seedOrganization(db, {
+      id: OTHER_ORG,
+      name: "Queued Withdrawal Other",
+      slug: "queued-withdrawal-other",
+      status: "active",
+      creator: organizationCreator(OTHER_ORG),
+    });
     await seedDefaultProjects(db, {
       organizationId: ORG,
       createdBy: USER,

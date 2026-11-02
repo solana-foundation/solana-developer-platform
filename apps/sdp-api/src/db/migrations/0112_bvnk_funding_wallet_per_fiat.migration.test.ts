@@ -41,10 +41,10 @@ afterEach(async () => {
 describe("0112 BVNK funding wallet per fiat", () => {
   it("archives legacy onramp-key funding rows and deduplicates per fiat currency", async () => {
     await client.query(
-      `INSERT INTO organizations (id, name, slug) VALUES ('org_0112', 'Org 0112', 'org-0112')`
+      `INSERT INTO users (id, email) VALUES ('usr_0112', 'owner-0112@example.test')`
     );
     await client.query(
-      `INSERT INTO users (id, email) VALUES ('usr_0112', 'owner-0112@example.test')`
+      `INSERT INTO organizations (id, name, slug, created_by_user_id) VALUES ('org_0112', 'Org 0112', 'org-0112', 'usr_0112')`
     );
     await client.query(
       `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)

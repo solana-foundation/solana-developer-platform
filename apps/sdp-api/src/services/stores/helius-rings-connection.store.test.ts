@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { HeliusRingsConnectionStore } from "./helius-rings-connection.store";
@@ -51,15 +52,13 @@ describe("HeliusRingsConnectionStore", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.execute("INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)", [
-      TEST_ORG.id,
-      TEST_ORG.name,
-      TEST_ORG.slug,
-    ]);
-    await db.execute("INSERT INTO users (id, email) VALUES (?, ?)", [
-      TEST_USER.id,
-      TEST_USER.email,
-    ]);
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: TEST_USER,
+    });
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,

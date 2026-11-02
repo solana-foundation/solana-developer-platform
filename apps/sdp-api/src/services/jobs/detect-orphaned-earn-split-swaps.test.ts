@@ -14,6 +14,7 @@ import {
   installClusterRpcResponder,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -53,14 +54,13 @@ beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Split Swap Org", "split-swap", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER, "split-swap@example.com"),
-  ]);
+  await seedOrganization(db, {
+    id: ORG,
+    name: "Split Swap Org",
+    slug: "split-swap",
+    status: "active",
+    creator: { id: USER, email: "split-swap@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,

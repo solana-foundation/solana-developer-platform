@@ -24,6 +24,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -175,16 +176,13 @@ describe("custody Connection deactivation", () => {
     custodyReleaseChannel.outOfChannelMode = null;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.execute(
-      `INSERT INTO organizations (id, name, slug, status)
-      VALUES (?, 'Deactivation', 'connection-deactivation', 'active')`,
-      [ORG]
-    );
-    await db.execute(
-      `INSERT INTO users (id, email, email_verified, status)
-      VALUES (?, 'connection-deactivation@example.com', 1, 'active')`,
-      [USER]
-    );
+    await seedOrganization(db, {
+      id: ORG,
+      name: "Deactivation",
+      slug: "connection-deactivation",
+      status: "active",
+      creator: { id: USER, email: "connection-deactivation@example.com" },
+    });
     await db.execute(
       `INSERT INTO organization_members (id, organization_id, user_id, role, status)
       VALUES ('mem_connection_deactivation', ?, ?, 'admin', 'active')`,
@@ -747,12 +745,14 @@ describe("custody Connection deactivation", () => {
     const before = await persistedState();
     // The key's own organization must exist and be active for it to reach the
     // route's API-key refusal.
-    await getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-      .run();
+    await seedOrganization(getDb(env), {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: "active",
+      creator: organizationCreator(TEST_ORG.id),
+      onConflict: "do-nothing",
+    });
     const { header } = await setupTestAuth(env);
     const response = await app.request(
       `/internal/dashboard/custody/connections/${CONNECTION}/deactivate`,

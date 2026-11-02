@@ -9,6 +9,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -117,12 +118,6 @@ describe("Private Channels event references handler", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Refs Org', 'refs-org', 'active')"
-      )
-      .bind(ORGANIZATION_ID)
-      .run();
     for (const [id, email, name] of [
       [USER_ID, "member@example.com", "Ada Lovelace"],
       [NON_MEMBER_USER_ID, "none@example.com", null],
@@ -134,6 +129,13 @@ describe("Private Channels event references handler", () => {
         .bind(id, email, name)
         .run();
     }
+    await seedOrganization(db, {
+      id: ORGANIZATION_ID,
+      name: "Refs Org",
+      slug: "refs-org",
+      status: "active",
+      creator: { id: USER_ID, email: "member@example.com" },
+    });
     await seedDefaultProjects(db, {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,

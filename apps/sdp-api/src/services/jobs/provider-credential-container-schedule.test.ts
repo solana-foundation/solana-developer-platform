@@ -6,6 +6,7 @@ import type {
   ListCredentialSecretVersionsParams,
 } from "@/services/credential-secret-store";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { scanGcpCredentialContainers } from "./provider-credential-container-cleanup";
@@ -67,14 +68,13 @@ describe("single-column container scan scheduling", () => {
   afterEach(() => vi.restoreAllMocks());
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env).execute(
-      "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Schedule prototype', 'scan-schedule-prototype', 'active')",
-      [ORG]
-    );
-    await getDb(env).execute(
-      "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'scan-schedule-prototype@example.test', 1, 'active')",
-      [USER]
-    );
+    await seedOrganization(getDb(env), {
+      id: ORG,
+      name: "Schedule prototype",
+      slug: "scan-schedule-prototype",
+      status: "active",
+      creator: { id: USER, email: "scan-schedule-prototype@example.test" },
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: ORG,
       createdBy: USER,

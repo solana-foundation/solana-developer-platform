@@ -24,6 +24,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedActiveMemberships } from "@/test/helpers/organization-members";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ORGANIZATION_ID = "org_onboarding_isolation";
@@ -91,13 +92,14 @@ describe("onboarding status under database tenant isolation", () => {
     await seedTestDatabase(env);
 
     const db = getDb(env);
+    await seedOrganization(db, {
+      id: ORGANIZATION_ID,
+      name: "Onboarding isolation",
+      slug: "onboarding-isolation",
+      status: "active",
+      creator: organizationCreator(ORGANIZATION_ID),
+    });
     await db.batch([
-      db
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, status)
-           VALUES (?, 'Onboarding isolation', 'onboarding-isolation', 'active')`
-        )
-        .bind(ORGANIZATION_ID),
       db
         .prepare(
           `INSERT INTO auth_organization_identities

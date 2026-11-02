@@ -12,6 +12,7 @@ import { seedClerkIdentity } from "@/test/helpers/clerk";
 import { seedTestCustodyRows, type TestCustodyConfigRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -47,21 +48,21 @@ function createApp() {
   return app;
 }
 
-async function seedOrganization() {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Onboarding test', 'onboarding-test', 'active')`
-      )
-      .bind(ORGANIZATION_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, name, status)
-         VALUES (?, 'onboarding@example.com', 1, 'Onboarding user', 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+async function seedOnboardingOrganization() {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO users (id, email, email_verified, name, status)
+       VALUES (?, 'onboarding@example.com', 1, 'Onboarding user', 'active')`
+    )
+    .bind(USER_ID)
+    .run();
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Onboarding test",
+    slug: "onboarding-test",
+    status: "active",
+    creator: { id: USER_ID, email: "onboarding@example.com" },
+  });
   await seedClerkIdentity(getDb(env), {
     userId: USER_ID,
     email: "onboarding@example.com",
@@ -139,7 +140,7 @@ async function getSetup() {
 describe("organization onboarding handlers", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedOrganization();
+    await seedOnboardingOrganization();
   });
 
   it("lists the provider of an active BYOK connection alone", async () => {
@@ -152,12 +153,13 @@ describe("organization onboarding handlers", () => {
   });
 
   it("lists distinct active sandbox providers in catalog order", async () => {
-    await getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES ('org_onboarding_other', 'Onboarding other', 'onboarding-other', 'active')`
-      )
-      .run();
+    await seedOrganization(getDb(env), {
+      id: "org_onboarding_other",
+      name: "Onboarding other",
+      slug: "onboarding-other",
+      status: "active",
+      creator: organizationCreator("org_onboarding_other"),
+    });
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_onboarding_other",
       createdBy: USER_ID,

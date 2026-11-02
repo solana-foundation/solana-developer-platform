@@ -9,6 +9,7 @@ import { createSigningService } from "@/services/domain/signing.service";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -181,20 +182,13 @@ describe("CustodyConfigStore project scope", () => {
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Custody config store', 'custody-config-store', 'active')`
-      )
-      .bind(ORGANIZATION_ID),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'custody-config-store@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Custody config store",
+    slug: "custody-config-store",
+    status: "active",
+    creator: { id: USER_ID, email: "custody-config-store@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

@@ -21,6 +21,7 @@ import {
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -1423,10 +1424,13 @@ describe("Payments routes — ramps", () => {
     it("fails closed when the provider reference is already bound to another tenant", async () => {
       const counterpartyId = await seedCounterparty({ externalId: "stripe_cross_tenant" });
       const now = new Date().toISOString();
-      await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-        .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "active")
-        .run();
+      await seedOrganization(getDb(env), {
+        id: "org_test_other_tenant",
+        name: "Other Tenant",
+        slug: "other-tenant",
+        status: "active",
+        creator: organizationCreator("org_test_other_tenant"),
+      });
       const otherTenantProjects = await seedDefaultProjects(getDb(env), {
         organizationId: "org_test_other_tenant",
         createdBy: TEST_USER.id,

@@ -6,6 +6,7 @@ import { badRequest } from "@/lib/errors";
 import { AuditService } from "@/services/audit.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -79,14 +80,13 @@ async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+  });
   await seedDefaultProjects(db, {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,

@@ -11,6 +11,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 
 const logEvent = vi.hoisted(() => vi.fn());
@@ -96,14 +97,20 @@ describe("vault exposure cap: the ledger write gate", () => {
       )
       .bind(USER)
       .run();
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status) VALUES
-           (?, 'Earn Gate', 'earn-gate', 'active'),
-           (?, 'Earn Gate Other', 'earn-gate-other', 'active')`
-      )
-      .bind(ORG, ORG_OTHER)
-      .run();
+    await seedOrganization(db, {
+      id: ORG,
+      name: "Earn Gate",
+      slug: "earn-gate",
+      status: "active",
+      creator: { id: USER, email: "earn-gate@example.com" },
+    });
+    await seedOrganization(db, {
+      id: ORG_OTHER,
+      name: "Earn Gate Other",
+      slug: "earn-gate-other",
+      status: "active",
+      creator: organizationCreator(ORG_OTHER),
+    });
     await seedDefaultProjects(db, {
       organizationId: ORG,
       createdBy: USER,

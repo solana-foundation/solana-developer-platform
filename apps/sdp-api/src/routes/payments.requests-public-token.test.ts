@@ -6,6 +6,7 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedPaymentRequest } from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -55,14 +56,13 @@ describe("payment request public tokens", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-      .bind(ORGANIZATION_ID, "Payment request token", "payment-request-token")
-      .run();
-    await db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "payment-request-token@example.com")
-      .run();
+    await seedOrganization(db, {
+      id: ORGANIZATION_ID,
+      name: "Payment request token",
+      slug: "payment-request-token",
+      status: "active",
+      creator: { id: USER_ID, email: "payment-request-token@example.com" },
+    });
     await seedDefaultProjects(db, {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,

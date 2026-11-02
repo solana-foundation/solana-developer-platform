@@ -10,6 +10,7 @@ import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -45,22 +46,20 @@ const OWNER_WALLETS = [
 
 async function seedOrganizationCustody(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORGANIZATION_ID, "Custody Cross Project Org", "custody-cross-project", "active"),
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(
-        OTHER_ORGANIZATION_ID,
-        "Custody Cross Project Other Org",
-        "custody-cross-project-other",
-        "active"
-      ),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "custody-cross-project@example.com", 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Custody Cross Project Org",
+    slug: "custody-cross-project",
+    status: "active",
+    creator: { id: USER_ID, email: "custody-cross-project@example.com" },
+  });
+  await seedOrganization(db, {
+    id: OTHER_ORGANIZATION_ID,
+    name: "Custody Cross Project Other Org",
+    slug: "custody-cross-project-other",
+    status: "active",
+    creator: organizationCreator(OTHER_ORGANIZATION_ID),
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

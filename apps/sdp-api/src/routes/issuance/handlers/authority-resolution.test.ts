@@ -6,6 +6,7 @@ import * as solanaSigner from "@/services/solana/signer";
 import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -54,16 +55,13 @@ function createAuth(): ApiKeyContext {
 }
 
 async function seedScope(): Promise<void> {
-  await getDb(testEnv).batch([
-    getDb(testEnv).prepare(
-      `INSERT INTO organizations (id, name, slug, status)
-         VALUES ('org_test', 'Authority resolution', 'authority-resolution', 'active')`
-    ),
-    getDb(testEnv).prepare(
-      `INSERT INTO users (id, email, email_verified, status)
-         VALUES ('user_test', 'authority-resolution@example.com', 1, 'active')`
-    ),
-  ]);
+  await seedOrganization(getDb(testEnv), {
+    id: "org_test",
+    name: "Authority resolution",
+    slug: "authority-resolution",
+    status: "active",
+    creator: { id: "user_test", email: "authority-resolution@example.com" },
+  });
   await seedDefaultProjects(getDb(testEnv), {
     organizationId: "org_test",
     createdBy: "user_test",
@@ -562,16 +560,13 @@ describe("authority-resolution", () => {
 
   it("does not resolve an exact wallet from another tenant", async () => {
     await resetScope();
-    await getDb(testEnv).batch([
-      getDb(testEnv).prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES ('org_other', 'Other', 'authority-resolution-other', 'active')`
-      ),
-      getDb(testEnv).prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES ('user_other', 'authority-resolution-other@example.com', 1, 'active')`
-      ),
-    ]);
+    await seedOrganization(getDb(testEnv), {
+      id: "org_other",
+      name: "Other",
+      slug: "authority-resolution-other",
+      status: "active",
+      creator: { id: "user_other", email: "authority-resolution-other@example.com" },
+    });
     await seedDefaultProjects(getDb(testEnv), {
       organizationId: "org_other",
       createdBy: "user_other",

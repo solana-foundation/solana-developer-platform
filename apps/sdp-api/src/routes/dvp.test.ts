@@ -25,6 +25,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
@@ -90,14 +91,13 @@ let originalMarkets: string | undefined;
 async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
@@ -139,11 +139,13 @@ function authHeaders() {
  */
 async function seedPartyOrg(): Promise<void> {
   const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(PARTY_ORG.id, PARTY_ORG.name, PARTY_ORG.slug, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: PARTY_ORG.id,
+    name: PARTY_ORG.name,
+    slug: PARTY_ORG.slug,
+    status: "active",
+    creator: organizationCreator(PARTY_ORG.id),
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: PARTY_ORG.id,
     createdBy: TEST_USER.id,

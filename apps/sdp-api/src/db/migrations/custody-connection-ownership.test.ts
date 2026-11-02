@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -13,20 +14,13 @@ const CHECKED_AT = "2026-08-06T12:00:00.000Z";
 
 async function seedScope(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Custody connection constraints', ?, 'active')`
-      )
-      .bind(ORGANIZATION_ID, "custody-connection-constraints"),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'custody-connection-constraints@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Custody connection constraints",
+    slug: "custody-connection-constraints",
+    status: "active",
+    creator: { id: USER_ID, email: "custody-connection-constraints@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

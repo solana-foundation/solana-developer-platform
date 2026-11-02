@@ -13,6 +13,7 @@ import {
   writeTestPrivyCredentialSecret,
 } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -54,14 +55,13 @@ const originalPrivyAppSecret = env.PRIVY_APP_SECRET;
 async function seedFixture(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-      .bind(ORGANIZATION_ID, "Wallet owner", "wallet-owner"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER_ID, "wallet-owner@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Wallet owner",
+    slug: "wallet-owner",
+    status: "active",
+    creator: { id: USER_ID, email: "wallet-owner@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

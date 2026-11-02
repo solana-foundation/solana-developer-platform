@@ -19,6 +19,7 @@ import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { conflict } from "@/lib/errors";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -54,13 +55,14 @@ async function seed(): Promise<void> {
        VALUES ('usr_leg_action', 'leg-action@example.com', 1, 'active') ON CONFLICT (id) DO NOTHING`
     )
     .run();
-  await db
-    .prepare(
-      `INSERT INTO organizations (id, name, slug, status)
-       VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
-    )
-    .bind(ORG, ORG, ORG)
-    .run();
+  await seedOrganization(db, {
+    id: ORG,
+    name: ORG,
+    slug: ORG,
+    status: "active",
+    creator: { id: "usr_leg_action", email: "leg-action@example.com" },
+    onConflict: "do-nothing",
+  });
   await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: "usr_leg_action",

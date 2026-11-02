@@ -33,6 +33,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedTestDatabase } from "@/test/mocks/db";
@@ -1252,20 +1253,13 @@ function channelRefusal(mode: CustodyMode) {
 }
 
 async function seedScope(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Runtime targets', 'runtime-targets', 'active')`
-      )
-      .bind(ORGANIZATION_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'runtime-targets@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: "Runtime targets",
+    slug: "runtime-targets",
+    status: "active",
+    creator: { id: USER_ID, email: "runtime-targets@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,

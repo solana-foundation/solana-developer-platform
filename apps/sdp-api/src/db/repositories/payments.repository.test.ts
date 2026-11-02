@@ -9,6 +9,7 @@ import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparti
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   expectProjectScoped,
   type SeededDefaultProjects,
@@ -31,12 +32,14 @@ async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
   await db.prepare("DELETE FROM custody_configs").run();
   await db.prepare("DELETE FROM projects").run();
 
-  await db
-    .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
-    )
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
-    .run();
+  await seedOrganization(db, {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    onConflict: "update",
+  });
   await db
     .prepare(
       "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"

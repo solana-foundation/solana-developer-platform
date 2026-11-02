@@ -62,6 +62,7 @@ import { AuditService } from "@/services/audit.service";
 import { ALL_API_KEY_GRANTS, TEST_PRODUCTION_API_KEY } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
@@ -161,16 +162,14 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
     ? JSON.stringify({ providerOverrides: { earn: { upshift: true } } })
     : null;
 
-  await getDb(env).batch([
-    getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active", settings),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    settings,
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: TEST_ORG.id,
     createdBy: TEST_USER.id,
@@ -1153,11 +1152,13 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const getWallet = stubProgramReads();
 
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-        .bind("org_test_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
-    ]);
+    await seedOrganization(db, {
+      id: "org_test_earn_program_neighbour",
+      name: "Neighbour Org",
+      slug: "earn-program-neighbour",
+      status: "active",
+      creator: organizationCreator("org_test_earn_program_neighbour"),
+    });
     await seedDefaultProjects(db, {
       organizationId: "org_test_earn_program_neighbour",
       createdBy: TEST_USER.id,
@@ -1979,11 +1980,13 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     const getWithdrawal = vi.spyOn(portfolioClient, "getPortfolioWithdrawal");
 
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
-        .bind("org_test_earn_program_victim", "Victim Org", "earn-program-victim"),
-    ]);
+    await seedOrganization(db, {
+      id: "org_test_earn_program_victim",
+      name: "Victim Org",
+      slug: "earn-program-victim",
+      status: "active",
+      creator: organizationCreator("org_test_earn_program_victim"),
+    });
     await seedDefaultProjects(db, {
       organizationId: "org_test_earn_program_victim",
       createdBy: TEST_USER.id,

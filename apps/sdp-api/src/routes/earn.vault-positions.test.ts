@@ -14,6 +14,7 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -78,14 +79,13 @@ function cachedKey(): SeededApiKey {
 async function seedScope(): Promise<void> {
   const keyHash = await hashString(API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, cachedKey());
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Vault Positions Org", "vault-positions", "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(USER, "vault-positions@example.com"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORG,
+    name: "Vault Positions Org",
+    slug: "vault-positions",
+    status: "active",
+    creator: { id: USER, email: "vault-positions@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORG,
     createdBy: USER,

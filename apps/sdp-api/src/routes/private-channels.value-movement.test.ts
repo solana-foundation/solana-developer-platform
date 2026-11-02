@@ -25,6 +25,7 @@ import {
 } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { lastPrivyAdapter } from "@/test/helpers/privy-adapter";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
@@ -251,9 +252,6 @@ async function seedRouteState(): Promise<void> {
 
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORGANIZATION_ID, "PC Value Org", "pc-value-org", "active"),
-    db
       .prepare(
         `INSERT INTO users (id, email, email_verified, status) VALUES
           (?, 'value-actor@example.com', 1, 'active'),
@@ -261,6 +259,15 @@ async function seedRouteState(): Promise<void> {
           (?, 'value-nonmember@example.com', 1, 'active')`
       )
       .bind(ACTOR_USER_ID, COLLEAGUE_USER_ID, NON_MEMBER_USER_ID),
+  ]);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "PC Value Org",
+    slug: "pc-value-org",
+    status: "active",
+    creator: { id: ACTOR_USER_ID, email: "value-actor@example.com" },
+  });
+  await db.batch([
     db
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)

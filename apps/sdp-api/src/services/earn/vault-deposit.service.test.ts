@@ -11,6 +11,7 @@ import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultDepositInput } from "./vault-deposit.service";
@@ -113,14 +114,13 @@ function plan(overrides: Record<string, unknown> = {}) {
 }
 
 async function seedWallet(): Promise<void> {
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Vault Deposit Org", "vault-deposit", "active"),
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER, "vault-deposit@example.com", 1, "active"),
-  ]);
+  await seedOrganization(getDb(env), {
+    id: ORG,
+    name: "Vault Deposit Org",
+    slug: "vault-deposit",
+    status: "active",
+    creator: { id: USER, email: "vault-deposit@example.com" },
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORG,
     createdBy: USER,

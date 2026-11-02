@@ -15,6 +15,7 @@ import {
   runWithTenantDatabaseIdentity,
 } from "@/db/identity";
 import { adminDatabaseUrl, env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { TEST_RUNTIME_ROLE } from "@/test/runtime-role";
@@ -33,26 +34,20 @@ interface PreparedStatementRow {
 
 async function seedTwoTenants(): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Prepared A', 'prepared-a', 'active')`
-      )
-      .bind(ORG_A),
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, 'Prepared B', 'prepared-b', 'active')`
-      )
-      .bind(ORG_B),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, 'prepared@example.com', 1, 'active')`
-      )
-      .bind(USER_ID),
-  ]);
+  await seedOrganization(db, {
+    id: ORG_A,
+    name: "Prepared A",
+    slug: "prepared-a",
+    status: "active",
+    creator: { id: USER_ID, email: "prepared@example.com" },
+  });
+  await seedOrganization(db, {
+    id: ORG_B,
+    name: "Prepared B",
+    slug: "prepared-b",
+    status: "active",
+    creator: organizationCreator(ORG_B),
+  });
   for (const [organizationId, suffix] of [
     [ORG_A, "a"],
     [ORG_B, "b"],

@@ -16,6 +16,7 @@ import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { insertTestCustodyWalletRow, seedTestCustodySetup } from "@/test/helpers/custody";
 import { activateTestCustodyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -70,19 +71,14 @@ function buildApp() {
 
 async function seedActor(): Promise<void> {
   const db = getDb(env);
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Provider Credential Submit",
+    slug: "provider-credential-submit",
+    status: "active",
+    creator: { id: USER_ID, email: "provider-credential-submit@example.com" },
+  });
   await db.batch([
-    db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status)
-         VALUES (?, ?, ?, 'active')`
-      )
-      .bind(ORGANIZATION_ID, "Provider Credential Submit", "provider-credential-submit"),
-    db
-      .prepare(
-        `INSERT INTO users (id, email, email_verified, status)
-         VALUES (?, ?, 1, 'active')`
-      )
-      .bind(USER_ID, "provider-credential-submit@example.com"),
     db
       .prepare(
         `INSERT INTO auth_user_identities

@@ -4,6 +4,7 @@ import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { VaultWithdrawalInput } from "./vault-withdraw.service";
@@ -93,14 +94,13 @@ function plan(overrides: Record<string, unknown> = {}) {
 async function seedPosition(): Promise<void> {
   positionId = generateEarnPositionId();
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
-      .bind(ORG, "Vault Withdraw Org", "vault-withdraw", "active"),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER, "vault-withdraw@example.com", 1, "active"),
-  ]);
+  await seedOrganization(db, {
+    id: ORG,
+    name: "Vault Withdraw Org",
+    slug: "vault-withdraw",
+    status: "active",
+    creator: { id: USER, email: "vault-withdraw@example.com" },
+  });
   await seedDefaultProjects(db, {
     organizationId: ORG,
     createdBy: USER,

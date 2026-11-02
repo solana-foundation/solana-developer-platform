@@ -10,6 +10,7 @@ import {
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { EARN_ENABLED_FLAGS, EARN_FLAG_OFF_CASES } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   type SeededDefaultProjects,
   type SeededProject,
@@ -118,16 +119,13 @@ describe("assertProjectProviderAdmitted", () => {
     providerMaturity.surfacedEarnProvider = null;
     await seedTestDatabase(env);
     const db = getDb(env);
-    await db.execute(
-      `INSERT INTO organizations (id, name, slug, status)
-       VALUES (?, 'Project Provider Rule', 'project-provider-rule', 'active')`,
-      [ORGANIZATION_ID]
-    );
-    await db.execute(
-      `INSERT INTO users (id, email, email_verified, status)
-       VALUES (?, 'project-provider-rule@example.com', 1, 'active')`,
-      [USER_ID]
-    );
+    await seedOrganization(db, {
+      id: ORGANIZATION_ID,
+      name: "Project Provider Rule",
+      slug: "project-provider-rule",
+      status: "active",
+      creator: { id: USER_ID, email: "project-provider-rule@example.com" },
+    });
     projects = await seedDefaultProjects(db, {
       organizationId: ORGANIZATION_ID,
       createdBy: USER_ID,
