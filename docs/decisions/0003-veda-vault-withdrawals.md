@@ -335,13 +335,13 @@ tolerance and SDP does not invent one.
 
 ## Sequencing
 
-| PR  | Contents                                                                                                            | Gate to start                                                                                                                                           |
-| --- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | This document                                                                                                       | —                                                                                                                                                       |
+| PR  | Contents                                                                                                              | Gate to start                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | This document                                                                                                         | —                                                                                                                                                       |
 | 2   | `buildVaultWithdrawal` in `@sdp/veda`, withdrawal service, `POST /v1/earn/withdrawals/execute`, `GET .../:movementId` | Veda confirms deployment addresses (`VEDA_DEPLOYMENTS` is empty; nothing can be proven until then) and confirms the launch vault's `withdraw_authority` |
-| 3   | `POST /v1/earn/withdrawals/provider-signed/options`                                                               | after 2                                                                                                                                                 |
-| 4   | Queued capability, `earn_vault_withdrawal_requests` migration, request/cancel routes, the closed-request indexer    | product answer to open question 5                                                                                                                       |
-| —   | `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` including `"production"`                                                        | **escalated, not part of this work** — the constant is global and flipping it opens Kamino, which still has no exit path                                |
+| 3   | `POST /v1/earn/withdrawals/provider-signed/options`                                                                   | after 2                                                                                                                                                 |
+| 4   | Queued capability, `earn_vault_withdrawal_requests` migration, request/cancel routes, the closed-request indexer      | product answer to open question 5                                                                                                                       |
+| —   | `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` including `"production"`                                                          | **escalated, not part of this work** — the constant is global and flipping it opens Kamino, which still has no exit path                                |
 
 ## Open questions
 
