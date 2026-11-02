@@ -43,15 +43,15 @@ a fabricated figure.
 - Vaults configured: **1**
 - Catalogued by SDP: **1**
 
-| Vault                                          | Name               | Base | Shelf      | Deposit assets | Liquidity | Fees (platform/perf) | Flags |
-| ---------------------------------------------- | ------------------ | ---- | ---------- | -------------- | --------- | -------------------- | ----- |
-| `3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU` | Veda USDC vault #0 | USDC | catalogued | USDC           | instant   | 0 / 0 bps            | —     |
+| Vault | Name | Base | Shelf | Deposit assets | Liquidity | Fees (platform/perf) | Flags |
+|---|---|---|---|---|---|---|---|
+| `3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU` | Veda USDC vault #0 | USDC | catalogued | USDC | instant | 0 / 0 bps | — |
 
 #### Asset configuration, as the vault declares it
 
-| Vault                                          | Asset | Deposits | Withdrawals | SDP fronts it |
-| ---------------------------------------------- | ----- | -------- | ----------- | ------------- |
-| `3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU` | USDC  | yes      | yes         | yes           |
+| Vault | Asset | Deposits | Withdrawals | SDP fronts it |
+|---|---|---|---|---|
+| `3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU` | USDC | yes | yes | yes |
 
 ### mainnet-beta
 
