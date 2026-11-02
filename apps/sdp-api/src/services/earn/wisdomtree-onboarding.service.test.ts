@@ -1,6 +1,7 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { WisdomTreeOnboardingClient } from "@sdp/earn/providers/wisdomtree/onboarding";
+import type { CustodyConnectionBindingLifecycle } from "@sdp/types/custody";
 import { generateKeyPairSigner, getBase58Decoder, signBytes } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -129,7 +130,7 @@ async function seedCustodyWallet(organizationId: string, projectId: string, publ
 async function seedConnectionWallet(
   projectId: string,
   publicKey: string,
-  connectionStatus: "active" | "pending" = "active"
+  connectionStatus: CustodyConnectionBindingLifecycle = "active"
 ) {
   const credentialId = `cred_${crypto.randomUUID()}`;
   const connectionId = `conn_${crypto.randomUUID()}`;
