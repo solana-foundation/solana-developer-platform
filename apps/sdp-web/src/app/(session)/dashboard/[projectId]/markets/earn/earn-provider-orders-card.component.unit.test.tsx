@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { EarnVaultWithdrawal } from "@sdp/types/earn";
+import type { EarnProviderAction, EarnProviderActionStatus } from "@sdp/types/earn-provider-orders";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
@@ -21,12 +22,13 @@ vi.mock("./earn-provider-actions", () => ({
 }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({ useCanWrite: () => mocks.canWrite }));
 vi.mock("@/lib/use-dashboard-project", () => ({ useProjectId: () => "prj_test_sandbox" }));
+const ownerAddress = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const order: EarnVaultWithdrawal = {
   movementId: "order",
   positionId: "position",
   provider: "plume",
   providerReference: "vault",
-  ownerAddress: "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg",
+  ownerAddress,
   status: "confirmed",
   signature: "source",
   shares: "10",
@@ -38,13 +40,17 @@ const order: EarnVaultWithdrawal = {
   redemptionMode: "standard",
 };
 
-const actionOf = (movementId: string, status: string, error: string | null = null) => ({
+const actionOf = (
+  movementId: string,
+  status: EarnProviderActionStatus,
+  error: string | null = null
+): EarnProviderAction => ({
   actionId: `action_${movementId}`,
-  action: "cancellations",
+  action: "cancellation",
   status,
   provider: "plume",
   providerReference: "vault",
-  ownerAddress: order.ownerAddress,
+  ownerAddress,
   feePayer: null,
   parentMovementId: movementId,
   signature: null,
@@ -138,9 +144,9 @@ describe("provider cancellation controls", () => {
     try {
       const second = { ...order, movementId: "order-2" };
       mocks.rows = [order, second];
-      mocks.create.mockImplementation(async (_kind, input) => ({
-        ...actionOf(input.movementId as string, "requested"),
-      }));
+      mocks.create.mockImplementation(async (_kind: string, input: { movementId: string }) =>
+        actionOf(input.movementId, "requested")
+      );
       let releaseSecond: (action: unknown) => void = () => {};
       const secondReply = new Promise((resolve) => {
         releaseSecond = resolve;
