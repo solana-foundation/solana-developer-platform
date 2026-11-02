@@ -139,7 +139,7 @@ async function seedEnvironmentApiKey(environment: SdpEnvironment): Promise<void>
 function initialize(environment: SdpEnvironment, provider: CustodyProvider): Promise<Response> {
   return Promise.resolve(
     app.request(
-      "/v1/wallets/initialize",
+      "/v1/wallets/managed-signing/initialize-with-wallet",
       {
         method: "POST",
         // Custody setup is `wallets.configure`, which no API key may hold.
@@ -193,7 +193,7 @@ function getConnection(environment: SdpEnvironment, connectionId: string): Promi
 function complete(environment: SdpEnvironment, connectionId: string): Promise<Response> {
   return Promise.resolve(
     app.request(
-      `/internal/dashboard/custody/connections/${connectionId}/complete`,
+      `/internal/dashboard/custody/connections/${connectionId}/complete-installation`,
       {
         method: "POST",
         headers: {
@@ -550,7 +550,7 @@ describe("Custody setup by project environment", () => {
           .run();
 
         const response = await app.request(
-          "/v1/wallets/initialize",
+          "/v1/wallets/managed-signing/initialize-with-wallet",
           {
             method: "POST",
             headers: {

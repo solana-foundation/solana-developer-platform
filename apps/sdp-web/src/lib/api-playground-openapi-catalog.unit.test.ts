@@ -168,8 +168,14 @@ describe("API playground allowlist", () => {
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
     ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
-    expect(findPublishedPlaygroundOperation("GET", "/v1/wallets/configs", "stable")).toMatchObject({
-      pathTemplate: "/v1/wallets/configs",
+    expect(
+      findPublishedPlaygroundOperation(
+        "GET",
+        "/v1/wallets/managed-signing/configurations",
+        "stable"
+      )
+    ).toMatchObject({
+      pathTemplate: "/v1/wallets/managed-signing/configurations",
     });
   });
 

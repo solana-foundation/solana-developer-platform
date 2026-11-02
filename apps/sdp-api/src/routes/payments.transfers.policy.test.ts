@@ -135,7 +135,7 @@ describe("Payments routes — transfer wallet access", () => {
     expect(await countTransferRows()).toBe(0);
     expect(await storedIdempotencyKeys(idempotencyKey)).toBe(0);
   });
-  it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
+  it.each(["/v1/payments/transfer-batches/execute", "/v1/payments/transfer-batches/estimate"])(
     "refuses a non-transfer source wallet on %s before reading its recipients",
     async (path) => {
       await seedSpecializedWallet("root");

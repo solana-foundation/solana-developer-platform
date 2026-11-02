@@ -162,7 +162,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       id: "execute-transfer",
       title: t("DashboardPayments.playground.executeTransfer"),
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
       pathFields: [],
       bodyFields: [
         sourceCustodyWalletIdField,

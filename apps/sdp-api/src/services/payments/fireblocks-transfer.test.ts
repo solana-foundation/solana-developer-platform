@@ -82,7 +82,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -232,7 +236,7 @@ async function send(
   projectId = PROJECT_ID
 ) {
   return paymentApp.request(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: {

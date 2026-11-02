@@ -41,9 +41,9 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
   {
     mode: "execute",
     method: "POST",
-    path: "/v1/payments/transfers",
+    path: "/v1/payments/transfers/execute",
     request: [
-      [PROMPT, ` curl -X POST ${API}/v1/payments/transfers \\`],
+      [PROMPT, ` curl -X POST ${API}/v1/payments/transfers/execute \\`],
       [`    ${AUTH} \\`],
       [`    ${IDEMPOTENCY} \\`],
       [`    ${JSON_TYPE} \\`],
@@ -52,7 +52,7 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
     ],
     narrowRequest: [
       [PROMPT, " curl -X POST \\"],
-      [`  ${API}/v1/payments/transfers \\`],
+      [`  ${API}/v1/payments/transfers/execute \\`],
       [`  ${AUTH} \\`],
       [`  ${IDEMPOTENCY} \\`],
       [`  ${JSON_TYPE} \\`],
@@ -78,17 +78,17 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
   {
     mode: "prepare",
     method: "POST",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
     request: [
       [PROMPT, " curl -X POST \\"],
-      [`    ${API}/v1/payments/subscriptions/psub_71c/prepare-collection \\`],
+      [`    ${API}/v1/payments/subscriptions/psub_71c/collect/build-unsigned-transaction \\`],
       [`    ${AUTH} \\`],
       [`    ${JSON_TYPE} \\`],
       [`    -d '{"receiverTokenAccount":"9WzD…AWWM"}'`],
     ],
     narrowRequest: [
       [PROMPT, " curl -X POST \\"],
-      [`  ${API}/v1/payments/subscriptions/psub_71c/prepare-collection \\`],
+      [`  ${API}/v1/payments/subscriptions/psub_71c/collect/build-unsigned-transaction \\`],
       [`  ${AUTH} \\`],
       [`  ${JSON_TYPE} \\`],
       ["  -d '{"],

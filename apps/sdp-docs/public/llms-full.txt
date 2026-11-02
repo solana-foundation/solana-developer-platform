@@ -557,9 +557,9 @@ balance. Open it to see its details.
 
 #### 1. Initialize the provider from the dashboard
 
-Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
+Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/managed-signing/initialize-with-wallet` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
 
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
+Production projects use BYOK only. `POST /v1/wallets/managed-signing/initialize-with-wallet` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 export IDEMPOTENCY_KEY=$(uuidgen)
@@ -1448,7 +1448,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp/idempotency
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
@@ -1459,8 +1459,8 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Required.** These routes move money. A request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`, and nothing runs.
 
-- `POST /v1/payments/transfers`
-- `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfers/execute`
+- `POST /v1/payments/transfer-batches/execute`
 - `POST /v1/payments/transfer-batches/{batchId}/retry`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
@@ -1471,12 +1471,12 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Accepted.** The key is optional, and honored when sent.
 
-- Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
+- Wallets: `POST /v1/wallets`, `POST /v1/wallets/managed-signing/initialize-with-wallet`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Subscription plans and subscriptions: `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
 
-**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription and subscription-plan `build-unsigned-transaction` routes return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
 Modules with their own key handling say so on their pages.
 
@@ -1497,7 +1497,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
   for (let attempt = 1; attempt <= 8; attempt++) {
     let response: Response;
     try {
-      response = await fetch("https://api.solana.com/v1/payments/transfers", {
+      response = await fetch("https://api.solana.com/v1/payments/transfers/execute", {
         method: "POST",
         headers: {
           Authorization: "Bearer sf_...",
@@ -1942,7 +1942,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-For SPL tokens, `POST /v1/payments/transfers` takes the on-chain mint address, not a symbol such as `USDC`. Use the literal `SOL` for native SOL.
+For SPL tokens, `POST /v1/payments/transfers/execute` takes the on-chain mint address, not a symbol such as `USDC`. Use the literal `SOL` for native SOL.
 
 The `token` filter on `GET /v1/payments/transfers` matches the stored `Transfer.token` exactly. API-created transfers store the mint you supplied (or `SOL`); indexed transfers may store a resolved symbol. Filter with the label returned in the response, or filter client-side. Balance responses attempt symbol resolution and return the symbol when known.
 
@@ -1950,7 +1950,7 @@ The `token` filter on `GET /v1/payments/transfers` matches the stored `Transfer.
 
 ## Transfer execution
 
-Outbound wallet transfers are server-executed through `POST /v1/payments/transfers`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
+Outbound wallet transfers are server-executed through `POST /v1/payments/transfers/execute`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
 
 The rest of this section assumes transfers are submitted by SDP from a custody wallet you control.
 
@@ -2086,7 +2086,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
@@ -2102,7 +2102,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript title="execute-transfer.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers/execute",
   {
     method: "POST",
     headers: {
@@ -2126,7 +2126,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
@@ -2194,7 +2194,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 ## Deduplication
 
-`POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
+`POST /v1/payments/transfers/execute` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
 
 A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
@@ -2215,7 +2215,7 @@ Source: https://platform.solana.com/docs/payments/send-payment-with-memo
 
 > Attach an order ID, invoice number, or customer reference to an SDP transfer.
 
-The `memo` field on `POST /v1/payments/transfers` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
+The `memo` field on `POST /v1/payments/transfers/execute` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
 
 ## When to use a memo
 
@@ -2232,7 +2232,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: order-2026-05-14-4837" \
   -H "Content-Type: application/json" \
@@ -2248,7 +2248,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript title="send-payment-with-memo.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers/execute",
   {
     method: "POST",
     headers: {
@@ -2271,7 +2271,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Idempotency-Key", "order-2026-05-14-4837")
     .header("Content-Type", "application/json")
@@ -2327,14 +2327,14 @@ Source: https://platform.solana.com/docs/payments/send-payouts
 
 > Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches/execute` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers/execute` once per recipient and reconcile the returned transfer IDs.
 
 ## Native transfer batches
 
 One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
 
 ```bash
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: 3f0c9e7a-5b1d-4c2e-9a8f-6d4b2e1c0a97" \
@@ -2372,7 +2372,7 @@ Derive the `externalId` from data you already have, so a worker that crashes and
 ```ts title="payroll-worker.ts"
 // Safe to run again after a crash: the run's id comes from the period, not from storage.
 const externalId = `payroll-${period}`;
-const response = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
+const response = await fetch("https://api.solana.com/v1/payments/transfer-batches/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -2429,7 +2429,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 - A recipient whose address has no account must receive at least the minimum.
 - The source wallet must end with nothing or at least the minimum. Chunks land in any order, so a batch that sends the wallet's whole balance also needs every chunk to move at least the minimum.
 
-`POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
+`POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches/execute` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
 ### Token account rent per transaction
 
@@ -2441,7 +2441,7 @@ For destinations that are not registered counterparty accounts, a run can send o
 
 1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
 2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
+3. **Iterate** — for each recipient, call `POST /v1/payments/transfers/execute` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
 4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
 5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
 
@@ -2451,7 +2451,7 @@ Send transfers sequentially or in modest concurrency (4–8 in flight); high con
 
 Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
 
-1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
+1. **Idempotency keys** — `POST /v1/payments/transfers/execute` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
 
 The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
@@ -2461,7 +2461,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
@@ -2480,7 +2480,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
   const response = await fetch(
-    "https://api.solana.com/v1/payments/transfers",
+    "https://api.solana.com/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: {
@@ -2508,7 +2508,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 <Tab value="Java">
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)
@@ -2649,7 +2649,7 @@ When a payment lands on a wallet you control, the inbound transfer moves through
 
 ## Status lifecycle
 
-The `status` field on a wallet transfer (`POST /v1/payments/transfers`, and inbound transfers discovered on-chain) takes one of these values:
+The `status` field on a wallet transfer (`POST /v1/payments/transfers/execute`, and inbound transfers discovered on-chain) takes one of these values:
 
 | Status | Meaning |
 | --- | --- |
@@ -4714,7 +4714,7 @@ In your Clerk development app:
   as `WEBHOOK_INGEST_DOMAIN` in `apps/sdp-api/.env.local`, and run
   `pnpm dev:webhooks`.
 - Create a webhook endpoint that points at
-  `https://<your-domain>/webhooks/clerk/link-orgs` — Clerk delivers over the
+  `https://<your-domain>/webhooks/clerk` — Clerk delivers over the
   public internet and cannot reach `localhost` directly.
 - Copy the webhook signing secret into `CLERK_WEBHOOK_SECRET`.
 
@@ -5694,12 +5694,12 @@ Source: https://platform.solana.com/docs/reference/api/wallets
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/wallets/initialize` | [Initialize wallet signing](/docs/reference/api/wallets/initialize-wallet-signing.md) |
+| `POST` | `/v1/wallets/managed-signing/initialize-with-wallet` | [Initialize wallet signing](/docs/reference/api/wallets/initialize-wallet-signing.md) |
 | `POST` | `/v1/wallets` | [Create wallet](/docs/reference/api/wallets/create-wallet.md) |
 | `DELETE` | `/v1/wallets` | [Delete wallet](/docs/reference/api/wallets/delete-wallet.md) |
 | `GET` | `/v1/wallets` | [List wallets](/docs/reference/api/wallets/list-wallets.md) |
-| `GET` | `/v1/wallets/configs` | [List wallet signing configs](/docs/reference/api/wallets/list-wallet-configs.md) |
-| `GET` | `/v1/wallets/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances.md) |
+| `GET` | `/v1/wallets/managed-signing/configurations` | [List managed signing configurations](/docs/reference/api/wallets/list-wallet-configs.md) |
+| `GET` | `/v1/wallets/balances/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances.md) |
 | `GET` | `/v1/wallets/public-key` | [Get wallet public key](/docs/reference/api/wallets/get-wallet-public-key.md) |
 | `POST` | `/v1/wallets/signer-check` | [Check signer via simulated memo transaction](/docs/reference/api/wallets/check-wallet-signer.md) |
 | `GET` | `/v1/wallets/{walletId}` | [Get wallet by ID](/docs/reference/api/wallets/get-wallet-by-id.md) |
@@ -5712,7 +5712,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets/initialize-wallet
 
 > Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet.
 
-`POST /v1/wallets/initialize`
+`POST /v1/wallets/managed-signing/initialize-with-wallet`
 
 Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.
 
@@ -5885,7 +5885,7 @@ One of:
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/wallets/initialize' \
+curl -X POST 'https://api.solana.com/v1/wallets/managed-signing/initialize-with-wallet' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -5895,7 +5895,7 @@ curl -X POST 'https://api.solana.com/v1/wallets/initialize' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/initialize", {
+const res = await fetch("https://api.solana.com/v1/wallets/managed-signing/initialize-with-wallet", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -5911,7 +5911,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/initialize", {
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.post("https://api.solana.com/v1/wallets/initialize",
+r = requests.post("https://api.solana.com/v1/wallets/managed-signing/initialize-with-wallet",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "provider": "local"
@@ -6253,7 +6253,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Delete wallet
 Source: https://platform.solana.com/docs/reference/api/wallets/delete-wallet
 
-> Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion.
+> Deletes the wallet from its exact owning provider account when that Provider supports wallet deletion.
 
 `DELETE /v1/wallets`
 
@@ -6680,12 +6680,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List wallet signing configs
+### List managed signing configurations
 Source: https://platform.solana.com/docs/reference/api/wallets/list-wallet-configs
 
 > Returns the active Config-owned wallet signing configurations for the requested scope, one per provider.
 
-`GET /v1/wallets/configs`
+`GET /v1/wallets/managed-signing/configurations`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallets.read` action.
 
@@ -6780,12 +6780,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/wallets/configs' \
+curl 'https://api.solana.com/v1/wallets/managed-signing/configurations' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/configs", {
+const res = await fetch("https://api.solana.com/v1/wallets/managed-signing/configurations", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -6796,7 +6796,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/configs", {
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/wallets/configs",
+r = requests.get("https://api.solana.com/v1/wallets/managed-signing/configurations",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -6847,7 +6847,7 @@ Source: https://platform.solana.com/docs/reference/api/wallets/aggregate-wallet-
 
 > Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value.
 
-`GET /v1/wallets/aggregate`
+`GET /v1/wallets/balances/aggregate`
 
 Returns 503 if any included wallet balance cannot be read, rather than returning an incomplete total.
 
@@ -6974,12 +6974,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/wallets/aggregate' \
+curl 'https://api.solana.com/v1/wallets/balances/aggregate' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/wallets/aggregate", {
+const res = await fetch("https://api.solana.com/v1/wallets/balances/aggregate", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -6990,7 +6990,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/aggregate", {
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/wallets/aggregate",
+r = requests.get("https://api.solana.com/v1/wallets/balances/aggregate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -7192,7 +7192,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 `application/json` · required
 
-walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record, and an API key may check only a wallet within its wallet scope.
+walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact connected wallet record, and an API key may check only a wallet within its wallet scope.
 
 - **`walletId`** · `string` · required · min length 1
 
@@ -7222,7 +7222,7 @@ walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs ar
 
     - **`signature`** · `string` · required · example `sig_example`
 
-      The custody wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.
+      The connected wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.
 
     - **`simulated`** · `boolean` · required · always `true`
 
@@ -7432,7 +7432,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
-        Wallet custody provider.
+        Wallet signing provider.
 
       - **`isRuntimeExecutionAllowed`** · `boolean` · required · example `true`
 
@@ -19833,7 +19833,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/payments/transfers` | [Execute transfer (custody)](/docs/reference/api/payments/create-payment-transfer.md) |
+| `POST` | `/v1/payments/transfers/execute` | [Execute a provider-signed transfer](/docs/reference/api/payments/create-payment-transfer.md) |
 | `GET` | `/v1/payments/transfers` | [List transfers](/docs/reference/api/payments/list-payment-transfers.md) |
 | `GET` | `/v1/payments/transfers/{transferId}` | [Get transfer](/docs/reference/api/payments/get-payment-transfer.md) |
 
@@ -19842,9 +19842,9 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
-| `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
-| `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
+| `POST` | `/v1/payments/transfer-batches/execute` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | [Retry a transfer batch's failed recipients](/docs/reference/api/payments/retry-payment-transfer-batch.md) |
+| `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
 
 ## Recurring payments
@@ -19872,7 +19872,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | --- | --- | --- |
 | `POST` | `/v1/payments/subscription-plans` | [Create subscription plan](/docs/reference/api/payments/create-payment-subscription-plan.md) |
 | `GET` | `/v1/payments/subscription-plans` | [List subscription plans](/docs/reference/api/payments/list-payment-subscription-plans.md) |
-| `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | [Prepare subscription plan creation](/docs/reference/api/payments/prepare-payment-subscription-plan-create.md) |
+| `POST` | `/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` | [Prepare subscription plan creation](/docs/reference/api/payments/prepare-payment-subscription-plan-create.md) |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | [Get subscription plan](/docs/reference/api/payments/get-payment-subscription-plan.md) |
 | `PATCH` | `/v1/payments/subscription-plans/{planId}` | [Update subscription plan](/docs/reference/api/payments/update-payment-subscription-plan.md) |
 
@@ -19882,10 +19882,10 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | --- | --- | --- |
 | `POST` | `/v1/payments/subscriptions` | [Create subscription](/docs/reference/api/payments/create-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions` | [List subscriptions](/docs/reference/api/payments/list-payment-subscriptions.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | [Prepare subscription authorization](/docs/reference/api/payments/prepare-payment-subscription-authorization.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | [Prepare subscription cancellation](/docs/reference/api/payments/prepare-payment-subscription-cancel.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | [Prepare subscription resume](/docs/reference/api/payments/prepare-payment-subscription-resume.md) |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | [Prepare subscription collection](/docs/reference/api/payments/prepare-payment-subscription-collection.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` | [Prepare subscription authorization](/docs/reference/api/payments/prepare-payment-subscription-authorization.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` | [Prepare subscription cancellation](/docs/reference/api/payments/prepare-payment-subscription-cancel.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` | [Prepare subscription resume](/docs/reference/api/payments/prepare-payment-subscription-resume.md) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` | [Prepare subscription collection](/docs/reference/api/payments/prepare-payment-subscription-collection.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | [Get subscription](/docs/reference/api/payments/get-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | [List subscription collection attempts](/docs/reference/api/payments/list-payment-subscription-collection-attempts.md) |
 
@@ -19905,7 +19905,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 ### Get wallet balances
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-wallet-balances
 
-> Retrieves balances for a custody wallet.
+> Retrieves balances for a connected wallet.
 
 `GET /v1/payments/wallets/{walletId}/balances`
 
@@ -20459,12 +20459,12 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Payments: Transfers
 
-### Execute transfer (custody)
+### Execute a provider-signed transfer
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-transfer
 
-> Executes an on-chain transfer using the exact SDP Wallet ID (id from /v1/wallets) and server-side custody signing.
+> Executes an on-chain transfer using the exact SDP Wallet ID (id from /v1/wallets) and server-side signing through the connected provider.
 
-`POST /v1/payments/transfers`
+`POST /v1/payments/transfers/execute`
 
 Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.
 
@@ -20484,7 +20484,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 `application/json` · required
 
-Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.
+Create transfer request payload for a provider-connected source wallet. This endpoint does not provision wallets.
 
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -20859,7 +20859,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/transfers' \
+curl -X POST 'https://api.solana.com/v1/payments/transfers/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -20873,7 +20873,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfers' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/transfers", {
+const res = await fetch("https://api.solana.com/v1/payments/transfers/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -20893,7 +20893,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfers", {
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.post("https://api.solana.com/v1/payments/transfers",
+r = requests.post("https://api.solana.com/v1/payments/transfers/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "projectId": "prj_example",
@@ -22378,7 +22378,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 > Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records.
 
-`POST /v1/payments/transfer-batches`
+`POST /v1/payments/transfer-batches/execute`
 
 Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
 
@@ -22398,7 +22398,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 `application/json` · required
 
-Create a custody-executed outbound transfer batch.
+Create an outbound transfer batch.
 
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -22476,7 +22476,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -22891,7 +22891,7 @@ Create a custody-executed outbound transfer batch.
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
+curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/execute' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -22917,7 +22917,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
+const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/execute", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -22949,7 +22949,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
+r = requests.post("https://api.solana.com/v1/payments/transfer-batches/execute",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "projectId": "prj_example",
@@ -23111,253 +23111,6 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### List transfer batches
-Source: https://platform.solana.com/docs/reference/api/payments/list-payment-transfer-batches
-
-> Lists transfer batches for the authenticated organization or project scope.
-
-`GET /v1/payments/transfer-batches`
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.read` action.
-
-## Query parameters
-
-- **`sourceCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
-
-  Filter by exact source SDP Wallet ID.
-
-- **`token`** · `string` · example `SOL`
-
-  Filter by token symbol or mint.
-
-- **`status`** · `string` · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
-
-  Filter by transfer batch status.
-
-- **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
-
-  Filter by caller-provided batch correlation ID.
-
-- **`page`** · `integer` · greater than 0 · default `1` · example `1`
-
-  Page number (1-based).
-
-- **`pageSize`** · `integer` · min 1 · max 100 · default `20` · example `20`
-
-  Number of batches per page.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Required for dashboard sessions. API keys use their assigned project.
-
-## Responses
-
-- **`200`** Transfer batch list
-
-  - **`data`** · `object[]` · required
-
-    - **`id`** · `string` · required · example `xbatch_example`
-
-      Transfer batch identifier.
-
-    - **`organizationId`** · `string` · required · min length 1 · example `org_example`
-
-      Organization identifier.
-
-    - **`projectId`** · `string` · required · min length 1 · example `prj_example`
-
-      Project identifier for the transfer batch.
-
-    - **`externalId`** · `string | null` · required · example `payroll_2026_06_30`
-
-      Caller-provided batch correlation ID.
-
-    - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
-
-      Exact source SDP Wallet ID, or null for unresolved legacy batches.
-
-    - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-      Source Provider wallet ID retained as evidence.
-
-    - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
-
-      Source custody wallet address.
-
-    - **`token`** · `string` · required · example `SOL`
-
-      Token symbol or mint address.
-
-    - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
-
-      Transfer batch status.
-
-    - **`totalAmount`** · `string | null` · required · example `1000.00`
-
-      Total requested batch amount in UI units, when computed.
-
-    - **`recipientCount`** · `integer` · required · example `20`
-
-      Number of recipient rows in the batch.
-
-    - **`transactionCount`** · `integer` · required · example `1`
-
-      Number of Solana transaction chunks for the batch.
-
-    - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-    - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
-
-      ISO 8601 timestamp.
-
-  - **`meta`** · `object` · required
-
-    Pagination metadata.
-
-    - **`total`** · `integer` · required · min 0
-
-      Total items.
-
-    - **`page`** · `integer` · required · greater than 0
-
-      Current page number.
-
-    - **`pageSize`** · `integer` · required · greater than 0
-
-      Items per page.
-
-    - **`hasMore`** · `boolean` · required
-
-      Whether more pages exist.
-
-    - **`requestId`** · `string` · required · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`400`** Bad Request
-
-  - **`error`** · `object` · required
-
-    Standard error payload.
-
-    - **`code`** · `string` · required
-
-      Machine-readable error code.
-
-    - **`message`** · `string` · required
-
-      Human-readable error message.
-
-    - **`details`** · `object`
-
-      Optional error details for debugging.
-
-      - **`*`** · `any`
-
-  - **`meta`** · `object`
-
-    - **`requestId`** · `string` · min length 1 · example `req_example`
-
-      Request identifier for tracing.
-
-- **`401`** Unauthorized
-
-  Same fields as `400`.
-
-- **`403`** Forbidden. Requires the `transfer_batches.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-
-  Same fields as `400`.
-
-- **`404`** Not Found
-
-  Same fields as `400`.
-
-- **`409`** Conflict
-
-  Same fields as `400`.
-
-- **`500`** Internal Server Error
-
-  Same fields as `400`.
-
-## Example request
-
-```bash tab="cURL"
-curl 'https://api.solana.com/v1/payments/transfer-batches' \
-  -H "Authorization: Bearer $SDP_API_KEY"
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
-  method: "GET",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
-});
-```
-
-```python tab="Python"
-import os, requests
-
-r = requests.get("https://api.solana.com/v1/payments/transfer-batches",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": [
-    {
-      "id": "xbatch_example",
-      "organizationId": "org_example",
-      "projectId": "prj_example",
-      "externalId": "payroll_2026_06_30",
-      "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
-      "sourceAddress": "So11111111111111111111111111111111111111112",
-      "token": "SOL",
-      "status": "processing",
-      "totalAmount": "1000.00",
-      "recipientCount": 20,
-      "transactionCount": 1,
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-01T00:00:00.000Z"
-    }
-  ],
-  "meta": {
-    "total": 1,
-    "page": 1,
-    "pageSize": 1,
-    "hasMore": false,
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: transfer_batches.read",
-    "details": {
-      "action": "transfer_batches.read"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-Error responses use the [standard error shape](/docs/reference/conventions/errors).
-
----
-
 ### Retry a transfer batch's failed recipients
 Source: https://platform.solana.com/docs/reference/api/payments/retry-payment-transfer-batch
 
@@ -23423,7 +23176,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -23999,6 +23752,253 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
+### List transfer batches
+Source: https://platform.solana.com/docs/reference/api/payments/list-payment-transfer-batches
+
+> Lists transfer batches for the authenticated organization or project scope.
+
+`GET /v1/payments/transfer-batches`
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.read` action.
+
+## Query parameters
+
+- **`sourceCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
+
+  Filter by exact source SDP Wallet ID.
+
+- **`token`** · `string` · example `SOL`
+
+  Filter by token symbol or mint.
+
+- **`status`** · `string` · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
+
+  Filter by transfer batch status.
+
+- **`externalId`** · `string` · min length 1 · max length 256 · example `payroll_2026_06_30`
+
+  Filter by caller-provided batch correlation ID.
+
+- **`page`** · `integer` · greater than 0 · default `1` · example `1`
+
+  Page number (1-based).
+
+- **`pageSize`** · `integer` · min 1 · max 100 · default `20` · example `20`
+
+  Number of batches per page.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
+
+## Responses
+
+- **`200`** Transfer batch list
+
+  - **`data`** · `object[]` · required
+
+    - **`id`** · `string` · required · example `xbatch_example`
+
+      Transfer batch identifier.
+
+    - **`organizationId`** · `string` · required · min length 1 · example `org_example`
+
+      Organization identifier.
+
+    - **`projectId`** · `string` · required · min length 1 · example `prj_example`
+
+      Project identifier for the transfer batch.
+
+    - **`externalId`** · `string | null` · required · example `payroll_2026_06_30`
+
+      Caller-provided batch correlation ID.
+
+    - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
+
+      Exact source SDP Wallet ID, or null for unresolved legacy batches.
+
+    - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+      Source Provider wallet ID retained as evidence.
+
+    - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Source connected wallet address.
+
+    - **`token`** · `string` · required · example `SOL`
+
+      Token symbol or mint address.
+
+    - **`status`** · `string` · required · one of `pending`, `processing`, `confirmed`, `failed`, `partially_failed`, `archived` · example `processing`
+
+      Transfer batch status.
+
+    - **`totalAmount`** · `string | null` · required · example `1000.00`
+
+      Total requested batch amount in UI units, when computed.
+
+    - **`recipientCount`** · `integer` · required · example `20`
+
+      Number of recipient rows in the batch.
+
+    - **`transactionCount`** · `integer` · required · example `1`
+
+      Number of Solana transaction chunks for the batch.
+
+    - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+    - **`updatedAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
+
+  - **`meta`** · `object` · required
+
+    Pagination metadata.
+
+    - **`total`** · `integer` · required · min 0
+
+      Total items.
+
+    - **`page`** · `integer` · required · greater than 0
+
+      Current page number.
+
+    - **`pageSize`** · `integer` · required · greater than 0
+
+      Items per page.
+
+    - **`hasMore`** · `boolean` · required
+
+      Whether more pages exist.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`400`** Bad Request
+
+  - **`error`** · `object` · required
+
+    Standard error payload.
+
+    - **`code`** · `string` · required
+
+      Machine-readable error code.
+
+    - **`message`** · `string` · required
+
+      Human-readable error message.
+
+    - **`details`** · `object`
+
+      Optional error details for debugging.
+
+      - **`*`** · `any`
+
+  - **`meta`** · `object`
+
+    - **`requestId`** · `string` · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+- **`401`** Unauthorized
+
+  Same fields as `400`.
+
+- **`403`** Forbidden. Requires the `transfer_batches.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+
+  Same fields as `400`.
+
+- **`404`** Not Found
+
+  Same fields as `400`.
+
+- **`409`** Conflict
+
+  Same fields as `400`.
+
+- **`500`** Internal Server Error
+
+  Same fields as `400`.
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/payments/transfer-batches' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/payments/transfer-batches",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": [
+    {
+      "id": "xbatch_example",
+      "organizationId": "org_example",
+      "projectId": "prj_example",
+      "externalId": "payroll_2026_06_30",
+      "sourceCustodyWalletId": "cwlt_example",
+      "sourceProviderWalletId": "privy_wallet_123",
+      "sourceAddress": "So11111111111111111111111111111111111111112",
+      "token": "SOL",
+      "status": "processing",
+      "totalAmount": "1000.00",
+      "recipientCount": 20,
+      "transactionCount": 1,
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "pageSize": 1,
+    "hasMore": false,
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: transfer_batches.read",
+    "details": {
+      "action": "transfer_batches.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+Error responses use the [standard error shape](/docs/reference/conventions/errors).
+
+---
+
 ### Get transfer batch
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-transfer-batch
 
@@ -24058,7 +24058,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -24625,7 +24625,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Create recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-recurring-payment
 
-> Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account.
+> Creates an outbound recurring payment intent from a connected wallet to a counterparty crypto-wallet account.
 
 `POST /v1/payments/recurring-payments`
 
@@ -24647,7 +24647,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
 `application/json` · required
 
-Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.
+Creates an outbound recurring payment intent. Activation and collection are added by follow-up endpoints.
 
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
@@ -24691,7 +24691,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -25026,7 +25026,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### List recurring payments
 Source: https://platform.solana.com/docs/reference/api/payments/list-payment-recurring-payments
 
-> Lists SDP-custody outbound recurring payments for the authenticated organization or project scope.
+> Lists outbound recurring payments for the authenticated organization or project scope.
 
 `GET /v1/payments/recurring-payments`
 
@@ -25326,7 +25326,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Update recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/update-payment-recurring-payment
 
-> Updates an SDP-custody recurring payment.
+> Updates a recurring payment.
 
 `PATCH /v1/payments/recurring-payments/{id}`
 
@@ -25402,7 +25402,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -25740,7 +25740,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Get recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-recurring-payment
 
-> Retrieves an SDP-custody outbound recurring payment record.
+> Retrieves an outbound recurring payment record.
 
 `GET /v1/payments/recurring-payments/{id}`
 
@@ -25768,7 +25768,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26057,7 +26057,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Activate recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/activate-payment-recurring-payment
 
-> Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.
+> Activates a pending recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.
 
 `POST /v1/payments/recurring-payments/{id}/activate`
 
@@ -26091,7 +26091,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26394,7 +26394,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Cancel recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-recurring-payment
 
-> Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period.
+> Permanently stops an active or paused recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period.
 
 `POST /v1/payments/recurring-payments/{id}/cancel`
 
@@ -26428,7 +26428,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26731,7 +26731,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Collect recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-recurring-payment
 
-> Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt.
+> Manually starts a due active recurring payment collection, creating a linked payment transfer and collection attempt.
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
@@ -26765,7 +26765,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -27506,7 +27506,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Resume recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-recurring-payment
 
-> Resumes a paused SDP-custody recurring payment.
+> Resumes a paused recurring payment.
 
 `POST /v1/payments/recurring-payments/{id}/resume`
 
@@ -27540,7 +27540,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -28144,7 +28144,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`ownerWalletId`** · `string` · required · min length 1 · example `wal_merchant`
 
-  Custody wallet that owns the Solana subscription plan.
+  Connected wallet that owns the Solana subscription plan.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -28172,7 +28172,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`pullerWalletId`** · `string` · min length 1 · example `wal_collector`
 
-  Optional SDP custody wallet allowed to pull subscription payments.
+  Optional connected wallet allowed to pull subscription payments.
 
 - **`metadataUri`** · `string` · format `uri` · max length 128 · example `https://example.com/subscriptions/monthly-usdc.json`
 
@@ -28687,7 +28687,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 > Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan.
 
-`POST /v1/payments/subscription-plans/{planId}/prepare-create`
+`POST /v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction`
 
 This derives and stores the plan PDA but does not submit the transaction.
 
@@ -28890,7 +28890,7 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create' \
+curl -X POST 'https://api.solana.com/v1/payments/subscription-plans/psp_example/create/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -28906,7 +28906,7 @@ curl -X POST 'https://api.solana.com/v1/payments/subscription-plans/psp_example/
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create", {
+const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/psp_example/create/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -28928,7 +28928,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create",
+r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_example/create/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "destinations": [
@@ -30051,7 +30051,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 > Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan.
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization`
+`POST /v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction`
 
 The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.
 
@@ -30258,7 +30258,7 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization' \
+curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/authorize/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -30269,7 +30269,7 @@ curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prep
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization", {
+const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/authorize/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -30286,7 +30286,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization",
+r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/authorize/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "subscriberTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
@@ -30362,7 +30362,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 > Prepares the subscriber-signed Solana transaction that cancels a subscription.
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-cancel`
+`POST /v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction`
 
 The transaction must still be signed and submitted by the client.
 
@@ -30545,14 +30545,14 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel' \
+curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/cancel/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel", {
+const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/cancel/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -30565,7 +30565,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel",
+r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/cancel/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={})
 ```
@@ -30635,7 +30635,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 > Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation.
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume`
+`POST /v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction`
 
 The transaction must still be signed and submitted by the client. A subscription that belongs to a recurring payment answers 409: a recurring payment's cancel is final.
 
@@ -30822,14 +30822,14 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume' \
+curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/resume/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume", {
+const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/resume/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -30842,7 +30842,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume",
+r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/resume/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={})
 ```
@@ -30912,7 +30912,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-
 
 > Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription.
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection`
+`POST /v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction`
 
 The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.
 
@@ -31213,7 +31213,7 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 ## Example request
 
 ```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection' \
+curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/collect/build-unsigned-transaction' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -31222,7 +31222,7 @@ curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prep
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection", {
+const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_example/collect/build-unsigned-transaction", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -31237,7 +31237,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```python tab="Python"
 import os, requests
 
-r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection",
+r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/collect/build-unsigned-transaction",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "receiverTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
@@ -33060,7 +33060,7 @@ Source: https://platform.solana.com/docs/reference/api/counterparties
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `GET` | `/v1/counterparties/metadata` | [Get counterparty field options](/docs/reference/api/counterparties/get-counterparty-field-options.md) |
+| `GET` | `/v1/counterparties/field-options` | [Get counterparty field options](/docs/reference/api/counterparties/get-counterparty-field-options.md) |
 | `GET` | `/v1/counterparties` | [List counterparties](/docs/reference/api/counterparties/list-counterparties.md) |
 | `POST` | `/v1/counterparties` | [Create counterparty](/docs/reference/api/counterparties/create-counterparty.md) |
 | `GET` | `/v1/counterparties/{counterpartyId}` | [Get counterparty](/docs/reference/api/counterparties/get-counterparty.md) |
@@ -33088,7 +33088,7 @@ Source: https://platform.solana.com/docs/reference/api/counterparties/get-counte
 
 > Returns the enum option sets and country list needed to build a counterparty form.
 
-`GET /v1/counterparties/metadata`
+`GET /v1/counterparties/field-options`
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `counterparties.read` action.
 
@@ -33169,12 +33169,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/counterparties/metadata' \
+curl 'https://api.solana.com/v1/counterparties/field-options' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/metadata", {
+const res = await fetch("https://api.solana.com/v1/counterparties/field-options", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -33185,7 +33185,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/metadata", {
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/counterparties/metadata",
+r = requests.get("https://api.solana.com/v1/counterparties/field-options",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 

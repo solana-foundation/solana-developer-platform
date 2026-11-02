@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.wallets.quick_action_status.api")
     );
-    const configsResponse = await apiClient.request("/v1/wallets/configs");
+    const configsResponse = await apiClient.request("/v1/wallets/managed-signing/configurations");
 
     if (configsResponse.status === 404) {
       const response = NextResponse.json(

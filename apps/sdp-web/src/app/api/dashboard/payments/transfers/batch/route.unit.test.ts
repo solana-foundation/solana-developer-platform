@@ -33,7 +33,7 @@ describe("POST /api/dashboard/payments/transfers/batch", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.payments.transfers.batch.post",
-      path: "/v1/payments/transfer-batches",
+      path: "/v1/payments/transfer-batches/execute",
     });
   });
 });

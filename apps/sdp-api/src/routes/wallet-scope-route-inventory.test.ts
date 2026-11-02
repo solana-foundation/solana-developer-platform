@@ -75,13 +75,13 @@ const WALLET_SCOPE_ROUTES = {
   },
 
   // Payments
-  "POST /v1/payments/transfers": {
+  "POST /v1/payments/transfers/execute": {
     refusedEarly: {
       file: TRANSFERS,
       test: "refuses a transfer from a wallet outside the key's scope before writing anything",
     },
   },
-  "POST /v1/payments/transfer-batches": {
+  "POST /v1/payments/transfer-batches/execute": {
     refusedEarly: {
       file: "routes/payments/transfer-batches/handlers.test.ts",
       test: "refuses a batch from a wallet outside the key's scope before writing anything",
@@ -147,14 +147,22 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
   "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": {
+  "POST /v1/payments/subscription-plans/:planId/create/build-unsigned-transaction": {
     exempt: SPONSOR_ONLY,
   },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": { exempt: SPONSOR_ONLY },
+  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
+  "POST /v1/payments/subscriptions/:subscriptionId/authorize/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/cancel/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/collect/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/resume/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
 
   // DvP
   "POST /v1/dvp/trades": {

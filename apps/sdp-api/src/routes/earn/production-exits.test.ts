@@ -79,7 +79,7 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
 
   it("refuses unknown methods and paths outside Earn", () => {
     expect(isEarnExitOrRead("DELETE", "/v1/earn/vault-withdrawals")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/payments/transfers")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/payments/transfers/execute")).toBe(false);
     expect(isEarnExitOrRead("POST", "/v1/earn/vault-withdrawals/extra")).toBe(false);
   });
 });

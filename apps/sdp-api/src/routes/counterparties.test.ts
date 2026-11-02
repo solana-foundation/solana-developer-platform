@@ -234,10 +234,10 @@ describe("Counterparties Routes", () => {
     );
   });
 
-  describe("GET /v1/counterparties/metadata", () => {
+  describe("GET /v1/counterparties/field-options", () => {
     it("returns field options (enums + countries)", async () => {
       const res = await app.request(
-        "/v1/counterparties/metadata",
+        "/v1/counterparties/field-options",
         { headers: { Authorization: authHeader } },
         env
       );

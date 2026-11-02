@@ -111,7 +111,7 @@ Use this file as the quick reference for answering tokenization questions on top
   - `POST /v1/issuance/tokens/{tokenId}/allowlist`
   - `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
 - Payments and movement:
-  - `POST /v1/payments/transfers`
+  - `POST /v1/payments/transfers/execute`
   - `GET /v1/payments/transfers`
   - `GET /v1/payments/wallets/{walletId}/balances`
 

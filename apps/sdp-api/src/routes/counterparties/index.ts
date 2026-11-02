@@ -41,7 +41,11 @@ counterparties.use("/:counterpartyId/provider-accounts/*", requireModule("ramps"
 counterparties.use("*", unifiedAuthMiddleware());
 counterparties.use("*", projectContextMiddleware());
 
-counterparties.get("/metadata", requireAction("counterparties.read"), getCounterpartyFieldOptions);
+counterparties.get(
+  "/field-options",
+  requireAction("counterparties.read"),
+  getCounterpartyFieldOptions
+);
 counterparties.get(
   "/accounts",
   requireAction("counterparties.read"),

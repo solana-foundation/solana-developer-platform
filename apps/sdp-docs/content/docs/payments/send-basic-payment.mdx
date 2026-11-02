@@ -94,7 +94,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
@@ -110,7 +110,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript title="execute-transfer.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers/execute",
   {
     method: "POST",
     headers: {
@@ -134,7 +134,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
@@ -199,7 +199,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 ## Deduplication
 
-`POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
+`POST /v1/payments/transfers/execute` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
 
 A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 

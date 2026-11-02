@@ -155,7 +155,7 @@ describe("scope", () => {
     );
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -174,7 +174,7 @@ describe("scope", () => {
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -191,7 +191,7 @@ describe("scope", () => {
     browser.projectHeader = null;
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -204,7 +204,7 @@ describe("scope", () => {
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -275,7 +275,7 @@ describe("pay", () => {
     const treasury = before.wallets.find((wallet) => wallet.id === "demo_cwlt_treasury");
     const held = Number(treasury?.balances.find((balance) => balance.mint === USDC)?.uiAmount);
 
-    const sent = await call("POST", "/v1/payments/transfers", {
+    const sent = await call("POST", "/v1/payments/transfers/execute", {
       sourceCustodyWalletId: "demo_cwlt_treasury",
       destination: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
       token: USDC,
@@ -297,7 +297,7 @@ describe("pay", () => {
   });
 
   it("refuses a payment the wallet cannot cover", async () => {
-    const refused = await call("POST", "/v1/payments/transfers", {
+    const refused = await call("POST", "/v1/payments/transfers/execute", {
       sourceCustodyWalletId: "demo_cwlt_settlement",
       destination: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
       token: USDC,
@@ -318,7 +318,7 @@ describe("pay", () => {
       recipients,
     });
     expect(estimate.body.data.estimate.recipientCount).toBe(2);
-    const batch = await call("POST", "/v1/payments/transfer-batches", {
+    const batch = await call("POST", "/v1/payments/transfer-batches/execute", {
       sourceCustodyWalletId: "demo_cwlt_payroll",
       token: USDC,
       recipients,
@@ -441,7 +441,7 @@ describe("ramps", () => {
     const deposit = waiting.transfer.cryptoDeposit;
     expect(deposit.destinationAddress).toBeTruthy();
 
-    const funded = await call("POST", "/v1/payments/transfers", {
+    const funded = await call("POST", "/v1/payments/transfers/execute", {
       transferId,
       sourceCustodyWalletId: "demo_cwlt_treasury",
       destination: deposit.destinationAddress,

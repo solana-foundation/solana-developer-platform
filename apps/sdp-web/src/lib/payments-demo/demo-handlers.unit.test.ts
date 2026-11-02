@@ -345,7 +345,7 @@ describe("ramp pay-ins and cancels", () => {
 
 describe("transfers and batches", () => {
   const send = (body: Record<string, unknown>) =>
-    write("POST", "/v1/payments/transfers", {
+    write("POST", "/v1/payments/transfers/execute", {
       sourceCustodyWalletId: TREASURY,
       destination: ADDRESS,
       token: USDC,
@@ -396,7 +396,7 @@ describe("transfers and batches", () => {
 
   it("refuses a batch the API would", () => {
     const batch = (body: Record<string, unknown>) =>
-      write("POST", "/v1/payments/transfer-batches", {
+      write("POST", "/v1/payments/transfer-batches/execute", {
         sourceCustodyWalletId: "demo_cwlt_payroll",
         token: USDC,
         recipients: [

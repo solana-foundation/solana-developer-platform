@@ -176,7 +176,9 @@ describe("buildApiReference", () => {
     const operations = buildApiReference(
       createPublicOpenApiDocument({ releaseChannel: "stable" })
     ).families.flatMap((family) => family.operations);
-    const initialize = operations.find((operation) => operation.path === "/v1/wallets/initialize");
+    const initialize = operations.find(
+      (operation) => operation.path === "/v1/wallets/managed-signing/initialize-with-wallet"
+    );
     expect(initialize?.requestBody?.schema.variantMode).toBe("oneOf");
     expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "local"');
     const createWallet = operations.find((operation) => operation.operationId === "createWallet");

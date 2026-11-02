@@ -33,7 +33,7 @@ organizations.use("/:orgId/*", unifiedAuthMiddleware());
 
 organizations.get("/:orgId", requireAction("organizations.read"), getOrganization);
 organizations.get(
-  "/:orgId/provider-access",
+  "/:orgId/provider-availability",
   requireAction("organizations.read"),
   getOrganizationProviderAccess
 );

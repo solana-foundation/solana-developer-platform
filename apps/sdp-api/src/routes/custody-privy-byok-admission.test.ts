@@ -89,7 +89,7 @@ async function requestInitialize(): Promise<Response> {
     projectId: PROJECT_ID,
   });
   return app.request(
-    "/v1/wallets/initialize",
+    "/v1/wallets/managed-signing/initialize-with-wallet",
     {
       method: "POST",
       headers: {

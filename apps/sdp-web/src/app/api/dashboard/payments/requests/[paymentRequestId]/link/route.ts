@@ -11,6 +11,6 @@ export async function GET(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.payment-requests.link",
-    path: `/v1/payments/requests/${encodeURIComponent(paymentRequestId)}/link`,
+    path: `/v1/payments/requests/${encodeURIComponent(paymentRequestId)}/link-token`,
   });
 }

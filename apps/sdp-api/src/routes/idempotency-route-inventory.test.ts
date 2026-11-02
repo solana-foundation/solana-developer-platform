@@ -44,21 +44,22 @@ const EXEMPT = {
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/rotate": CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/complete-rotation":
     CREDENTIALS,
-  "POST /internal/dashboard/custody/provider-credentials/:credentialId/rollback": CREDENTIALS,
+  "POST /internal/dashboard/custody/provider-credentials/:credentialId/rollback-rotation":
+    CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/deactivate": CREDENTIALS,
-  "POST /internal/dashboard/custody/connections/:connectionId/cancel": CONNECTION,
-  "POST /internal/dashboard/custody/connections/:connectionId/complete": CONNECTION,
+  "POST /internal/dashboard/custody/connections/:connectionId/cancel-installation": CONNECTION,
+  "POST /internal/dashboard/custody/connections/:connectionId/complete-installation": CONNECTION,
   "POST /internal/dashboard/custody/connections/:connectionId/deactivate": CONNECTION,
   "POST /internal/dashboard/wallets/:walletId/faucet":
     "dashboard-internal devnet faucet: airdrops free devnet SOL and stores nothing, so each press is a new airdrop",
   "POST /pay/:token/tx":
     "public and unauthenticated (no organization to scope a key to); the payment request token is the unit of retry",
   "POST /v1/payments/transfer-batches/estimate": "read-only estimate; moves and stores nothing",
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": PREPARE,
+  "POST /v1/payments/subscription-plans/:planId/create/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/authorize/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/cancel/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/collect/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/resume/build-unsigned-transaction": PREPARE,
 } as const satisfies Record<string, string>;
 
 /**
@@ -69,7 +70,8 @@ const EXEMPT = {
 const NAMES_NOTHING = {
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
-  "POST /v1/wallets/initialize": "connects a provider in the caller's own project",
+  "POST /v1/wallets/managed-signing/initialize-with-wallet":
+    "connects a provider in the caller's own project",
 } as const satisfies Record<string, string>;
 
 interface RouteSteps {

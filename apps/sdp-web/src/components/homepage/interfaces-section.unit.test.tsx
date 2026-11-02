@@ -181,7 +181,9 @@ describe("InterfacesConsole", () => {
     expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(tabs[1]);
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(tabs[1]?.id);
-    expect(screen.getByRole("tabpanel").textContent).toContain("prepare-collection");
+    expect(screen.getByRole("tabpanel").textContent).toContain(
+      "collect/build-unsigned-transaction"
+    );
 
     fireEvent.keyDown(tabs[1], { key: "End" });
     expect(tabs[2]?.getAttribute("aria-selected")).toBe("true");
