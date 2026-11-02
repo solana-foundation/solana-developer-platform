@@ -135,6 +135,69 @@ describe("SponsorshipBudgetRepository", () => {
     expect(provenanceOverwrite?.updatedBy).toBe("operator:oncall");
   });
 
+  it("rejects a resume or set whose expected version an interleaved kill outdated", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const before = await repository.upsertPolicy({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      perTransactionLamports: 111,
+      hourlyLamports: 222,
+      dailyLamports: 333,
+      operator: "operator",
+      reason: "seed",
+    });
+
+    const killed = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: false,
+      operator: "github:oncall",
+      reason: "kill during drain",
+    });
+    expect(killed?.enabled).toBe(false);
+
+    // A resume dispatched before the kill carries the pre-kill version and
+    // must match zero rows instead of undoing the newer stop.
+    const staleResume = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      operator: "github:approver",
+      reason: "stale resume",
+      expectedVersion: before.version,
+    });
+    expect(staleResume).toBeNull();
+    await expect(
+      repository.upsertPolicy({
+        network: "devnet",
+        scopeType: "global",
+        scopeId: null,
+        enabled: true,
+        perTransactionLamports: 111,
+        hourlyLamports: 222,
+        dailyLamports: 333,
+        operator: "github:approver",
+        reason: "stale set",
+        expectedVersion: before.version,
+      })
+    ).rejects.toThrow(/version/);
+
+    const freshResume = await repository.setPolicyEnabled({
+      network: "devnet",
+      scopeType: "global",
+      scopeId: null,
+      enabled: true,
+      operator: "github:approver",
+      reason: "resume against the kill's version",
+      expectedVersion: killed?.version,
+    });
+    expect(freshResume?.enabled).toBe(true);
+  });
+
   it("resumes the breaker only when the trip provenance still matches", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
 
