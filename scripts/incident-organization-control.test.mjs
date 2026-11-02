@@ -7,7 +7,9 @@ import { test } from "node:test";
 import { parse } from "yaml";
 
 const root = resolve(import.meta.dirname, "..");
-const workflow = parse(readFileSync(join(root, ".github/workflows/incident-organization-control.yml"), "utf8"));
+const workflow = parse(
+  readFileSync(join(root, ".github/workflows/incident-organization-control.yml"), "utf8")
+);
 
 function compose(t, changes) {
   const dir = mkdtempSync(join(tmpdir(), "org-control-"));
@@ -17,9 +19,15 @@ function compose(t, changes) {
     encoding: "utf8",
     env: {
       ...process.env,
-      TARGET: "prod", ACTION: "suspend", ORGANIZATION_ID: "org_drill",
-      OPERATOR: "oncall", REASON: "Authorized local drill", TICKET: "PRO-2315",
-      EXPECTED_VERSION: "", GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, "summary"),
+      TARGET: "prod",
+      ACTION: "suspend",
+      ORGANIZATION_ID: "org_drill",
+      OPERATOR: "oncall",
+      REASON: "Authorized local drill",
+      TICKET: "PRO-2315",
+      EXPECTED_VERSION: "",
+      GITHUB_OUTPUT: output,
+      GITHUB_STEP_SUMMARY: join(dir, "summary"),
       ...changes,
     },
   });
@@ -30,12 +38,23 @@ function compose(t, changes) {
 for (const target of ["prod", "stage"]) {
   for (const action of ["status", "suspend", "resume"]) {
     test(`${target} ${action} composes a scoped command with the correct approval gate`, (t) => {
-      const result = compose(t, { TARGET: target, ACTION: action, EXPECTED_VERSION: action === "resume" ? "4" : "" });
+      const result = compose(t, {
+        TARGET: target,
+        ACTION: action,
+        EXPECTED_VERSION: action === "resume" ? "4" : "",
+      });
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.output, new RegExp(`args=organization-control\\|${action}\\|--organization-id\\|org_drill`));
+      assert.match(
+        result.output,
+        new RegExp(`args=organization-control\\|${action}\\|--organization-id\\|org_drill`)
+      );
       assert.match(result.output, new RegExp(`gated=${target === "prod" && action === "resume"}`));
       if (action === "status") assert.doesNotMatch(result.output, /--operator|--expected-version/);
-      else assert.match(result.output, /--operator\|github:oncall\|--reason\|Authorized local drill\|--ticket\|PRO-2315/);
+      else
+        assert.match(
+          result.output,
+          /--operator\|github:oncall\|--reason\|Authorized local drill\|--ticket\|PRO-2315/
+        );
       if (action === "resume") assert.match(result.output, /--expected-version\|4/);
     });
   }
@@ -65,10 +84,13 @@ test("restoration uses the existing production approval and execution boundaries
   assert.equal(approve.environment, "release-production");
   assert.equal(approve.if, "needs.validate.outputs.gated == 'true'");
   assert.deepEqual(prod.needs, ["validate", "approve"]);
-  assert.match(prod.if, /needs\.approve\.result == 'success' \|\| needs\.approve\.result == 'skipped'/);
+  assert.match(
+    prod.if,
+    /needs\.approve\.result == 'success' \|\| needs\.approve\.result == 'skipped'/
+  );
   assert.equal(prod.environment, "production");
   assert.deepEqual(stage.needs, ["validate"]);
-  assert.equal(prod.concurrency.group, "sdp-incident-ops-run-${{ inputs.target }}");
+  assert.equal(prod.concurrency.group, `sdp-incident-ops-run-\${{ inputs.target }}`);
   assert.equal(stage.concurrency.group, prod.concurrency.group);
   assert.equal(workflow.concurrency, undefined);
   assert.equal(prod.env.OPS_JOB, "sdp-prod-incident-ops");
