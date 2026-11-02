@@ -65,10 +65,19 @@ export function registerEarnOnboardingPaths(registry: OpenAPIRegistry) {
         "Child organization and person GUIDs are derived from the durable mapping; callers cannot select them.",
       request,
       responses: {
-        [code]: {
+        200: {
           description: "Onboarding result",
           content: jsonContent(successResponseSchema(response)),
         },
+        // Document storage creates a reference; every other route returns 200.
+        ...(code === 201
+          ? {
+              201: {
+                description: "Document stored",
+                content: jsonContent(successResponseSchema(response)),
+              },
+            }
+          : {}),
         ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 413, 429, 500, 503]),
       },
     });
