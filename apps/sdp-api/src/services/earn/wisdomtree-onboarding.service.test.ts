@@ -120,6 +120,45 @@ async function seedCustodyWallet(organizationId: string, projectId: string, publ
     .bind(`cwlt_${crypto.randomUUID()}`, configId, `wtl_${crypto.randomUUID()}`, publicKey)
     .run();
 }
+
+/**
+ * A connection-owned (BYOK) wallet row, which shares custody_wallets but hangs
+ * off a custody connection instead of a config. `connectionStatus` exercises
+ * the connection lifecycle gate.
+ */
+async function seedConnectionWallet(
+  projectId: string,
+  publicKey: string,
+  connectionStatus: "active" | "pending" = "active"
+) {
+  const credentialId = `cred_${crypto.randomUUID()}`;
+  const connectionId = `conn_${crypto.randomUUID()}`;
+  await db
+    .prepare(
+      "INSERT INTO provider_credentials (id, organization_id, project_id, provider, label, scope, source, storage_backend, encrypted_secret_payload, status) VALUES (?, ?, ?, 'fireblocks', 'Connection', 'project', 'stored', 'encrypted_db', 'encrypted', 'active')"
+    )
+    .bind(credentialId, TEST_ORG.id, projectId)
+    .run();
+  // status = 'active' requires activated_at, a successful last check and its
+  // timestamp (custody_connections_activated_at_lifecycle_check and
+  // custody_connections_active_lifecycle_check); every other lifecycle state
+  // requires activated_at to stay NULL.
+  const activatedAt = connectionStatus === "active" ? "sdp_iso_now()" : "NULL";
+  const lastCheck = connectionStatus === "active" ? "'success', sdp_iso_now()" : "NULL, NULL";
+  await db
+    .prepare(
+      `INSERT INTO custody_connections (id, organization_id, project_id, provider, scope, provider_credential_id, provider_credential_scope_key, status, activated_at, last_check_status, last_check_at)
+       VALUES (?, ?, ?, 'fireblocks', 'project', ?, ?, ?, ${activatedAt}, ${lastCheck})`
+    )
+    .bind(connectionId, TEST_ORG.id, projectId, credentialId, projectId, connectionStatus)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO custody_wallets (id, custody_config_id, custody_connection_id, wallet_id, public_key, purpose, status) VALUES (?, NULL, ?, ?, ?, 'transfer', 'active')"
+    )
+    .bind(`cwlt_${crypto.randomUUID()}`, connectionId, `wtl_${crypto.randomUUID()}`, publicKey)
+    .run();
+}
 beforeEach(async () => {
   await seedTestDatabase(env);
   await db
@@ -435,6 +474,33 @@ describe("wallet onboarding and deposit admission", () => {
     );
     expect(register).not.toHaveBeenCalled();
     expect(await repo.findByWallet(scope, custody.address)).toBeNull();
+  });
+  it("accepts a connection-owned custody wallet of the same project as the binding", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
+    // Connection (BYOK) wallets share custody_wallets but hang off a custody
+    // connection, which no config lookup joins: the binding must see them too.
+    const connection = await generateKeyPairSigner();
+    await seedConnectionWallet(scope.projectId, connection.address);
+    await expect(service.registerWallet(scope, connection.address)).resolves.toMatchObject({
+      counterpartyId: scope.counterpartyId,
+      owner: connection.address,
+      registered: true,
+    });
+    expect(register).toHaveBeenCalledWith(runtime, childGuid, connection.address);
+  });
+  it("accepts no binding from a connection that is not active", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet");
+    const connection = await generateKeyPairSigner();
+    await seedConnectionWallet(scope.projectId, connection.address, "pending");
+    await expect(service.registerWallet(scope, connection.address)).rejects.toThrow(
+      /custody wallet of this project/
+    );
+    expect(register).not.toHaveBeenCalled();
+    expect(await repo.findByWallet(scope, connection.address)).toBeNull();
   });
   it("still demands proof from an unbound address, claiming nothing", async () => {
     await linkBusiness();

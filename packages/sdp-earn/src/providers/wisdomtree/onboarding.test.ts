@@ -247,16 +247,15 @@ describe("WisdomTree onboarding wire contract", () => {
         errors: { tax_id: "666123456" },
       },
     });
-    await assert.rejects(
-      client.saveBusiness(ctx, { entity_type: "organization", status: "submit" }),
-      (error: unknown) => {
-        assert.ok(error instanceof SdpEarnError);
-        assert.equal(error.details?.organization_guid, childGuid);
-        assert.equal(error.details?.providerStatus, 400);
-        assert.doesNotMatch(JSON.stringify(error) + error.message, /666123456/);
-        return true;
-      }
-    );
+    try {
+      await client.saveBusiness(ctx, { entity_type: "organization", status: "submit" });
+      assert.fail("expected the submission to be rejected");
+    } catch (error) {
+      assert.ok(error instanceof SdpEarnError);
+      assert.equal(error.details?.organization_guid, childGuid);
+      assert.equal(error.details?.providerStatus, 400);
+      assert.doesNotMatch(JSON.stringify(error) + error.message, /666123456/);
+    }
   });
   it("does not replay a write on 401 or 5xx", async () => {
     for (const status of [401, 503]) {
@@ -276,10 +275,13 @@ describe("WisdomTree onboarding wire contract", () => {
       if (calls++ === 0) return new Response(JSON.stringify(token));
       throw new Error("timeout with applicant 666123456");
     });
-    await assert.rejects(
-      client.submitPerson(ctx, person),
-      (error: unknown) => error instanceof SdpEarnError && !error.message.includes("666123456")
-    );
+    try {
+      await client.submitPerson(ctx, person);
+      assert.fail("expected the submission to be rejected");
+    } catch (error) {
+      assert.ok(error instanceof SdpEarnError);
+      assert.doesNotMatch(error.message, /666123456/);
+    }
     assert.equal(calls, 2);
   });
   it("refreshes a revoked token once for reads only", async () => {
@@ -294,13 +296,14 @@ describe("WisdomTree onboarding wire contract", () => {
   });
   it("does not leak malformed response contents and retains a recovery GUID", async () => {
     replies(ok(token), ok({ organization_guid: childGuid, status: 5, tax_id: "666123456" }));
-    await assert.rejects(
-      client.saveBusiness(ctx, { entity_type: "organization", status: "draft" }),
-      (error: unknown) =>
-        error instanceof SdpEarnError &&
-        error.details?.organization_guid === childGuid &&
-        !error.message.includes("666123456")
-    );
+    try {
+      await client.saveBusiness(ctx, { entity_type: "organization", status: "draft" });
+      assert.fail("expected the save to be rejected");
+    } catch (error) {
+      assert.ok(error instanceof SdpEarnError);
+      assert.equal(error.details?.organization_guid, childGuid);
+      assert.doesNotMatch(error.message, /666123456/);
+    }
   });
   it("rejects unsafe path IDs before network", async () => {
     const f = replies();

@@ -42,7 +42,10 @@ type Provider = Pick<
 >;
 
 /** The project's custody wallets, whose keys SDP holds and signs with. */
-type CustodyWallets = Pick<CustodyConfigStore, "findActiveWalletByPublicKey">;
+type CustodyWallets = Pick<
+  CustodyConfigStore,
+  "findActiveWalletByPublicKey" | "findActiveConnectionWalletByPublicKey"
+>;
 
 /**
  * WisdomTree processed and refused the registration (any 4xx), or the write
@@ -51,13 +54,12 @@ type CustodyWallets = Pick<CustodyConfigStore, "findActiveWalletByPublicKey">;
  * and malformed responses leave the outcome unknown — the wallet may be
  * registered — so those claims stay for reconciliation instead.
  */
-function isConfirmedWalletRejection(error: unknown): boolean {
+function isConfirmedWalletRejection(error: SdpEarnError): boolean {
   return (
-    error instanceof SdpEarnError &&
-    (error.code === "BAD_REQUEST" ||
-      error.code === "CONFLICT" ||
-      error.code === "RATE_LIMITED" ||
-      error.code === "PROVIDER_NOT_CONFIGURED")
+    error.code === "BAD_REQUEST" ||
+    error.code === "CONFLICT" ||
+    error.code === "RATE_LIMITED" ||
+    error.code === "PROVIDER_NOT_CONFIGURED"
   );
 }
 
@@ -124,10 +126,11 @@ export class WisdomTreeOnboardingService {
    * sign the scope-bound registration message with the wallet's own Ed25519
    * key. An SDP-managed custody wallet has no private key or arbitrary-message
    * signing endpoint to expose, so its authorized project binding — an active
-   * wallet under this organization's and project's active custody config — is
-   * the alternative proof: the keys are generated and held by SDP, and only a
-   * project-authorized caller can reach this registration at all. A custody
-   * binding of any other project or organization proves nothing.
+   * wallet, config-owned or connection-owned, under this organization's and
+   * project's active custody config or connection — is the alternative proof:
+   * the keys are generated and held by SDP, and only a project-authorized
+   * caller can reach this registration at all. A binding of any other project
+   * or organization proves nothing.
    */
   private async assertControlProven(
     scope: EarnOnboardingScope,
@@ -135,12 +138,19 @@ export class WisdomTreeOnboardingService {
     signature?: string
   ): Promise<void> {
     if (signature === undefined) {
-      const bound = await this.custodyWallets.findActiveWalletByPublicKey(
-        scope.organizationId,
-        scope.projectId,
-        owner
-      );
-      if (bound !== null) return;
+      const [configBound, connectionBound] = await Promise.all([
+        this.custodyWallets.findActiveWalletByPublicKey(
+          scope.organizationId,
+          scope.projectId,
+          owner
+        ),
+        this.custodyWallets.findActiveConnectionWalletByPublicKey(
+          scope.organizationId,
+          scope.projectId,
+          owner
+        ),
+      ]);
+      if (configBound !== null || connectionBound !== null) return;
       throw badRequest(
         "Provide the wallet's base58 signature over the registration message, or register an SDP custody wallet of this project"
       );
@@ -335,7 +345,8 @@ export class WisdomTreeOnboardingService {
       // A confirmed rejection releases the unverified claim so it cannot block
       // the real owner; an uncertain outcome (timeout, 5xx, malformed reply)
       // keeps the claim — the provider may have accepted the wallet.
-      if (isConfirmedWalletRejection(error)) await this.repository.releaseWallet(scope, owner);
+      if (error instanceof SdpEarnError && isConfirmedWalletRejection(error))
+        await this.repository.releaseWallet(scope, owner);
       throw error;
     }
     if (!(await this.repository.linkWallet(scope, owner)))
