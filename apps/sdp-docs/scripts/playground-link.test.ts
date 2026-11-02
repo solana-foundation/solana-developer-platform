@@ -37,7 +37,7 @@ describe("API reference playground links", () => {
     },
     {
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
       returnTo: "/dashboard/payments?tab=playground&endpoint=create-payment-transfer",
     },
     {
