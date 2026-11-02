@@ -32,12 +32,21 @@ import {
   isInstructionForProgram,
   isInstructionWithAccounts,
   isInstructionWithData,
+  isSolanaError,
   type Signature,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  type SolanaError,
+  unwrapSimulationError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
+  TOKEN_2022_ERROR__INSUFFICIENT_FUNDS,
+  TOKEN_2022_ERROR__OWNER_MISMATCH,
+  TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
@@ -67,6 +76,7 @@ import {
   AppError,
   badRequest,
   conflict,
+  type ErrorCode,
   internalError,
   notFound,
   solanaRpcError,
@@ -624,6 +634,101 @@ interface RecurringPaymentPause {
   reason: RecurringPaymentPauseReason;
   /** Failed attempts at the due period since the schedule last resumed, this one included. */
   failedAttempts: number;
+  /**
+   * The pausing failure's API error code, or `UNEXPECTED` for an error SDP did not classify, so
+   * an alert can tell a payer's or issuer's refusal from an SDP or dependency fault.
+   */
+  errorCode: ErrorCode | "UNEXPECTED";
+  /**
+   * Who refused the collection, when that is proven: `payer` for a custody policy refusal or a
+   * preflight refusal the token or subscriptions program raised for the payer's balance or
+   * delegation, `issuer` for a token program's frozen-account refusal, and `unconfirmed` for
+   * everything else, an expired or on-chain failed send included, so an alert on `unconfirmed`
+   * misses no SDP or dependency fault.
+   */
+  failureSource: RecurringPaymentFailureSource;
+}
+
+type RecurringPaymentFailureSource = "payer" | "issuer" | "unconfirmed";
+
+/** The token programs a pull moves tokens through. */
+const TOKEN_PROGRAMS: ReadonlySet<string> = new Set([
+  TOKEN_PROGRAM_ADDRESS,
+  TOKEN_2022_PROGRAM_ADDRESS,
+]);
+
+/**
+ * Whether a program error proves the payer refused the pull: the token program refused a drained
+ * source token account or one whose delegation was revoked (the program is no longer its
+ * delegate, so the token program sees an owner mismatch), or the subscriptions program refused a
+ * delegation the payer let expire. A code alone proves nothing: the System program, a Token-2022
+ * transfer hook or any other program can raise the same numbers.
+ *
+ * @param programAddress - The program that raised the error.
+ * @param code - Its custom error code.
+ * @returns Whether it is the payer's refusal.
+ */
+function isPayerRefusal(programAddress: string, code: number): boolean {
+  if (TOKEN_PROGRAMS.has(programAddress)) {
+    return (
+      code === TOKEN_2022_ERROR__INSUFFICIENT_FUNDS || code === TOKEN_2022_ERROR__OWNER_MISMATCH
+    );
+  }
+  return (
+    programAddress === subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS &&
+    code === subscriptionsProgram.SUBSCRIPTIONS_ERROR__DELEGATION_EXPIRED
+  );
+}
+
+const PROGRAM_CUSTOM_ERROR_LINE = /^Program (\S+) failed: custom program error: 0x([0-9a-f]+)$/;
+
+/**
+ * The program that raised a preflight refusal's custom error, and the code. The runtime logs a
+ * failure line for each program the error unwinds through, innermost first, so the first line
+ * names the program that raised it, a CPI's callee rather than its caller.
+ *
+ * @param refusal - The preflight refusal.
+ * @returns The raising program and its code, or null when the logs do not show one that
+ *   matches the refusal's error.
+ */
+function preflightProgramError(
+  refusal: SolanaError<
+    typeof SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE
+  >
+): { programAddress: string; code: number } | null {
+  const programError = unwrapSimulationError(refusal);
+  if (!isSolanaError(programError, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) return null;
+  const failure = (refusal.context.logs ?? [])
+    .map((line) => PROGRAM_CUSTOM_ERROR_LINE.exec(line))
+    .find((match) => match !== null);
+  if (!failure || Number.parseInt(failure[2], 16) !== programError.context.code) return null;
+  return { programAddress: failure[1], code: programError.context.code };
+}
+
+/**
+ * Classifies a pausing failure's source from what it proves (see `RecurringPaymentPause`).
+ *
+ * @param error - The failure.
+ * @returns Its source.
+ */
+function recurringPaymentFailureSource(error: Error): RecurringPaymentFailureSource {
+  if (!(error instanceof AppError)) return "unconfirmed";
+  if (error.code === "CUSTODY_POLICY_REFUSED") return "payer";
+  if (
+    (error.code !== "TRANSACTION_FAILED" && error.code !== "ACCOUNT_FROZEN") ||
+    !isSolanaError(
+      error.cause,
+      SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE
+    )
+  ) {
+    return "unconfirmed";
+  }
+  const raised = preflightProgramError(error.cause);
+  if (raised === null) return "unconfirmed";
+  if (error.code === "ACCOUNT_FROZEN") {
+    return TOKEN_PROGRAMS.has(raised.programAddress) ? "issuer" : "unconfirmed";
+  }
+  return isPayerRefusal(raised.programAddress, raised.code) ? "payer" : "unconfirmed";
 }
 
 /**
@@ -675,7 +780,14 @@ async function pauseFailingRecurringPayment(
     reason,
     updatedAt: input.pausedAt,
   });
-  return paused === null ? null : { reason, failedAttempts };
+  if (paused === null) return null;
+  const errorCode = input.error instanceof AppError ? input.error.code : "UNEXPECTED";
+  return {
+    reason,
+    failedAttempts,
+    errorCode,
+    failureSource: recurringPaymentFailureSource(input.error),
+  };
 }
 
 /**
@@ -700,6 +812,8 @@ function logRecurringPaymentPaused(
     event: "sdp_recurring_payment_paused",
     reason: pause.reason,
     failed_attempts: pause.failedAttempts,
+    error_code: pause.errorCode,
+    failure_source: pause.failureSource,
     organization_id: context.organizationId,
     project_id: context.projectId,
     recurring_payment_id: context.recurringPaymentId,
