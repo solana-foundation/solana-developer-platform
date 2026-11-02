@@ -223,7 +223,6 @@ jobs:
             exp: now + 900,
             email: "smoke@example.com",
             org_id: "org_clerk_smoke",
-            org_role: "org:admin",
             org_slug: "smoke-test",
           });
           const signature = crypto.sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), key);

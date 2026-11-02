@@ -119,52 +119,7 @@ async function resolveOrganizationId(
   return organization.id;
 }
 
-async function resolveUserEmail(
-  client: ReturnType<typeof createClerkClient>,
-  userId: string
-): Promise<string | null> {
-  const user = await withTransientClerkRetry(() => client.users.getUser(userId));
-  const primaryEmail =
-    user.emailAddresses.find((entry) => entry.id === user.primaryEmailAddressId)?.emailAddress ??
-    user.emailAddresses[0]?.emailAddress;
-
-  return primaryEmail ?? null;
-}
-
-async function resolveExistingAdminIdentity(
-  client: ReturnType<typeof createClerkClient>,
-  organizationId: string
-): Promise<ClerkTestIdentity> {
-  const memberships = await withTransientClerkRetry(() =>
-    client.organizations.getOrganizationMembershipList({
-      organizationId,
-      role: ["org:admin"],
-      limit: 10,
-    })
-  );
-
-  for (const membership of memberships.data) {
-    const userId = membership.publicUserData?.userId;
-    if (!userId) {
-      continue;
-    }
-
-    const email = await resolveUserEmail(client, userId);
-    if (!email) {
-      continue;
-    }
-
-    return {
-      email,
-      organizationId,
-      userId,
-    };
-  }
-
-  throw new Error(`Unable to resolve an admin Clerk identity for organization '${organizationId}'`);
-}
-
-async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
+async function ensureClerkTestUser(): Promise<ClerkTestIdentity> {
   const env = getE2EEnv();
   const client = createClerkClient({ secretKey: env.clerkSecretKey });
   const organizationId = await resolveOrganizationId(client, env);
@@ -197,28 +152,14 @@ async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
     })
   );
 
-  const membership = memberships.data[0];
-
-  try {
-    if (!membership) {
-      await withTransientClerkRetry(() =>
-        client.organizations.createOrganizationMembership({
-          organizationId,
-          userId: user.id,
-          role: "org:admin",
-        })
-      );
-    } else if (membership.role !== "org:admin") {
-      await withTransientClerkRetry(() =>
-        client.organizations.updateOrganizationMembership({
-          organizationId,
-          userId: user.id,
-          role: "org:admin",
-        })
-      );
-    }
-  } catch {
-    return resolveExistingAdminIdentity(client, organizationId);
+  if (!memberships.data[0]) {
+    await withTransientClerkRetry(() =>
+      client.organizations.createOrganizationMembership({
+        organizationId,
+        userId: user.id,
+        role: "org:member",
+      })
+    );
   }
 
   return {
@@ -228,7 +169,7 @@ async function ensureClerkAdminUser(): Promise<ClerkTestIdentity> {
   };
 }
 
-async function resolveReadOnlyClerkAdminUser(): Promise<ClerkTestIdentity> {
+async function resolveReadOnlyClerkTestUser(): Promise<ClerkTestIdentity> {
   const env = getE2EEnv();
   if (!env.clerkOrgId) {
     throw new Error("Read-only external identity requires E2E_CLERK_ORG_ID");
@@ -263,12 +204,6 @@ async function resolveReadOnlyClerkAdminUser(): Promise<ClerkTestIdentity> {
       `Read-only Clerk user '${env.clerkTestEmail}' is not a member of '${env.clerkOrgId}'`
     );
   }
-  if (membership.role !== "org:admin") {
-    throw new Error(
-      `Read-only Clerk user '${env.clerkTestEmail}' must already be org:admin in '${env.clerkOrgId}'`
-    );
-  }
-
   return {
     email: env.clerkTestEmail,
     organizationId: env.clerkOrgId,
@@ -281,7 +216,7 @@ async function resolveReadOnlyClerkAdminUser(): Promise<ClerkTestIdentity> {
  * creates users, memberships, roles, or organization metadata.
  */
 export function resolveClerkTestIdentity(): Promise<ClerkTestIdentity> {
-  return getE2EEnv().useExternalApi ? resolveReadOnlyClerkAdminUser() : ensureClerkAdminUser();
+  return getE2EEnv().useExternalApi ? resolveReadOnlyClerkTestUser() : ensureClerkTestUser();
 }
 
 export async function setClerkOrganizationTier(

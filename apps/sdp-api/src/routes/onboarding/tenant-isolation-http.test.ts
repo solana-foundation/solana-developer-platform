@@ -68,7 +68,6 @@ function clerkPayload(clerkOrgId: string) {
     sub: "user_clerk_onboarding_isolation",
     org_id: clerkOrgId,
     org_slug: "onboarding-isolation",
-    org_role: "org:admin",
     email: SESSION_EMAIL,
   };
 }

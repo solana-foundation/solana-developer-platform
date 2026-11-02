@@ -10,11 +10,9 @@ export interface ClerkJwtPayload extends JWTPayload {
   v?: number;
   o?: {
     id?: string | null;
-    rol?: string | null;
     slg?: string | null;
   } | null;
   org_id?: string | null;
-  org_role?: string | null;
   org_slug?: string | null;
   email?: string;
   email_addresses?: Array<{ email_address: string }>;
