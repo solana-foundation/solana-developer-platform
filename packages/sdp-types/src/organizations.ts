@@ -16,6 +16,12 @@ export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 export const ORGANIZATION_STATUSES = ["provisioning", "active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
+/** Incident operations cannot activate provisioning or deleted organizations. */
+export const ORGANIZATION_CONTROL_SOURCE_STATUSES = {
+  suspend: ["active", "suspended"],
+  resume: ["suspended"],
+} as const satisfies Record<string, readonly OrganizationStatus[]>;
+
 /**
  * Organization statuses whose credentials may authenticate (HOO-1955). A
  * suspended or deleted organization is locked out of the API and dashboard
