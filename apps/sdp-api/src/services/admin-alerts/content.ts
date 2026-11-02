@@ -3,6 +3,7 @@
  * organization and project, who did it, and a dashboard link. It never carries an address, an
  * amount or a secret; the dashboard shows those to someone signed in.
  */
+import type { AdminAlertAudience } from "@sdp/types/admin-alerts";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
@@ -251,17 +252,33 @@ function detailRows(
   return rows;
 }
 
+/** Why the recipient got the email, and what to do if they did not expect it. */
+function alertNote(audience: AdminAlertAudience, organization: string): string {
+  switch (audience) {
+    case "admin":
+      return `You get this email because you are an admin of ${organization}. If you did not expect this change, review your organization's members and API keys. An admin can turn off alert emails in organization settings.`;
+    case "affected":
+      return `You get this email because this change removed your admin access to ${organization}. If you did not expect it, contact another admin of ${organization}.`;
+    default: {
+      const unreachable: never = audience;
+      throw new Error(`Unhandled admin alert audience: ${String(unreachable)}`);
+    }
+  }
+}
+
 /**
  * The email for one alert. The dashboard link is SDP's own page on its own origin, never built
  * from customer input; every other field is escaped by the layout.
  *
  * @param input.kind - What happened.
+ * @param input.audience - An admin, or the person the change took admin access from.
  * @param input.details - The alert's snapshot.
  * @param input.occurredAt - When it happened (ISO 8601).
  * @param input.dashboardOrigin - The dashboard's https origin, for the link.
  */
 export function adminAlertEmail(input: {
   kind: AdminAlertKind;
+  audience: AdminAlertAudience;
   details: AdminAlertDetails;
   occurredAt: string;
   dashboardOrigin: string;
@@ -279,7 +296,7 @@ export function adminAlertEmail(input: {
         label: "Review in dashboard",
         url: `${input.dashboardOrigin}${dashboardPath(kind, details)}`,
       },
-      note: `You get this email because you are an admin of ${details.organizationName}. If you did not expect this change, review your organization's members and API keys. An admin can turn off alert emails in organization settings.`,
+      note: alertNote(input.audience, details.organizationName),
     },
   };
 }

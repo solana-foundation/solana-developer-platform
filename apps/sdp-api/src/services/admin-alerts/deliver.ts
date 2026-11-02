@@ -7,8 +7,10 @@
  * email an admin twice.
  *
  * Who gets an email is decided again at each send: a recipient who is no longer an active admin,
- * or an organization that has since turned alert emails off, suppresses it.
+ * or an organization that has since turned alert emails off, suppresses it. An `affected`
+ * delivery, to the person a change took admin access from, needs only their account active.
  */
+import { ADMIN_ALERT_AUDIENCES } from "@sdp/types/admin-alerts";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
@@ -39,8 +41,12 @@ const deliveryTargetSchema = z.object({
   kind: z.enum(ADMIN_ALERT_KINDS),
   details: z.unknown(),
   occurred_at: z.string(),
-  /** The recipient's address now, or null when they are no longer an active admin. */
-  admin_email: z.string().nullable(),
+  audience: z.enum(ADMIN_ALERT_AUDIENCES),
+  /**
+   * The recipient's address now, or null when they may no longer receive it: an admin who is no
+   * longer an active admin, or an affected person whose account is no longer active.
+   */
+  recipient_email: z.string().nullable(),
   alert_emails: z.string().nullable(),
 });
 
@@ -87,15 +93,18 @@ async function deliveryTarget(
   delivery: z.infer<typeof claimedDeliverySchema>
 ) {
   const row = await db.queryOne<Record<string, unknown>>(
-    `SELECT a.kind, a.details, a.occurred_at,
-            u.email AS admin_email,
+    `SELECT a.kind, a.details, a.occurred_at, d.audience,
+            CASE d.audience WHEN 'affected' THEN person.email ELSE admin_user.email END
+              AS recipient_email,
             o.settings::jsonb ->> 'alertEmails' AS alert_emails
        FROM admin_alerts a
+       JOIN admin_alert_deliveries d ON d.alert_id = a.id AND d.user_id = ?
        JOIN organizations o ON o.id = a.organization_id
+       LEFT JOIN users person ON person.id = d.user_id AND person.status = 'active'
        LEFT JOIN organization_members om
-              ON om.organization_id = a.organization_id AND om.user_id = ?
+              ON om.organization_id = a.organization_id AND om.user_id = d.user_id
              AND om.role = 'admin' AND om.status = 'active'
-       LEFT JOIN users u ON u.id = om.user_id AND u.status = 'active'
+       LEFT JOIN users admin_user ON admin_user.id = om.user_id AND admin_user.status = 'active'
       WHERE a.id = ?`,
     [delivery.user_id, delivery.alert_id]
   );
@@ -134,8 +143,11 @@ async function deliverOne(
   context: { clock: () => Date; dashboardOrigin: string }
 ): Promise<DeliveryOutcome> {
   const target = await deliveryTarget(db, delivery);
-  const turnedOff = target.alert_emails === "false" && target.kind !== "alert_emails_changed";
-  if (target.admin_email === null || turnedOff) {
+  const turnedOff =
+    target.audience === "admin" &&
+    target.alert_emails === "false" &&
+    target.kind !== "alert_emails_changed";
+  if (target.recipient_email === null || turnedOff) {
     await settle(db, delivery, claimId, {
       set: "status = 'suppressed', claimed_until = NULL",
       values: [],
@@ -149,9 +161,10 @@ async function deliverOne(
         : target.details
     );
     await sendIterableEmail(env, {
-      to: target.admin_email,
+      to: target.recipient_email,
       ...adminAlertEmail({
         kind: target.kind,
+        audience: target.audience,
         details,
         occurredAt: target.occurred_at,
         dashboardOrigin: context.dashboardOrigin,

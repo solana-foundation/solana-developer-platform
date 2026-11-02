@@ -23,7 +23,7 @@ SDP sends email through Iterable, the Foundation's sender for its email domains.
 
 ## Admin alerts
 
-Every active admin of an organization is emailed when something changes in it (HOO-2299). The Worker cron `admin-alert-emails` (`apps/sdp-api/src/services/admin-alerts/`) runs every 15 seconds, so an email follows its event within about a minute. It builds alerts only from rows that already record each event, so no request or money path calls it:
+Every active admin of an organization is emailed when something changes in it (HOO-2299). An admin who is removed or demoted is emailed too, even with alerts off, so a removal can't be hidden from them. The Worker cron `admin-alert-emails` (`apps/sdp-api/src/services/admin-alerts/`) runs every 15 seconds, so an email follows its event within about a minute. It builds alerts only from rows that already record each event, so no request or money path calls it:
 - **Configuration changes**, read from the audit ledger: invitations, joins, role changes, removals, API key creation, rotation and revocation, custody connections and wallets, the IP allowlist, mainnet access and the alert setting itself.
 - **Money movement**, read from the payment tables: one summary per project per minute, counting transfers, batch payouts (once each), recurring collections, payment-request settlements, deposits and ramps. A payment that failed before reaching the chain isn't counted. Only deposits SDP records are counted: funds sent straight to a project wallet from outside SDP aren't stored, so they don't alert yet (HOO-2479).
 

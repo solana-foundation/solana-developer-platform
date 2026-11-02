@@ -29,6 +29,9 @@ CREATE TABLE admin_alert_deliveries (
     organization_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     email TEXT NOT NULL,
+    -- `admin`: an admin told of a change; `affected`: the person a removal or demotion took admin
+    -- access from, told even though they are no longer an admin.
+    audience TEXT NOT NULL DEFAULT 'admin',
     status TEXT NOT NULL DEFAULT 'pending',
     attempts INTEGER NOT NULL DEFAULT 0,
     claim_id TEXT,
@@ -40,6 +43,7 @@ CREATE TABLE admin_alert_deliveries (
     PRIMARY KEY (alert_id, user_id),
     CONSTRAINT admin_alert_deliveries_status_check
         CHECK (status IN ('pending', 'sent', 'abandoned', 'suppressed')),
+    CONSTRAINT admin_alert_deliveries_audience_check CHECK (audience IN ('admin', 'affected')),
     CONSTRAINT admin_alert_deliveries_attempts_nonnegative CHECK (attempts >= 0)
 );
 

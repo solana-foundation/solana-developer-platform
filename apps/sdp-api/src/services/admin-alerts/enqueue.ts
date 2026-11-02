@@ -10,9 +10,11 @@
  *   per window. A movement row is dated by its transaction's start, so a window closes
  *   `MONEY_WINDOW_GRACE_MS` after it ends, for transactions still open at its end.
  *
- * Each alert is written once per source (`source_key` is unique) with a delivery row per admin,
- * in the transaction that moves its cursor; `deliver.ts` sends them after that commits.
+ * Each alert is written once per source (`source_key` is unique) with a delivery row per
+ * recipient, in the transaction that moves its cursor; `deliver.ts` sends them after that commits.
  */
+
+import type { AdminAlertAudience } from "@sdp/types/admin-alerts";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
@@ -59,6 +61,11 @@ interface ConfigAlert {
   projectId: string | null;
   /** The member the event is about, named in the email. */
   subjectUserId?: string;
+  /**
+   * The person a removal or demotion took admin access from. Admin deliveries no longer reach
+   * them, so they are emailed too: otherwise an admin could remove another without their knowing.
+   */
+  affectedUserId?: string;
   subject?: string | null;
   previousRole?: OrganizationRole;
   role?: OrganizationRole;
@@ -142,6 +149,15 @@ function organizationAlerts(metadata: AuditMetadata): ConfigAlert[] {
   return alerts;
 }
 
+/** The member, when a change took admin access from them (a removal has no new role). */
+function lostAdmin(
+  previousRole: OrganizationRole | undefined,
+  role: OrganizationRole | undefined,
+  userId: string | undefined
+): string | undefined {
+  return previousRole === "admin" && role !== "admin" ? userId : undefined;
+}
+
 /**
  * The alerts one audit entry raises; most raise none. An organization update can raise two (an
  * allowlist and the alert-email setting in one request). Entries of critical operations count
@@ -173,13 +189,21 @@ export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
               kind: "member_role_changed",
               projectId: null,
               subjectUserId: metadata.userId,
+              affectedUserId: lostAdmin(metadata.previousRole, metadata.role, metadata.userId),
               previousRole: metadata.previousRole,
               role: metadata.role,
             },
           ]
         : [];
     case "delete:member":
-      return [{ kind: "member_removed", projectId: null, subjectUserId: metadata.userId }];
+      return [
+        {
+          kind: "member_removed",
+          projectId: null,
+          subjectUserId: metadata.userId,
+          affectedUserId: lostAdmin(metadata.previousRole, undefined, metadata.userId),
+        },
+      ];
     case "create:api_key":
       return [{ kind: "api_key_created", projectId, subject: metadata.name ?? row.resource_id }];
     case "update:api_key":
@@ -215,18 +239,28 @@ export function configAlertsFromAudit(row: AuditRow): ConfigAlert[] {
 interface Recipient {
   user_id: string;
   email: string;
+  audience: AdminAlertAudience;
 }
 
 /** Every active admin of the organization. */
 async function organizationAdmins(db: DatabaseExecutor, organizationId: string) {
   return db.queryMany<Recipient>(
-    `SELECT u.id AS user_id, u.email
+    `SELECT u.id AS user_id, u.email, 'admin' AS audience
        FROM organization_members om
        JOIN users u ON u.id = om.user_id
       WHERE om.organization_id = ? AND om.role = 'admin' AND om.status = 'active'
         AND u.status = 'active'
       ORDER BY u.id`,
     [organizationId]
+  );
+}
+
+/** The person a change took admin access from, while their account is active. */
+async function affectedRecipient(db: DatabaseExecutor, userId: string): Promise<Recipient | null> {
+  return db.queryOne<Recipient>(
+    `SELECT id AS user_id, email, 'affected' AS audience
+       FROM users WHERE id = ? AND status = 'active'`,
+    [userId]
   );
 }
 
@@ -342,9 +376,9 @@ async function insertAlert(
   if (!inserted) return false;
   for (const recipient of recipients) {
     await db.execute(
-      `INSERT INTO admin_alert_deliveries (alert_id, organization_id, user_id, email)
-       VALUES (?, ?, ?, ?)`,
-      [inserted.id, alert.organizationId, recipient.user_id, recipient.email]
+      `INSERT INTO admin_alert_deliveries (alert_id, organization_id, user_id, email, audience)
+       VALUES (?, ?, ?, ?, ?)`,
+      [inserted.id, alert.organizationId, recipient.user_id, recipient.email, recipient.audience]
     );
   }
   return true;
@@ -371,7 +405,30 @@ async function moveCursor(
 }
 
 /**
- * Writes the alerts one audit entry raises, each to every admin of its organization.
+ * Who one alert goes to: every admin, unless the organization turned alerts off (turning them off
+ * is itself emailed, so it can never happen unnoticed), and the person it took admin access from,
+ * whatever the setting, unless they made the change themselves.
+ */
+async function configAlertRecipients(
+  tx: DatabaseExecutor,
+  row: AuditRow,
+  alert: ConfigAlert,
+  context: { admins: readonly Recipient[]; alertEmailsOff: boolean }
+): Promise<Recipient[]> {
+  const recipients =
+    context.alertEmailsOff && alert.kind !== "alert_emails_changed" ? [] : [...context.admins];
+  if (alert.affectedUserId && alert.affectedUserId !== row.user_id) {
+    const affected = await affectedRecipient(tx, alert.affectedUserId);
+    if (affected && !recipients.some((admin) => admin.user_id === affected.user_id)) {
+      recipients.push(affected);
+    }
+  }
+  return recipients;
+}
+
+/**
+ * Writes the alerts one audit entry raises, to the admins of its organization and anyone a change
+ * took admin access from.
  *
  * @returns How many alerts were new.
  */
@@ -380,12 +437,15 @@ async function writeConfigAlerts(tx: DatabaseExecutor, row: AuditRow): Promise<n
   if (raised.length === 0) return 0;
   const organization = await organizationAlerting(tx, row.organization_id);
   if (!organization) return 0;
-  const recipients = await organizationAdmins(tx, row.organization_id);
+  const admins = await organizationAdmins(tx, row.organization_id);
   const actor = await actorLabel(tx, row);
   let written = 0;
   for (const [index, alert] of raised.entries()) {
-    // Turning alerts off is itself emailed, so it can never happen unnoticed.
-    if (organization.alertEmailsOff && alert.kind !== "alert_emails_changed") continue;
+    const recipients = await configAlertRecipients(tx, row, alert, {
+      admins,
+      alertEmailsOff: organization.alertEmailsOff,
+    });
+    if (recipients.length === 0) continue;
     const project = await projectOf(
       tx,
       row.organization_id,

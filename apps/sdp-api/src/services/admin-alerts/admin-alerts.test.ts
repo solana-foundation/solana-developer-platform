@@ -427,6 +427,80 @@ describe("admin alert emails (HOO-2299)", () => {
       expect(email?.body).toContain("Role: Member to Admin");
     });
 
+    describe("emails the admin a change took admin access from", () => {
+      it("emails a removed admin, who is no longer an admin", async () => {
+        await audit({
+          action: "delete",
+          resourceType: "member",
+          userId: TEST_USER.id,
+          metadata: { userId: OTHER_ADMIN.id, previousRole: "admin", left: false },
+        });
+        await asWorker(() =>
+          getDb(env).execute(
+            "UPDATE organization_members SET status = 'removed' WHERE user_id = ?",
+            [OTHER_ADMIN.id]
+          )
+        );
+        await runWorker();
+        const emails = sentEmails();
+        expect(emails.map((email) => email.to).sort()).toEqual(
+          [OTHER_ADMIN.email, TEST_USER.email].sort()
+        );
+        const affected = emails.find((email) => email.to === OTHER_ADMIN.email);
+        expect(affected?.subject).toBe("Member removed in Acme Pay");
+        expect(affected?.body).toContain("this change removed your admin access to Acme Pay");
+      });
+
+      it("emails a demoted admin, even with alert emails off", async () => {
+        await asWorker(() =>
+          getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+            JSON.stringify({ enableProductionProject: true, alertEmails: false }),
+            ORGANIZATION_ID,
+          ])
+        );
+        await audit({
+          action: "update",
+          resourceType: "member",
+          metadata: { userId: OTHER_ADMIN.id, previousRole: "admin", role: "member" },
+        });
+        await runWorker();
+        expect(sentEmails().map((email) => [email.to, email.subject])).toEqual([
+          [OTHER_ADMIN.email, "Member role changed in Acme Pay"],
+        ]);
+      });
+
+      it("does not email a member whose role change kept or never gave admin access", async () => {
+        await audit({
+          action: "update",
+          resourceType: "member",
+          metadata: { userId: MEMBER.id, previousRole: "member", role: "viewer" },
+        });
+        await runWorker();
+        expect(
+          sentEmails()
+            .map((email) => email.to)
+            .sort()
+        ).toEqual([OTHER_ADMIN.email, TEST_USER.email].sort());
+      });
+
+      it("does not email an admin who left on their own", async () => {
+        await audit({
+          action: "delete",
+          resourceType: "member",
+          userId: OTHER_ADMIN.id,
+          metadata: { userId: OTHER_ADMIN.id, previousRole: "admin", left: true },
+        });
+        await asWorker(() =>
+          getDb(env).execute(
+            "UPDATE organization_members SET status = 'removed' WHERE user_id = ?",
+            [OTHER_ADMIN.id]
+          )
+        );
+        await runWorker();
+        expect(sentEmails().map((email) => email.to)).toEqual([TEST_USER.email]);
+      });
+    });
+
     it("ignores a custody intent, a started event, and a replayed wallet outcome", async () => {
       await audit({
         action: "deactivate",
@@ -782,6 +856,7 @@ describe("admin alert emails (HOO-2299)", () => {
     expect(() =>
       adminAlertEmail({
         kind: "money_movement",
+        audience: "admin",
         details: { organizationName: "Acme", project: null, actor: null, subject: null },
         occurredAt: "2026-10-30T10:15:00.000Z",
         dashboardOrigin: DASHBOARD,
@@ -792,6 +867,7 @@ describe("admin alert emails (HOO-2299)", () => {
   it("renders no field it was not given", () => {
     const email = adminAlertEmail({
       kind: "money_movement",
+      audience: "admin",
       details: {
         organizationName: "Acme",
         project: { id: "prj_1", name: "Treasury", environment: "production" },

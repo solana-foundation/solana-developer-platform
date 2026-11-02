@@ -6,6 +6,7 @@ import type {
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
@@ -241,7 +242,11 @@ async function auditedMembershipDeletionMirror(
  */
 function membershipDeletionMirrorAuditEntry(
   params: { organizationId: string; userId: string },
-  mirrored: { removedMemberId: string | null; revokedInvitations: number }
+  mirrored: {
+    removedMemberId: string | null;
+    removedRole: OrganizationRole | null;
+    revokedInvitations: number;
+  }
 ): AuditLogEntry | null {
   const metadata = {
     userId: params.userId,
@@ -253,7 +258,7 @@ function membershipDeletionMirrorAuditEntry(
       action: "delete",
       resourceType: "member",
       resourceId: mirrored.removedMemberId,
-      metadata,
+      metadata: { ...metadata, previousRole: mirrored.removedRole },
       organizationId: params.organizationId,
     };
   }
