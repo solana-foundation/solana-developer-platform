@@ -548,19 +548,23 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
 /**
  * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
  * both in the flow's column, and the content box stays full width so the flow's footer band
- * can span the card. No back action: the footer's Cancel returns to Payments.
+ * can span the card. No back action: the footer's Cancel returns to Payments. A flow with one
+ * way in has no tabs.
  */
 function refreshFlowPageConfig(config: {
   title: string;
-  tabs: DashboardHeaderTabsConfig["tabs"];
+  tabs?: DashboardHeaderTabsConfig["tabs"];
 }): DashboardPageConfig {
-  return {
+  const pageConfig: DashboardPageConfig = {
     title: config.title,
     titlePosition: "left",
-    headerTabs: { tabs: config.tabs, hideOnMobile: false },
     contentWidthClass: "max-w-none",
     headerWidthClass: "max-w-flow",
   };
+  if (config.tabs) {
+    pageConfig.headerTabs = { tabs: config.tabs, hideOnMobile: false };
+  }
+  return pageConfig;
 }
 
 /** Width of the refresh Payments overview and list pages: the design's 900px column. */
@@ -1056,7 +1060,8 @@ function getWalletSectionPageConfig(
  */
 function getRefreshPaymentsPageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  rampsEnabled: boolean
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty") {
     return {
@@ -1160,16 +1165,19 @@ function getRefreshPaymentsPageConfig(
     });
   }
   if (pathname === "/dashboard/payments/deposit") {
+    // A provider deposit is an on-ramp, so without Ramps the address is the only way in.
     return refreshFlowPageConfig({
       title: t("Shared.dashboardShell.deposit"),
-      tabs: [
-        { id: "address", label: t("DashboardPayments.depositMethod.address") },
-        {
-          id: "provider",
-          label: t("DashboardPayments.depositMethod.provider"),
-          capability: "canWrite",
-        },
-      ],
+      tabs: rampsEnabled
+        ? [
+            { id: "address", label: t("DashboardPayments.depositMethod.address") },
+            {
+              id: "provider",
+              label: t("DashboardPayments.depositMethod.provider"),
+              capability: "canWrite",
+            },
+          ]
+        : undefined,
     });
   }
   return null;
@@ -1202,10 +1210,15 @@ function getHomePageConfig(
   return null;
 }
 
+/**
+ * The header for a dashboard route. `rampsEnabled` is whether the deployment's channel runs
+ * Ramps; unknown counts as not, so a module the API refuses never shows.
+ */
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  paymentsEnabled = true
+  paymentsEnabled = true,
+  rampsEnabled = false
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -1217,7 +1230,7 @@ export function getDashboardPageConfig(
   if (walletRoutePageConfig) return walletRoutePageConfig;
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
+  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t, rampsEnabled);
   if (refreshPaymentsConfig) {
     return refreshPaymentsConfig;
   }

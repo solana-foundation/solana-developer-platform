@@ -16,6 +16,13 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
+const flagMocks = vi.hoisted(() => ({ issuance: vi.fn() }));
+// The issued-token read is gated on the `issuance` flag itself; it follows the channel here.
+vi.mock("@/flags", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/flags")>()),
+  issuance: flagMocks.issuance,
+}));
+
 /** What the page hands its workspace that the release channel decides. */
 type WorkspaceProps = {
   modules: UnifiedTransactionModule[];
@@ -65,7 +72,9 @@ async function renderPage(
   releaseChannel: SdpReleaseChannel,
   searchParams: Record<string, string>
 ): Promise<WorkspaceProps> {
-  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(dashboardFlagsAt(releaseChannel));
+  const flags = dashboardFlagsAt(releaseChannel);
+  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(flags);
+  flagMocks.issuance.mockResolvedValue(flags.issuance);
   // SAFETY: the page returns its workspace element, whose props include `WorkspaceProps`.
   const element = (await TransactionsPage({
     searchParams: Promise.resolve(searchParams),
@@ -90,6 +99,15 @@ describe("transactions page on each release channel", () => {
     async (releaseChannel) => {
       const { modules } = await renderPage(releaseChannel, {});
       expect(modules).toEqual(enabledTransactionModules(dashboardFlagsAt(releaseChannel)));
+    }
+  );
+
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "reads issued tokens on %s only when that channel runs Issuance",
+    async (releaseChannel) => {
+      await renderPage(releaseChannel, {});
+      const readsIssuance = requestedPaths.some((path) => path.startsWith("/v1/issuance/"));
+      expect(readsIssuance).toBe(dashboardFlagsAt(releaseChannel).issuance);
     }
   );
 

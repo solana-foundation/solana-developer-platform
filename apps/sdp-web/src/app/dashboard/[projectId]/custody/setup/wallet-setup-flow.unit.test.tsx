@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
+    // Issuance runs, so every purpose is on offer; `wallet-purposes` pins the stable list.
+    flags: { dvp: false, issuance: true, markets: false },
     selectedProjectId: mocks.projectId,
     projects: [{ id: "prj_test_sandbox", name: "Default Sandbox Project" }],
     sdpEnvironment: "sandbox",

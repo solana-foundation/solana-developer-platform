@@ -14,7 +14,8 @@ import { Fragment, Suspense } from "react";
 import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/payments/payments-provider-access.server";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
-import { getEnabledRampProviders } from "@/flags/ramps";
+import { getEnabledRampProviders, isRampsEnabled } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import type { MessageKey } from "@/i18n/messages";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
@@ -23,13 +24,22 @@ import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { requestMemberRole, requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
+import {
+  fetchIssuedTokenSymbolsWhenIssuanceEnabled,
+  fetchIssuedTokensByMintWhenIssuanceEnabled,
+} from "./issued-tokens.server";
 import { PaymentsActivityPanels } from "./payments-activity-panels";
 import {
   PAYMENT_COMMAND_ACTION_DESTINATIONS,
   PAYMENT_COMMAND_ACTIVITY_DESTINATIONS,
   PAYMENT_COMMAND_SUMMARY_DESTINATIONS,
 } from "./payments-command-center.constants";
-import { resolveCommandCenterCounterparty } from "./payments-command-center.utils";
+import {
+  activityTransferTypes,
+  depositLineKey,
+  payLineKey,
+  resolveCommandCenterCounterparty,
+} from "./payments-command-center.utils";
 import {
   PaymentsActivitySkeleton,
   PaymentsBalanceSkeleton,
@@ -48,9 +58,7 @@ import {
   statusMessageKey,
 } from "./payments-overview.utils";
 import {
-  fetchIssuedTokensByMint,
   fetchPaymentsAggregate,
-  fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
   fetchTransferBatches,
@@ -73,19 +81,19 @@ type ApiClientPromise = Promise<{ request: SdpApiClient["request"] }>;
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
 const ACTIVITY_ROW_COUNT = 5;
-// Transfers and batches are separate lists here, so the transfer list leaves batch parents out.
-const NON_BATCH_TRANSFER_TYPES = ["transfer", "onramp", "offramp"] as const;
 
 async function MoveMoneyActions() {
-  const [t, projectId, role] = await Promise.all([
+  const [t, projectId, role, rampsOffered] = await Promise.all([
     getTranslations(),
     requestProjectId(),
     requestMemberRole(),
+    isRampsEnabled(),
   ]);
   // Every tile starts a payment; a read-only member has none to start.
   if (!resolveDashboardAccess(role).capabilities.canWrite) {
     return null;
   }
+  const complianceInChannel = isModuleInDeploymentReleaseChannel("compliance");
   return (
     <section
       className="grid min-w-0 grid-cols-2 content-start gap-2"
@@ -96,13 +104,13 @@ async function MoveMoneyActions() {
         href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.pay)}
         icon={ReceiptTextIcon}
         label={t("DashboardPayments.pay")}
-        description={t("DashboardPayments.newDesign.commandCenter.payDescription")}
+        description={t(payLineKey({ ramps: rampsOffered, compliance: complianceInChannel }))}
       />
       <ActionTile
         href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.deposit)}
         icon={ArrowDownIcon}
         label={t("DashboardPayments.deposit")}
-        description={t("DashboardPayments.newDesign.commandCenter.depositDescription")}
+        description={t(depositLineKey(rampsOffered))}
       />
       <ActionTile
         href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.request)}
@@ -129,7 +137,9 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
   const trace = createTimedTrace("dashboard.payments.overview.balance");
   const [result, issuedTokensByMint] = await Promise.all([
     trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request)),
-    trace.step("fetch_issued_token_symbols", () => fetchIssuedTokensByMint(request)),
+    trace.step("fetch_issued_token_symbols", () =>
+      fetchIssuedTokensByMintWhenIssuanceEnabled(request)
+    ),
   ]);
   trace.log({
     ok: result.ok,
@@ -218,38 +228,49 @@ function countLabel(t: Translate, key: string, count: number | null): string {
 }
 
 /**
+ * How many ramp providers the organization has enabled. Null where the dashboard offers no
+ * ramp provider (stable runs no Ramps), whose two reads are then skipped, or where access can't
+ * be read.
+ */
+async function loadRampProviderCount(rampsOffered: boolean): Promise<number | null> {
+  if (!rampsOffered) return null;
+  const [providerAccess, enabledRampProviders] = await Promise.all([
+    loadOrganizationProviderAccess(),
+    getEnabledRampProviders(),
+  ]);
+  if (providerAccess === null) return null;
+  return Object.values(
+    filterEnabledRampProviderAccess(providerAccess.rampProviderAccess, enabledRampProviders)
+  ).filter((access) => access.entitled && access.configured && access.enabled).length;
+}
+
+/**
  * The one-line census under the balance: contacts, open requests, active schedules and
  * enabled providers. Each count links to where it is managed; a core count that failed to load
- * reads "—" rather than a misleading zero, and providers drop out when their availability
- * can't be read at all.
+ * reads "—" rather than a misleading zero, and providers drop out where no ramp provider is
+ * offered or their availability can't be read at all.
  */
 async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
-  const [{ request }, t, projectId] = await Promise.all([
+  const [{ request }, t, projectId, rampsOffered] = await Promise.all([
     apiClientPromise,
     getTranslations(),
     requestProjectId(),
+    isRampsEnabled(),
   ]);
   const trace = createTimedTrace("dashboard.payments.overview.summary");
-  const [[counterparties, requests, recurring, providerAccess], enabledRampProviders] =
-    await Promise.all([
-      trace.step("fetch_summary_counts", () =>
-        Promise.all([
-          fetchCounterparties(request, { page: 1, pageSize: 1 }),
-          fetchPaymentRequests(request, { pageSize: 1, status: "awaiting_payment" }),
-          fetchRecurringPayments(request, t, { page: 1, pageSize: 1, status: "active" }),
-          loadOrganizationProviderAccess(),
-        ])
-      ),
-      getEnabledRampProviders(),
-    ]);
-  const providerCount = providerAccess
-    ? Object.values(
-        filterEnabledRampProviderAccess(providerAccess.rampProviderAccess, enabledRampProviders)
-      ).filter((access) => access.entitled && access.configured && access.enabled).length
-    : null;
+  const [counterparties, requests, recurring, providerCount] = await trace.step(
+    "fetch_summary_counts",
+    () =>
+      Promise.all([
+        fetchCounterparties(request, { page: 1, pageSize: 1 }),
+        fetchPaymentRequests(request, { pageSize: 1, status: "awaiting_payment" }),
+        fetchRecurringPayments(request, t, { page: 1, pageSize: 1, status: "active" }),
+        loadRampProviderCount(rampsOffered),
+      ])
+  );
   trace.log({
-    ok: counterparties.ok || requests.ok || recurring.ok || providerAccess !== null,
-    requestCount: 4,
+    ok: counterparties.ok || requests.ok || recurring.ok || providerCount !== null,
+    requestCount: rampsOffered ? 4 : 3,
   });
   const base = "DashboardPayments.commandCenter.summary";
   const items = [
@@ -505,11 +526,11 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
     trace.step("fetch_recent_transfers", () =>
       fetchPaymentTransfers(request, ACTIVITY_ROW_COUNT, {
         includeObserved: false,
-        types: NON_BATCH_TRANSFER_TYPES,
+        types: activityTransferTypes(isModuleInDeploymentReleaseChannel("ramps")),
       })
     ),
     trace.step("fetch_recent_batches", () => fetchTransferBatches(request, ACTIVITY_ROW_COUNT)),
-    fetchPaymentsIssuedTokenSymbols(request),
+    fetchIssuedTokenSymbolsWhenIssuanceEnabled(request),
     fetchPaymentsWallets(request, { view: "summary" }),
   ]);
   // Recipient counts turn "partially failed" into "1 of 8 failed". Best effort: a batch whose
