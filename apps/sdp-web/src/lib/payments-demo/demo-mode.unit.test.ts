@@ -155,7 +155,7 @@ describe("scope", () => {
     );
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -174,7 +174,7 @@ describe("scope", () => {
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -191,7 +191,7 @@ describe("scope", () => {
     browser.projectHeader = null;
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -204,7 +204,7 @@ describe("scope", () => {
     upstream.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
     const response = await paymentsDemoResponse(
       "GET",
-      "/v1/organizations/org_1/provider-access",
+      "/v1/organizations/org_1/provider-availability",
       null,
       undefined,
       upstream
@@ -332,7 +332,7 @@ describe("pay", () => {
 
 describe("ramps and the release channel", () => {
   const quote = (provider: string) =>
-    call("POST", "/v1/payments/ramps/onramp/quote", {
+    call("POST", "/v1/payments/ramps/onramp/start", {
       provider,
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",
@@ -379,7 +379,7 @@ describe("ramps and the release channel", () => {
 describe("ramps", () => {
   it("runs a deposit from quote to a completed transfer, then credits the wallet", async () => {
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/ramp-requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
     const estimate = await call("POST", "/v1/payments/ramps/onramp/estimate", {
@@ -389,7 +389,7 @@ describe("ramps", () => {
     });
     expect(estimate.body.data.estimates[0].status).toBe("ok");
 
-    const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
+    const quoted = await call("POST", "/v1/payments/ramps/onramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",
@@ -421,11 +421,11 @@ describe("ramps", () => {
 
   it("pays out once the crypto is sent", async () => {
     const requirements = await data<{ status: string }>(
-      "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
+      "/v1/counterparties/demo_cpty_jane/ramp-requirements?provider=moonpay&direction=offramp&assetRail=usdc.solana&fiatCurrency=USD"
     );
     expect(requirements.status).toBe("ready");
 
-    const quoted = await call("POST", "/v1/payments/ramps/offramp/quote", {
+    const quoted = await call("POST", "/v1/payments/ramps/offramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_treasury",
@@ -457,7 +457,7 @@ describe("ramps", () => {
   });
 
   it("cancels a deposit before it is paid", async () => {
-    const quoted = await call("POST", "/v1/payments/ramps/onramp/quote", {
+    const quoted = await call("POST", "/v1/payments/ramps/onramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_kai",
       destinationCustodyWalletId: "demo_cwlt_payroll",
@@ -474,7 +474,7 @@ describe("ramps", () => {
 
 describe("every ramp provider", () => {
   const onrampQuote = (provider: string, assetRail: string, fiatCurrency = "USD") =>
-    call("POST", "/v1/payments/ramps/onramp/quote", {
+    call("POST", "/v1/payments/ramps/onramp/start", {
       provider,
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: "demo_cwlt_treasury",

@@ -73,7 +73,7 @@ describe("recheckPrivyCredentialAction", () => {
       connectionId: "conn_test",
     });
     expect(client.fetch).toHaveBeenCalledWith(
-      "/internal/dashboard/custody/connections/conn_test/complete",
+      "/internal/dashboard/custody/connections/conn_test/complete-installation",
       expect.objectContaining({ method: "POST" })
     );
     expect(mocks.revalidatePath.mock.calls).toEqual([
@@ -230,7 +230,7 @@ describe("submitPrivyCredentialAction outcome classification", () => {
     );
     expect(client.fetch).toHaveBeenNthCalledWith(
       2,
-      "/internal/dashboard/custody/connections/conn_test/complete",
+      "/internal/dashboard/custody/connections/conn_test/complete-installation",
       expect.objectContaining({ method: "POST" })
     );
   });

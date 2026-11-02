@@ -66,14 +66,14 @@ describe("Issuance exact wallet OpenAPI contract", () => {
     for (const [method, path] of [
       ["post", "/v1/issuance/tokens/{tokenId}/pause"],
       ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
-      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
+      ["post", "/v1/issuance/tokens/{tokenId}/control-list"],
       ["patch", "/v1/issuance/tokens/{tokenId}"],
     ] as const) {
       const schema = requestSchema(doc.paths?.[path]?.[method]?.requestBody);
       expect(schema.properties).toHaveProperty("signingCustodyWalletId");
       expect(schema.required ?? []).not.toContain("signingCustodyWalletId");
     }
-    const removal = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"]?.delete;
+    const removal = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list/{entryId}"]?.delete;
     expect(removal?.parameters).toContainEqual(
       expect.objectContaining({ name: "signingCustodyWalletId", in: "query", required: false })
     );
@@ -117,10 +117,10 @@ describe("Issuance exact wallet OpenAPI contract", () => {
       ["post", "/v1/issuance/tokens/{tokenId}/authority/update/execute"],
       ["post", "/v1/issuance/tokens/{tokenId}/pause"],
       ["post", "/v1/issuance/tokens/{tokenId}/unpause"],
-      ["post", "/v1/issuance/tokens/{tokenId}/freeze"],
-      ["post", "/v1/issuance/tokens/{tokenId}/unfreeze"],
-      ["post", "/v1/issuance/tokens/{tokenId}/allowlist"],
-      ["delete", "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}"],
+      ["post", "/v1/issuance/tokens/{tokenId}/freeze-account"],
+      ["post", "/v1/issuance/tokens/{tokenId}/unfreeze-account"],
+      ["post", "/v1/issuance/tokens/{tokenId}/control-list"],
+      ["delete", "/v1/issuance/tokens/{tokenId}/control-list/{entryId}"],
     ] as const;
 
     const undocumented = operations

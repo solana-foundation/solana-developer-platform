@@ -338,7 +338,7 @@ does.
    the wallet with devnet SOL first — it fee-pays every bring-up transaction
    and rents the config, ring-auth, reader-record, and lookup-table accounts.
 3. Hand the program id to the project admin. They enter it with a name in the
-   dashboard's _Custom rings_ card (or `POST /v1/helius-rings/rings`).
+   dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings/register-and-initialize`).
 
 SDP then completes bring-up through the SDK: an auditor key from the Ring RPC
 saved in project setup, the ring's create-config instruction, its

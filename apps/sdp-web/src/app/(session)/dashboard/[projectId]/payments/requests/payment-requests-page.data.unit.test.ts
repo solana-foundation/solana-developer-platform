@@ -128,7 +128,7 @@ describe("fetchPaymentRequestLinkToken", () => {
       ok: true,
       publicToken: "tok_1",
     });
-    expect(api.paths).toEqual(["/v1/payments/requests/preq_1/link"]);
+    expect(api.paths).toEqual(["/v1/payments/requests/preq_1/link-token"]);
   });
 
   it("answers no token when the member may not manage payment requests", async () => {

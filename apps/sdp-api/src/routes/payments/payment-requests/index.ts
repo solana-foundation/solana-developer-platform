@@ -26,7 +26,7 @@ paymentRequests.get(
   getPaymentRequest
 );
 paymentRequests.get(
-  "/:paymentRequestId/link",
+  "/:paymentRequestId/link-token",
   requireAction("payment_requests.manage"),
   validateParams(paymentRequestParamsSchema),
   authorize(authorizeExistingPaymentRequest),

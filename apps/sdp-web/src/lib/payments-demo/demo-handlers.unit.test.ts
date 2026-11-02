@@ -107,13 +107,12 @@ describe("contacts", () => {
 
 describe("ramp requirements", () => {
   it("refuses an unknown contact, and an unknown provider", () => {
-    expect(read("/v1/counterparties/demo_cpty_nobody/requirements").status).toBe(404);
-    expect(refusal(read("/v1/counterparties/demo_cpty_jane/requirements?provider=acme"))).toEqual([
-      400,
-      "invalid_request",
-    ]);
+    expect(read("/v1/counterparties/demo_cpty_nobody/ramp-requirements").status).toBe(404);
+    expect(
+      refusal(read("/v1/counterparties/demo_cpty_jane/ramp-requirements?provider=acme"))
+    ).toEqual([400, "invalid_request"]);
     const advance = (body: unknown, id = "demo_cpty_jane") =>
-      write("POST", `/v1/counterparties/${id}/requirements`, body);
+      write("POST", `/v1/counterparties/${id}/ramp-requirements/check`, body);
     expect(advance({ provider: "moonpay", direction: "onramp" }, "demo_cpty_x")?.status).toBe(404);
     expect(advance({ provider: "moonpay" })?.status).toBe(400);
     expect(advance({ provider: "acme", direction: "onramp" })?.status).toBe(400);
@@ -122,10 +121,11 @@ describe("ramp requirements", () => {
   it("is ready at once with providers that run no onboarding", () => {
     for (const provider of ["moonpay", "stripe"]) {
       expect(
-        read(`/v1/counterparties/demo_cpty_jane/requirements?provider=${provider}`).body.data.status
+        read(`/v1/counterparties/demo_cpty_jane/ramp-requirements?provider=${provider}`).body.data
+          .status
       ).toBe("ready");
       expect(
-        write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
+        write("POST", "/v1/counterparties/demo_cpty_jane/ramp-requirements/check", {
           provider,
           direction: "offramp",
         })?.body.data.status
@@ -181,7 +181,7 @@ describe("ramp assets", () => {
       fiatAmount: "100",
     });
     expect(estimate?.body.data.estimates).toEqual([]);
-    const onramp = write("POST", "/v1/payments/ramps/onramp/quote", {
+    const onramp = write("POST", "/v1/payments/ramps/onramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       destinationCustodyWalletId: TREASURY,
@@ -190,7 +190,7 @@ describe("ramp assets", () => {
       fiatAmount: "100",
     });
     expect(onramp?.body.error.message).toMatch(/^The demo wallets don't hold PYUSD/);
-    const offramp = write("POST", "/v1/payments/ramps/offramp/quote", {
+    const offramp = write("POST", "/v1/payments/ramps/offramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: TREASURY,
@@ -226,7 +226,7 @@ describe("ramp estimates and quotes", () => {
 
   it("refuses an on-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
-      write("POST", "/v1/payments/ramps/onramp/quote", {
+      write("POST", "/v1/payments/ramps/onramp/start", {
         provider: "moonpay",
         counterpartyId: "demo_cpty_jane",
         destinationCustodyWalletId: TREASURY,
@@ -236,7 +236,7 @@ describe("ramp estimates and quotes", () => {
         ...body,
       });
     expect(quote({ provider: "acme" })?.status).toBe(400);
-    expect(write("POST", "/v1/payments/ramps/onramp/quote", null)?.status).toBe(400);
+    expect(write("POST", "/v1/payments/ramps/onramp/start", null)?.status).toBe(400);
     expect(quote({ fiatAmount: "0" })?.status).toBe(400);
     expect(quote({ counterpartyId: "demo_cpty_nobody" })?.status).toBe(404);
     expect(quote({ destinationCustodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
@@ -249,7 +249,7 @@ describe("ramp estimates and quotes", () => {
     for (const provider of RAMP_PROVIDERS) {
       const pair = supportedPair("onramp", provider);
       if (!pair) continue;
-      const quoted = write("POST", "/v1/payments/ramps/onramp/quote", {
+      const quoted = write("POST", "/v1/payments/ramps/onramp/start", {
         provider,
         counterpartyId: "demo_cpty_jane",
         destinationCustodyWalletId: TREASURY,
@@ -268,7 +268,7 @@ describe("ramp estimates and quotes", () => {
 
   it("refuses an off-ramp quote the API would", () => {
     const quote = (body: Record<string, unknown>) =>
-      write("POST", "/v1/payments/ramps/offramp/quote", {
+      write("POST", "/v1/payments/ramps/offramp/start", {
         provider: "moonpay",
         counterpartyId: "demo_cpty_jane",
         sourceCustodyWalletId: "demo_cwlt_settlement",
@@ -289,7 +289,7 @@ describe("ramp estimates and quotes", () => {
     for (const provider of RAMP_PROVIDERS) {
       const pair = supportedPair("offramp", provider);
       if (!pair) continue;
-      const quoted = write("POST", "/v1/payments/ramps/offramp/quote", {
+      const quoted = write("POST", "/v1/payments/ramps/offramp/start", {
         provider,
         counterpartyId: "demo_cpty_jane",
         sourceCustodyWalletId: TREASURY,
@@ -305,7 +305,7 @@ describe("ramp estimates and quotes", () => {
 
 describe("ramp pay-ins and cancels", () => {
   function deposit(counterpartyId = "demo_cpty_jane") {
-    return write("POST", "/v1/payments/ramps/onramp/quote", {
+    return write("POST", "/v1/payments/ramps/onramp/start", {
       provider: "moonpay",
       counterpartyId,
       destinationCustodyWalletId: TREASURY,
@@ -374,7 +374,7 @@ describe("transfers and batches", () => {
   });
 
   it("funds an off-ramp's payout once, from a wallet that can cover it", () => {
-    const quoted = write("POST", "/v1/payments/ramps/offramp/quote", {
+    const quoted = write("POST", "/v1/payments/ramps/offramp/start", {
       provider: "moonpay",
       counterpartyId: "demo_cpty_jane",
       sourceCustodyWalletId: "demo_cwlt_settlement",

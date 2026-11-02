@@ -17,7 +17,7 @@ The same onramp call works for every ramp provider. The `provider` field is the 
 <Tab value="JavaScript">
 ```javascript title="onramp-quote.js" rotate-providers
 const response = await fetch(
-  "https://api.solana.com/v1/payments/ramps/onramp/quote",
+  "https://api.solana.com/v1/payments/ramps/onramp/start",
   {
     method: "POST",
     headers: {
@@ -42,7 +42,7 @@ const quote = await response.json();
 import requests
 
 response = requests.post(
-    "https://api.solana.com/v1/payments/ramps/onramp/quote",
+    "https://api.solana.com/v1/payments/ramps/onramp/start",
     headers={"Authorization": "Bearer sf_..."},
     json={
         "provider": "moonpay",
@@ -58,7 +58,7 @@ quote = response.json()
 </Tab>
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
-curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/start \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -80,17 +80,17 @@ Ramp quote endpoints use the same public shape for every provider: `destinationC
 ## Prerequisites
 
 1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
-2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
+2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/ramp-requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
 3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
 
 ## Discovering corridors
 
-`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` list the fiat/crypto pairs SDP supports and which providers cover each one — the **Corridor** dimensions (currency, country coverage, entity type).
+`GET /v1/payments/ramps/onramp/supported-pairs` and `GET /v1/payments/ramps/offramp/supported-pairs` list the fiat/crypto pairs SDP supports and which providers cover each one — the **Corridor** dimensions (currency, country coverage, entity type).
 
 <Tabs items={["curl"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana" \
+curl "https://api.solana.com/v1/payments/ramps/onramp/supported-pairs?source=USD&dest=usdc.solana" \
   -H "Authorization: Bearer sf_..."
 ```
 </Tab>
@@ -148,12 +148,12 @@ Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate
 
 ## Requesting a quote
 
-`POST /v1/payments/ramps/onramp/quote` (fiat → crypto) and `POST /v1/payments/ramps/offramp/quote` (crypto → fiat) create the actual **Ramp Quote** against the named provider. This is the step that talks to the provider and, for most providers, produces a provider-side record — unlike estimate, it requires a resolved counterparty and wallet.
+`POST /v1/payments/ramps/onramp/start` (fiat → crypto) and `POST /v1/payments/ramps/offramp/start` (crypto → fiat) create the actual **Ramp Quote** against the named provider. This is the step that talks to the provider and, for most providers, produces a provider-side record — unlike estimate, it requires a resolved counterparty and wallet.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
-curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
+curl -X POST https://api.solana.com/v1/payments/ramps/onramp/start \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,7 +169,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 <Tab value="TypeScript">
 ```typescript title="onramp-quote.ts" rotate-providers
 const response = await fetch(
-  "https://api.solana.com/v1/payments/ramps/onramp/quote",
+  "https://api.solana.com/v1/payments/ramps/onramp/start",
   {
     method: "POST",
     headers: {
@@ -193,7 +193,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="OnrampQuote.java" rotate-providers
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
+    .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/start"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -293,7 +293,7 @@ You always pass `provider` explicitly; SDP does not auto-select. Choose based on
 
 ## Fiat currency support
 
-Fiat currency support is corridor-specific, not a fixed allowlist — use `GET /v1/payments/ramps/onramp/currency` and `.../offramp/currency` to see which fiat currencies a given provider covers for a given crypto rail.
+Fiat currency support is corridor-specific, not a fixed allowlist — use `GET /v1/payments/ramps/onramp/supported-pairs` and `.../offramp/currency` to see which fiat currencies a given provider covers for a given crypto rail.
 
 ## Related
 

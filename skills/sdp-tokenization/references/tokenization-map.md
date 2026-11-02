@@ -100,16 +100,16 @@ Use this file as the quick reference for answering tokenization questions on top
   - `POST /v1/issuance/tokens/{tokenId}/mint/execute`
   - `POST /v1/issuance/tokens/{tokenId}/burn/execute`
   - `POST /v1/issuance/tokens/{tokenId}/authority/update/execute`
-  - `POST /v1/issuance/tokens/{tokenId}/freeze`
-  - `POST /v1/issuance/tokens/{tokenId}/unfreeze`
+  - `POST /v1/issuance/tokens/{tokenId}/freeze-account`
+  - `POST /v1/issuance/tokens/{tokenId}/unfreeze-account`
   - `POST /v1/issuance/tokens/{tokenId}/pause`
   - `POST /v1/issuance/tokens/{tokenId}/unpause`
   - `POST /v1/issuance/tokens/{tokenId}/supply/refresh`
   - `GET /v1/issuance/tokens/{tokenId}/transactions` (server-side `type` + `status` filters, newest-first, paginated up to pageSize 500)
-  - `GET /v1/issuance/tokens/{tokenId}/allowlist` (server-side `search` over address/label + exact `label` filter, paginated)
-  - `GET /v1/issuance/tokens/{tokenId}/allowlist/labels` (distinct labels, for building a label filter)
-  - `POST /v1/issuance/tokens/{tokenId}/allowlist`
-  - `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
+  - `GET /v1/issuance/tokens/{tokenId}/control-list` (server-side `search` over address/label + exact `label` filter, paginated)
+  - `GET /v1/issuance/tokens/{tokenId}/control-list/labels` (distinct labels, for building a label filter)
+  - `POST /v1/issuance/tokens/{tokenId}/control-list`
+  - `DELETE /v1/issuance/tokens/{tokenId}/control-list/{entryId}`
 - Payments and movement:
   - `POST /v1/payments/transfers/execute`
   - `GET /v1/payments/transfers`

@@ -107,7 +107,7 @@ export async function fetchPaymentsAggregate(
   request: SdpApiClient["request"]
 ): Promise<FetchResult<CustodyWalletAggregate>> {
   try {
-    const response = await request("/v1/wallets/aggregate");
+    const response = await request("/v1/wallets/balances/aggregate");
     if (!response.ok) {
       const body = await response.text();
       return {

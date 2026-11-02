@@ -232,7 +232,7 @@ export async function paymentsDemoResponse(
   const world = applyDemoOps(buildWorld(now, rampProviders), ops, now);
 
   if (verb === "GET") {
-    if (resource === "organizations" && parts.segments[2] === "provider-access") {
+    if (resource === "organizations" && parts.segments[2] === "provider-availability") {
       return demoProviderAccess(upstream, rampProviders);
     }
     const fixture = demoWorldBody(world, path);

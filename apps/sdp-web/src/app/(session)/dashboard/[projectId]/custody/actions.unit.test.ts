@@ -106,7 +106,7 @@ describe("initializeCustodySetupAction", () => {
       answer: { status: 409, replayed: false, code: null },
     });
     expect(client.fetch).toHaveBeenCalledExactlyOnceWith(
-      "/v1/wallets/initialize",
+      "/v1/wallets/managed-signing/initialize-with-wallet",
       expect.anything()
     );
     expect(mocks.revalidatePath).not.toHaveBeenCalled();

@@ -13,7 +13,7 @@ import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconci
 import { listReadableEarnVaultWallets } from "./vault";
 
 /**
- * GET /v1/earn/vault-share-reconciliation — custody share balances versus the
+ * GET /v1/earn/positions/provider-signed/share-reconciliation-report — custody share balances versus the
  * recorded claim set, both directions (PRO-1741).
  *
  * `GET /vault-positions` can only report what SDP recorded, and the recorded

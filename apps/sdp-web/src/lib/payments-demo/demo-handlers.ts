@@ -960,13 +960,13 @@ const WRITE_ROUTES: ReadonlyArray<[method: string, shape: string, handler: Handl
   ["POST", "counterparties", createContact],
   ["DELETE", "counterparties/*", archiveContact],
   ["POST", "counterparties/*/accounts", createAccount],
-  ["POST", "counterparties/*/requirements", advanceRequirements],
+  ["POST", "counterparties/*/ramp-requirements/check", advanceRequirements],
   ["POST", "compliance/address-screenings", screenAddress],
   ["POST", "payments/transfers/execute", createTransfer],
   ["POST", "payments/transfer-batches/estimate", estimateBatch],
   ["POST", "payments/transfer-batches/execute", createBatch],
   ["POST", "payments/ramps/*/estimate", estimate],
-  ["POST", "payments/ramps/*/quote", quote],
+  ["POST", "payments/ramps/*/start", quote],
   ["POST", "payments/ramps/sandbox/simulate", simulatePayIn],
   ["POST", "payments/ramps/transfers/cancel", cancelRamp],
   ["POST", "payments/ramps/*/events", () => record([], () => ({ status: 204 }))],
@@ -1004,7 +1004,7 @@ export function demoFlowRead(
   world: DemoWorld,
   _now: Date
 ): DemoAnswer | undefined {
-  if (matchesShape(segments, "counterparties/*/requirements")) {
+  if (matchesShape(segments, "counterparties/*/ramp-requirements")) {
     const counterpartyId = segments[1] ?? "";
     if (!contactById(world, counterpartyId)) {
       return { status: 404, body: { error: { code: "not_found", message: "Contact not found." } } };

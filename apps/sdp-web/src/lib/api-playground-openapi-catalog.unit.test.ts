@@ -75,7 +75,7 @@ describe("API playground release channel", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/onramp/start");
 
     const stable = paths(filterPlaygroundEndpointsToReleaseChannel(payments, "stable"));
     expect(stable.filter((path) => path.startsWith("/v1/payments/ramps"))).toEqual([]);
@@ -168,8 +168,14 @@ describe("API playground allowlist", () => {
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/trf_1", "stable")
     ).toMatchObject({ pathTemplate: "/v1/payments/transfers/{transferId}" });
-    expect(findPublishedPlaygroundOperation("GET", "/v1/wallets/configs", "stable")).toMatchObject({
-      pathTemplate: "/v1/wallets/configs",
+    expect(
+      findPublishedPlaygroundOperation(
+        "GET",
+        "/v1/wallets/managed-signing/configurations",
+        "stable"
+      )
+    ).toMatchObject({
+      pathTemplate: "/v1/wallets/managed-signing/configurations",
     });
   });
 
@@ -209,10 +215,10 @@ describe("API playground allowlist", () => {
       { transfers: [], wallets: [], rampProviders: [] },
       t
     );
-    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/quote");
+    expect(paths(payments)).toContain("/v1/payments/ramps/offramp/start");
     expect(
       paths(filterPlaygroundEndpointsToReleaseChannel(payments, "experimental"))
-    ).not.toContain("/v1/payments/ramps/offramp/quote");
+    ).not.toContain("/v1/payments/ramps/offramp/start");
   });
 });
 

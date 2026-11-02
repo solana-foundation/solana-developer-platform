@@ -3,6 +3,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.fireblocks.destination",
-    path: `/internal/dashboard/fireblocks/destination${new URL(request.url).search}`,
+    path: `/internal/dashboard/fireblocks/destination-eligibility${new URL(request.url).search}`,
   });
 }

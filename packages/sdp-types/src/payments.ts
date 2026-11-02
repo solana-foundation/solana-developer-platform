@@ -1443,7 +1443,7 @@ export interface CreatedPaymentRequest extends PaymentRequest {
 }
 
 /**
- * `GET /v1/payments/requests/{id}/link` (`payment_requests.manage`): the
+ * `GET /v1/payments/requests/{id}/link-token` (`payment_requests.manage`): the
  * request's link token.
  */
 export interface PaymentRequestLink {

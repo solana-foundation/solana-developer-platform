@@ -81,7 +81,7 @@ describe("integration provider route availability", () => {
       organization: { id: "org_test" },
     });
     mocks.projectRequest.mockImplementation(async (path: string) => {
-      if (path === "/v1/wallets/configs") {
+      if (path === "/v1/wallets/managed-signing/configurations") {
         return Response.json({ data: { configs: [] } });
       }
       throw new Error(`Unexpected request: ${path}`);
@@ -122,7 +122,9 @@ describe("integration provider route availability", () => {
 
     expect(page.props.detail).toMatchObject({ family: "custody", provider: "privy" });
     expect(page.props.custodyConnections).toBeNull();
-    expect(mocks.projectRequest.mock.calls).toEqual([["/v1/wallets/configs"]]);
+    expect(mocks.projectRequest.mock.calls).toEqual([
+      ["/v1/wallets/managed-signing/configurations"],
+    ]);
   });
 
   it("throws when the availability read fails instead of rendering without it", async () => {

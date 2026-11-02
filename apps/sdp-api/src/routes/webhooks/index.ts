@@ -45,7 +45,7 @@ webhooks.use(
 );
 
 webhooks.post(
-  "/clerk/link-orgs",
+  "/clerk",
   publicRoute("signed webhook: Clerk's signature authenticates it"),
   handleClerkWebhook
 );

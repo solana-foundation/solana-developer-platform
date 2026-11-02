@@ -241,7 +241,7 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
 
   try {
     const client = await createSdpApiClient();
-    await client.fetch("/v1/members/invite", {
+    await client.fetch("/v1/members/invitations", {
       method: "POST",
       headers: { [IDEMPOTENCY_KEY_HEADER]: parsed.data.idempotencyKey },
       body: JSON.stringify({ email: parsed.data.email, role: parsed.data.role }),

@@ -1642,7 +1642,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     expect(response.status).toBe(201);
     const created = await response.json();
     const cancelled = await app.request(
-      `/internal/dashboard/custody/connections/${created.data.connectionId}/cancel`,
+      `/internal/dashboard/custody/connections/${created.data.connectionId}/cancel-installation`,
       { method: "POST", headers: { Authorization: `Bearer ${token}`, "X-Project-ID": PROJECT_ID } },
       env
     );

@@ -263,7 +263,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       id: "create-onramp-quote",
       title: t("DashboardPayments.playground.createOnrampQuote"),
       method: "POST",
-      path: "/v1/payments/ramps/onramp/quote",
+      path: "/v1/payments/ramps/onramp/start",
       pathFields: [],
       bodyFields: [
         buildSelectBackedField(
@@ -318,7 +318,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       id: "create-offramp-quote",
       title: t("DashboardPayments.playground.createOfframpQuote"),
       method: "POST",
-      path: "/v1/payments/ramps/offramp/quote",
+      path: "/v1/payments/ramps/offramp/start",
       pathFields: [],
       bodyFields: [
         buildSelectBackedField(

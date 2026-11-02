@@ -71,7 +71,7 @@ describe("member actions", () => {
     });
     expect(client.fetch.mock.calls).toEqual([
       [
-        "/v1/members/invite",
+        "/v1/members/invitations",
         {
           method: "POST",
           headers: { "Idempotency-Key": "key_invite" },

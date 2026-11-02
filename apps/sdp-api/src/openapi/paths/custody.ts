@@ -43,7 +43,7 @@ const walletCreateKeyHeaders = projectScopeWithDeclaredIdempotencyHeaders({
 export function registerCustodyPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "post",
-    path: "/v1/wallets/initialize",
+    path: "/v1/wallets/managed-signing/initialize-with-wallet",
     tags: ["Wallets"],
     summary: "Initialize wallet signing",
     operationId: "initializeWalletSigning",
@@ -133,9 +133,9 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/wallets/configs",
+    path: "/v1/wallets/managed-signing/configurations",
     tags: ["Wallets"],
-    summary: "List wallet signing configs",
+    summary: "List managed signing configurations",
     operationId: "listWalletConfigs",
     description:
       "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider.",
@@ -180,7 +180,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/wallets/aggregate",
+    path: "/v1/wallets/balances/aggregate",
     tags: ["Wallets"],
     summary: "Aggregate wallet balances",
     operationId: "aggregateWalletBalances",

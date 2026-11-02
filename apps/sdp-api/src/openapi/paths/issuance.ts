@@ -887,7 +887,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/freeze",
+    path: "/v1/issuance/tokens/{tokenId}/freeze-account",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Freeze account",
@@ -915,7 +915,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/unfreeze",
+    path: "/v1/issuance/tokens/{tokenId}/unfreeze-account",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Unfreeze account",
@@ -943,7 +943,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/frozen",
+    path: "/v1/issuance/tokens/{tokenId}/frozen-accounts",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "List frozen accounts",
@@ -971,12 +971,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist",
+    path: "/v1/issuance/tokens/{tokenId}/control-list",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "List token allowlist",
+    summary: "List token control list",
     operationId: "listTokenAllowlist",
-    description: "Lists allowlist entries for a token.",
+    description:
+      "Lists control-list entries for a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1001,10 +1002,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+    path: "/v1/issuance/tokens/{tokenId}/control-list/labels",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "List token allowlist labels",
+    summary: "List token control-list labels",
     operationId: "listTokenAllowlistLabels",
     description:
       "Lists the distinct labels used across a token's active control-list entries, for building a label filter.",
@@ -1026,12 +1027,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist",
+    path: "/v1/issuance/tokens/{tokenId}/control-list",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "Add token allowlist entry",
+    summary: "Add token control-list entry",
     operationId: "addTokenAllowlistEntry",
-    description: "Adds an allowlist entry for a token.",
+    description:
+      "Adds a control-list entry for a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1054,12 +1056,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
+    path: "/v1/issuance/tokens/{tokenId}/control-list/{entryId}",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "Remove token allowlist entry",
+    summary: "Remove token control-list entry",
     operationId: "removeTokenAllowlistEntry",
-    description: "Removes an allowlist entry from a token.",
+    description:
+      "Removes a control-list entry from a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1102,10 +1105,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/holders",
+    path: "/v1/issuance/tokens/{tokenId}/holder-enrollments",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
-    summary: "List verified holders",
+    summary: "List holder enrollments",
     operationId: "listHolders",
     description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
     security: [{ apiKeyAuth: [] }],
@@ -1118,10 +1121,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/holders",
+    path: "/v1/issuance/tokens/{tokenId}/holder-enrollments",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
-    summary: "Enroll a verified holder",
+    summary: "Enroll a holder",
     operationId: "enrollHolder",
     description:
       "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",

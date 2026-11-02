@@ -154,7 +154,7 @@ describe("Payments routes — transfer wallet access", () => {
     const estimate = stubOfframpQuoteReads();
 
     const response = await app.request(
-      "/v1/payments/ramps/offramp/quote",
+      "/v1/payments/ramps/offramp/start",
       {
         method: "POST",
         headers: {

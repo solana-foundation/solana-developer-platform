@@ -14,7 +14,7 @@ import { createOfframpQuoteSchema, estimateOfframpSchema } from "./schemas";
 
 export const offramp = new Hono<{ Bindings: Env }>();
 
-offramp.get("/currency", requireAction("offramp.read"), listOfframpCurrencies);
+offramp.get("/supported-pairs", requireAction("offramp.read"), listOfframpCurrencies);
 offramp.post(
   "/estimate",
   requireAction("offramp.read"),
@@ -23,7 +23,7 @@ offramp.post(
   estimateOfframp
 );
 offramp.post(
-  "/quote",
+  "/start",
   requireAction("offramp.execute"),
   validateBody(createOfframpQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),

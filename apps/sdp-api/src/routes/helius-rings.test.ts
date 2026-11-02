@@ -284,7 +284,7 @@ describe("Helius Rings routes", () => {
         }),
       } as unknown as RingsGatewayPort;
 
-      const created = await post("/v1/helius-rings/rings", {
+      const created = await post("/v1/helius-rings/rings/register-and-initialize", {
         name: "treasury",
         ringProgramId: RING_PROGRAM,
       });
@@ -307,7 +307,7 @@ describe("Helius Rings routes", () => {
     });
 
     it("400s a ring program id that is not base58", async () => {
-      const res = await post("/v1/helius-rings/rings", {
+      const res = await post("/v1/helius-rings/rings/register-and-initialize", {
         name: "treasury",
         ringProgramId: "not base58 0OIl",
       });
@@ -316,7 +316,10 @@ describe("Helius Rings routes", () => {
 
     it("400s a name outside the slug shape and the reserved word", async () => {
       for (const name of ["Treasury", "default"]) {
-        const res = await post("/v1/helius-rings/rings", { name, ringProgramId: RING_PROGRAM });
+        const res = await post("/v1/helius-rings/rings/register-and-initialize", {
+          name,
+          ringProgramId: RING_PROGRAM,
+        });
         expect(res.status).toBe(400);
       }
     });
@@ -331,7 +334,10 @@ describe("Helius Rings routes", () => {
   });
 
   it("POST /wallets 404s for an unknown custody wallet", async () => {
-    const res = await post("/v1/helius-rings/wallets", { walletId: "wal_missing", name: "Ops" });
+    const res = await post("/v1/helius-rings/wallets/provision-identity", {
+      walletId: "wal_missing",
+      name: "Ops",
+    });
     expect(res.status).toBe(404);
   });
 
@@ -726,7 +732,7 @@ describe("Helius Rings routes", () => {
             lookupTableAddress: LOOKUP_TABLE,
           }),
         } as unknown as RingsGatewayPort;
-        const created = await post("/v1/helius-rings/rings", {
+        const created = await post("/v1/helius-rings/rings/register-and-initialize", {
           name: "treasury",
           ringProgramId: RING_PROGRAM,
         });
@@ -872,7 +878,7 @@ describe("Helius Rings routes", () => {
     it.each([
       {
         route: "POST /wallets",
-        path: () => "/v1/helius-rings/wallets",
+        path: () => "/v1/helius-rings/wallets/provision-identity",
         body: () => ({ walletId: "wal_hr_route", name: "Ops" }),
       },
       {
@@ -882,7 +888,7 @@ describe("Helius Rings routes", () => {
       },
       {
         route: "POST /wallets/:walletId/rekey",
-        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/rekey`,
+        path: () => `/v1/helius-rings/wallets/${ringsWalletId}/identity/rekey`,
         body: () => ({ confirmation: "Treasury" }),
       },
       {

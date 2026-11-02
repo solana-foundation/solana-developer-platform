@@ -635,7 +635,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "freeze-account",
       title: t("DashboardIssuance.playground.freezeAccount"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/freeze",
+      path: "/v1/issuance/tokens/{tokenId}/freeze-account",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -661,7 +661,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "unfreeze-account",
       title: t("DashboardIssuance.playground.unfreezeAccount"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/unfreeze",
+      path: "/v1/issuance/tokens/{tokenId}/unfreeze-account",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -682,7 +682,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "list-frozen-accounts",
       title: t("DashboardIssuance.playground.listFrozenAccounts"),
       method: "GET",
-      path: "/v1/issuance/tokens/{tokenId}/frozen",
+      path: "/v1/issuance/tokens/{tokenId}/frozen-accounts",
       pathFields: [tokenIdField],
       bodyFields: [],
       expectedResponse: {
@@ -700,7 +700,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "list-allowlist",
       title: t("DashboardIssuance.playground.listAllowlist"),
       method: "GET",
-      path: "/v1/issuance/tokens/{tokenId}/allowlist",
+      path: "/v1/issuance/tokens/{tokenId}/control-list",
       pathFields: [tokenIdField],
       bodyFields: [],
       expectedResponse: {
@@ -719,7 +719,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "list-allowlist-labels",
       title: t("DashboardIssuance.playground.listAllowlistLabels"),
       method: "GET",
-      path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+      path: "/v1/issuance/tokens/{tokenId}/control-list/labels",
       pathFields: [tokenIdField],
       bodyFields: [],
       expectedResponse: {
@@ -732,7 +732,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "add-allowlist-entry",
       title: t("DashboardIssuance.playground.addAllowlistEntry"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/allowlist",
+      path: "/v1/issuance/tokens/{tokenId}/control-list",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -761,7 +761,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "remove-allowlist-entry",
       title: t("DashboardIssuance.playground.removeAllowlistEntry"),
       method: "DELETE",
-      path: "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
+      path: "/v1/issuance/tokens/{tokenId}/control-list/{entryId}",
       pathFields: [
         tokenIdField,
         {
