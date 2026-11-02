@@ -1,4 +1,4 @@
-import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
+import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 import {
@@ -62,9 +62,6 @@ export const organizationSchema = z
     id: orgIdParamSchema,
     name: z.string().openapi({ description: "Organization name.", example: "Example Org" }),
     slug: z.string().openapi({ description: "URL-friendly slug.", example: "example-org" }),
-    tier: z
-      .enum(ORGANIZATION_TIERS)
-      .openapi({ description: "Organization tier.", example: "enterprise" }),
     status: z
       .enum(ORGANIZATION_STATUSES)
       .openapi({ description: "Organization status.", example: "active" }),

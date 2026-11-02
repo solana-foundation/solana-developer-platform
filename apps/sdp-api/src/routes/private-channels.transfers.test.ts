@@ -247,8 +247,8 @@ async function seedRouteState(): Promise<void> {
 
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORGANIZATION_ID, "PC Transfer Org", "pc-transfer-org", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORGANIZATION_ID, "PC Transfer Org", "pc-transfer-org", "active"),
     db
       .prepare(
         `INSERT INTO users (id, email, email_verified, status) VALUES

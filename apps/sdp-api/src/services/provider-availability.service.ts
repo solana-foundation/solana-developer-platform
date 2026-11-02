@@ -8,11 +8,7 @@ import {
   type CustodySetupRefusalReason,
   isCustodyModeAllowedInEnvironment,
 } from "@sdp/types/custody";
-import {
-  normalizeOrganizationTier,
-  type OrganizationSettings,
-  type OrganizationTier,
-} from "@sdp/types/organizations";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import {
   COMPLIANCE_PROVIDERS,
   type ComplianceProviderId,
@@ -40,7 +36,7 @@ import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { AppError, forbidden } from "@/lib/errors";
+import { AppError, forbidden, notFound } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
   isEarnEnabled,
@@ -53,7 +49,6 @@ import { isManagedRampConfigured } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
-  tier: string;
   settings: string | null;
 };
 
@@ -437,8 +432,7 @@ export function parseProviderOverridesFromClerkMetadata(
   return hasOwnEntries(next as Record<string, unknown>) ? next : undefined;
 }
 
-export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizationWithMetadata): {
-  tier: OrganizationTier;
+export function parseClerkProviderAccessMetadata(organization: ClerkOrganizationWithMetadata): {
   providerOverrides?: OrganizationProviderOverrides;
   enableProductionProject: boolean;
 } {
@@ -446,19 +440,18 @@ export function parseClerkOrganizationTierMetadata(organization: ClerkOrganizati
   const sdp = asRecord(privateMetadata?.sdp);
 
   return {
-    tier: normalizeOrganizationTier(typeof sdp?.tier === "string" ? sdp.tier : undefined),
     providerOverrides: parseProviderOverridesFromClerkMetadata(sdp?.providerOverrides),
     enableProductionProject: sdp?.enableProductionProject === true,
   };
 }
 
-export async function getOrganizationTierState(
+export async function getOrganizationSettings(
   db: DatabaseExecutor,
   organizationId: string
-): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
+): Promise<OrganizationSettings | null> {
   const row = await db
     .prepare(
-      `SELECT tier, settings
+      `SELECT settings
        FROM organizations
        WHERE id = ?`
     )
@@ -466,13 +459,10 @@ export async function getOrganizationTierState(
     .first<OrganizationProviderRow>();
 
   if (!row) {
-    throw new AppError("NOT_FOUND", "Organization not found");
+    throw notFound("Organization");
   }
 
-  return {
-    tier: normalizeOrganizationTier(row.tier),
-    settings: parseOrganizationSettings(row.settings),
-  };
+  return parseOrganizationSettings(row.settings);
 }
 
 function buildConfiguredProviderEntries<T extends string>(
@@ -549,32 +539,24 @@ export async function getProviderAvailability(
   organizationId: string,
   options: ProviderAvailabilityOptions
 ): Promise<OrganizationProviderAvailabilityResponse> {
-  const organization = await getOrganizationTierState(db, organizationId);
-  const resolved = resolveOrganizationProviderEntitlements({
-    tier: organization.tier,
-    providerOverrides: organization.settings?.providerOverrides,
+  const settings = await getOrganizationSettings(db, organizationId);
+  const entitlements = resolveOrganizationProviderEntitlements({
+    providerOverrides: settings?.providerOverrides,
   });
   const configured = getConfiguredProviders(env);
 
   return {
-    tier: resolved.tier,
     providers: {
-      custody: buildAvailabilityEntries(
-        resolved.providers.custody,
-        configured.custody,
-        (provider) => CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode))
+      custody: buildAvailabilityEntries(entitlements.custody, configured.custody, (provider) =>
+        CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode))
       ),
-      compliance: buildAvailabilityEntries(
-        resolved.providers.compliance,
-        configured.compliance,
-        () => isModuleAvailable(env, "compliance", options.rampProviderMaturity)
+      compliance: buildAvailabilityEntries(entitlements.compliance, configured.compliance, () =>
+        isModuleAvailable(env, "compliance", options.rampProviderMaturity)
       ),
-      ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps, (provider) =>
+      ramps: buildAvailabilityEntries(entitlements.ramps, configured.ramps, (provider) =>
         isRampProviderAvailable(env, provider, options.rampProviderMaturity)
       ),
-      earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
-        isEarnEnabled(env)
-      ),
+      earn: buildAvailabilityEntries(entitlements.earn, configured.earn, () => isEarnEnabled(env)),
     },
   };
 }
@@ -611,10 +593,8 @@ export async function assertCustodyProviderEntitled(
       provider,
       reason: "provider_not_entitled",
     });
-    throw new AppError(
-      "FORBIDDEN",
+    throw forbidden(
       getAvailabilityMessage(
-        availability.tier,
         "custody",
         provider,
         entry ?? { entitled: false, configured: false, enabled: false }
@@ -864,7 +844,7 @@ function decideCustodySetup(
   if (!entry.entitled) {
     return refuse(
       new CustodySetupRefusedError(
-        getAvailabilityMessage(facts.availability.tier, "custody", provider, entry),
+        getAvailabilityMessage("custody", provider, entry),
         "provider_not_entitled"
       )
     );
@@ -1018,16 +998,9 @@ function decideStagedProvider(
       facts,
       request,
       "provider_not_entitled",
-      new AppError(
-        "FORBIDDEN",
-        getAvailabilityMessage(
-          facts.availability.tier,
-          request.family,
-          request.provider,
-          checks.entry
-        ),
-        { reason: "provider_not_entitled" }
-      )
+      forbidden(getAvailabilityMessage(request.family, request.provider, checks.entry), {
+        reason: "provider_not_entitled",
+      })
     );
   }
   if (!checks.configured) {
@@ -1447,7 +1420,6 @@ export async function assertManagedCustodyUseAllowed(
 }
 
 function getAvailabilityMessage(
-  _tier: OrganizationTier,
   family: OrganizationProviderFamily,
   providerId: string,
   entry: ProviderAvailabilityEntry
@@ -1467,7 +1439,7 @@ function getAvailabilityMessage(
 
 /**
  * Refuses an organization using a custody provider it does not have enabled:
- * entitled by its tier or overrides, and configured in this deployment. An
+ * entitled by default or by its overrides, and configured in this deployment. An
  * organization-level check for the signing runtime, which has no project in
  * scope; custody's release-channel and Production BYOK-only rules live in the custody setup gate.
  *
@@ -1486,10 +1458,7 @@ export async function assertCustodyProviderEnabled(
   const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_MATURITY);
   const entry = access.providers.custody[provider];
   if (!entry.enabled) {
-    throw new AppError(
-      "FORBIDDEN",
-      getAvailabilityMessage(access.tier, "custody", provider, entry)
-    );
+    throw forbidden(getAvailabilityMessage("custody", provider, entry));
   }
 }
 
@@ -1569,7 +1538,7 @@ export async function assertProviderAvailable(
 /**
  * Exit-safety gate for Earn withdrawals: money OUT must keep working when a
  * provider is commercially disabled for an organization (entitlement off), so
- * funds can never be trapped behind a sales/tier decision. Only the
+ * funds can never be trapped behind a sales decision. Only the
  * credential/mode check applies here — deposits use the full
  * assertProviderAvailable gate.
  */
@@ -1594,8 +1563,8 @@ export async function syncProviderAccessFromClerk(
     organizationId: string;
     clerkOrganization: ClerkOrganizationWithMetadata;
   }
-): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
-  const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
+): Promise<OrganizationSettings | null> {
+  const clerkMetadata = parseClerkProviderAccessMetadata(params.clerkOrganization);
 
   // Settings are one JSON column patched by read-merge-write; the row lock keeps
   // this sync from clobbering a concurrent dashboard settings update (and vice
@@ -1607,7 +1576,7 @@ export async function syncProviderAccessFromClerk(
       .first<{ settings: string | null }>();
 
     if (!row) {
-      throw new AppError("NOT_FOUND", "Organization not found");
+      throw notFound("Organization");
     }
 
     const existing = parseOrganizationSettings(row.settings);
@@ -1629,10 +1598,10 @@ export async function syncProviderAccessFromClerk(
     await tx
       .prepare(
         `UPDATE organizations
-         SET tier = ?, settings = ?, updated_at = sdp_datetime_now()
+         SET settings = ?, updated_at = sdp_datetime_now()
          WHERE id = ?`
       )
-      .bind(clerkMetadata.tier, toStoredOrganizationSettings(persisted), params.organizationId)
+      .bind(toStoredOrganizationSettings(persisted), params.organizationId)
       .run();
 
     return { existingSettings: existing, persistedSettings: persisted };
@@ -1647,8 +1616,5 @@ export async function syncProviderAccessFromClerk(
     });
   }
 
-  return {
-    tier: clerkMetadata.tier,
-    settings: persistedSettings,
-  };
+  return persistedSettings;
 }

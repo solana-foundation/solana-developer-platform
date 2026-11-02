@@ -38,8 +38,8 @@ describe("human-only routes", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
       .run();
     await seedApiKeyRow(
       env,

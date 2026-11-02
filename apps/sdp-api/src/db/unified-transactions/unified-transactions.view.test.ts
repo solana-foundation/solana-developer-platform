@@ -23,9 +23,7 @@ const CREATED_AT = "2026-09-15T10:00:00.000Z";
 async function seedBase(): Promise<void> {
   const db = getDb(env);
   await db
-    .prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-    )
+    .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
     .run();
   await db

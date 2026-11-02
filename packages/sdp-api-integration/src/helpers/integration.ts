@@ -180,7 +180,7 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
 
   await db
     .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'individual', 'active', ?)"
+      "INSERT OR REPLACE INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
     )
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, getOrganizationSettingsForIntegration())
     .run();

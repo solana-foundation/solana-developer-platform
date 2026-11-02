@@ -83,14 +83,8 @@ async function seedActor(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "Credential Lifecycle",
-        "credential-lifecycle",
-        "enterprise",
-        "active"
-      ),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORGANIZATION_ID, "Credential Lifecycle", "credential-lifecycle", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER_ID, "provider-credential-lifecycle@example.com"),

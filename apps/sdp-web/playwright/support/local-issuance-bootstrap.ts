@@ -1,4 +1,3 @@
-import type { OrganizationTier } from "@sdp/types/organizations";
 import type { Token } from "@sdp/types/tokens";
 import { generateKeyPairSigner } from "@solana/kit";
 import type { ClerkTestIdentity } from "./clerk-admin";
@@ -23,7 +22,6 @@ import {
 interface BootstrapOptions {
   identity: ClerkTestIdentity;
   bearerToken: BearerTokenProvider;
-  tier?: OrganizationTier;
 }
 
 export interface PaymentDashboardFixtures {
@@ -146,7 +144,6 @@ function requireWallet(
 export async function bootstrapLocalIssuanceFixtures({
   identity,
   bearerToken,
-  tier,
 }: BootstrapOptions): Promise<IssuanceFixtures> {
   const custodyProvider = getPlaywrightCustodyProvider();
   const walletBootstrap = await bootstrapLocalWalletFixtures({
@@ -154,7 +151,6 @@ export async function bootstrapLocalIssuanceFixtures({
     bearerToken,
     provider: custodyProvider,
     walletCount: custodyProvider === "local" ? 1 : 2,
-    tier,
     // sRFC-37 deploys (denylist tokens) bypass Kora and have custody pay
     // directly, so the treasury wallet needs SOL up front. 0.05 SOL covers
     // multiple deploys + downstream rent with comfortable margin.
@@ -238,7 +234,6 @@ export async function bootstrapLocalIssuanceFixtures({
 export async function bootstrapLocalPaymentFixtures({
   identity,
   bearerToken,
-  tier,
 }: BootstrapOptions): Promise<PaymentDashboardFixtures> {
   const custodyProvider = getPlaywrightCustodyProvider();
   const walletBootstrap = await bootstrapLocalWalletFixtures({
@@ -246,7 +241,6 @@ export async function bootstrapLocalPaymentFixtures({
     bearerToken,
     provider: custodyProvider,
     walletCount: 1,
-    tier,
     fundSourceWallet: true,
     fundSourceAmountSol: 0.05,
   });

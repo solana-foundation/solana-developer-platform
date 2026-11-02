@@ -236,7 +236,6 @@
     "walletActivityRequestFailed": "Wallet activity request failed.",
     "previous": "Previous",
     "active": "Active",
-    "noWalletProvidersTier": "No wallet providers are enabled for this organization tier right now.",
     "newWallet": "New wallet",
     "providerAdditionalWalletUnavailable": "{provider} is already connected, but additional wallets are not available yet.",
     "walletCreationAvailable": "Wallet creation is available after a custody provider is enabled for this organization.",

@@ -54,7 +54,7 @@ describe("Places routes — metered quota", () => {
     await seedTestDatabase(env);
     await getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Places', 'places-test', 'individual', 'active')"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Places', 'places-test', 'active')"
       )
       .bind(TEST_ORG_ID)
       .run();

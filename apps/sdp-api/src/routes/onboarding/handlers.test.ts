@@ -51,8 +51,8 @@ async function seedOrganization() {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Onboarding test', 'onboarding-test', 'enterprise', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Onboarding test', 'onboarding-test', 'active')`
       )
       .bind(ORGANIZATION_ID),
     getDb(env)
@@ -209,8 +209,8 @@ describe("organization onboarding handlers", () => {
   it("lists distinct active sandbox providers in catalog order", async () => {
     await getDb(env)
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ('org_onboarding_other', 'Onboarding other', 'onboarding-other', 'enterprise', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES ('org_onboarding_other', 'Onboarding other', 'onboarding-other', 'active')`
       )
       .run();
     await seedDefaultProjects(getDb(env), {

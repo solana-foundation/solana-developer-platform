@@ -98,9 +98,9 @@ describe("vault exposure cap: the ledger write gate", () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status) VALUES
-           (?, 'Earn Gate', 'earn-gate', 'individual', 'active'),
-           (?, 'Earn Gate Other', 'earn-gate-other', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status) VALUES
+           (?, 'Earn Gate', 'earn-gate', 'active'),
+           (?, 'Earn Gate Other', 'earn-gate-other', 'active')`
       )
       .bind(ORG, ORG_OTHER)
       .run();

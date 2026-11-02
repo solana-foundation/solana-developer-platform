@@ -52,8 +52,8 @@ describe("tenant isolation through the HTTP stack", () => {
     for (const tenant of TENANTS) {
       await db
         .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, ?, ?, 'individual', 'active')`
+          `INSERT INTO organizations (id, name, slug, status)
+           VALUES (?, ?, ?, 'active')`
         )
         .bind(tenant.org, tenant.org, tenant.org.replaceAll("_", "-"))
         .run();

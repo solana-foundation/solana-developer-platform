@@ -50,7 +50,7 @@ export async function seedEarnAuthzTenant(
   await db.batch([
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'enterprise', 'active', '{}')"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', '{}')"
       )
       .bind(tenant.org.id, tenant.org.name, tenant.org.slug),
     db

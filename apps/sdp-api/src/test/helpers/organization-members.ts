@@ -24,9 +24,7 @@ export async function seedOrganizationMembers(
   const { organization, members } = input;
   await db.batch([
     db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
       .bind(organization.id, organization.slug, organization.slug),
     ...activeMembershipStatements(db, organization.id, members),
   ]);

@@ -34,7 +34,6 @@ test.describe
         const fixtures = await bootstrapLocalPaymentFixtures({
           identity: session.identity,
           bearerToken: session.getBearerToken,
-          tier: "enterprise",
         });
         const api = createLocalApiClient(
           getBootstrapApiBaseUrl(),

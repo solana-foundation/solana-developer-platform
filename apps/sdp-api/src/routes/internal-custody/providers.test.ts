@@ -78,8 +78,8 @@ async function seedBaseline(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -348,14 +348,8 @@ describe("internal custody providers", () => {
     const otherOrganizationId = "org_setup_status_other";
     const otherOrganizationSandboxProjectId = "prj_setup_status_other_sandbox";
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        otherOrganizationId,
-        "Setup Status Other Org",
-        "setup-status-other",
-        "enterprise",
-        "active"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(otherOrganizationId, "Setup Status Other Org", "setup-status-other", "active")
       .run();
     await seedDefaultProjects(getDb(env), {
       organizationId: otherOrganizationId,
@@ -453,8 +447,8 @@ describe("internal custody providers", () => {
 
   it("does not leak another organization's setup", async () => {
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind("org_setup_status_other", "Other", "other-setup-status", "standard", "active")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind("org_setup_status_other", "Other", "other-setup-status", "active")
       .run();
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_setup_status_other",

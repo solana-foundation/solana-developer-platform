@@ -119,7 +119,7 @@ describe("Private Channels event references handler", () => {
     const db = getDb(env);
     await db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Refs Org', 'refs-org', 'enterprise', 'active')"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Refs Org', 'refs-org', 'active')"
       )
       .bind(ORGANIZATION_ID)
       .run();

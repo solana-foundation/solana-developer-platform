@@ -68,20 +68,19 @@ let originalChainalysisApiKey: string | undefined;
 let originalChainalysisBaseUrl: string | undefined;
 let originalDeploymentMode: "managed" | "self_hosted" | undefined;
 
-async function seedAuth(tier: "individual" | "enterprise" = "enterprise"): Promise<void> {
+async function seedAuth(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
 
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, settings, status) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO organizations (id, name, slug, settings, status) VALUES (?, ?, ?, ?, ?)"
       )
       .bind(
         TEST_ORG.id,
         TEST_ORG.name,
         TEST_ORG.slug,
-        tier,
         JSON.stringify({
           providerOverrides: {
             compliance: { range: true, elliptic: true, trm: true, chainalysis: true },
@@ -283,11 +282,6 @@ describe("Compliance routes", () => {
 
   it("returns a self-hosted-flavored 403 when no compliance providers are configured in self-hosted mode", async () => {
     env.SDP_DEPLOYMENT_MODE = "self_hosted";
-    // tier doesn't matter in self-hosted mode, but keep it as the seed default
-    await getDb(env)
-      .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-      .bind("individual", TEST_ORG.id)
-      .run();
 
     const res = await app.request(
       "/v1/compliance/address-screenings",

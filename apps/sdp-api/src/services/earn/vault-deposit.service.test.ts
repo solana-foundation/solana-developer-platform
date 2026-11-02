@@ -115,8 +115,8 @@ function plan(overrides: Record<string, unknown> = {}) {
 async function seedWallet(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "Vault Deposit Org", "vault-deposit", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "Vault Deposit Org", "vault-deposit", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER, "vault-deposit@example.com", 1, "active"),

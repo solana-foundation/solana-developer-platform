@@ -126,7 +126,7 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 3. Confirm the webhook landed by querying Postgres:
 
    ```bash
-   psql "${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}" -c "SELECT o.id, a.provider_org_id AS clerk_org_id, o.name, o.tier FROM organizations o JOIN auth_organization_identities a ON a.organization_id = o.id AND a.provider = 'clerk';"
+   psql "${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp}" -c "SELECT o.id, a.provider_org_id AS clerk_org_id, o.name FROM organizations o JOIN auth_organization_identities a ON a.organization_id = o.id AND a.provider = 'clerk';"
    ```
 
    You should see one row with `clerk_org_id` matching the org you just created.

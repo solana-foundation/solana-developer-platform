@@ -71,7 +71,7 @@ const STALE_ORGANIZATION_EVENT = {
 };
 
 function knownOrganizationState() {
-  return getDb(env).queryOne("SELECT name, slug, tier, settings FROM organizations WHERE id = ?", [
+  return getDb(env).queryOne("SELECT name, slug, settings FROM organizations WHERE id = ?", [
     KNOWN_ORGANIZATION.id,
   ]);
 }
@@ -123,7 +123,6 @@ describe("Clerk webhooks", () => {
       expect(await knownOrganizationState()).toEqual({
         name: KNOWN_ORGANIZATION.slug,
         slug: KNOWN_ORGANIZATION.slug,
-        tier: "enterprise",
         settings: null,
       });
       expect(
@@ -345,7 +344,7 @@ describe("Clerk webhooks", () => {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Cache Invalidation Org', ?, 'individual', 'active')"
+          "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Cache Invalidation Org', ?, 'active')"
         )
         .bind(orgId, orgId),
       db
@@ -573,8 +572,8 @@ describe("MoonPay ramp webhook", () => {
   }
   async function seedMoonpayOnrampTransfer() {
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG_ID, "MoonPay Webhook Org", "moonpay-webhook-org", "enterprise", "active")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG_ID, "MoonPay Webhook Org", "moonpay-webhook-org", "active")
       .run();
     await getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")

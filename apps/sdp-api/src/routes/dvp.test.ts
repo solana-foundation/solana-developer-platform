@@ -92,8 +92,8 @@ async function seedAuth(): Promise<void> {
   await seedApiKeyRow(env, keyHash, TEST_SEEDED_API_KEY);
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -141,8 +141,8 @@ async function seedPartyOrg(): Promise<void> {
   const keyHash = await hashString(PARTY_API_KEY.raw, env.API_KEY_PEPPER);
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(PARTY_ORG.id, PARTY_ORG.name, PARTY_ORG.slug, "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(PARTY_ORG.id, PARTY_ORG.name, PARTY_ORG.slug, "active"),
   ]);
   await seedDefaultProjects(getDb(env), {
     organizationId: PARTY_ORG.id,

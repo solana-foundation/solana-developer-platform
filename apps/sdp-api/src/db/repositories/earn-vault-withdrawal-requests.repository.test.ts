@@ -73,9 +73,9 @@ describe("Earn queued withdrawal repository", () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status) VALUES
-          (?, 'Queued Withdrawal Repo', 'queued-withdrawal-repo', 'enterprise', 'active'),
-          (?, 'Queued Withdrawal Other', 'queued-withdrawal-other', 'enterprise', 'active')`
+        `INSERT INTO organizations (id, name, slug, status) VALUES
+          (?, 'Queued Withdrawal Repo', 'queued-withdrawal-repo', 'active'),
+          (?, 'Queued Withdrawal Other', 'queued-withdrawal-other', 'active')`
       )
       .bind(ORG, OTHER_ORG)
       .run();

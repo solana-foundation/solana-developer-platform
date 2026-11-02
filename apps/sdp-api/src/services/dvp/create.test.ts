@@ -212,7 +212,7 @@ describe("createDvpTrade", () => {
     const db = getDb(env);
     await db
       .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();
@@ -327,7 +327,6 @@ describe("createDvpTrade", () => {
     try {
       await seedConnectionAuthority();
       const db = getDb(env);
-      await db.execute("UPDATE organizations SET tier = 'enterprise' WHERE id = ?", [TEST_ORG.id]);
       await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [
         TEST_PROJECT_ID,
       ]);

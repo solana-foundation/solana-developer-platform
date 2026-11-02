@@ -121,12 +121,12 @@ async function seedAuth(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'enterprise', 'active', ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, settings),
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'enterprise', 'active', ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
       )
       .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug, settings),
     getDb(env)

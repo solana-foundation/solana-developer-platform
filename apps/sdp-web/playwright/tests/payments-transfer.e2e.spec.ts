@@ -29,7 +29,6 @@ test.describe
           walletCount: 1,
           fundSourceWallet: true,
           fundSourceAmountSol: 0.05,
-          tier: "enterprise",
         });
         const api = createLocalApiClient(
           getBootstrapApiBaseUrl(),

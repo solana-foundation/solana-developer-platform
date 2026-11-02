@@ -145,7 +145,6 @@ describe("scope", () => {
     upstream.mockResolvedValueOnce(
       Response.json({
         data: {
-          tier: "sandbox",
           providers: {
             ramps: { moonpay: { entitled: true, configured: true, enabled: true } },
             compliance: {},

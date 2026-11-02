@@ -60,7 +60,6 @@ function unavailableEntries<Provider extends string>(
 }
 
 const FANOUT_AVAILABILITY: OrganizationProviderAvailabilityResponse = {
-  tier: "individual",
   providers: {
     custody: unavailableEntries(CUSTODY_PROVIDERS),
     compliance: unavailableEntries(COMPLIANCE_PROVIDERS),

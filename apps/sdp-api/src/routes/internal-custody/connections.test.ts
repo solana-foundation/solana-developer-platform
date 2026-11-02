@@ -72,8 +72,8 @@ async function seedScope(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG.id, "Connections Read", ORG.slug, "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG.id, "Connections Read", ORG.slug, "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER.id, USER.email, 1, "active"),

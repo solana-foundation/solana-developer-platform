@@ -117,7 +117,7 @@ beforeEach(async () => {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, 'enterprise', 'active', ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
       )
       .bind(
         TEST_ORG.id,

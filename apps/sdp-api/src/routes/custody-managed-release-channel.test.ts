@@ -197,8 +197,8 @@ async function auditRows() {
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
   await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'Managed release channel', 'managed-release-channel', 'enterprise', 'active')`,
+    `INSERT INTO organizations (id, name, slug, status)
+     VALUES (?, 'Managed release channel', 'managed-release-channel', 'active')`,
     [ORGANIZATION_ID]
   );
   await db.execute(

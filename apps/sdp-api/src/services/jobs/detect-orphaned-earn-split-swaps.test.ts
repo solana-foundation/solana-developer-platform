@@ -55,8 +55,8 @@ beforeEach(async () => {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "Split Swap Org", "split-swap", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "Split Swap Org", "split-swap", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "split-swap@example.com"),

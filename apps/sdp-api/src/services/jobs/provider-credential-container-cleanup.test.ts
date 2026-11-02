@@ -93,7 +93,7 @@ describe("shared-container orphan cleanup", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).execute(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Prototype', 'shared-prototype', 'enterprise', 'active')",
+      "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Prototype', 'shared-prototype', 'active')",
       [ORG]
     );
     await getDb(env).execute(

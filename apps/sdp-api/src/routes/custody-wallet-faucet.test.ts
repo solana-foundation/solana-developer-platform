@@ -29,14 +29,8 @@ async function seedSandboxWalletAndApiKey(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "Custody Wallet Faucet Org",
-        "custody-wallet-faucet",
-        "enterprise",
-        "active"
-      ),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORGANIZATION_ID, "Custody Wallet Faucet Org", "custody-wallet-faucet", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER_ID, "custody-wallet-faucet@example.com", 1, "active"),

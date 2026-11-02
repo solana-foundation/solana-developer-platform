@@ -1255,8 +1255,8 @@ async function seedScope(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Runtime targets', 'runtime-targets', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Runtime targets', 'runtime-targets', 'active')`
       )
       .bind(ORGANIZATION_ID),
     getDb(env)

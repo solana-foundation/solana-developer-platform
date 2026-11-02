@@ -466,7 +466,7 @@ export async function seedRecurringDatabaseTenant(options: {
   await db.batch([
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active') ON CONFLICT (id) DO NOTHING"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
       )
       .bind(options.organizationId, options.organizationName, options.organizationSlug),
     db

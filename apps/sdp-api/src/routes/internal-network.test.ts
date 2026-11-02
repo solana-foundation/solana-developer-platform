@@ -72,8 +72,8 @@ async function dashboardHeaders(): Promise<Record<string, string>> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG.id, ORG.name, ORG.slug, "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG.id, ORG.name, ORG.slug, "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER.id, USER.email),

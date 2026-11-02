@@ -24,7 +24,7 @@ function answer(onboarding: OnboardingStatusAnswer) {
     const url = input instanceof Request ? input.url : String(input);
     const data = url.endsWith("/v1/onboarding/status")
       ? onboarding
-      : { tier: "enterprise", providers: { compliance: {}, ramps: RAMP_ACCESS } };
+      : { providers: { compliance: {}, ramps: RAMP_ACCESS } };
     return Response.json({ data });
   });
 }

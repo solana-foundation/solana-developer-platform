@@ -183,7 +183,7 @@ async function seedIssuanceTransaction(input: {
 async function seedOrganization(input: { id: string; name: string; slug: string }) {
   await getDb(env)
     .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
     )
     .bind(input.id, input.name, input.slug)
     .run();
@@ -296,8 +296,8 @@ describe("Issuance Routes", () => {
     // Seed organization
     await db
       .prepare(
-        `INSERT OR REPLACE INTO organizations (id, name, slug, tier, status, settings)
-         VALUES (?, ?, ?, 'individual', 'active', '{"providerOverrides":{"custody":{"local":true}}}')`
+        `INSERT OR REPLACE INTO organizations (id, name, slug, status, settings)
+         VALUES (?, ?, ?, 'active', '{"providerOverrides":{"custody":{"local":true}}}')`
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();

@@ -179,8 +179,8 @@ async function seedTenancy(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "External Wallet Org", "ext-wallet", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "External Wallet Org", "ext-wallet", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "ext-wallet@example.com"),
@@ -894,14 +894,8 @@ describe("submitExternalWalletDeposit", () => {
       crypto.randomUUID()
     );
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        "org_ext_wallet_unclaimed",
-        "Unclaimed Org",
-        "ext-wallet-unclaimed",
-        "enterprise",
-        "active"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind("org_ext_wallet_unclaimed", "Unclaimed Org", "ext-wallet-unclaimed", "active")
       .run();
     const unclaimed = await seedDefaultProjects(getDb(env), {
       organizationId: "org_ext_wallet_unclaimed",

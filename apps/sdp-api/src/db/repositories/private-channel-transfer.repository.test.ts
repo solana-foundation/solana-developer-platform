@@ -82,9 +82,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     await db.prepare("DELETE FROM organizations").run();
 
     await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();
 

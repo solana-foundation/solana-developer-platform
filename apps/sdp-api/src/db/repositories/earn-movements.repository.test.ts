@@ -116,9 +116,9 @@ describe("Unified earn movement ledger (postgres)", () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status) VALUES
-           (?, 'Earn Movements', 'earn-movements', 'individual', 'active'),
-           (?, 'Earn Movements Other', 'earn-movements-other', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status) VALUES
+           (?, 'Earn Movements', 'earn-movements', 'active'),
+           (?, 'Earn Movements Other', 'earn-movements-other', 'active')`
       )
       .bind(ORG, ORG_OTHER)
       .run();

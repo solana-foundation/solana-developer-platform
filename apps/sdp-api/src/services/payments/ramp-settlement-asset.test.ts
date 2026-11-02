@@ -55,8 +55,8 @@ describe("applyRampSettlementEvent delivered asset", () => {
     await seedTestDatabase(env);
     await getDb(env).batch([
       getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(ORG_ID, "Ramp Settlement Asset", "ramp-settlement-asset", "enterprise", "active"),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(ORG_ID, "Ramp Settlement Asset", "ramp-settlement-asset", "active"),
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "ramp-settlement-asset@example.com", 1, "active"),

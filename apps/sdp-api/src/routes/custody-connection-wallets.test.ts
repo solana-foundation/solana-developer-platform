@@ -67,9 +67,7 @@ async function seedFixture(): Promise<void> {
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await getDb(env).batch([
     getDb(env)
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
       .bind(ORGANIZATION_ID, "Connection wallets", "connection-wallets"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")

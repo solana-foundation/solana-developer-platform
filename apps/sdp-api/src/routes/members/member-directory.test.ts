@@ -65,7 +65,7 @@ async function seedDirectory(memberCount: number): Promise<void> {
   const statements = [
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Member Directory', 'member-directory', 'individual', 'active')"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Member Directory', 'member-directory', 'active')"
       )
       .bind(ORGANIZATION_ID),
     db

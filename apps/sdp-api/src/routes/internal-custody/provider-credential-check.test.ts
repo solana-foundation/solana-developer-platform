@@ -113,8 +113,8 @@ async function seedActor(): Promise<void> {
   await db.batch([
     db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, ?, ?, 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, ?, ?, 'active')`
       )
       .bind(
         ORGANIZATION_ID,

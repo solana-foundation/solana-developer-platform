@@ -95,8 +95,8 @@ async function seedPosition(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "Vault Withdraw Org", "vault-withdraw", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "Vault Withdraw Org", "vault-withdraw", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(USER, "vault-withdraw@example.com", 1, "active"),

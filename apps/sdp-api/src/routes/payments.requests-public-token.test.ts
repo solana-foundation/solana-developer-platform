@@ -56,9 +56,7 @@ describe("payment request public tokens", () => {
     await seedTestDatabase(env);
     const db = getDb(env);
     await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
       .bind(ORGANIZATION_ID, "Payment request token", "payment-request-token")
       .run();
     await db

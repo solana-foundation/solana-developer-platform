@@ -105,7 +105,7 @@ beforeEach(async () => {
   await clearKVStores(env);
   const db = getDb(env);
   await db.execute(
-    "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Fireblocks BYOK', 'fireblocks-byok', 'enterprise', 'active')",
+    "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Fireblocks BYOK', 'fireblocks-byok', 'active')",
     [ORGANIZATION_ID]
   );
   await db.execute(

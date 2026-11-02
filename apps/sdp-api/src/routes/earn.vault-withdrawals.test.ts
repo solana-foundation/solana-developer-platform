@@ -137,10 +137,10 @@ async function seedAuth(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
       )
       // NO providerOverrides: the exit route must never need entitlement.
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active", "{}"),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active", "{}"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(TEST_USER.id, TEST_USER.email),
@@ -682,9 +682,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
     await seedAuth();
     await getDb(env).batch([
       getDb(env)
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-        )
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
         .bind("org_earn_vw_other", "Other Org", "earn-vw-other"),
     ]);
     await seedDefaultProjects(getDb(env), {

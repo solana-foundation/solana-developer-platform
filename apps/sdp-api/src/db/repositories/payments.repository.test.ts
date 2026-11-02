@@ -33,7 +33,7 @@ async function resetPaymentFixtures(): Promise<SeededDefaultProjects> {
 
   await db
     .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
     )
     .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
     .run();

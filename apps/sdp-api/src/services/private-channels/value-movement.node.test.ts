@@ -67,7 +67,7 @@ beforeEach(async () => {
   await db.batch([
     db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'PC execution', 'pc-execution', 'enterprise', 'active')"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'PC execution', 'pc-execution', 'active')"
       )
       .bind(scope.organizationId),
     db.prepare(

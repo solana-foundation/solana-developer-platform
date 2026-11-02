@@ -211,8 +211,8 @@ describe("money admission reads", () => {
     const db = getDb(env);
     await db.batch([
       db
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
       db
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(TEST_USER.id, TEST_USER.email),
@@ -841,8 +841,8 @@ describe("money admission reads the principal in the same statement", () => {
     const db = getDb(env);
     await db.batch([
       db
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status),
       db
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(TEST_USER.id, TEST_USER.email),

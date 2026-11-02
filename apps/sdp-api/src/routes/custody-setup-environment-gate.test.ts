@@ -101,8 +101,8 @@ function cachedApiKey(environment: SdpEnvironment): SeededApiKey {
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
   await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'Custody Setup Gate', 'custody-setup-gate', 'individual', 'active')`,
+    `INSERT INTO organizations (id, name, slug, status)
+     VALUES (?, 'Custody Setup Gate', 'custody-setup-gate', 'active')`,
     [ORGANIZATION_ID]
   );
   await db.execute(

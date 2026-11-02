@@ -18,8 +18,8 @@ INSERT INTO users (id, email, email_verified, name, status) VALUES
     ('usr_test123456789', 'test@example.com', 1, 'Test User', 'active');
 
 -- Create a test organization
-INSERT INTO organizations (id, name, slug, tier, status) VALUES
-    ('org_test123456789', 'Test Organization', 'test-org', 'individual', 'active');
+INSERT INTO organizations (id, name, slug, status) VALUES
+    ('org_test123456789', 'Test Organization', 'test-org', 'active');
 
 -- Link user to organization as admin
 INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES

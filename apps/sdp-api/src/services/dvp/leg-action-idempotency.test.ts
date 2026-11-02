@@ -56,8 +56,8 @@ async function seed(): Promise<void> {
     .run();
   await db
     .prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-       VALUES (?, ?, ?, 'individual', 'active') ON CONFLICT (id) DO NOTHING`
+      `INSERT INTO organizations (id, name, slug, status)
+       VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING`
     )
     .bind(ORG, ORG, ORG)
     .run();

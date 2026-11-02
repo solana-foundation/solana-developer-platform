@@ -56,8 +56,8 @@ function createAuth(): ApiKeyContext {
 async function seedScope(): Promise<void> {
   await getDb(testEnv).batch([
     getDb(testEnv).prepare(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ('org_test', 'Authority resolution', 'authority-resolution', 'individual', 'active')`
+      `INSERT INTO organizations (id, name, slug, status)
+         VALUES ('org_test', 'Authority resolution', 'authority-resolution', 'active')`
     ),
     getDb(testEnv).prepare(
       `INSERT INTO users (id, email, email_verified, status)
@@ -564,8 +564,8 @@ describe("authority-resolution", () => {
     await resetScope();
     await getDb(testEnv).batch([
       getDb(testEnv).prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES ('org_other', 'Other', 'authority-resolution-other', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES ('org_other', 'Other', 'authority-resolution-other', 'active')`
       ),
       getDb(testEnv).prepare(
         `INSERT INTO users (id, email, email_verified, status)

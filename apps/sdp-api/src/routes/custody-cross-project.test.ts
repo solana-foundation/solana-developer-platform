@@ -47,21 +47,14 @@ async function seedOrganizationCustody(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "Custody Cross Project Org",
-        "custody-cross-project",
-        "enterprise",
-        "active"
-      ),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORGANIZATION_ID, "Custody Cross Project Org", "custody-cross-project", "active"),
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
       .bind(
         OTHER_ORGANIZATION_ID,
         "Custody Cross Project Other Org",
         "custody-cross-project-other",
-        "enterprise",
         "active"
       ),
     db

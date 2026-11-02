@@ -373,8 +373,8 @@ async function seedApiKey(
 async function seedOrganization(organizationId: string, userId: string): Promise<void> {
   const db = getDb(env);
   await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, ?, ?, 'individual', 'active')`,
+    `INSERT INTO organizations (id, name, slug, status)
+     VALUES (?, ?, ?, 'active')`,
     [organizationId, organizationId, organizationId.replaceAll("_", "-")]
   );
   await db.execute(

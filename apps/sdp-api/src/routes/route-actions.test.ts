@@ -195,8 +195,8 @@ async function refusedAction(res: Response): Promise<string | null> {
 async function seedTestKey(): Promise<void> {
   await seedTestDatabase(env);
   await getDb(env)
-    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+    .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
     .run();
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_SEEDED_API_KEY,

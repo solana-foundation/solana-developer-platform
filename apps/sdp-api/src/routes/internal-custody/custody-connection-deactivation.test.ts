@@ -176,8 +176,8 @@ describe("custody Connection deactivation", () => {
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-      VALUES (?, 'Deactivation', 'connection-deactivation', 'enterprise', 'active')`,
+      `INSERT INTO organizations (id, name, slug, status)
+      VALUES (?, 'Deactivation', 'connection-deactivation', 'active')`,
       [ORG]
     );
     await db.execute(
@@ -749,9 +749,9 @@ describe("custody Connection deactivation", () => {
     // route's API-key refusal.
     await getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
       )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier)
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();
     const { header } = await setupTestAuth(env);
     const response = await app.request(

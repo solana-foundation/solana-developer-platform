@@ -186,8 +186,8 @@ describe("sweepRampTransferStatuses", () => {
     const db = getDb(env);
     await db.batch([
       db
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(ORG, "Ramp Status Sweep", "ramp-status-sweep", "enterprise", "active"),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(ORG, "Ramp Status Sweep", "ramp-status-sweep", "active"),
       db
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
         .bind(USER, "ramp-status-sweep@example.com"),

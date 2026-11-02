@@ -65,14 +65,8 @@ describe("moonpayWebhook.process", () => {
     await seedTestDatabase(env);
     await getDb(env).batch([
       getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(
-          ORGANIZATION_ID,
-          "MoonPay Webhook Test",
-          "moonpay-webhook-test",
-          "enterprise",
-          "active"
-        ),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(ORGANIZATION_ID, "MoonPay Webhook Test", "moonpay-webhook-test", "active"),
       getDb(env)
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
         .bind(USER_ID, "moonpay-webhook@example.com", 1, "active"),

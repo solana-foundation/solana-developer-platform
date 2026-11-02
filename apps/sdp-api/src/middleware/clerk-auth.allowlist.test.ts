@@ -53,13 +53,12 @@ describe("Clerk auth and the organization IP allowlist", () => {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
         )
         .bind(
           TEST_ORG.id,
           TEST_ORG.name,
           TEST_ORG.slug,
-          TEST_ORG.tier,
           TEST_ORG.status,
           JSON.stringify({ allowedIpAddresses: ["203.0.113.0/24"] })
         ),

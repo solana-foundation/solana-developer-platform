@@ -312,14 +312,8 @@ async function seedFixture(): Promise<void> {
   await seedApiKeyRow(env, keyHash, CACHED_API_KEY);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        ORGANIZATION_ID,
-        "API key provisioning",
-        "api-key-provisioning",
-        "enterprise",
-        "active"
-      ),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORGANIZATION_ID, "API key provisioning", "api-key-provisioning", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER_ID, "api-key-provisioning@example.com"),

@@ -191,8 +191,8 @@ jobs:
             VALUES ('usr_smoke', 'smoke@example.com', 1, 'Smoke Test', 'active');
           -- The local signer is a manual provider: the operator enables it in the
           -- organization's settings (Clerk private metadata, synced here).
-          INSERT INTO organizations (id, name, slug, tier, status, settings)
-            VALUES ('org_smoke', 'Smoke Test', 'smoke-test', 'enterprise', 'active',
+          INSERT INTO organizations (id, name, slug, status, settings)
+            VALUES ('org_smoke', 'Smoke Test', 'smoke-test', 'active',
                     '{"providerOverrides":{"custody":{"local":true}}}');
           INSERT INTO organization_members (id, organization_id, user_id, role, status)
             VALUES ('mem_smoke', 'org_smoke', 'usr_smoke', 'admin', 'active');

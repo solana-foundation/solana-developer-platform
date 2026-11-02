@@ -74,8 +74,8 @@ async function seedAuthAndWallets(): Promise<void> {
 
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "individual", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -395,14 +395,8 @@ describe("API key wallet scope routes", () => {
 
   it("hides API keys outside the authenticated organization", async () => {
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(
-        "org_other_api_key_policy",
-        "Other Organization",
-        "other-api-key-policy",
-        "individual",
-        "active"
-      )
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind("org_other_api_key_policy", "Other Organization", "other-api-key-policy", "active")
       .run();
     await seedDefaultProjects(getDb(env), {
       organizationId: "org_other_api_key_policy",

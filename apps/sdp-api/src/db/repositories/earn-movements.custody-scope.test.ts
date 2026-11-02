@@ -110,8 +110,8 @@ async function seedScope(): Promise<void> {
   await db.batch([
     db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Earn custody scope', 'earn-custody-scope', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Earn custody scope', 'earn-custody-scope', 'active')`
       )
       .bind(ORGANIZATION_ID),
     db

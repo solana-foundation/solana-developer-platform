@@ -1,5 +1,5 @@
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
-import { normalizeOrganizationTier, type OrganizationSettings } from "@sdp/types/organizations";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
@@ -16,7 +16,7 @@ type AppContext = Context<{ Bindings: Env }>;
 async function fetchOrganization(db: DatabaseClient, orgId: string) {
   const org = await db
     .prepare(
-      `SELECT id, name, slug, tier, status, settings, onboarding_completed_at,
+      `SELECT id, name, slug, status, settings, onboarding_completed_at,
               onboarding_version, created_at, updated_at
        FROM organizations WHERE id = ?`
     )
@@ -25,7 +25,6 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
       id: string;
       name: string;
       slug: string;
-      tier: string;
       status: string;
       settings: string | null;
       onboarding_completed_at: string | null;
@@ -43,7 +42,6 @@ async function fetchOrganization(db: DatabaseClient, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    tier: normalizeOrganizationTier(org.tier),
     status: org.status as "active" | "suspended" | "deleted",
     settings: storedSettings === null ? null : projectOrganizationSettings(storedSettings),
     createdAt: org.created_at,

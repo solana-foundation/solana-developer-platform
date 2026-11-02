@@ -19,7 +19,7 @@ import {
   custodyProviderNotInReleaseChannel,
   getProjectProviderAvailability,
   getProviderAvailability,
-  parseClerkOrganizationTierMetadata,
+  parseClerkProviderAccessMetadata,
   parseProviderOverridesFromClerkMetadata,
   syncProviderAccessFromClerk,
 } from "@/services/provider-availability.service";
@@ -151,13 +151,6 @@ function admitCustodySetup(
   });
 }
 
-async function setOrganizationTier(tier: "individual" | "enterprise"): Promise<void> {
-  await getDb(env)
-    .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-    .bind(tier, TEST_ORG_ID)
-    .run();
-}
-
 describe("provider-availability.service", () => {
   let originalProviderEnv: ProviderEnvSnapshot;
   let originalDeploymentMode: "managed" | "self_hosted" | undefined;
@@ -173,12 +166,11 @@ describe("provider-availability.service", () => {
     await seedTestDatabase(env);
 
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
       .bind(
         TEST_ORG_ID,
         "Provider Availability Test Org",
         "provider-availability-test-org",
-        "individual",
         "active"
       )
       .run();
@@ -226,32 +218,6 @@ describe("provider-availability.service", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
   });
 
-  it("resolves general defaults independently of the legacy tier value", () => {
-    const resolved = resolveOrganizationProviderEntitlements({
-      tier: "individual",
-      providerOverrides: {
-        custody: {
-          local: true,
-        },
-        compliance: {
-          range: true,
-        },
-        ramps: {
-          moonpay: true,
-        },
-      },
-    });
-
-    expect(resolved.tier).toBe("individual");
-    expect(resolved.providers.custody.privy).toBe(true);
-    expect(resolved.providers.custody.coinbase_cdp).toBe(true);
-    expect(resolved.providers.custody.turnkey).toBe(true);
-    expect(resolved.providers.custody.local).toBe(true);
-    expect(resolved.providers.custody.para).toBe(true);
-    expect(resolved.providers.compliance.range).toBe(true);
-    expect(resolved.providers.ramps.moonpay).toBe(true);
-  });
-
   it("marks providers available only when the organization is entitled and the environment is configured", async () => {
     const availability = await getProviderAvailability(
       env,
@@ -260,7 +226,6 @@ describe("provider-availability.service", () => {
       MANIFEST_MATURITY
     );
 
-    expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.privy).toEqual({
       entitled: true,
       configured: true,
@@ -312,8 +277,6 @@ describe("provider-availability.service", () => {
   });
 
   it("reports providers the release channel leaves out as not enabled", async () => {
-    await setOrganizationTier("enterprise");
-
     const onExperimental = await getProviderAvailability(
       env,
       getDb(env),
@@ -363,7 +326,6 @@ describe("provider-availability.service", () => {
   });
 
   it("follows injected ramp provider stages", async () => {
-    await setOrganizationTier("enterprise");
     const onBeta = { ...env, SDP_RELEASE_CHANNEL: "beta" };
     const onExperimental = await getProviderAvailability(
       env,
@@ -387,7 +349,6 @@ describe("provider-availability.service", () => {
         id: "org_clerk_provider_availability_local_test",
         private_metadata: {
           sdp: {
-            tier: "individual",
             providerOverrides: {
               custody: {
                 local: true,
@@ -439,14 +400,13 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("syncs normalized Clerk tier and provider overrides into the organization row", async () => {
+  it("syncs Clerk provider overrides into the organization row", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_provider_availability_test",
         private_metadata: {
           sdp: {
-            tier: "pro",
             providerOverrides: {
               custody: {
                 local: true,
@@ -459,11 +419,10 @@ describe("provider-availability.service", () => {
     });
 
     const organization = await getDb(env)
-      .prepare("SELECT tier, settings FROM organizations WHERE id = ?")
+      .prepare("SELECT settings FROM organizations WHERE id = ?")
       .bind(TEST_ORG_ID)
-      .first<{ tier: string; settings: string | null }>();
+      .first<{ settings: string | null }>();
 
-    expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toMatchObject({
       providerOverrides: {
         custody: {
@@ -486,7 +445,6 @@ describe("provider-availability.service", () => {
       MANIFEST_MATURITY
     );
 
-    expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
       entitled: false,
       configured: true,
@@ -550,7 +508,6 @@ describe("provider-availability.service", () => {
       MANIFEST_MATURITY
     );
 
-    expect(availability.tier).toBe("individual");
     expect(availability.providers.custody.local).toEqual({
       entitled: false,
       configured: false,
@@ -559,11 +516,10 @@ describe("provider-availability.service", () => {
     expect(availability.providers.compliance.range.entitled).toBe(false);
   });
 
-  it("defaults to enterprise and clears provider overrides when Clerk metadata is absent", async () => {
+  it("clears provider overrides when Clerk metadata is absent", async () => {
     await getDb(env)
-      .prepare("UPDATE organizations SET tier = ?, settings = ? WHERE id = ?")
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(
-        "enterprise",
         JSON.stringify({
           providerOverrides: {
             custody: {
@@ -584,17 +540,16 @@ describe("provider-availability.service", () => {
     });
 
     const organization = await getDb(env)
-      .prepare("SELECT tier, settings FROM organizations WHERE id = ?")
+      .prepare("SELECT settings FROM organizations WHERE id = ?")
       .bind(TEST_ORG_ID)
-      .first<{ tier: string; settings: string | null }>();
+      .first<{ settings: string | null }>();
 
-    expect(organization?.tier).toBe("enterprise");
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
       defaultEnvironment: "sandbox",
     });
   });
 
-  it("parseClerkOrganizationTierMetadata returns enableProductionProject true only for boolean true", () => {
+  it("parseClerkProviderAccessMetadata returns enableProductionProject true only for boolean true", () => {
     const cases: Array<{ metadata: unknown; expected: boolean }> = [
       { metadata: { sdp: { enableProductionProject: true } }, expected: true },
       { metadata: { sdp: { enableProductionProject: false } }, expected: false },
@@ -607,7 +562,7 @@ describe("provider-availability.service", () => {
 
     for (const { metadata, expected } of cases) {
       expect(
-        parseClerkOrganizationTierMetadata({
+        parseClerkProviderAccessMetadata({
           id: "org_parse_test",
           private_metadata: metadata,
         }).enableProductionProject
@@ -701,22 +656,20 @@ describe("provider-availability.service", () => {
     });
   });
 
-  it("resolves earn entitlements as override-only, regardless of tier", () => {
-    // Earn providers require manual activation: no tier grants them by default.
-    const individual = resolveOrganizationProviderEntitlements({
-      tier: "individual",
+  it("resolves earn entitlements as override-only", () => {
+    const overridden = resolveOrganizationProviderEntitlements({
       providerOverrides: { earn: { veda: true } },
     });
-    expect(individual.providers.earn.veda).toBe(true);
-    expect(individual.providers.earn.upshift).toBe(false);
+    expect(overridden.earn.veda).toBe(true);
+    expect(overridden.earn.upshift).toBe(false);
 
-    const enterprise = resolveOrganizationProviderEntitlements({ tier: "enterprise" });
+    const defaults = resolveOrganizationProviderEntitlements({});
     // Exhaustive on purpose: a new earn provider must show up here as a failing
-    // assertion, so nobody adds one that a tier silently entitles. `kamino`
+    // assertion, so nobody adds one that the defaults silently entitle. `kamino`
     // defaults false like the rest even though it needs no credential —
     // entitlement and configuration are separate gates, and only money-in
     // consults entitlement (a catalogue-only provider never reaches it).
-    expect(enterprise.providers.earn).toEqual({
+    expect(defaults.earn).toEqual({
       veda: false,
       upshift: false,
       perena: false,

@@ -84,8 +84,8 @@ async function seedOrg(): Promise<void> {
   const db = getDb(env);
   await db.batch([
     db
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "individual", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG_ID, "Job Test Org", "job-test-org", "active"),
     db
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(TEST_USER_ID, "job-test@example.com"),

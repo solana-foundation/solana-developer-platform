@@ -164,9 +164,9 @@ async function seedAuth({ entitleGround }: { entitleGround: boolean }): Promise<
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
       )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "enterprise", "active", settings),
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, "active", settings),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
       .bind(TEST_USER.id, TEST_USER.email, 1, "active"),
@@ -1155,9 +1155,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const db = getDb(env);
     await db.batch([
       db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-        )
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
         .bind("org_test_earn_program_neighbour", "Neighbour Org", "earn-program-neighbour"),
     ]);
     await seedDefaultProjects(db, {
@@ -1983,9 +1981,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     const db = getDb(env);
     await db.batch([
       db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'enterprise', 'active')"
-        )
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
         .bind("org_test_earn_program_victim", "Victim Org", "earn-program-victim"),
     ]);
     await seedDefaultProjects(db, {

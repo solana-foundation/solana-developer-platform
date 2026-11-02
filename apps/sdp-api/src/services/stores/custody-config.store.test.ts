@@ -184,8 +184,8 @@ async function seedScope(): Promise<void> {
   await db.batch([
     db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Custody config store', 'custody-config-store', 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Custody config store', 'custody-config-store', 'active')`
       )
       .bind(ORGANIZATION_ID),
     db

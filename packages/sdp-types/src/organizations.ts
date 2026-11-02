@@ -6,9 +6,6 @@ import type { CustodyProvider } from "./custody";
 import type { OrganizationProviderOverrides } from "./provider-access";
 import type { OrganizationRole } from "./roles";
 
-export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
-export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
-
 /**
  * `provisioning` is an organization SDP is still creating (ADR 0012): it holds
  * its creator's one-organization slot but may not authenticate until active.
@@ -73,7 +70,6 @@ export interface Organization {
   id: string; // org_xxxxxxxxxxxx
   name: string;
   slug: string;
-  tier: OrganizationTier;
   status: OrganizationStatus;
   settings: OrganizationSettings | null;
   createdAt: string;
@@ -100,31 +96,6 @@ export interface OrganizationSettings {
     requestsPerMinute?: number;
     requestsPerDay?: number;
   };
-}
-
-const LEGACY_ORGANIZATION_TIER_ALIASES = {
-  standard: "individual",
-  starter: "individual",
-  pro: "enterprise",
-  growth: "enterprise",
-} as const;
-
-export function isOrganizationTier(value: string | null | undefined): value is OrganizationTier {
-  return ORGANIZATION_TIERS.includes(value as OrganizationTier);
-}
-
-export function normalizeOrganizationTier(value: string | null | undefined): OrganizationTier {
-  if (!value) {
-    return "enterprise";
-  }
-
-  if (isOrganizationTier(value)) {
-    return value;
-  }
-
-  const legacyTier =
-    LEGACY_ORGANIZATION_TIER_ALIASES[value as keyof typeof LEGACY_ORGANIZATION_TIER_ALIASES];
-  return legacyTier ?? "individual";
 }
 
 /**

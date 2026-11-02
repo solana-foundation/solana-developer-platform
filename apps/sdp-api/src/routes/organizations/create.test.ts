@@ -111,7 +111,6 @@ function createdResponse(organizationId: string) {
         id: organizationId,
         name: NAME,
         slug: "acme-labs",
-        tier: "enterprise",
         status: "active",
         settings: null,
         createdAt: expect.any(String),

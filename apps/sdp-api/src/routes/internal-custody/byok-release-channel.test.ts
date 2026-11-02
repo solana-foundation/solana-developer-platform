@@ -57,8 +57,8 @@ let clerkToken: string;
 async function seedActor(): Promise<void> {
   const db = getDb(env);
   await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'BYOK Release Channel', 'byok-release-channel', 'individual', 'active')`,
+    `INSERT INTO organizations (id, name, slug, status)
+     VALUES (?, 'BYOK Release Channel', 'byok-release-channel', 'active')`,
     [ORGANIZATION_ID]
   );
   await db.execute(

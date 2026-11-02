@@ -117,8 +117,8 @@ describe("Managed custody use by project environment", () => {
 async function seedFixture(): Promise<void> {
   const db = getDb(env);
   await db.execute(
-    `INSERT INTO organizations (id, name, slug, tier, status)
-     VALUES (?, 'Managed production use', 'managed-production-use', 'enterprise', 'active')`,
+    `INSERT INTO organizations (id, name, slug, status)
+     VALUES (?, 'Managed production use', 'managed-production-use', 'active')`,
     [ORGANIZATION_ID]
   );
   await db.execute(

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Browser, Page, Response } from "@playwright/test";
 import type { CounterpartyAccountResponse, CounterpartyResponse } from "@sdp/types/counterparties";
 import type { WalletFaucetResponse } from "@sdp/types/custody";
-import type { OrganizationSettings, OrganizationTier } from "@sdp/types/organizations";
+import type { OrganizationSettings } from "@sdp/types/organizations";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { ListProjectsResponse } from "@sdp/types/projects";
 import {
@@ -27,7 +27,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getPlaywrightAdminSession, type PlaywrightAdminSession } from "./auth-session";
-import { type ClerkTestIdentity, setClerkOrganizationTier } from "./clerk-admin";
+import { type ClerkTestIdentity, setClerkOrganizationProviderAccess } from "./clerk-admin";
 import {
   type BearerTokenProvider,
   createLocalApiClient,
@@ -102,10 +102,6 @@ interface PlaywrightOrganizationFixture {
   id: string;
   name: string;
   slug: string;
-}
-
-interface EnsureLinkedOrgOptions {
-  tier?: OrganizationTier;
 }
 
 function getPlaywrightApiRuntimeEnv(): PlaywrightApiRuntimeEnv {
@@ -408,7 +404,7 @@ export async function gotoProjectPage(
  */
 export async function provisionLinkedOrgProjects(browser: Browser): Promise<PlaywrightProjects> {
   return provisionWithAdminSession(browser, async (session) => {
-    await ensureLinkedOrg(session.identity, { tier: "enterprise" });
+    await ensureLinkedOrg(session.identity);
     return resolvePlaywrightProjects(getBootstrapApiBaseUrl(), session.getBearerToken);
   });
 }
@@ -599,13 +595,11 @@ async function fundWalletToLamports(
 }
 
 async function ensureLinkedOrg(
-  identity: ClerkTestIdentity,
-  options?: EnsureLinkedOrgOptions
+  identity: ClerkTestIdentity
 ): Promise<PlaywrightOrganizationFixture> {
   const organization = buildPlaywrightOrganizationFixture(identity);
-  const tier = options?.tier ?? "enterprise";
 
-  await setClerkOrganizationTier(identity.organizationId, tier);
+  await setClerkOrganizationProviderAccess(identity.organizationId);
 
   await withDatabaseClient(async (client) => {
     await client.query("BEGIN");
@@ -616,12 +610,11 @@ async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations
-           (id, name, slug, tier, status, settings, onboarding_completed_at, onboarding_version)
-         VALUES ($1, $2, $3, $4, 'active', $5, sdp_datetime_now(), 1)
+           (id, name, slug, status, settings, onboarding_completed_at, onboarding_version)
+         VALUES ($1, $2, $3, 'active', $4, sdp_datetime_now(), 1)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
-           tier = EXCLUDED.tier,
            status = EXCLUDED.status,
            settings = EXCLUDED.settings,
            onboarding_completed_at = sdp_datetime_now(),
@@ -631,7 +624,6 @@ async function ensureLinkedOrg(
           organization.id,
           organization.name,
           organization.slug,
-          tier,
           JSON.stringify(PLAYWRIGHT_ORGANIZATION_BASE_SETTINGS),
         ]
       );
@@ -695,7 +687,6 @@ export async function bootstrapLocalWalletFixtures(input: {
   walletCount?: number;
   fundSourceWallet?: boolean;
   fundSourceAmountSol?: number;
-  tier?: OrganizationTier;
 }): Promise<WalletBootstrapResult> {
   const { identity, bearerToken } = input;
   const walletCount = Math.max(1, input.walletCount ?? 1);
@@ -708,9 +699,7 @@ export async function bootstrapLocalWalletFixtures(input: {
     throw new Error("Local custody supports one seeded Playwright wallet");
   }
 
-  const organization = await ensureLinkedOrg(identity, {
-    tier: input.tier,
-  });
+  const organization = await ensureLinkedOrg(identity);
   if (provider === "local") {
     await enableLocalCustodyForPlaywrightOrg(organization.id);
   }

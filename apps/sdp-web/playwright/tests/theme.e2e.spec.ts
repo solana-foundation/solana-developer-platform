@@ -96,7 +96,6 @@ async function bootstrapWalletForToasts(browser: Browser) {
       provider: "privy",
       walletCount: 1,
       walletLabel: `Theme Toast ${Date.now().toString(36).toUpperCase()}`,
-      tier: "enterprise",
     })
   );
 }

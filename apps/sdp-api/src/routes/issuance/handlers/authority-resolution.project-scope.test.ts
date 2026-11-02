@@ -145,21 +145,14 @@ describe("issuance authority resolution across an organization's projects", () =
     await seedTestDatabase(env);
     await getDb(env).batch([
       getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(
-          ORGANIZATION_ID,
-          "Issuance Project Scope",
-          "issuance-project-scope",
-          "individual",
-          "active"
-        ),
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(ORGANIZATION_ID, "Issuance Project Scope", "issuance-project-scope", "active"),
       getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
         .bind(
           OTHER_ORGANIZATION_ID,
           "Issuance Project Scope Other",
           "issuance-project-scope-other",
-          "individual",
           "active"
         ),
       getDb(env)

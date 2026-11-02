@@ -48,8 +48,8 @@ describe("Organizations routes", () => {
   describe("GET /v1/organizations/:orgId", () => {
     beforeEach(async () => {
       await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
         .run();
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
     });
@@ -90,7 +90,6 @@ describe("Organizations routes", () => {
           id: TEST_ORG.id,
           name: TEST_ORG.name,
           slug: TEST_ORG.slug,
-          tier: TEST_ORG.tier,
           status: TEST_ORG.status,
           settings: { defaultEnvironment: "production" },
           createdAt: expect.any(String),
@@ -98,28 +97,6 @@ describe("Organizations routes", () => {
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },
       });
-    });
-    it("returns internal error when organization tier is invalid in storage", async () => {
-      await getDb(env)
-        .prepare("UPDATE organizations SET tier = ? WHERE id = ?")
-        .bind("totally-invalid-tier", TEST_ORG.id)
-        .run();
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-      expect(res.status).toBe(500);
-      const body = (await res.json()) as {
-        error: {
-          code: string;
-        };
-      };
-      expect(body.error.code).toBe("INTERNAL_ERROR");
     });
     it("refuses a key whose organization's stored status is not one it knows", async () => {
       await getDb(env)
@@ -186,8 +163,8 @@ describe("Organizations routes", () => {
   describe("PATCH /v1/organizations/:orgId", () => {
     beforeEach(async () => {
       await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
         .run();
       await seedOrganizationMember("admin");
     });
@@ -219,7 +196,6 @@ describe("Organizations routes", () => {
           id: TEST_ORG.id,
           name: "Updated Name",
           slug: TEST_ORG.slug,
-          tier: TEST_ORG.tier,
           status: TEST_ORG.status,
           settings: null,
           createdAt: expect.any(String),

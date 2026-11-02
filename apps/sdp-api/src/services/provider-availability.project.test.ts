@@ -119,8 +119,8 @@ describe("assertProjectProviderAdmitted", () => {
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-       VALUES (?, 'Project Provider Rule', 'project-provider-rule', 'individual', 'active')`,
+      `INSERT INTO organizations (id, name, slug, status)
+       VALUES (?, 'Project Provider Rule', 'project-provider-rule', 'active')`,
       [ORGANIZATION_ID]
     );
     await db.execute(

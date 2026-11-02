@@ -95,8 +95,8 @@ describe("onboarding status under database tenant isolation", () => {
     await db.batch([
       db
         .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, 'Onboarding isolation', 'onboarding-isolation', 'individual', 'active')`
+          `INSERT INTO organizations (id, name, slug, status)
+           VALUES (?, 'Onboarding isolation', 'onboarding-isolation', 'active')`
         )
         .bind(ORGANIZATION_ID),
       db
@@ -188,7 +188,6 @@ describe("onboarding status under database tenant isolation", () => {
             id: ORGANIZATION_ID,
             name: "Onboarding isolation",
             slug: "onboarding-isolation",
-            tier: "individual",
             status: "active",
             settings: null,
             createdAt: expect.any(String),

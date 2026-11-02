@@ -132,13 +132,12 @@ async function seedAuth(options: { entitled?: boolean } = {}): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)"
       )
       .bind(
         TEST_ORG.id,
         TEST_ORG.name,
         TEST_ORG.slug,
-        "enterprise",
         "active",
         entitled
           ? JSON.stringify({ providerOverrides: { earn: { kamino: true, jupiter_lend: true } } })

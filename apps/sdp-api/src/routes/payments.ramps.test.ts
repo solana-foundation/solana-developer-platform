@@ -1424,8 +1424,8 @@ describe("Payments routes — ramps", () => {
       const counterpartyId = await seedCounterparty({ externalId: "stripe_cross_tenant" });
       const now = new Date().toISOString();
       await getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "enterprise", "active")
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+        .bind("org_test_other_tenant", "Other Tenant", "other-tenant", "active")
         .run();
       const otherTenantProjects = await seedDefaultProjects(getDb(env), {
         organizationId: "org_test_other_tenant",

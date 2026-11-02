@@ -19,7 +19,7 @@ import type { createOrganizationSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-const ORGANIZATION_COLUMNS = "id, name, slug, tier, status, settings, created_at, updated_at";
+const ORGANIZATION_COLUMNS = "id, name, slug, status, settings, created_at, updated_at";
 const SLUG_ATTEMPTS = 3;
 const organizationStatusSchema = z.object({ status: z.enum(ORGANIZATION_STATUSES) });
 

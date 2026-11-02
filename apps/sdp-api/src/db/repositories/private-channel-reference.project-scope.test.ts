@@ -35,9 +35,7 @@ describe("PrivateChannelReferenceRepository wallet project scope (postgres)", ()
     const db = getDb(env);
     await db.batch([
       db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
-        )
+        .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')")
         .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug),
       db
         .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")

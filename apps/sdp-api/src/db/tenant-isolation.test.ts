@@ -35,14 +35,14 @@ async function seedTwoTenants(): Promise<void> {
   await db.batch([
     db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Tenant isolation A', ?, 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Tenant isolation A', ?, 'active')`
       )
       .bind(ORG_A, "tenant-isolation-a"),
     db
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, 'Tenant isolation B', ?, 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, 'Tenant isolation B', ?, 'active')`
       )
       .bind(ORG_B, "tenant-isolation-b"),
     db

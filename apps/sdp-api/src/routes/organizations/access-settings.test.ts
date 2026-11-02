@@ -20,14 +20,11 @@ const PROJECT_ID = "prj_access_settings";
 
 async function seedOrganization(settings: OrganizationSettings | null): Promise<void> {
   await getDb(env)
-    .prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status, settings) VALUES (?, ?, ?, ?, ?, ?)"
-    )
+    .prepare("INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)")
     .bind(
       ORGANIZATION_ID,
       TEST_ORG.name,
       TEST_ORG.slug,
-      TEST_ORG.tier,
       TEST_ORG.status,
       settings === null ? null : JSON.stringify(settings)
     )

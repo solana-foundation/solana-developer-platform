@@ -63,7 +63,7 @@ describe("EarnRepository (postgres)", () => {
 
     await db
       .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+        "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();
@@ -1041,7 +1041,7 @@ describe("EarnRepository (postgres)", () => {
       const db = getDb(env);
       await db
         .prepare(
-          "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+          "INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active')"
         )
         .bind(OTHER_ORG.id, OTHER_ORG.name, OTHER_ORG.slug)
         .run();

@@ -68,7 +68,7 @@ describe("single-column container scan scheduling", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).execute(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Schedule prototype', 'scan-schedule-prototype', 'enterprise', 'active')",
+      "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Schedule prototype', 'scan-schedule-prototype', 'active')",
       [ORG]
     );
     await getDb(env).execute(

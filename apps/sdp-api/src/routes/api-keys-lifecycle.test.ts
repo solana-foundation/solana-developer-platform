@@ -158,7 +158,7 @@ describe("API key lifecycle", () => {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Lifecycle', 'api-key-lifecycle', 'individual', 'active')"
+          "INSERT INTO organizations (id, name, slug, status) VALUES (?, 'Lifecycle', 'api-key-lifecycle', 'active')"
         )
         .bind(ORGANIZATION_ID),
       db

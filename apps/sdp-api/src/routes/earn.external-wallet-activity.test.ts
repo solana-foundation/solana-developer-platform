@@ -88,8 +88,8 @@ async function seedScope() {
   await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "External activity", "external-activity", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "External activity", "external-activity", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "external-activity@example.com"),
@@ -646,8 +646,8 @@ describe("external-wallet activity", () => {
     const foreignOrg = "org_external_activity_foreign";
     const foreignProject = "prj_external_activity_foreign";
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(foreignOrg, "Foreign", "external-activity-foreign", "enterprise", "active")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(foreignOrg, "Foreign", "external-activity-foreign", "active")
       .run();
     await seedDefaultProjects(getDb(env), {
       organizationId: foreignOrg,

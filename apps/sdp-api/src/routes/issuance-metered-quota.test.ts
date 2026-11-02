@@ -24,7 +24,7 @@ describe("Issuance routes — metered quota", () => {
     const db = getDb(env);
     await db
       .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active') ON CONFLICT (id) DO NOTHING"
+        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
       )
       .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
       .run();

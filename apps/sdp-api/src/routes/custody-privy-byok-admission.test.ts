@@ -44,8 +44,8 @@ async function seedActor(): Promise<void> {
   await getDb(env).batch([
     getDb(env)
       .prepare(
-        `INSERT INTO organizations (id, name, slug, tier, status)
-         VALUES (?, ?, ?, 'individual', 'active')`
+        `INSERT INTO organizations (id, name, slug, status)
+         VALUES (?, ?, ?, 'active')`
       )
       .bind(ORGANIZATION_ID, "Privy BYOK Admission", "privy-byok-admission"),
     getDb(env)

@@ -119,8 +119,8 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
     await getDb(env).batch([
       getDb(env)
         .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, status)
-           VALUES (?, 'Credential cleanup', 'credential-cleanup', 'enterprise', 'active')`
+          `INSERT INTO organizations (id, name, slug, status)
+           VALUES (?, 'Credential cleanup', 'credential-cleanup', 'active')`
         )
         .bind(ORGANIZATION_ID),
       getDb(env)

@@ -127,7 +127,7 @@ beforeEach(async () => {
   const db = getDb(env);
   await db.batch([
     db.prepare(
-      "INSERT INTO organizations (id, name, slug, tier, status) VALUES ('org_test_pc_wallet', 'PC', 'pc-verify', 'enterprise', 'active')"
+      "INSERT INTO organizations (id, name, slug, status) VALUES ('org_test_pc_wallet', 'PC', 'pc-verify', 'active')"
     ),
     db.prepare(
       "INSERT INTO users (id, email, status) VALUES ('usr_test_pc_wallet', 'pc-verify@example.com', 'active')"

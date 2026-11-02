@@ -80,8 +80,8 @@ async function seedScope(): Promise<void> {
   await seedApiKeyRow(env, keyHash, cachedKey());
   await getDb(env).batch([
     getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG, "Vault Positions Org", "vault-positions", "enterprise", "active"),
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG, "Vault Positions Org", "vault-positions", "active"),
     getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
       .bind(USER, "vault-positions@example.com"),

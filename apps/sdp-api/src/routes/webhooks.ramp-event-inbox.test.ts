@@ -119,8 +119,8 @@ describe("Ramp webhook event inbox", () => {
 
   async function seedMoonpayOnrampTransfer() {
     await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG_ID, "Ramp Inbox Org", "ramp-inbox-org", "enterprise", "active")
+      .prepare("INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(ORG_ID, "Ramp Inbox Org", "ramp-inbox-org", "active")
       .run();
     await getDb(env)
       .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")

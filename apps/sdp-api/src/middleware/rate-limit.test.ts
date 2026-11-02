@@ -45,10 +45,8 @@ describe("Rate limiting", () => {
     await seedTestDatabase(env);
 
     await getDb(env)
-      .prepare(
-        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-      )
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
+      .prepare("INSERT OR REPLACE INTO organizations (id, name, slug, status) VALUES (?, ?, ?, ?)")
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.status)
       .run();
 
     validKeyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);

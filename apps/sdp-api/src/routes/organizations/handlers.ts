@@ -1,10 +1,8 @@
 import {
   ORGANIZATION_STATUSES,
-  ORGANIZATION_TIERS,
   type Organization,
   type OrganizationSettings,
   type OrganizationStatus,
-  type OrganizationTier,
 } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
@@ -27,7 +25,6 @@ export type OrganizationRow = {
   id: string;
   name: string;
   slug: string;
-  tier: string;
   status: string;
   settings: string | null;
   created_at: string;
@@ -46,19 +43,6 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 }
 
-function parseOrganizationTier(value: string): OrganizationTier {
-  if (ORGANIZATION_TIERS.includes(value as OrganizationTier)) {
-    return value as OrganizationTier;
-  }
-  if (value === "standard" || value === "starter") {
-    return "individual";
-  }
-  if (value === "pro" || value === "growth") {
-    return "enterprise";
-  }
-  throw new AppError("INTERNAL_ERROR", `Organization tier '${value}' is invalid`);
-}
-
 function parseOrganizationStatus(value: string): OrganizationStatus {
   if (ORGANIZATION_STATUSES.includes(value as OrganizationStatus)) {
     return value as OrganizationStatus;
@@ -71,7 +55,6 @@ export function toOrganizationResponse(row: OrganizationRow): Organization {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    tier: parseOrganizationTier(row.tier),
     status: parseOrganizationStatus(row.status),
     settings: parseOrganizationSettings(row.settings),
     createdAt: row.created_at,
@@ -90,7 +73,7 @@ export const getOrganization = async (c: AppContext) => {
 
   const org = await getDb(c.env)
     .prepare(
-      `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+      `SELECT id, name, slug, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
     )
     .bind(orgId)
@@ -127,7 +110,7 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
   const org = await getDb(c.env).transaction(async (tx) => {
     const existing = await tx
       .prepare(
-        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+        `SELECT id, name, slug, status, settings, created_at, updated_at
      FROM organizations WHERE id = ? FOR UPDATE`
       )
       .bind(orgId)
@@ -164,7 +147,7 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
 
     const updated = await tx
       .prepare(
-        `SELECT id, name, slug, tier, status, settings, created_at, updated_at
+        `SELECT id, name, slug, status, settings, created_at, updated_at
      FROM organizations WHERE id = ?`
       )
       .bind(orgId)
