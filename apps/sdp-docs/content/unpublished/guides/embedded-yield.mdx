@@ -40,12 +40,12 @@ The dashboard's **Embedded Yield → Integrate** page generates a complete serve
 | Submit the signed withdrawal | `POST /v1/earn/withdrawals/submit-signed-transaction` |
 | Discover available withdrawal routes | `POST /v1/earn/external-wallet/withdrawal-options` |
 | Preview an asynchronous withdrawal | `POST /v1/earn/external-wallet/queued-withdrawal-previews` |
-| Build an asynchronous request | `POST /v1/earn/external-wallet/withdrawal-request-transactions` |
-| Submit an asynchronous request | `POST /v1/earn/external-wallet/withdrawal-requests` |
+| Build an asynchronous request | `POST /v1/earn/withdrawal-requests/build-unsigned-transaction` |
+| Submit an asynchronous request | `POST /v1/earn/withdrawal-requests/submit-signed-transaction` |
 | Restore asynchronous requests | `GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=…&settled=false` |
 | Poll an asynchronous request | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` |
-| Build request recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions` |
-| Submit request recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` |
+| Build request recovery | `POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` |
+| Submit request recovery | `POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction` |
 
 Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
 
@@ -315,7 +315,7 @@ Build, sign and submit the request with the same customer and optional sponsor f
 
 ```ts
 const { transaction } = await sdpFetch(
-  "/v1/earn/external-wallet/withdrawal-request-transactions",
+  "/v1/earn/withdrawal-requests/build-unsigned-transaction",
   {
     method: "POST",
     headers: sdpHeaders(),
@@ -374,7 +374,7 @@ const canRecover =
 
 if (canRecover) {
   const { transaction } = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
     {
       method: "POST",
       headers: sdpHeaders(),
@@ -383,7 +383,7 @@ if (canRecover) {
   );
 
   // Collect the required signatures, then submit with a new idempotency key.
-  await sdpFetch("/v1/earn/external-wallet/withdrawal-request-cancellations", {
+  await sdpFetch("/v1/earn/withdrawal-requests/cancel/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": cancelIdempotencyKey }),
     body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),

@@ -19,7 +19,7 @@ import { createTransferSchema } from "./schemas";
 export const transfers = new Hono<{ Bindings: Env }>();
 
 transfers.post(
-  "/",
+  "/execute",
   requireAction("transfers.execute"),
   validateBody(createTransferSchema),
   authorize(authorizeTransfer),

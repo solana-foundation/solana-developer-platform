@@ -4633,7 +4633,7 @@ describe("Payments routes — recurring", () => {
       });
 
     const preparePromise = app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
+      `/v1/payments/subscriptions/${subscriptionId}/authorize/build-unsigned-transaction`,
       {
         method: "POST",
         headers: RECURRING_HEADERS,

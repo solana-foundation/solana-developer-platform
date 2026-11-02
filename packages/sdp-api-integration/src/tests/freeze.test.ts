@@ -56,13 +56,13 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
     const created = (await createRes.json()) as TokenApiResponse;
     deployedTokenId = created.data.token.id;
 
-    await request(`/v1/issuance/tokens/${deployedTokenId}/deploy`, {
+    await request(`/v1/issuance/tokens/${deployedTokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
     });
 
-    const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint`, {
+    const mintRes = await request(`/v1/issuance/tokens/${deployedTokenId}/mint/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

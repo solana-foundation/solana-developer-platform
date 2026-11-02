@@ -522,7 +522,7 @@ describe("Payments routes — subscriptions", () => {
     });
 
     const preparePlanRes = await app.request(
-      `/v1/payments/subscription-plans/${planId}/prepare-create`,
+      `/v1/payments/subscription-plans/${planId}/create/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -629,7 +629,7 @@ describe("Payments routes — subscriptions", () => {
     });
 
     const prepareAuthorizationRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
+      `/v1/payments/subscriptions/${subscriptionId}/authorize/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -675,7 +675,7 @@ describe("Payments routes — subscriptions", () => {
     expect(authorizedSubscription).not.toBeNull();
 
     const prepareCancelRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-cancel`,
+      `/v1/payments/subscriptions/${subscriptionId}/cancel/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -694,7 +694,7 @@ describe("Payments routes — subscriptions", () => {
     ]);
 
     const prepareResumeRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-resume`,
+      `/v1/payments/subscriptions/${subscriptionId}/resume/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -713,7 +713,7 @@ describe("Payments routes — subscriptions", () => {
     ]);
 
     const amountOverrideRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
+      `/v1/payments/subscriptions/${subscriptionId}/collect/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -727,7 +727,7 @@ describe("Payments routes — subscriptions", () => {
     expect(amountOverrideRes.status).toBe(400);
 
     const prepareCollectionRes = await app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-collection`,
+      `/v1/payments/subscriptions/${subscriptionId}/collect/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,

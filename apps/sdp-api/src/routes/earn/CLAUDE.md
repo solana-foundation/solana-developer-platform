@@ -471,7 +471,7 @@ other's balance.
     the provider client normalizes onto `SdpEarnError.details.balance` and
     `app.ts` already serializes into `error.details`. Consumers should read it
     rather than surfacing the provider's message.
-- **`POST /programs/:programId/withdrawals` — live provider call + SDP ledger
+- **`POST /programs/:programId/withdrawals/execute` — live provider call + SDP ledger
   write.**
   **It refuses a wallet-scoped key** (HOO-1559). It pays a
   caller-supplied `destinationAddress` out of the organization's provider

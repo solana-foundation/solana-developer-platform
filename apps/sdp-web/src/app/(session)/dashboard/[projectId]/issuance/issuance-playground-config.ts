@@ -403,7 +403,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "deploy-token",
       title: t("DashboardIssuance.playground.deployToken"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/deploy",
+      path: "/v1/issuance/tokens/{tokenId}/deploy/execute",
       pathFields: [tokenIdField],
       bodyFields: [],
       expectedResponse: {
@@ -420,7 +420,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "mint-execute",
       title: t("DashboardIssuance.playground.mintTokens"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/mint",
+      path: "/v1/issuance/tokens/{tokenId}/mint/execute",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -452,7 +452,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "burn-execute",
       title: t("DashboardIssuance.playground.burnTokens"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/burn",
+      path: "/v1/issuance/tokens/{tokenId}/burn/execute",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -484,7 +484,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "seize-execute",
       title: t("DashboardIssuance.playground.seizeTokens"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/seize",
+      path: "/v1/issuance/tokens/{tokenId}/seize/execute",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -527,7 +527,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "force-burn-execute",
       title: t("DashboardIssuance.playground.forceBurn"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/force-burn",
+      path: "/v1/issuance/tokens/{tokenId}/force-burn/execute",
       pathFields: [tokenIdField],
       bodyFields: [
         {
@@ -564,7 +564,7 @@ export function buildIssuancePlaygroundEndpointConfigs({
       id: "authority-execute",
       title: t("DashboardIssuance.playground.updateAuthority"),
       method: "POST",
-      path: "/v1/issuance/tokens/{tokenId}/authority",
+      path: "/v1/issuance/tokens/{tokenId}/authority/update/execute",
       pathFields: [tokenIdField],
       bodyFields: [
         {

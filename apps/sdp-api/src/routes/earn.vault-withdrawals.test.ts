@@ -509,7 +509,7 @@ describe("vault exits outside the key's wallet scope", () => {
     const before = await exitRows();
 
     const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
+      "/v1/earn/withdrawal-requests/execute",
       {
         method: "POST",
         headers: {
@@ -617,7 +617,7 @@ describe("vault exits outside the key's wallet scope", () => {
     const before = await exitRows();
 
     const response = await app.request(
-      `/v1/earn/vault-withdrawal-requests/${input.requestId}/cancel`,
+      `/v1/earn/withdrawal-requests/${input.requestId}/cancel/execute`,
       {
         method: "POST",
         headers: {
@@ -1472,7 +1472,7 @@ describe("POST /v1/earn/vault-withdrawal-requests: a par request", () => {
     const positionId = await seedPosition({ provider: "hastra" });
 
     const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
+      "/v1/earn/withdrawal-requests/execute",
       {
         method: "POST",
         headers: {

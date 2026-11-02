@@ -54,7 +54,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const created = (await createRes.json()) as TokenApiResponse;
       const tokenId = created.data.token.id;
 
-      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -64,7 +64,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const deployed = (await deployRes.json()) as TokenApiResponse;
       expect(deployed.data.token.freezeAuthority).toBeNull();
 
-      const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+      const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint/execute`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

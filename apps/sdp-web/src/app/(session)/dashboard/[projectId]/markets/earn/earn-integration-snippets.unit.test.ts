@@ -521,7 +521,7 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+        path: "/v1/earn/withdrawal-requests/build-unsigned-transaction",
         body: {
           positionId: "position",
           shares: "2",
@@ -531,7 +531,7 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+        path: "/v1/earn/withdrawal-requests/build-unsigned-transaction",
         body: {
           positionId: "position",
           shares: "3",
@@ -540,14 +540,14 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-requests",
+        path: "/v1/earn/withdrawal-requests/submit-signed-transaction",
         body: {
           transactionId: "par-build",
           signedTransaction: "signed-par-request",
         },
       },
       {
-        path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        path: "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
         body: { withdrawalRequestId: "request_1", feePayer: "sponsor" },
       },
     ]);

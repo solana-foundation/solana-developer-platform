@@ -26,6 +26,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.withdrawals.create",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}/withdrawals`,
+    path: `/v1/earn/programs/${encodeURIComponent(programId)}/withdrawals/execute`,
   });
 }

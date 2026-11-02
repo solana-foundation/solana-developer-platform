@@ -72,7 +72,7 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: deploy-acme-001" \
@@ -81,7 +81,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
 
 ```typescript title="deploy-token.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute",
   {
     method: "POST",
     headers: {

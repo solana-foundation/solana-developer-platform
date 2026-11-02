@@ -40,7 +40,7 @@ transferBatches.post(
   estimateTransferBatch
 );
 transferBatches.post(
-  "/",
+  "/execute",
   requireAction("transfer_batches.execute"),
   validateBody(createTransferBatchSchema),
   authorize(authorizeTransferBatch),

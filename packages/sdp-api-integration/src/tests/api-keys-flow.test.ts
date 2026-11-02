@@ -117,7 +117,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
     const createdToken = (await createTokenRes.json()) as TokenApiResponse;
     const tokenId = createdToken.data.token.id;
 
-    const deployRes = await scopedRequest(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await scopedRequest(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: sourceWallet.id }),
@@ -131,7 +131,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
       throw new Error("Expected deployed token to include mintAddress");
     }
 
-    const mintRes = await scopedRequest(`/v1/issuance/tokens/${tokenId}/mint`, {
+    const mintRes = await scopedRequest(`/v1/issuance/tokens/${tokenId}/mint/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -150,7 +150,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
     expect(minted.data.transaction.status).toBe("confirmed");
     expect(minted.data.transaction.signature).toBeTruthy();
 
-    const transferRes = await scopedRequest("/v1/payments/transfers", {
+    const transferRes = await scopedRequest("/v1/payments/transfers/execute", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

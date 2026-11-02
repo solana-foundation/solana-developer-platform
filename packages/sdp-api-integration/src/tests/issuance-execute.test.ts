@@ -155,7 +155,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
     );
     await mintToWallet(request, tokenId, custodyAddress, "1", custodyWalletId);
 
-    const burnRes = await request(`/v1/issuance/tokens/${tokenId}/burn`, {
+    const burnRes = await request(`/v1/issuance/tokens/${tokenId}/burn/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -199,7 +199,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
       custodyWalletId
     );
 
-    const seizeRes = await request(`/v1/issuance/tokens/${tokenId}/seize`, {
+    const seizeRes = await request(`/v1/issuance/tokens/${tokenId}/seize/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -219,7 +219,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
     expect(seized.data.transaction.status).toBe("confirmed");
     expect(seized.data.transaction.signature).toBeTruthy();
 
-    const forceBurnRes = await request(`/v1/issuance/tokens/${tokenId}/force-burn`, {
+    const forceBurnRes = await request(`/v1/issuance/tokens/${tokenId}/force-burn/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -249,7 +249,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
       custodyWalletId
     );
 
-    const authorityRes = await request(`/v1/issuance/tokens/${tokenId}/authority`, {
+    const authorityRes = await request(`/v1/issuance/tokens/${tokenId}/authority/update/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

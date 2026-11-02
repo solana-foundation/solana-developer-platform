@@ -182,7 +182,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \

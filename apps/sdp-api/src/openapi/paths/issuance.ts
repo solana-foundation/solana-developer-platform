@@ -440,7 +440,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Deploy token",
@@ -468,13 +468,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare token deploy transaction",
     operationId: "prepareDeployToken",
     description:
-      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.",
+      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -493,7 +493,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Confirm a caller-signed deployment",
@@ -522,13 +522,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
-      "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
+      "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -547,7 +547,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/mint/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare mint transaction",
@@ -576,7 +576,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/mint",
+    path: "/v1/issuance/tokens/{tokenId}/mint/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute mint",
@@ -605,7 +605,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/burn/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare burn transaction",
@@ -634,7 +634,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/burn",
+    path: "/v1/issuance/tokens/{tokenId}/burn/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute burn",
@@ -663,7 +663,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/seize/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare seize transaction",
@@ -691,7 +691,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/seize",
+    path: "/v1/issuance/tokens/{tokenId}/seize/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute seize",
@@ -719,7 +719,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare force burn transaction",
@@ -747,7 +747,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/force-burn",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute force burn",
@@ -775,7 +775,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/authority/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Prepare authority update",
@@ -803,7 +803,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/authority",
+    path: "/v1/issuance/tokens/{tokenId}/authority/update/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Execute authority update",

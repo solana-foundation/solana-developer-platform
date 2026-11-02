@@ -81,7 +81,7 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 SDP signs the authority rotation:
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/update/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \

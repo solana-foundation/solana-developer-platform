@@ -41,9 +41,9 @@ The **Fund management** panel shows the current supply with two primary actions:
 All supply operations share this URL pattern:
 
 ```text title="Endpoints"
-POST /v1/issuance/tokens/{tokenId}/mint
-POST /v1/issuance/tokens/{tokenId}/burn
-POST /v1/issuance/tokens/{tokenId}/force-burn
+POST /v1/issuance/tokens/{tokenId}/mint/execute
+POST /v1/issuance/tokens/{tokenId}/burn/execute
+POST /v1/issuance/tokens/{tokenId}/force-burn/execute
 ```
 
 The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
@@ -88,7 +88,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -104,7 +104,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 
 ```typescript title="mint-tokens.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute",
   {
     method: "POST",
     headers: {
@@ -168,7 +168,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 **Burn from a controlled account:**
 
 ```typescript title="burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -185,7 +185,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 **Force-burn from any holder** (requires `tokens:admin`):
 
 ```typescript title="force-burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",

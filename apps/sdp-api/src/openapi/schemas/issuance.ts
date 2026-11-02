@@ -431,7 +431,7 @@ export const prepareDeployResponseSchema = z
       .optional()
       .openapi({
         description:
-          "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain.",
+          "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/metadata/build-unsigned-transaction and submit the returned follow-up transaction to set this URI on-chain.",
       }),
     simulation: simulationResultSchema
       .optional()
@@ -1002,7 +1002,8 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
       example: "5x...signature",
     }),
     mint: withOpenApi(confirmDeploySchemaBase.shape.mint, {
-      description: "Mint address returned by deploy/prepare and created by the submitted tx.",
+      description:
+        "Mint address returned by deploy/build-unsigned-transaction and created by the submitted tx.",
       example: "So11111111111111111111111111111111111111112",
     }),
     listAddress: withOpenApi(confirmDeploySchemaBase.shape.listAddress, {
@@ -1012,7 +1013,7 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
     }),
     signingWalletId: withOpenApi(confirmDeploySchemaBase.shape.signingWalletId, {
       description:
-        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.",
+        "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/build-unsigned-transaction, so the authority can't be changed at confirm time.",
       example: "privy_wallet_123",
     }),
   })

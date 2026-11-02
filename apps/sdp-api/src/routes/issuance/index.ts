@@ -123,13 +123,13 @@ issuance.patch(
 
 // Deploy
 issuance.post(
-  "/tokens/:tokenId/deploy",
+  "/tokens/:tokenId/deploy/execute",
   requireAction("issuance.execute"),
   validateBody(deployTokenSchema),
   deployToken
 );
 issuance.post(
-  "/tokens/:tokenId/deploy/prepare",
+  "/tokens/:tokenId/deploy/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
@@ -140,7 +140,7 @@ issuance.post(
 // the signing wallet prepareDeploy persisted on the token, so they can't diverge
 // from the prepared tx. Required before prepare-metadata can run.
 issuance.post(
-  "/tokens/:tokenId/deploy/confirm",
+  "/tokens/:tokenId/deploy/confirm-submitted-transaction",
   requireAction("issuance.execute"),
   validateBody(confirmDeploySchema),
   confirmDeploy
@@ -148,7 +148,7 @@ issuance.post(
 // Follow-up tx for the non-custodial deploy flow: set the metadata uri when the
 // create tx had to be prepared with an empty uri to stay under the packet limit.
 issuance.post(
-  "/tokens/:tokenId/deploy/prepare-metadata",
+  "/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(legacyDeployTokenSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
@@ -157,14 +157,14 @@ issuance.post(
 
 // Mint
 issuance.post(
-  "/tokens/:tokenId/mint/prepare",
+  "/tokens/:tokenId/mint/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(mintSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareMint
 );
 issuance.post(
-  "/tokens/:tokenId/mint",
+  "/tokens/:tokenId/mint/execute",
   requireAction("issuance.execute"),
   validateBody(mintSchema),
   requestGate({
@@ -177,14 +177,14 @@ issuance.post(
 
 // Burn
 issuance.post(
-  "/tokens/:tokenId/burn/prepare",
+  "/tokens/:tokenId/burn/build-unsigned-transaction",
   requireAction("issuance.execute"),
   validateBody(burnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareBurn
 );
 issuance.post(
-  "/tokens/:tokenId/burn",
+  "/tokens/:tokenId/burn/execute",
   requireAction("issuance.execute"),
   validateBody(burnSchema),
   executeBurn
@@ -192,14 +192,14 @@ issuance.post(
 
 // Seize (Force Transfer)
 issuance.post(
-  "/tokens/:tokenId/seize/prepare",
+  "/tokens/:tokenId/seize/build-unsigned-transaction",
   requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareSeize
 );
 issuance.post(
-  "/tokens/:tokenId/seize",
+  "/tokens/:tokenId/seize/execute",
   requireAction("issuance.enforce"),
   validateBody(seizeSchema),
   executeSeize
@@ -207,14 +207,14 @@ issuance.post(
 
 // Force Burn
 issuance.post(
-  "/tokens/:tokenId/force-burn/prepare",
+  "/tokens/:tokenId/force-burn/build-unsigned-transaction",
   requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareForceBurn
 );
 issuance.post(
-  "/tokens/:tokenId/force-burn",
+  "/tokens/:tokenId/force-burn/execute",
   requireAction("issuance.enforce"),
   validateBody(forceBurnSchema),
   executeForceBurn
@@ -222,14 +222,14 @@ issuance.post(
 
 // Authority Updates
 issuance.post(
-  "/tokens/:tokenId/authority/prepare",
+  "/tokens/:tokenId/authority/update/build-unsigned-transaction",
   requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareUpdateAuthority
 );
 issuance.post(
-  "/tokens/:tokenId/authority",
+  "/tokens/:tokenId/authority/update/execute",
   requireAction("issuance.authority"),
   validateBody(updateAuthoritySchema),
   requestGate({

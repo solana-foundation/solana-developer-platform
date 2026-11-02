@@ -8,13 +8,6 @@
         "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/wallets\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"provider\": \"privy\",\n    \"label\": \"Treasury wallet\",\n    \"purpose\": \"transfer\"\n  })"
       }
     },
-    "get-payment-transfer": {
-      "snippets": {
-        "curl": "curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
-        "ts": "const res = await fetch(\"https://api.solana.com/v1/payments/transfers/xfr_example\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
-        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/payments/transfers/xfr_example\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
-      }
-    },
     "get-payment-wallet-balances": {
       "snippets": {
         "curl": "curl 'https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",

@@ -171,7 +171,7 @@ A regulated stablecoin has four on-chain authorities, each a distinct role on th
 
 A fifth, the **pause authority**, lives on the `pausable` extension configuration. SDP defaults it to the `mint` authority if you don't set it explicitly.
 
-You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}/authority`. Default-everything-to-custody is the institutional baseline.
+You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}/authority/update/execute`. Default-everything-to-custody is the institutional baseline.
 
 ### 4. Capture the design as a config
 
@@ -276,7 +276,7 @@ The deploy call submits a Token-2022 mint creation transaction to Solana via the
 ```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy`,
+  `/v1/issuance/tokens/${tokenId}/deploy/execute`,
   { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
@@ -399,7 +399,7 @@ This is the technological capability the GENIUS Act requires you to have ready f
 ```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/seize`,
+  `/v1/issuance/tokens/${tokenId}/seize/execute`,
   {
     signingCustodyWalletId,
     seize: {
@@ -422,7 +422,7 @@ Force-burn destroys tokens at a holder's account. Same authority as seize, diffe
 ```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/force-burn`,
+  `/v1/issuance/tokens/${tokenId}/force-burn/execute`,
   {
     signingCustodyWalletId,
     forceBurn: {
@@ -455,7 +455,7 @@ Minting requires the `issuance.execute` grant, so the key (`sdp`) must hold it:
 ```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/mint`,
+  `/v1/issuance/tokens/${tokenId}/mint/execute`,
   {
     signingCustodyWalletId,
     mint: {
@@ -553,7 +553,7 @@ for (const provider of screening.data.screening.providers) {
 }
 
 const transfer = await sdp.post(
-  "/v1/payments/transfers",
+  "/v1/payments/transfers/execute",
   {
     sourceCustodyWalletId,
     destination: destinationAddress,
@@ -622,7 +622,7 @@ Run the same transfer call. This time it fails:
 ```javascript title="transfer-blocked.js"
 try {
   await sdp.post(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       sourceCustodyWalletId,
       destination: destinationAddress,
