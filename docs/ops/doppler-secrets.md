@@ -8,12 +8,12 @@ SDP uses Doppler for team development, secret-aware CI, and configuration synced
 
 The monorepo uses these shared configs:
 
-| Config | Purpose |
-| --- | --- |
-| `dev` | Team development and the source for personal developer configs |
-| `dev_ci` | Secret-aware CI and integration tests |
-| `stg` | Preview/staging web and docs configuration |
-| `prd` | Production web/docs configuration and operator access |
+| Config   | Purpose                                                        |
+| -------- | -------------------------------------------------------------- |
+| `dev`    | Team development and the source for personal developer configs |
+| `dev_ci` | Secret-aware CI and integration tests                          |
+| `stg`    | Preview/staging web and docs configuration                     |
+| `prd`    | Production web/docs configuration and operator access          |
 
 For local development, create a personal config cloned from `dev` and set `DOPPLER_CONFIG` before running root commands.
 

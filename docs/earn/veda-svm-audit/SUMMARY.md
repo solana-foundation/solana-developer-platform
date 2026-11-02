@@ -7,17 +7,17 @@ Target: `@vedatech/svm-sdk@0.1.0-alpha.1` against Veda's devnet + mainnet Test V
 Mainnet was exercised read-only (reads, previews, simulation). Only devnet was
 ever signed, per Veda checklist item 8.
 
-| Phase | Pass | Fail | Warn | Skip | Run at |
-| --- | --- | --- | --- | --- | --- |
-| 01 on-chain deployment verification | 62 | 0 | 9 | 0 | 19:53:12 |
-| 02 package + supply-chain audit | 9 | 0 | 1 | 0 | 20:00:42 |
-| 03 API surface conformance | 46 | 0 | 0 | 0 | 20:00:49 |
-| 04 SDK reads + deployment validation | 37 | 0 | 2 | 2 | 20:43:56 |
-| 05 preview + quote correctness | 12 | 0 | 0 | 0 | 20:44:31 |
-| 06 build + prepare + simulate | 38 | 1 | 0 | 0 | 20:34:53 |
-| 07 negative + error recovery | 14 | 2 | 1 | 0 | 20:20:43 |
-| 08 full devnet lifecycle | 28 | 2 | 1 | 0 | 20:15:37 |
-| **total** | **246** | **5** | **14** | **2** | |
+| Phase                                | Pass    | Fail  | Warn   | Skip  | Run at   |
+| ------------------------------------ | ------- | ----- | ------ | ----- | -------- |
+| 01 on-chain deployment verification  | 62      | 0     | 9      | 0     | 19:53:12 |
+| 02 package + supply-chain audit      | 9       | 0     | 1      | 0     | 20:00:42 |
+| 03 API surface conformance           | 46      | 0     | 0      | 0     | 20:00:49 |
+| 04 SDK reads + deployment validation | 37      | 0     | 2      | 2     | 20:43:56 |
+| 05 preview + quote correctness       | 12      | 0     | 0      | 0     | 20:44:31 |
+| 06 build + prepare + simulate        | 38      | 1     | 0      | 0     | 20:34:53 |
+| 07 negative + error recovery         | 14      | 2     | 1      | 0     | 20:20:43 |
+| 08 full devnet lifecycle             | 28      | 2     | 1      | 0     | 20:15:37 |
+| **total**                            | **246** | **5** | **14** | **2** |          |
 
 ## Failures
 

@@ -117,8 +117,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
@@ -135,21 +133,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: |
-          git diff --name-only --diff-filter=d -z origin/main...HEAD \
-            | xargs -0 --no-run-if-empty pnpm exec biome check --no-errors-on-unmatched
-
-      # Scripts sit outside every TypeScript program, and the diff-scoped lint above never re-reads
-      # one when the package it imports changes its exports, so these are linted in full every run.
-      - name: Lint script imports
-        run: |
-          git ls-files -z ':(glob)**/*.mjs' ':(glob)**/*.cjs' ':(glob)**/scripts/**' ':(glob).github/scripts/**' ':(exclude,glob)examples/**' \
-            | xargs -0 pnpm exec biome lint --no-errors-on-unmatched --diagnostic-level=error
-
-      # A package.json edit changes what every file in its workspace may import, and the
-      # diff-scoped lint re-reads only the manifest, so the dependency rule runs over all sources.
-      - name: Lint declared dependencies
-        run: pnpm exec biome lint --only=correctness/noUndeclaredDependencies --diagnostic-level=error apps packages
+        run: pnpm exec biome ci .
 
       # Biome's noRestrictedImports does not read vi.mock-family strings or typeof import() type
       # queries, and its options are replaced per override, so every copy must carry the ../ group.

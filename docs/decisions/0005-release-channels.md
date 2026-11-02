@@ -31,11 +31,11 @@ deployment can run.
   startup in the API, its jobs and the dashboard server. Builds do not read it.
   Names are lowercase and case-sensitive.
 
-| Release channel | Modules                                           | Target deployment                            |
-| --------------- | ------------------------------------------------- | -------------------------------------------- |
-| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                            |
-| `beta`          | `stable` plus modules in final validation         | None yet                                     |
-| `experimental`  | All modules                                       | Development, previews, self-hosted           |
+| Release channel | Modules                                           | Target deployment                  |
+| --------------- | ------------------------------------------------- | ---------------------------------- |
+| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                  |
+| `beta`          | `stable` plus modules in final validation         | None yet                           |
+| `experimental`  | All modules                                       | Development, previews, self-hosted |
 
 Every deployment starts on `experimental`, which matches the behavior before
 release channels. Stage and production move to `beta` and `stable` in a later

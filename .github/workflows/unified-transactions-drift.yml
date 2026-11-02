@@ -3,20 +3,20 @@ name: Unified Transactions Drift
 on:
   pull_request:
     paths:
-      - 'apps/sdp-api/scripts/unified-transactions-view.ts'
-      - 'apps/sdp-api/src/db/unified-transactions/**'
-      - 'apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql'
-      - 'packages/sdp-types/src/unified-transactions.ts'
-      - '.github/workflows/unified-transactions-drift.yml'
+      - "apps/sdp-api/scripts/unified-transactions-view.ts"
+      - "apps/sdp-api/src/db/unified-transactions/**"
+      - "apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql"
+      - "packages/sdp-types/src/unified-transactions.ts"
+      - ".github/workflows/unified-transactions-drift.yml"
   push:
     branches:
       - main
     paths:
-      - 'apps/sdp-api/scripts/unified-transactions-view.ts'
-      - 'apps/sdp-api/src/db/unified-transactions/**'
-      - 'apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql'
-      - 'packages/sdp-types/src/unified-transactions.ts'
-      - '.github/workflows/unified-transactions-drift.yml'
+      - "apps/sdp-api/scripts/unified-transactions-view.ts"
+      - "apps/sdp-api/src/db/unified-transactions/**"
+      - "apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql"
+      - "packages/sdp-types/src/unified-transactions.ts"
+      - ".github/workflows/unified-transactions-drift.yml"
 
 permissions:
   contents: read

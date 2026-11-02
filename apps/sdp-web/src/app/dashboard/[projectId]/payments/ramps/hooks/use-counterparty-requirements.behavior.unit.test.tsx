@@ -103,6 +103,17 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function usePurgeHarness(params: CounterpartyRequirementsParams) {
+  const requirements = useCounterpartyRequirements(params);
+  const { mutate } = useSWRConfig();
+  const purgeRequirements = () => {
+    void mutate(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
+      revalidate: true,
+    });
+  };
+  return { requirements, purgeRequirements };
+}
+
 describe("useCounterpartyRequirements — subject-addressed responses", () => {
   beforeEach(() => {
     held = [];
@@ -181,17 +192,6 @@ describe("useCounterpartyRequirements — subject-addressed responses", () => {
 
     expect(result.current.onboarding).toEqual(READY_OFFRAMP);
   });
-
-  function usePurgeHarness(params: CounterpartyRequirementsParams) {
-    const requirements = useCounterpartyRequirements(params);
-    const { mutate } = useSWRConfig();
-    const purgeRequirements = () => {
-      void mutate(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
-        revalidate: true,
-      });
-    };
-    return { requirements, purgeRequirements };
-  }
 
   it("re-selecting the same provider refetches a subject the cache already answered", async () => {
     const rendered = renderHook((props: CounterpartyRequirementsParams) => usePurgeHarness(props), {
