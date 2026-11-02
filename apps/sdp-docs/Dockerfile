@@ -33,6 +33,8 @@ COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 # The API's openapi generation loads the Rings state machine and SDK mints.
 COPY packages/sdp-helius-rings/package.json ./packages/sdp-helius-rings/
 COPY packages/sdp-helius-rings-sdk/package.json ./packages/sdp-helius-rings-sdk/
+# The generated API reference walks the private-channels route chain.
+COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
 
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
@@ -57,6 +59,7 @@ COPY packages/sdp-solana ./packages/sdp-solana
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-helius-rings ./packages/sdp-helius-rings
 COPY packages/sdp-helius-rings-sdk ./packages/sdp-helius-rings-sdk
+COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # These are parsed as URLs at build time, so the placeholder defaults are valid
 # URLs whose origin /app/entrypoint.sh swaps for runtime env at container start.

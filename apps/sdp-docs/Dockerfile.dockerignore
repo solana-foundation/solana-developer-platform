@@ -57,6 +57,7 @@ packages/*
 !packages/sdp-issuance
 !packages/sdp-helius-rings
 !packages/sdp-helius-rings-sdk
+!packages/sdp-private-channels
 docs
 infra
 scripts/*
