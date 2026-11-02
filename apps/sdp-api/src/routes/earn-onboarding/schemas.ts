@@ -58,5 +58,11 @@ export const onboardingCorrectionBodySchema = wisdomTreeCorrectionFieldsSchema
 export type OnboardingApplication = z.infer<typeof onboardingApplicationSchema>;
 
 export const onboardingWalletSchema = z
-  .object({ owner: z.string().refine(isAddress, "Invalid Solana address") })
+  .object({
+    owner: z.string().refine(isAddress, "Invalid Solana address"),
+    // Base58 Ed25519 signature over the scope-bound registration message
+    // (see wisdomTreeWalletRegistrationMessage). Proves the caller controls
+    // the address before it is claimed or sent to WisdomTree.
+    signature: z.string().min(1).max(88),
+  })
   .strict();

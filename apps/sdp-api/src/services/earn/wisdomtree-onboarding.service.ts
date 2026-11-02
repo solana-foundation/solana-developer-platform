@@ -10,6 +10,13 @@ import {
 } from "@sdp/earn/providers/wisdomtree/onboarding-schemas";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import type { CounterpartyEntityType } from "@sdp/types/counterparties";
+import {
+  address,
+  getBase58Encoder,
+  getPublicKeyFromAddress,
+  isSignatureBytes,
+  verifySignature,
+} from "@solana/kit";
 import type {
   EarnOnboardingCustomer,
   EarnOnboardingRepository,
@@ -48,6 +55,54 @@ function isConfirmedWalletRejection(error: unknown): boolean {
       error.code === "RATE_LIMITED" ||
       error.code === "PROVIDER_NOT_CONFIGURED")
   );
+}
+
+/**
+ * The exact bytes a wallet must sign to prove control of itself for this
+ * registration. The message binds every scope dimension (organization,
+ * project, environment, counterparty) plus the address, so one signature can
+ * never be replayed for another customer, project or wallet, and no challenge
+ * round trip is needed. Clients sign the UTF-8 text with the wallet's Ed25519
+ * key and send the base58 signature.
+ */
+export function wisdomTreeWalletRegistrationMessage(
+  scope: Pick<
+    EarnOnboardingScope,
+    "environment" | "organizationId" | "projectId" | "counterpartyId"
+  >,
+  owner: string
+): Uint8Array {
+  return new TextEncoder().encode(
+    [
+      "WisdomTree wallet registration",
+      `organization: ${scope.organizationId}`,
+      `project: ${scope.projectId}`,
+      `environment: ${scope.environment}`,
+      `counterparty: ${scope.counterpartyId}`,
+      `owner: ${owner}`,
+    ].join("\n")
+  );
+}
+
+/** Whether `signature` is the wallet's own valid Ed25519 signature over the scope-bound registration message. */
+async function provesWalletOwnership(
+  scope: EarnOnboardingScope,
+  owner: string,
+  signature: string
+): Promise<boolean> {
+  try {
+    const signatureBytes = getBase58Encoder().encode(signature);
+    // An Ed25519 signature is always exactly 64 bytes; anything else cannot verify.
+    if (signatureBytes.length !== 64 || !isSignatureBytes(signatureBytes)) return false;
+    const publicKey = await getPublicKeyFromAddress(address(owner));
+    return await verifySignature(
+      publicKey,
+      signatureBytes,
+      wisdomTreeWalletRegistrationMessage(scope, owner)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** No PII is persisted. Only immutable identity links and encrypted upload references. */
@@ -221,10 +276,16 @@ export class WisdomTreeOnboardingService {
     };
   }
 
-  async registerWallet(scope: EarnOnboardingScope, owner: string) {
+  async registerWallet(scope: EarnOnboardingScope, owner: string, signature: string) {
     const { row, moderator } = await this.customer(scope);
     if (row.status !== "linked" || row.organization_guid === null)
       throw conflict("A linked business customer is required");
+    // Control of the address must be proven before anything is claimed or
+    // written. The claim is globally unique per environment and moderator
+    // registrations are accepted immediately, so an unproven caller could
+    // block the address's real owner forever.
+    if (!(await provesWalletOwnership(scope, owner, signature)))
+      throw badRequest("The wallet signature does not prove control of the address");
     if (!moderator.client_organizations.some((child) => child.guid === row.organization_guid)) {
       throw conflict("WisdomTree customer is not assigned to the configured moderator");
     }

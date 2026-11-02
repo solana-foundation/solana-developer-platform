@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { EARN_ONBOARDING_MAX_FILE_BYTES, onboardingUploadSchema } from "./schemas";
+import {
+  EARN_ONBOARDING_MAX_FILE_BYTES,
+  onboardingUploadSchema,
+  onboardingWalletSchema,
+} from "./schemas";
 
 describe("onboarding document upload schema", () => {
   const maxEncodedLength = 4 * Math.ceil(EARN_ONBOARDING_MAX_FILE_BYTES / 3);
@@ -30,5 +34,26 @@ describe("onboarding document upload schema", () => {
     for (const contentBase64 of ["QUJDRA", "QUJ=DA", "QUJD=", "=QUJ", "QU!D"]) {
       expect(onboardingUploadSchema.safeParse(upload(contentBase64)).success).toBe(false);
     }
+  });
+});
+
+describe("wallet registration schema", () => {
+  const wallet = {
+    owner: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+    signature: "1".repeat(87),
+  };
+
+  it("requires a signature next to the owner address", () => {
+    expect(onboardingWalletSchema.safeParse(wallet).success).toBe(true);
+    expect(onboardingWalletSchema.safeParse({ owner: wallet.owner }).success).toBe(false);
+  });
+
+  it("bounds the signature to the base58 encoding of 64 signature bytes", () => {
+    expect(onboardingWalletSchema.safeParse({ ...wallet, signature: "1".repeat(88) }).success).toBe(
+      true
+    );
+    expect(onboardingWalletSchema.safeParse({ ...wallet, signature: "1".repeat(89) }).success).toBe(
+      false
+    );
   });
 });

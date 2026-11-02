@@ -43,7 +43,7 @@ Responses use `Cache-Control: no-store`.
 | `GET /{counterpartyId}`                         | Live provider status and business correction requests; `claimed` means operator reconciliation is required.                    |
 | `POST /{counterpartyId}/documents`              | `{ documentType, filename, contentType, contentBase64 }`; one PDF/JPEG/PNG, up to 20 MiB decoded; returns `{ documentId }`.    |
 | `POST /{counterpartyId}/corrections/{reasonId}` | Answer one reason with `values`, `explanation`, `attested`, or a customer-scoped `documentId`. Answering does not resubmit.    |
-| `POST /{counterpartyId}/wallets`                | `{ owner }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. |
+| `POST /{counterpartyId}/wallets`                | `{ owner, signature }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. `signature` is the wallet's base58 Ed25519 signature over the scope-bound registration message, proving control of `owner` before anything is claimed. |
 
 Start from the current form's `submission_template`, use its choices exactly,
 and collect each applicant's actual agreement answers. Never infer agreement
@@ -66,6 +66,14 @@ Do not send masked/blank GET readback as a new application: it is display data,
 with numeric document references and redacted personal data. `submitted` and
 unfamiliar statuses never imply approval. Status webhooks are not available;
 poll conservatively. Only `active` businesses can register customer wallets.
+Wallet registration additionally requires a proof of control: the caller signs
+the deterministic scope-bound registration message (one line per organization,
+project, environment, counterparty and owner address) with the wallet's Ed25519
+key and posts the base58 `signature`. Because the address is globally unique
+per environment and moderator additions are accepted immediately, an unproven
+registration of someone else's address would block its real owner — so the
+signature is verified before any claim row is written or any provider call is
+made.
 
 ## Durable state and recovery
 
