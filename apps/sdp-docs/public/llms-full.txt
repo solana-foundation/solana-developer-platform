@@ -20511,10 +20511,6 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
   Destination wallet address.
 
-- **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
-
-  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.
-
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
   Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.

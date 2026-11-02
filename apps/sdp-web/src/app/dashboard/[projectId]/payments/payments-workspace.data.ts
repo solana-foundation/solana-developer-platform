@@ -518,9 +518,8 @@ export async function createTransfer(
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
-      ...(input.counterpartyAccountId
-        ? { counterpartyAccountId: input.counterpartyAccountId }
-        : {}),
+      // Left out of the body when absent: JSON.stringify drops an undefined value.
+      counterpartyAccountId: input.counterpartyAccountId,
       token: input.token,
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),

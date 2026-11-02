@@ -1102,7 +1102,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         walletId: operation.sourceWallet.walletId,
         sourceAddress: operation.sourceWallet.publicKey,
         destination: body.destination,
-        ...(counterpartyAccount ? { counterpartyAccountId: counterpartyAccount.id } : {}),
+        counterpartyAccountId: counterpartyAccount ? counterpartyAccount.id : null,
         // Named tokenMint: a bare "token" key is scrubbed as a credential by
         // the audit redaction policy, and a mint address is not a secret.
         tokenMint: operation.token,
