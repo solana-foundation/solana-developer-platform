@@ -83,8 +83,12 @@ customer against Connect's list/detail and the creating Moderator, then attach
 the proven saved GUID with the repository's compare-and-set `link`. Never
 match on name alone, delete a claim, guess a GUID, or create another business
 just to inspect progress. If no unique applicant can be proven, involve
-WisdomTree support. Wallet claims follow the same posture: verify the exact
-stored child's wallet registry before calling `linkWallet`. Requests naming a
+WisdomTree support. Wallet claims differ in one way: the owner address is
+unique per environment across every customer, so when WisdomTree does not
+accept the registration the unverified claim is released automatically —
+otherwise a rejected or timed-out registration would permanently block the
+real owner. Verify the exact stored child's wallet registry before calling
+`linkWallet`. Requests naming a
 new HTTP key cannot bypass these domain claims.
 
 SSNs, CDD answers, document bytes and provider readback are never stored.

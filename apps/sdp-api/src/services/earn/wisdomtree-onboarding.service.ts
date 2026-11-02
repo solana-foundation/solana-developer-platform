@@ -216,7 +216,15 @@ export class WisdomTreeOnboardingService {
       throw conflict("WisdomTree customer verification is not active");
     if (!(await this.repository.claimWallet(scope, owner)))
       throw conflict("Wallet onboarding already claimed; reconcile before retrying");
-    await this.provider.registerSolanaWallet(this.runtime, row.organization_guid, owner);
+    try {
+      await this.provider.registerSolanaWallet(this.runtime, row.organization_guid, owner);
+    } catch (error) {
+      // The address is globally unique per environment across every customer.
+      // Until WisdomTree accepts the registration the claim is unverified, and
+      // keeping it would permanently block the real owner from registering.
+      await this.repository.releaseWallet(scope, owner);
+      throw error;
+    }
     if (!(await this.repository.linkWallet(scope, owner)))
       throw internalError("Wallet registration could not be recorded; reconcile before retrying");
     return { counterpartyId: scope.counterpartyId, owner, registered: true };

@@ -59,6 +59,14 @@ export function createPostgresEarnOnboardingRepository(
         .first();
       return row !== null;
     },
+    async releaseWallet(scope, owner) {
+      // Only an unverified claim is deletable; a linked registration stands.
+      await db
+        .prepare(`DELETE FROM earn_onboarding_wallets
+        WHERE ${scopeWhere} AND owner_address = ? AND status = 'claimed'`)
+        .bind(...scopeValues(scope), owner)
+        .run();
+    },
     async linkWallet(scope, owner) {
       const row = await db
         .prepare(`UPDATE earn_onboarding_wallets SET status = 'linked'
