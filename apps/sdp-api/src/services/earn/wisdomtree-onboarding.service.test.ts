@@ -9,6 +9,7 @@ import type { EarnOnboardingScope } from "@/db/repositories/earn-onboarding.repo
 import { createPostgresEarnOnboardingRepository } from "@/db/repositories/earn-onboarding.repository.postgres";
 import { createEarnOnboardingCipher } from "@/lib/earn-onboarding-crypto";
 import { onboardingApplicationSchema } from "@/routes/earn-onboarding/schemas";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
@@ -37,7 +38,13 @@ const runtime = { environment: "sandbox" as const, env: {} };
 const cipher = createEarnOnboardingCipher({
   EARN_ONBOARDING_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 });
-const service = new WisdomTreeOnboardingService(repo, provider, cipher, runtime);
+const service = new WisdomTreeOnboardingService(
+  repo,
+  provider,
+  cipher,
+  runtime,
+  new CustodyConfigStore(db, env)
+);
 const draft = {
   application: {
     entity_type: "organization" as const,
@@ -83,6 +90,35 @@ async function activeBusiness() {
     onboarding_status: "active",
     sensitive_data_redacted: true,
   });
+}
+
+/** An active SDP custody wallet bound to one project, as a project-authorized flow creates it. */
+async function seedCustodyWallet(organizationId: string, projectId: string, publicKey: string) {
+  const configId = `cfg_${crypto.randomUUID()}`;
+  await db
+    .prepare(
+      "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Other', 'other-custody', 'individual', 'active') ON CONFLICT (id) DO NOTHING"
+    )
+    .bind(organizationId)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by) VALUES (?, ?, 'Other', 'other-custody', 'sandbox', 'active', ?) ON CONFLICT (id) DO NOTHING"
+    )
+    .bind(projectId, organizationId, TEST_USER.id)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status) VALUES (?, ?, ?, 'local', 'encrypted', 'active')"
+    )
+    .bind(configId, organizationId, projectId)
+    .run();
+  await db
+    .prepare(
+      "INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status) VALUES (?, ?, ?, ?, 'active')"
+    )
+    .bind(`cwlt_${crypto.randomUUID()}`, configId, `wtl_${crypto.randomUUID()}`, publicKey)
+    .run();
 }
 beforeEach(async () => {
   await seedTestDatabase(env);
@@ -369,6 +405,47 @@ describe("wallet onboarding and deposit admission", () => {
       /does not prove control/
     );
     expect(register).not.toHaveBeenCalled();
+  });
+  it("registers an SDP custody wallet of the same project without a signature", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
+    // Custody callers have no private key and no arbitrary-message signing
+    // endpoint: the wallet's authorized project binding is the alternative
+    // proof, because SDP generated and holds that key.
+    const custody = await generateKeyPairSigner();
+    await seedCustodyWallet(TEST_ORG.id, scope.projectId, custody.address);
+    await expect(service.registerWallet(scope, custody.address)).resolves.toMatchObject({
+      counterpartyId: scope.counterpartyId,
+      owner: custody.address,
+      registered: true,
+    });
+    expect(register).toHaveBeenCalledWith(runtime, childGuid, custody.address);
+    // The linked claim is what the custody deposit path's eligibility gate reads.
+    expect(await repo.findByWallet(scope, custody.address)).not.toBeNull();
+  });
+  it("accepts no custody binding outside the caller's organization and project", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet");
+    const custody = await generateKeyPairSigner();
+    await seedCustodyWallet("org_other_custody", "prj_other_custody", custody.address);
+    await expect(service.registerWallet(scope, custody.address)).rejects.toThrow(
+      /custody wallet of this project/
+    );
+    expect(register).not.toHaveBeenCalled();
+    expect(await repo.findByWallet(scope, custody.address)).toBeNull();
+  });
+  it("still demands proof from an unbound address, claiming nothing", async () => {
+    await linkBusiness();
+    await activeBusiness();
+    const register = vi.spyOn(provider, "registerSolanaWallet");
+    const wallet = await generateKeyPairSigner();
+    await expect(service.registerWallet(scope, wallet.address)).rejects.toThrow(
+      /custody wallet of this project/
+    );
+    expect(register).not.toHaveBeenCalled();
+    expect(await repo.findByWallet(scope, wallet.address)).toBeNull();
   });
   it("claims a wallet once, then passes only its stored child context to admission", async () => {
     await linkBusiness();

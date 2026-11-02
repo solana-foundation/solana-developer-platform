@@ -61,8 +61,12 @@ export const onboardingWalletSchema = z
   .object({
     owner: z.string().refine(isAddress, "Invalid Solana address"),
     // Base58 Ed25519 signature over the scope-bound registration message
-    // (see wisdomTreeWalletRegistrationMessage). Proves the caller controls
-    // the address before it is claimed or sent to WisdomTree.
-    signature: z.string().min(1).max(88),
+    // (see wisdomTreeWalletRegistrationMessage). Required for external
+    // wallets: it proves the caller controls the address before it is
+    // claimed or sent to WisdomTree. An SDP custody wallet of the same
+    // project omits it — its authorized project binding is the proof,
+    // because SDP holds that wallet's keys and only a project-authorized
+    // caller can create the binding.
+    signature: z.string().min(1).max(88).optional(),
   })
   .strict();

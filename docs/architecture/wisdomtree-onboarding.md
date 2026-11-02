@@ -36,14 +36,14 @@ writes take `earn.execute` and a required `Idempotency-Key`. The project sets
 the environment; callers cannot supply provider GUIDs or change parentage.
 Responses use `Cache-Control: no-store`.
 
-| Method and path                                 | Behavior                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /forms/{entityType}`                       | Current `business` or `individual` form, including `can_create`, template, choices, CDD conditions and agreements.                                                                                                                                                                               |
-| `POST /{counterpartyId}`                        | `{ application, documents? }`: create KYC, or save/submit the same business application.                                                                                                                                                                                                         |
-| `GET /{counterpartyId}`                         | Live provider status and business correction requests; `claimed` means operator reconciliation is required.                                                                                                                                                                                      |
-| `POST /{counterpartyId}/documents`              | `{ documentType, filename, contentType, contentBase64 }`; one PDF/JPEG/PNG, up to 20 MiB decoded; returns `{ documentId }`.                                                                                                                                                                      |
-| `POST /{counterpartyId}/corrections/{reasonId}` | Answer one reason with `values`, `explanation`, `attested`, or a customer-scoped `documentId`. Answering does not resubmit.                                                                                                                                                                      |
-| `POST /{counterpartyId}/wallets`                | `{ owner, signature }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. `signature` is the wallet's base58 Ed25519 signature over the scope-bound registration message, proving control of `owner` before anything is claimed. |
+| Method and path                                 | Behavior                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /forms/{entityType}`                       | Current `business` or `individual` form, including `can_create`, template, choices, CDD conditions and agreements.                                                                                                                                                                                                                                                          |
+| `POST /{counterpartyId}`                        | `{ application, documents? }`: create KYC, or save/submit the same business application.                                                                                                                                                                                                                                                                                    |
+| `GET /{counterpartyId}`                         | Live provider status and business correction requests; `claimed` means operator reconciliation is required.                                                                                                                                                                                                                                                                 |
+| `POST /{counterpartyId}/documents`              | `{ documentType, filename, contentType, contentBase64 }`; one PDF/JPEG/PNG, up to 20 MiB decoded; returns `{ documentId }`.                                                                                                                                                                                                                                                 |
+| `POST /{counterpartyId}/corrections/{reasonId}` | Answer one reason with `values`, `explanation`, `attested`, or a customer-scoped `documentId`. Answering does not resubmit.                                                                                                                                                                                                                                                 |
+| `POST /{counterpartyId}/wallets`                | `{ owner, signature? }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. Proof of control of `owner` is required before anything is claimed: a base58 Ed25519 `signature` over the scope-bound registration message, or `owner`'s authorized binding as an active SDP custody wallet of the same project. |
 
 Start from the current form's `submission_template`, use its choices exactly,
 and collect each applicant's actual agreement answers. Never infer agreement
@@ -66,14 +66,19 @@ Do not send masked/blank GET readback as a new application: it is display data,
 with numeric document references and redacted personal data. `submitted` and
 unfamiliar statuses never imply approval. Status webhooks are not available;
 poll conservatively. Only `active` businesses can register customer wallets.
-Wallet registration additionally requires a proof of control: the caller signs
-the deterministic scope-bound registration message (one line per organization,
-project, environment, counterparty and owner address) with the wallet's Ed25519
-key and posts the base58 `signature`. Because the address is globally unique
-per environment and moderator additions are accepted immediately, an unproven
-registration of someone else's address would block its real owner — so the
-signature is verified before any claim row is written or any provider call is
-made.
+Wallet registration additionally requires a proof of control. An external
+wallet signs the deterministic scope-bound registration message (one line per
+organization, project, environment, counterparty and owner address) with its
+Ed25519 key and posts the base58 `signature`. An SDP-managed custody wallet
+cannot sign arbitrary messages — its keys never leave SDP and no
+arbitrary-message signing endpoint exists — so an active custody wallet bound
+to the same organization and project is accepted instead: SDP generated and
+holds that key, and only a project-authorized caller reaches this route. A
+custody binding of another project or organization proves nothing. Because the
+address is globally unique per environment and moderator additions are
+accepted immediately, an unproven registration of someone else's address would
+block its real owner — so the proof is verified before any claim row is
+written or any provider call is made.
 
 ## Durable state and recovery
 
