@@ -36,9 +36,20 @@ const ROTATIONS = [
   },
   {
     flag: "rotate-token-ops",
-    token: "/freeze",
-    prefix: "/",
-    values: ["freeze", "unfreeze", "pause", "seize", "force-burn", "mint", "burn"],
+    token: "freeze-account",
+    // Values are full action segments: freeze/unfreeze end in `-account`, and
+    // the custody-signed ops (seize, force-burn, mint, burn) live under
+    // `/execute`. Keep them in sync with the live issuance routes.
+    prefix: "",
+    values: [
+      "freeze-account",
+      "unfreeze-account",
+      "pause",
+      "seize/execute",
+      "force-burn/execute",
+      "mint/execute",
+      "burn/execute",
+    ],
   },
 ] as const satisfies readonly Rotation[];
 
