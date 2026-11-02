@@ -248,11 +248,11 @@ describe("OpenAPI spec", () => {
         "GET /v1/earn/external-wallet/movements",
         "GET /v1/earn/external-wallet/movements/{movementId}",
         "GET /v1/earn/external-wallet/earnings",
-        "POST /v1/earn/external-wallet/deposit-transactions",
-        "POST /v1/earn/external-wallet/deposits",
+        "POST /v1/earn/deposits/build-unsigned-transaction",
+        "POST /v1/earn/deposits/submit-signed-transaction",
         "POST /v1/earn/external-wallet/withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-transactions",
-        "POST /v1/earn/external-wallet/withdrawals",
+        "POST /v1/earn/withdrawals/build-unsigned-transaction",
+        "POST /v1/earn/withdrawals/submit-signed-transaction",
         "POST /v1/earn/external-wallet/withdrawal-options",
         "POST /v1/earn/external-wallet/queued-withdrawal-previews",
         "POST /v1/earn/external-wallet/withdrawal-request-transactions",
@@ -304,7 +304,7 @@ describe("OpenAPI spec", () => {
     ).toContain("sharesOut");
 
     const withdrawalBuildRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/withdrawals/build-unsigned-transaction"]?.post?.requestBody
     );
     expect(withdrawalBuildRequest.required).toEqual(
       expect.arrayContaining(["positionId", "shares"])
@@ -318,8 +318,8 @@ describe("OpenAPI spec", () => {
     ).toContain('"unlockTimestamp"');
 
     for (const path of [
-      "/v1/earn/external-wallet/deposit-transactions",
-      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/deposits/build-unsigned-transaction",
+      "/v1/earn/withdrawals/build-unsigned-transaction",
     ]) {
       expect(JSON.stringify(publicDocument.paths?.[path]?.post?.responses?.["200"])).toContain(
         '"sponsored"'
@@ -327,7 +327,7 @@ describe("OpenAPI spec", () => {
     }
 
     const submitRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/external-wallet/deposits"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/deposits/submit-signed-transaction"]?.post?.requestBody
     );
     const signedTransactionExample = submitRequest.properties?.signedTransaction?.example;
     expect(signedTransactionExample).toEqual(expect.any(String));
@@ -569,8 +569,8 @@ describe("OpenAPI spec", () => {
   it("documents the 422 SIGNING_REJECTED response on sponsored submit operations", () => {
     const doc = createOpenApiDocument();
     const sponsored = [
-      ["/v1/earn/external-wallet/deposits", "post"],
-      ["/v1/earn/external-wallet/withdrawals", "post"],
+      ["/v1/earn/deposits/submit-signed-transaction", "post"],
+      ["/v1/earn/withdrawals/submit-signed-transaction", "post"],
       ["/v1/payments/transfers", "post"],
       ["/v1/issuance/tokens/{tokenId}/mint", "post"],
       ["/v1/dvp/trades/{tradeId}/settle", "post"],

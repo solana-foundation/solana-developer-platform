@@ -82,7 +82,7 @@ describe("corsMiddleware", () => {
 
   it("refuses a cross-origin credentialed preflight to a money route in development", async () => {
     const app = buildApp("development");
-    const res = await app.request("/v1/earn/vault-withdrawals", {
+    const res = await app.request("/v1/earn/withdrawals/execute", {
       method: "OPTIONS",
       headers: {
         Origin: "https://attacker.example",
@@ -97,7 +97,7 @@ describe("corsMiddleware", () => {
 
   it("passes a preflight from an allowed origin in development without credentials", async () => {
     const app = buildApp("development");
-    const res = await app.request("/v1/earn/vault-withdrawals", {
+    const res = await app.request("/v1/earn/withdrawals/execute", {
       method: "OPTIONS",
       headers: {
         Origin: "http://localhost:3000",

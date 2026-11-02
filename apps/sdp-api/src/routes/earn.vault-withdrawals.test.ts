@@ -90,7 +90,7 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
 });
 
 /**
- * `POST /v1/earn/vault-withdrawals` and its reads — the gates, the exit-safety
+ * `POST /v1/earn/withdrawals/execute` and its reads — the gates, the exit-safety
  * ASYMMETRY, and the signed-movement read contract.
  *
  * The deliberate contrast with `earn.vault.test.ts` (the deposit route) is the
@@ -364,7 +364,7 @@ function postVaultWithdrawal(
 ) {
   const key = options.idempotencyKey === undefined ? crypto.randomUUID() : options.idempotencyKey;
   return app.request(
-    "/v1/earn/vault-withdrawals",
+    "/v1/earn/withdrawals/execute",
     {
       method: "POST",
       headers: {
@@ -412,7 +412,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
+describe("POST /v1/earn/withdrawals/execute — custody release channel", () => {
   it("refuses an out-of-channel wallet before signing a withdrawal", async () => {
     await seedAuth();
     await useConnectionWallet();
@@ -638,7 +638,7 @@ describe("vault exits outside the key's wallet scope", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — request validation", () => {
+describe("POST /v1/earn/withdrawals/execute — request validation", () => {
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const positionId = await seedPosition();
@@ -760,7 +760,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
+describe("POST /v1/earn/withdrawals/execute — exit safety (ADR 0002)", () => {
   it("withdraws WITHOUT entitlement, surfacing, or a catalogue row", async () => {
     // Everything the deposit route requires is deliberately absent here: the
     // org has no earn provider override, `earn_strategies` holds no row for
@@ -924,7 +924,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — response shape", () => {
+describe("POST /v1/earn/withdrawals/execute — response shape", () => {
   it("serves one movement with its transaction signature", async () => {
     await seedAuth();
     const positionId = await seedPosition();
@@ -1192,7 +1192,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
+describe("POST /v1/earn/withdrawals/execute — the exit slippage floor", () => {
   it("passes the caller's minAmountOut through to the service verbatim", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "veda" });
@@ -1365,7 +1365,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () => {
+describe("POST /v1/earn/withdrawals/execute: audit ledger parity (PRO-1866)", () => {
   function auditRows() {
     return getDb(env)
       .prepare(

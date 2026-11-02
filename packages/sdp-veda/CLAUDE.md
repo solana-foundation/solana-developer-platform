@@ -77,7 +77,7 @@ re-checked, not remembered.
 
 `VedaVaultDirectClient` implements `buildVaultWithdrawal` (ADR 0003 — "instant
 lands first, and alone"): burn shares, receive the vault asset, one
-transaction, carried by the same `POST /vault-withdrawals` movement model
+transaction, carried by the same `POST /withdrawals/execute` movement model
 Kamino uses. `quoteVaultWithdrawal` (`supportsVaultWithdrawQuote`) is the read
 the exit floor derives from, exactly as `quoteVaultDeposit` feeds the deposit
 floor; `minAmountOut` is required for the same reason `minSharesOut` is.

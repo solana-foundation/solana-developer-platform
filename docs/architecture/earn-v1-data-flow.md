@@ -134,7 +134,7 @@ this shape was removed; the routes and contracts stay provider-neutral.)
 For the NON-CUSTODIAL (`vault_direct`) shape it no longer does. A K-Vault has no
 address to send to, so the only way money moves is SDP building an instruction,
 signing it with an organization custody wallet and submitting it. That path
-exists: `@sdp/kamino` builds the plan, `POST /v1/earn/vault-deposits` signs and
+exists: `@sdp/kamino` builds the plan, `POST /v1/earn/deposits/execute` signs and
 submits, and `earn_movements` ledgers it — written at intent BEFORE signing,
 because the chain has no request-id dedupe and a crash between signing and
 recording is otherwise unrecoverable. `earn_positions` records only WHICH
@@ -149,7 +149,7 @@ authoritative tables split by execution mechanism. PRO-1705 merged them into one
 dropped the mechanism-split tables, and ended dual writes. The unified tables are
 now the only movement and holdings sources.
 
-The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
+The withdraw counterpart landed with PRO-1702: `POST /v1/earn/withdrawals/execute`
 records one share-mint-denominated signed movement before broadcasting it, and
 the treasury dashboard's exit action drives it. The shared vault reconciliation
 sweep finishes an ambiguous or interrupted submission. Vault deposits open

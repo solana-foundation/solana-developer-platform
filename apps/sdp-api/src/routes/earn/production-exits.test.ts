@@ -12,9 +12,9 @@ import { isEarnExitOrRead } from "./exits";
  */
 const EARN_ENTRY_ROUTES = [
   "POST /v1/earn/vault-deposit-previews",
-  "POST /v1/earn/external-wallet/deposit-transactions",
-  "POST /v1/earn/vault-deposits",
-  "POST /v1/earn/external-wallet/deposits",
+  "POST /v1/earn/deposits/build-unsigned-transaction",
+  "POST /v1/earn/deposits/execute",
+  "POST /v1/earn/deposits/submit-signed-transaction",
   "POST /v1/earn/programs",
   "PUT /v1/earn/programs/:programId",
   // Cancelling a queued withdrawal puts the shares back, so it is a start

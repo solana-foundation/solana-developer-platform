@@ -1156,7 +1156,7 @@ function isEarnVaultDepositSettled(deposit: EarnVaultDepositRecord): boolean {
  * Watch how a submitted vault deposit actually ends, and report it to the
  * mounted product surface exactly once.
  *
- * `POST /vault-deposits` records the signed transaction BEFORE broadcasting it,
+ * `POST /deposits/execute` records the signed transaction BEFORE broadcasting it,
  * so its response is a receipt for a signature, not for a holding. Between that
  * receipt and the chain there are three real outcomes: landed, rejected, or
  * the blockhash expired without it ever landing. The detail read observes the

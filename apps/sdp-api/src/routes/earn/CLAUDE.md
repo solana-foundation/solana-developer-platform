@@ -558,7 +558,7 @@ custodies nothing: the position may be vault shares, a market receipt token, or
 a yield-bearing token, but there is no provider-managed wallet to provision or
 generic deposit address to fund. Money moves only through a provider-built
 transaction signed by the organization custody wallet or external owner.
-- `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
+- `POST /deposits/execute` — **build + simulate + sign + record + broadcast**, in
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
   required `Idempotency-Key` header; body `requestId` is rejected.
   Registered as
@@ -1172,7 +1172,7 @@ Every direction is BUILD then SUBMIT, so SDP records each movement or queued
 request before broadcast and can guarantee durable status and recovery
 (`handlers/external-wallet.ts`, `handlers/queued-withdrawals.ts`,
 `services/earn/vault-external-wallet.service.ts`):
-- `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
+- `POST /deposits/build-unsigned-transaction`: **build + simulate + compile,
   never sign.** Body `{strategyId, ownerAddress, feePayer?, amount,
   minSharesOut?}`. It enforces environment capability, the share floor
   (`assertDepositFloorPresent`), surfacing, entitlement, catalogue admission,

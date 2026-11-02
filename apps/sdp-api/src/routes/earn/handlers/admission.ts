@@ -20,7 +20,7 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
  * The ONE money-in admission predicate for an Earn catalogue row.
  *
  * Both money-in paths reach this: `POST /programs` (custodial allocations) and
- * `POST /vault-deposits` (non-custodial). Before it existed the two disagreed,
+ * `POST /deposits/execute` (non-custodial). Before it existed the two disagreed,
  * and the disagreement was not theoretical — the vault path resolved its row
  * with a bare `getStrategyById` and so would happily fund a `paused` or
  * `deprecated` strategy that `POST /programs` refused. `paused` is the operator
@@ -94,8 +94,8 @@ export function assertVaultDirectDepositStyle(provider: string): void {
 
 /**
  * The ONE vault money-in gate sequence for every handler that commits a
- * strategy to the vault-deposit path: `POST /vault-deposits` (custody),
- * `POST /external-wallet/deposit-transactions` (caller-signed), and
+ * strategy to the vault-deposit path: `POST /deposits/execute` (custody),
+ * `POST /deposits/build-unsigned-transaction` (caller-signed), and
  * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
  * the project provider rule, catalogue admission,

@@ -28,16 +28,16 @@ The dashboard's **Embedded Yield → Integrate** page generates a complete serve
 | --- | --- |
 | Discover strategies | `GET /v1/earn/strategies` |
 | Preview a deposit | `POST /v1/earn/vault-deposit-previews` |
-| Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
-| Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
+| Build a deposit | `POST /v1/earn/deposits/build-unsigned-transaction` |
+| Submit the signed deposit | `POST /v1/earn/deposits/submit-signed-transaction` |
 | Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
 | Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
 | Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
 | Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
 | Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
 | Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
-| Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
-| Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
+| Build a withdrawal | `POST /v1/earn/withdrawals/build-unsigned-transaction` |
+| Submit the signed withdrawal | `POST /v1/earn/withdrawals/submit-signed-transaction` |
 | Discover available withdrawal routes | `POST /v1/earn/external-wallet/withdrawal-options` |
 | Preview an asynchronous withdrawal | `POST /v1/earn/external-wallet/queued-withdrawal-previews` |
 | Build an asynchronous request | `POST /v1/earn/external-wallet/withdrawal-request-transactions` |
@@ -88,7 +88,7 @@ async function sdpFetch(path: string, init?: RequestInit) {
 **Build.** SDP simulates the deposit before handing anything out, so a wallet that cannot fund it fails here with a readable 400 instead of a landed, failed transaction.
 
 ```ts
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+const { transaction } = await sdpFetch("/v1/earn/deposits/build-unsigned-transaction", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({
@@ -119,7 +119,7 @@ A built transaction expires with its blockhash, about a minute. If the customer 
 **Submit.** The `Idempotency-Key` header is required. Reuse the same key when retrying: a retry returns the original movement with `replayed: true` instead of moving money twice, and each built transaction is consumable exactly once.
 
 ```ts
-const { deposit } = await sdpFetch("/v1/earn/external-wallet/deposits", {
+const { deposit } = await sdpFetch("/v1/earn/deposits/submit-signed-transaction", {
   method: "POST",
   headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
   body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
@@ -156,7 +156,7 @@ import {
 } from "@solana/kit";
 
 // 1. Build with your sponsor wallet as the fee payer.
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+const { transaction } = await sdpFetch("/v1/earn/deposits/build-unsigned-transaction", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({ strategyId: STRATEGY_ID, ownerAddress, amount, feePayer: SPONSOR_ADDRESS }),
@@ -235,13 +235,13 @@ const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
 });
 // { assetsOut, assetDecimals, blockingIssues }
 
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+const { transaction } = await sdpFetch("/v1/earn/withdrawals/build-unsigned-transaction", {
   method: "POST",
   headers: sdpHeaders(),
   body: JSON.stringify({ positionId, shares }), // + minAmountOut when withdrawalSlippage is non-null, + feePayer to sponsor
 });
 // customer signs (and your sponsor co-signs, if sponsoring), then submit:
-const { withdrawal } = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+const { withdrawal } = await sdpFetch("/v1/earn/withdrawals/submit-signed-transaction", {
   method: "POST",
   headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
   body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),

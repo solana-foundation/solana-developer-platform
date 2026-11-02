@@ -17,7 +17,7 @@ defaults described below are not yet synthesized.
 ## Context
 
 Nothing in the Earn money path bounds how much can move. The three custody
-routes (`POST /vault-deposits`, `/vault-withdrawals`,
+routes (`POST /deposits/execute`, `/vault-withdrawals`,
 `/programs/:programId/withdrawals`) run through `policyGate`, so an org's
 wallet policy or API-key control profile can impose amount limits, but only if
 the org wrote one: no active policy resolves to `IMPLICIT_DEFAULT_ALLOW_POLICY`.

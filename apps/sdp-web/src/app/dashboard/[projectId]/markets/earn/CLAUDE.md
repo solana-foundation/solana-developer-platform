@@ -139,8 +139,8 @@ nothing else; the program create still sends the body `requestId` form.
   The guide covers the sectioned **server-side, authenticated**
   EXTERNAL-WALLET flow:
   the WHOLE loop (PRO-1722 + PRO-1772), not just the deposit: build via
-  `POST /v1/earn/external-wallet/deposit-transactions`, the customer's wallet
-  signs, submit via `POST /v1/earn/external-wallet/deposits`, then poll
+  `POST /v1/earn/deposits/build-unsigned-transaction`, the customer's wallet
+  signs, submit via `POST /v1/earn/deposits/submit-signed-transaction`, then poll
   `GET …/movements/:movementId`, read `GET …/earnings?ownerAddress=`
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
   render a dash, never $0), list `GET …/movements?ownerAddress=` and

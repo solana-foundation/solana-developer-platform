@@ -220,7 +220,7 @@ describe.each([
     const positionId = await seedProductionPosition();
     const scopes = recordCallScopes(withdrawFromVault);
 
-    const res = await request(actor, "POST", "/v1/earn/vault-withdrawals", {
+    const res = await request(actor, "POST", "/v1/earn/withdrawals/execute", {
       positionId,
       shares: "10",
     });

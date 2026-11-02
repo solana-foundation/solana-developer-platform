@@ -487,7 +487,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
-      section: '"/vault-deposits",',
+      section: '"/deposits/execute",',
       before: "requestGate(",
       after: "createEarnVaultDeposit",
     },
@@ -517,7 +517,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/earn/index.ts",
-      section: '"/vault-withdrawals",',
+      section: '"/withdrawals/execute",',
       before: "requestGate(",
       after: "createEarnVaultWithdrawal",
     },

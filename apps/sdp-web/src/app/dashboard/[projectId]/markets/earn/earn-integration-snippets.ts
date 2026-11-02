@@ -302,7 +302,7 @@ ${depositSlippageInput}}: {
   feePayer?: string;
 ${depositSlippageType}}) {
 ${depositFloor}
-  const data = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
+  const data = await sdpFetch("/v1/earn/deposits/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -332,7 +332,7 @@ export async function submitEarnDeposit({
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/deposits", {
+  const data = await sdpFetch("/v1/earn/deposits/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
     body: JSON.stringify({ transactionId, signedTransaction }),
@@ -446,7 +446,7 @@ ${withdrawalSlippageInput}}: {
   feePayer?: string;
 ${withdrawalSlippageType}}) {
 ${withdrawalFloor}
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawals/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -469,7 +469,7 @@ export async function submitEarnWithdrawal({
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
+  const data = await sdpFetch("/v1/earn/withdrawals/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
     body: JSON.stringify({ transactionId, signedTransaction }),
