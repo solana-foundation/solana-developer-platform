@@ -54,7 +54,7 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
  * read: the anonymous limit applies whatever headers are sent, and no JWKS
  * verification runs.
  */
-export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
+export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/onboarding-allowlist"];
 
 /**
  * Per-key-hash flood guard the auth middleware applies before it reads the

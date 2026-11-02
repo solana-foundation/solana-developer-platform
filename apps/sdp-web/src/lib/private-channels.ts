@@ -33,7 +33,7 @@ export interface FetchPrivateChannelEventsParams {
 export function fetchPrivateChannelInstance(
   client: SdpApiClient
 ): Promise<PrivateChannelInstanceEnvelope> {
-  return client.fetch<PrivateChannelInstanceEnvelope>("/v1/private-channels/instance");
+  return client.fetch<PrivateChannelInstanceEnvelope>("/v1/private-channels/instance-connection");
 }
 
 /** Read SDP's token registry combined with the connected instance's on-chain allowlist. */
@@ -41,7 +41,7 @@ export async function fetchPrivateChannelTokenEligibility(
   client: SdpApiClient
 ): Promise<PrivateChannelTokenEligibility[]> {
   const { tokens } = await client.fetch<{ tokens: PrivateChannelTokenEligibility[] }>(
-    "/v1/private-channels/tokens"
+    "/v1/private-channels/token-eligibility"
   );
   return tokens;
 }
@@ -189,7 +189,7 @@ export async function fetchPrivateChannelEventReferences(
   client: SdpApiClient
 ): Promise<Record<string, string>> {
   const { references } = await client.fetch<PrivateChannelEventReferencesEnvelope>(
-    "/v1/private-channels/events/references"
+    "/v1/private-channels/events/reference-labels"
   );
   return references;
 }
@@ -231,10 +231,13 @@ export function addPrincipalChannelMembership(
   channelId: string,
   principalId: string
 ): Promise<unknown> {
-  return client.fetch(`/v1/private-channels/channels/${encodeURIComponent(channelId)}/principals`, {
-    method: "POST",
-    body: JSON.stringify({ principalId }),
-  });
+  return client.fetch(
+    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/principal-memberships`,
+    {
+      method: "POST",
+      body: JSON.stringify({ principalId }),
+    }
+  );
 }
 
 /** Remove a principal's access to a channel. */
@@ -244,7 +247,7 @@ export function removePrincipalChannelMembership(
   principalId: string
 ): Promise<unknown> {
   return client.fetch(
-    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/principals/${encodeURIComponent(principalId)}`,
+    `/v1/private-channels/channels/${encodeURIComponent(channelId)}/principal-memberships/${encodeURIComponent(principalId)}`,
     { method: "DELETE" }
   );
 }
@@ -298,7 +301,7 @@ export async function fetchVerifiedWallets(
   client: SdpApiClient
 ): Promise<PrivateChannelVerifiedWalletDto[]> {
   const { wallets } = await client.fetch<{ wallets: PrivateChannelVerifiedWalletDto[] }>(
-    "/v1/private-channels/wallets"
+    "/v1/private-channels/verified-wallets"
   );
   return wallets;
 }
@@ -324,7 +327,7 @@ export function deletePrivateChannelVerifiedWallet(
   client: SdpApiClient,
   pubkey: string
 ): Promise<unknown> {
-  return client.fetch(`/v1/private-channels/wallets/${encodeURIComponent(pubkey)}`, {
+  return client.fetch(`/v1/private-channels/verified-wallets/${encodeURIComponent(pubkey)}`, {
     method: "DELETE",
   });
 }
