@@ -61,6 +61,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
+import { resolvePrivateChannelCustodyLinks } from "./custody-links";
 import { resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
@@ -197,6 +198,7 @@ async function reserveWithdrawal(
     projectId: string;
     instanceId: string;
     walletId: string;
+    custodyWalletId: string;
     owner: string;
     destination: string;
     mint: string;
@@ -386,6 +388,7 @@ export async function createChannelWithdrawal(
     projectId,
     instanceId: instance.id,
     walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     owner,
     destination,
     mint,
@@ -530,7 +533,9 @@ export async function getChannelWithdrawal(
   scope: { organizationId: string; projectId: string; id: string }
 ): Promise<PrivateChannelWithdrawal | null> {
   const row = await createPrivateChannelWithdrawalRepository(env).getWithdrawalById(scope);
-  return row ? mapPrivateChannelWithdrawalRow(row) : null;
+  if (!row) return null;
+  const [linked] = await resolvePrivateChannelCustodyLinks(env, scope, [row]);
+  return mapPrivateChannelWithdrawalRow(linked);
 }
 
 /** List a project's withdrawals, newest first. */
@@ -539,5 +544,6 @@ export async function listChannelWithdrawals(
   scope: { organizationId: string; projectId: string }
 ): Promise<PrivateChannelWithdrawal[]> {
   const rows = await createPrivateChannelWithdrawalRepository(env).listWithdrawalsByProject(scope);
-  return rows.map(mapPrivateChannelWithdrawalRow);
+  const linked = await resolvePrivateChannelCustodyLinks(env, scope, rows);
+  return linked.map(mapPrivateChannelWithdrawalRow);
 }

@@ -229,7 +229,7 @@ afterEach(() => {
 
 describe("verifyPrivateChannelWallet", () => {
   it("verifies with a key that holds private_channels.execute", async () => {
-    const { row } = await verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID);
+    const { row } = await verifyPrivateChannelWallet(env, keyAuth, "prj_1", "cw_verify");
     expect(row.pubkey).toBe(PUBKEY);
     expect(signMessages).toHaveBeenCalledTimes(1);
   });
@@ -237,7 +237,7 @@ describe("verifyPrivateChannelWallet", () => {
     "refuses a key whose grants lack private_channels.execute: %j",
     async (grants) => {
       await expect(
-        verifyPrivateChannelWallet(env, { ...keyAuth, grants }, "prj_1", WALLET_ID)
+        verifyPrivateChannelWallet(env, { ...keyAuth, grants }, "prj_1", "cw_verify")
       ).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
       expect(getTransactionSigner).not.toHaveBeenCalled();
       expect(client.challengeWallet).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe("verifyPrivateChannelWallet", () => {
   ])("refuses at signing a key that %s after authentication", async (_change, sql, code) => {
     await getDb(env).prepare(sql).bind(keyAuth.apiKeyId).run();
     await expect(
-      verifyPrivateChannelWallet(env, keyAuth, "prj_1", WALLET_ID)
+      verifyPrivateChannelWallet(env, keyAuth, "prj_1", "cw_verify")
     ).rejects.toMatchObject({ code });
     expect(signMessages).not.toHaveBeenCalled();
     expect(client.verifyWallet).not.toHaveBeenCalled();
@@ -316,7 +316,7 @@ describe("verifyPrivateChannelWallet", () => {
       providerAccountFingerprint: "sha256:pc-verify",
     });
 
-    expect((await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).row.pubkey).toBe(
+    expect((await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).row.pubkey).toBe(
       PUBKEY
     );
     expect(getTransactionSigner).toHaveBeenCalledWith(WALLET_ID, PUBKEY);
@@ -327,15 +327,17 @@ describe("verifyPrivateChannelWallet", () => {
     client.verifyWallet.mockRejectedValue(
       new PrivateChannelError("CONFLICT", "wallet already verified")
     );
-    const { row } = await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
+    const { row } = await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify");
     expect(verifiedRepo.upsert).toHaveBeenCalledTimes(1);
     expect(row.pubkey).toBe(PUBKEY);
   });
   it("retries once on UNAUTHORIZED then propagates a persistent 401 without upserting", async () => {
     client.verifyWallet.mockRejectedValue(new PrivateChannelError("UNAUTHORIZED", "bad token"));
-    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
-      code: "UNAUTHORIZED",
-    });
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).rejects.toMatchObject(
+      {
+        code: "UNAUTHORIZED",
+      }
+    );
     expect(client.challengeWallet).toHaveBeenCalledTimes(2);
     expect(verifiedRepo.upsert).not.toHaveBeenCalled();
   });
@@ -349,7 +351,7 @@ describe("verifyPrivateChannelWallet", () => {
     client.verifyWallet
       .mockRejectedValueOnce(new PrivateChannelError("UNAUTHORIZED", "stale jwt"))
       .mockResolvedValueOnce({ pubkey: PUBKEY, created_at: "x" });
-    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
+    await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify");
     expect(client.challengeWallet).toHaveBeenCalledTimes(2);
     expect(client.challengeWallet).toHaveBeenNthCalledWith(1, "stale");
     expect(client.challengeWallet).toHaveBeenNthCalledWith(2, "fresh");
@@ -364,7 +366,7 @@ describe("verifyPrivateChannelWallet", () => {
   });
   it("opens the session through the shared cached handle layer", async () => {
     const openSpy = vi.spyOn(gatewayAuth, "openSpcAuthContext");
-    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
+    await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify");
     expect(openSpy).toHaveBeenCalledWith(
       env,
       "org_test_pc_wallet",
@@ -381,12 +383,13 @@ describe("verifyPrivateChannelWallet", () => {
     );
   });
   it("upserts the mirror scoped to the acting member and active instance", async () => {
-    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
+    await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify");
     expect(verifiedRepo.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "pcu_1",
         instanceId: "pci_1",
         walletId: WALLET_ID,
+        custodyWalletId: "cw_verify",
         pubkey: PUBKEY,
       })
     );
@@ -397,9 +400,11 @@ describe("verifyPrivateChannelWallet", () => {
       ...pcUser,
       disabled_at: "2026-08-31T00:00:00.000Z",
     });
-    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).rejects.toMatchObject(
+      {
+        code: "CONFLICT",
+      }
+    );
     expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
     expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
@@ -420,9 +425,11 @@ describe("verifyPrivateChannelWallet", () => {
     client.deleteWallet.mockRejectedValue(
       new PrivateChannelError("AUTH_UNAVAILABLE", "SPC unavailable")
     );
-    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).rejects.toMatchObject(
+      {
+        code: "CONFLICT",
+      }
+    );
     expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledTimes(1);
     expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
     expect(verifiedRepo.deletePendingRevocation).not.toHaveBeenCalled();
@@ -430,7 +437,7 @@ describe("verifyPrivateChannelWallet", () => {
   it("does not revoke SPC on an unrelated persistence failure for an active identity", async () => {
     verifiedRepo.upsert.mockRejectedValue(new Error("database unavailable"));
     principalRepo.getById.mockResolvedValue(pcUser);
-    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toThrow(
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).rejects.toThrow(
       "database unavailable"
     );
     expect(client.deleteWallet).not.toHaveBeenCalled();
@@ -442,7 +449,7 @@ describe("verifyPrivateChannelWallet", () => {
       is_default: false,
     } as PrivateChannelUserWithIdentityRow;
     principalRepo.getById.mockResolvedValue(selectedPrincipal);
-    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID, selectedPrincipal.id);
+    await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify", selectedPrincipal.id);
     expect(principalRepo.getById).toHaveBeenCalledWith(
       { organizationId: "org_test_pc_wallet", projectId: "prj_1" },
       selectedPrincipal.id
@@ -452,7 +459,7 @@ describe("verifyPrivateChannelWallet", () => {
     );
   });
   it("resolves the signer before requesting the SPC challenge", async () => {
-    await verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID);
+    await verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify");
     const signerOrder = getTransactionSigner.mock.invocationCallOrder[0];
     const challengeOrder = client.challengeWallet.mock.invocationCallOrder[0];
     expect(signerOrder).toBeLessThan(challengeOrder);
@@ -466,9 +473,11 @@ describe("verifyPrivateChannelWallet", () => {
   });
   it("does not refresh when signing fails inside the retry unit", async () => {
     signMessages.mockRejectedValueOnce(new Error("sign boom"));
-    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
-      code: "SIGNING_FAILED",
-    });
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", "cw_verify")).rejects.toMatchObject(
+      {
+        code: "SIGNING_FAILED",
+      }
+    );
     expect(spcSession.getSpcSession).toHaveBeenCalledTimes(1);
     expect(client.challengeWallet).toHaveBeenCalledTimes(1);
     expect(client.verifyWallet).not.toHaveBeenCalled();

@@ -25,6 +25,7 @@ function makeInput(overrides: Partial<CreateWithdrawalInput> = {}): CreateWithdr
     projectId: TEST_PROJECT_ID,
     instanceId: TEST_INSTANCE_ID,
     walletId: "wal_pcw_1",
+    custodyWalletId: "cw_repo_source",
     owner: "OwnerAddr1111111111111111111111111111111111",
     destination: "DestAddr11111111111111111111111111111111111",
     mint: "MintAddr11111111111111111111111111111111111",
@@ -107,6 +108,7 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
     expect(row).not.toBeNull();
     expect(row?.id).toMatch(/^wd_/);
     expect(row?.status).toBe("pending");
+    expect(row?.custody_wallet_id).toBe("cw_repo_source");
     expect(row?.signature).toBeNull();
     expect(row?.settlement_ref).toBeNull();
     expect(row?.context).toMatchObject({

@@ -20,7 +20,7 @@ function movement(id = "movement-1"): PrivateChannelDeposit & PrivateChannelWith
     instanceId: "instance",
     organizationId: "org",
     projectId: "project",
-    walletId: "wallet",
+    custodyWalletId: "wallet",
     depositor: "sender",
     recipient: "receiver",
     owner: "sender",

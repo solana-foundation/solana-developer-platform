@@ -81,7 +81,7 @@ describe("PrivateChannelReferenceRepository wallet project scope (postgres)", ()
       expect([...ownerReferences].sort((left, right) => left.key.localeCompare(right.key))).toEqual(
         [
           { kind: "wallet", key: OWNER_WALLET.publicKey, name: OWNER_WALLET.label },
-          { kind: "wallet", key: OWNER_WALLET.walletId, name: OWNER_WALLET.label },
+          { kind: "wallet", key: OWNER_WALLET.id, name: OWNER_WALLET.label },
         ].sort((left, right) => left.key.localeCompare(right.key))
       );
 

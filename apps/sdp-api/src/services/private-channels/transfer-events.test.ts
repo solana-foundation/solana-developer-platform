@@ -16,6 +16,7 @@ const TRANSFER: PrivateChannelTransferRow = {
   sender_private_channel_user_id: "pcu_sender",
   recipient_private_channel_user_id: "pcu_recipient",
   sender_wallet_id: "wallet_sender",
+  custody_wallet_id: "cw_sender",
   recipient_verified_wallet_id: "pcvw_recipient",
   sender: "7HkZpV2gWQJnJHJFQWsvzY2dxbCPmnbMAxcr9m1DF3sG",
   recipient: "4Nd1mYB7RzSdyWLdgS2vFfrZAzifV44vCV9NFV1mCMbV",
@@ -58,7 +59,7 @@ describe("emitTransferEvent", () => {
       status: "pending",
       payload: {
         transferId: "pct_event_test",
-        senderWalletId: TRANSFER.sender_wallet_id,
+        custodyWalletId: "cw_sender",
         sender: TRANSFER.sender,
         recipient: TRANSFER.recipient,
         amount: "2.5",

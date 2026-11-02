@@ -27,7 +27,7 @@ function toVerifiedWalletDto(
 ): PrivateChannelVerifiedWalletDto {
   return {
     id: row.id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id,
     pubkey: row.pubkey,
     verifiedAt: row.verified_at,
   };
@@ -90,7 +90,11 @@ export async function verifyWallet(c: ValidatedBodyContext<typeof verifyWalletBo
       },
       PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
       {
-        payload: { walletId: row.wallet_id, pubkey: row.pubkey, principalId: row.user_id },
+        payload: {
+          custodyWalletId: row.custody_wallet_id,
+          pubkey: row.pubkey,
+          principalId: row.user_id,
+        },
       }
     );
     return success(c, { wallet: toVerifiedWalletDto(row) });

@@ -204,6 +204,8 @@ describe.each(["deposit", "withdrawal", "transfer"] as const)(
     it("uses its prepared signer and persists the signature before sending", async () => {
       const result = await execute(kind);
       expect(result.status).toBe("confirmed");
+      expect(result.custodyWalletId).toBe("cw_execution");
+      expect(result).not.toHaveProperty("walletId");
       expect(result.signature).toBe(signedBeforeSend[0]);
       expect(signTransactions).toHaveBeenCalledTimes(1);
     });
@@ -211,6 +213,10 @@ describe.each(["deposit", "withdrawal", "transfer"] as const)(
     it("only lets one simultaneous request sign and send under the same key", async () => {
       const results = await Promise.all([execute(kind), execute(kind)]);
       expect(results[0].id).toBe(results[1].id);
+      expect(results.map((result) => result.custodyWalletId)).toEqual([
+        "cw_execution",
+        "cw_execution",
+      ]);
       expect(signTransactions).toHaveBeenCalledTimes(1);
       expect(solanaRpc.sendTransaction).toHaveBeenCalledTimes(1);
     });

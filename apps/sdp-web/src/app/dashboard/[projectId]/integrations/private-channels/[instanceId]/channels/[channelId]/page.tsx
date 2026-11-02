@@ -43,11 +43,11 @@ async function loadPrivateChannelDetail(
 
   const verifiedWallets = wallets.ok ? wallets.data.verified : [];
   const custodyWallets = wallets.ok ? wallets.data.custody : [];
-  const verifiedPubkeys = new Set(verifiedWallets.map((item) => item.pubkey));
+  const verifiedIds = new Set(verifiedWallets.map((item) => item.custodyWalletId));
   const canEnrollWallet =
     activeInstance.isActive &&
     wallets.ok &&
-    custodyWallets.some((wallet) => !verifiedPubkeys.has(wallet.publicKey));
+    custodyWallets.some((wallet) => !verifiedIds.has(wallet.id));
   let enrollDisabledReason: string | null = null;
   if (!activeInstance.isActive) {
     enrollDisabledReason = t("DashboardPrivateChannels.channelDetail.enrollNeedsConnection");

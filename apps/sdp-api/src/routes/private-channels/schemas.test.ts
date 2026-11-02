@@ -21,7 +21,7 @@ const WRITE_BODY_SCHEMAS = [
 /** Minimal valid body per schema; transfer alone requires a recipient. */
 function bodyFor(name: string, overrides: Record<string, unknown>) {
   return {
-    walletId: "wlt_1",
+    custodyWalletId: "cwlt_1",
     amount: "1.5",
     ...(name === "transfer" ? { recipientVerifiedWalletId: "pcvw_1" } : {}),
     ...overrides,
@@ -31,6 +31,14 @@ function bodyFor(name: string, overrides: Record<string, unknown>) {
 describe("private-channel write body schemas", () => {
   for (const [name, schema] of WRITE_BODY_SCHEMAS) {
     describe(name, () => {
+      it("rejects retired and mixed source fields", () => {
+        const current = bodyFor(name, {});
+        const { custodyWalletId, ...terms } = current;
+        expect(schema.safeParse({ ...terms, walletId: "provider_1" }).success).toBe(false);
+        expect(schema.safeParse({ ...current, walletId: "provider_1" }).success).toBe(false);
+        expect(schema.safeParse(current).success).toBe(true);
+      });
+
       it("rejects a malformed or over-scaled amount at the route boundary", () => {
         // Each of these used to reach the service and become a 500 on deposit and
         // withdrawal. Six decimals is the scale of the only allowlisted token.

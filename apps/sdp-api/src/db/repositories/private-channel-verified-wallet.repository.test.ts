@@ -100,13 +100,17 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       userId: PCU_ID,
       instanceId: instanceA,
       walletId: "wal_1b",
+      custodyWalletId: "cw_reverified",
       pubkey: PUBKEY_A,
     });
 
     const rows = await repo.listByUserAndInstance(PCU_ID, instanceA);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.pubkey).sort()).toEqual([PUBKEY_A, PUBKEY_B].sort());
-    expect(rows.find((r) => r.pubkey === PUBKEY_A)?.wallet_id).toBe("wal_1b");
+    expect(rows.find((r) => r.pubkey === PUBKEY_A)).toMatchObject({
+      wallet_id: "wal_1b",
+      custody_wallet_id: "cw_reverified",
+    });
   });
 
   it("returns a clear conflict when a wallet already identifies another principal", async () => {

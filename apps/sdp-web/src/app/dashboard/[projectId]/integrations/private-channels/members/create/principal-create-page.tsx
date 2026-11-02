@@ -141,7 +141,7 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
             iconLeft={<WalletCardsIcon />}
           >
             {wallets.map((wallet) => (
-              <SelectItem key={wallet.walletId} value={wallet.walletId}>
+              <SelectItem key={wallet.id} value={wallet.id}>
                 {walletLabel(wallet)}
               </SelectItem>
             ))}

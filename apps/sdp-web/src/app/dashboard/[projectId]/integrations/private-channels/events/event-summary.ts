@@ -19,7 +19,7 @@ interface PrivateChannelEventSummaryIds {
   depositId?: string;
   withdrawalId?: string;
   transferId?: string;
-  walletId?: string;
+  custodyWalletId?: string;
   privateChannelUserId?: string;
   targetUserId?: string;
   membershipId?: string;
@@ -96,7 +96,7 @@ const ID_KEYS = [
   "depositId",
   "withdrawalId",
   "transferId",
-  "walletId",
+  "custodyWalletId",
   "privateChannelUserId",
   "targetUserId",
   "membershipId",

@@ -79,14 +79,14 @@ export function movementAnswer(
  * server considers identical and let it move funds twice.
  */
 export function privateChannelDepositRequestFingerprint(input: {
-  walletId: string;
+  custodyWalletId: string;
   mint: string | undefined;
   amount: string;
   recipient: string | undefined;
 }): string {
   return JSON.stringify([
     "deposit",
-    input.walletId,
+    input.custodyWalletId,
     input.mint ?? null,
     input.amount,
     input.recipient ?? null,
@@ -95,14 +95,14 @@ export function privateChannelDepositRequestFingerprint(input: {
 
 /** The withdrawal's mirror; `destination` is what the release is paid to. */
 export function privateChannelWithdrawalRequestFingerprint(input: {
-  walletId: string;
+  custodyWalletId: string;
   mint: string | undefined;
   amount: string;
   destination: string | undefined;
 }): string {
   return JSON.stringify([
     "withdrawal",
-    input.walletId,
+    input.custodyWalletId,
     input.mint ?? null,
     input.amount,
     input.destination ?? null,
@@ -115,7 +115,7 @@ export function privateChannelWithdrawalRequestFingerprint(input: {
  */
 export function privateChannelTransferRequestFingerprint(input: {
   channelId: string;
-  walletId: string;
+  custodyWalletId: string;
   recipientVerifiedWalletId: string;
   mint: string | undefined;
   amount: string;
@@ -123,7 +123,7 @@ export function privateChannelTransferRequestFingerprint(input: {
   return JSON.stringify([
     "transfer",
     input.channelId,
-    input.walletId,
+    input.custodyWalletId,
     input.recipientVerifiedWalletId,
     input.mint ?? null,
     input.amount,

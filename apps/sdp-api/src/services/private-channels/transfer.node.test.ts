@@ -78,6 +78,7 @@ function makePendingRow(input: CreatePrivateChannelTransferInput): PrivateChanne
     sender_private_channel_user_id: input.senderPrivateChannelUserId,
     recipient_private_channel_user_id: input.recipientPrivateChannelUserId,
     sender_wallet_id: input.senderWalletId,
+    custody_wallet_id: input.custodyWalletId,
     recipient_verified_wallet_id: input.recipientVerifiedWalletId,
     sender: input.sender,
     recipient: input.recipient,
@@ -111,7 +112,6 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     onReplay: async (row) => {
       matchesTransferReplay(row, {
         channelId: input.channelId,
-        walletId: input.wallet.walletId,
         recipientVerifiedWalletId: input.recipient.verifiedWalletId,
         amount: input.amount,
         mint: input.mint,
@@ -358,6 +358,7 @@ describe("createChannelTransfer", () => {
       senderPrivateChannelUserId: auth.pcUserId,
       recipientPrivateChannelUserId: RECIPIENT_PC_USER_ID,
       senderWalletId: wallet.walletId,
+      custodyWalletId: wallet.id,
       recipientVerifiedWalletId: RECIPIENT_VERIFIED_WALLET_ID,
       sender: senderSigner.address,
       recipient,

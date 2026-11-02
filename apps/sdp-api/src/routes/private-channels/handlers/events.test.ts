@@ -5,9 +5,10 @@ import {
   type PrivateChannelEventListEnvelope,
 } from "@sdp/types/private-channels";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresPrivateChannelEventRepository } from "@/db/repositories/private-channel-event.repository.postgres";
+import { createPostgresPrivateChannelVerifiedWalletRepository } from "@/db/repositories/private-channel-verified-wallet.repository.postgres";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -237,7 +238,7 @@ describe("Private Channels event handlers", () => {
     expect(
       required(projectBody.data.events.find((event) => event.id === "pce_own_transfer")).payload
     ).toEqual({
-      senderWalletId: "wallet-id-a",
+      custodyWalletId: null,
       sender: "wallet-a",
       recipient: "wallet-b",
     });
@@ -251,6 +252,37 @@ describe("Private Channels event handlers", () => {
       "pce_admin_lifecycle",
     ]);
   });
+  it.each([
+    { payload: { custodyWalletId: 123 } },
+    { payload: { walletId: 123 } },
+    { payload: { pubkey: 123 } },
+    { payload: { depositId: 123 } },
+    { payload: { withdrawalId: 123 } },
+    { payload: { transferId: 123 } },
+    { payload: [] },
+  ])("refuses malformed saved event data: $payload", async ({ payload }) => {
+    await getDb(env)
+      .prepare("UPDATE private_channel_events SET payload = ?::jsonb WHERE id = ?")
+      .bind(JSON.stringify(payload), "pce_member_match")
+      .run();
+    const response = await buildApiKeyApp().request("/events", {}, env);
+    expect(response.status).toBe(500);
+  });
+  it.each([{ payload: {} }, { payload: { custodyWalletId: null } }])(
+    "preserves valid absent or null event identities: $payload",
+    async ({ payload }) => {
+      await getDb(env)
+        .prepare("UPDATE private_channel_events SET payload = ?::jsonb WHERE id = ?")
+        .bind(JSON.stringify(payload), "pce_member_match")
+        .run();
+      const response = await buildApiKeyApp().request("/events", {}, env);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toHaveProperty(
+        "data.events",
+        expect.arrayContaining([expect.objectContaining({ id: "pce_member_match", payload })])
+      );
+    }
+  );
   it("returns raw payloads only to organization admins", async () => {
     const app = await buildApp(USER_ID, "admin");
     const res = await app.request("/events", {}, env);
@@ -264,6 +296,143 @@ describe("Private Channels event handlers", () => {
       signature: "sig_private",
       adminOnly: "secret-value",
     });
+    expect(
+      required(body.data.events.find((candidate) => candidate.id === "pce_other_wallet_event"))
+        .payload
+    ).toEqual({ pubkey: "other-member-pubkey", custodyWalletId: null });
+  });
+  it("projects original movement evidence in bulk after explicit re-verification without rewriting events", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(`INSERT INTO custody_configs
+      (id, organization_id, project_id, provider, config_encrypted, status)
+      VALUES ('cfg_event_history', ?, ?, 'local', 'encrypted', 'archived')`)
+      .bind(ORGANIZATION_ID, PROJECT_ID)
+      .run();
+    await db
+      .prepare(`INSERT INTO custody_wallets
+      (id, custody_config_id, wallet_id, public_key, status) VALUES
+      ('cw_event_original', 'cfg_event_history', 'provider-original', 'original-address', 'archived'),
+      ('cw_event_current', 'cfg_event_history', 'provider-current', 'original-address', 'active')`)
+      .run();
+    const verifications = createPostgresPrivateChannelVerifiedWalletRepository(db);
+    const binding = {
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      userId: PRIVATE_CHANNEL_USER_ID,
+      instanceId: INSTANCE_ID,
+      pubkey: "original-address",
+    };
+    const original = await verifications.upsert({
+      ...binding,
+      walletId: "provider-original",
+      custodyWalletId: "cw_event_original",
+    });
+    const refreshed = await verifications.upsert({
+      ...binding,
+      walletId: "provider-current",
+      custodyWalletId: "cw_event_current",
+    });
+    expect(refreshed.id).toBe(original.id);
+    for (const [kind, source, destination] of [
+      ["deposits", "depositor", "recipient"],
+      ["withdrawals", "owner", "destination"],
+    ]) {
+      await db
+        .prepare(`INSERT INTO private_channel_${kind}
+        (id, organization_id, project_id, instance_id, wallet_id, ${source}, ${destination}, mint, amount)
+        VALUES ('movement_history', ?, ?, ?, 'provider-original', 'original-address', 'recipient-address', 'mint', '1.5')`)
+        .bind(ORGANIZATION_ID, PROJECT_ID, INSTANCE_ID)
+        .run();
+    }
+    await db
+      .prepare(`INSERT INTO private_channel_transfers
+      (id, organization_id, project_id, instance_id, channel_id, sender_private_channel_user_id,
+       recipient_private_channel_user_id, sender_wallet_id, recipient_verified_wallet_id, sender, recipient, mint, amount, status)
+      VALUES ('movement_history', ?, ?, ?, ?, ?, ?, 'provider-original', ?, 'original-address', 'recipient-address', 'mint', '1.5', 'pending')`)
+      .bind(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        INSTANCE_ID,
+        CHANNEL_ID,
+        PRIVATE_CHANNEL_USER_ID,
+        PRIVATE_CHANNEL_USER_ID,
+        original.id
+      )
+      .run();
+    const repository = createPostgresPrivateChannelEventRepository(db);
+    for (const [id, kind, movementId] of [
+      ["pce_history_a", "deposit", "movement_history"],
+      ["pce_history_b", "withdrawal", "movement_history"],
+      ["pce_history_c", "transfer", "movement_history"],
+      ["pce_history_missing", "deposit", "missing-row"],
+    ] as const) {
+      await repository.insert({
+        id,
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        instanceId: INSTANCE_ID,
+        channelId: CHANNEL_ID,
+        sdpUserId: USER_ID,
+        family: "transfer",
+        type: `transfer.${kind}.submitted`,
+        status: "pending",
+        occurredAt: "2026-07-31T12:00:00.000Z",
+        createdAt: NOW,
+        payload: {
+          [`${kind}Id`]: movementId,
+          senderWalletId: "provider-original",
+          sender: "original-address",
+          recipient: "recipient-address",
+          note: "keep provider-original in arbitrary text",
+        },
+      });
+    }
+    const app = await buildApp(USER_ID, "admin");
+    const queries = vi.spyOn(db, "prepare");
+    try {
+      const response = await app.request("/events?limit=4&family=transfer", {}, env);
+      // SAFETY: The local route's response is checked against the seeded event payloads below.
+      const { data } = (await response.json()) as { data: PrivateChannelEventListEnvelope };
+      expect(data.events.map((event) => event.id)).toEqual([
+        "pce_history_missing",
+        "pce_history_c",
+        "pce_history_b",
+        "pce_history_a",
+      ]);
+      expect(data.events.map((event) => event.payload)).toEqual(
+        [
+          { depositId: "missing-row", custodyWalletId: null },
+          { transferId: "movement_history", custodyWalletId: "cw_event_original" },
+          { withdrawalId: "movement_history", custodyWalletId: "cw_event_original" },
+          { depositId: "movement_history", custodyWalletId: "cw_event_original" },
+        ].map((identity) => ({
+          ...identity,
+          sender: "original-address",
+          recipient: "recipient-address",
+          note: "keep provider-original in arbitrary text",
+        }))
+      );
+      expect(data.hasMore).toBe(true);
+      expect(data.nextCursor).toEqual(expect.any(String));
+      const sql = queries.mock.calls.map(([statement]) => statement);
+      expect(sql.filter((statement) => /FROM custody_wallets\b/.test(statement))).toHaveLength(1);
+      expect(
+        sql.filter((statement) => /FROM private_channel_deposits\b/.test(statement))
+      ).toHaveLength(1);
+    } finally {
+      queries.mockRestore();
+    }
+    expect(
+      (
+        await repository.listByProject({
+          organizationId: ORGANIZATION_ID,
+          projectId: PROJECT_ID,
+          viewer: { scope: "all" },
+          limit: 100,
+        })
+      ).rows.find((row) => row.id === "pce_history_a")?.payload
+    ).toHaveProperty("senderWalletId", "provider-original");
   });
   it("hides another member's channel-less events from both feeds", async () => {
     const app = await buildApp(USER_ID, "member");

@@ -450,6 +450,7 @@ export async function createChannelTransfer(
     senderPrivateChannelUserId: input.gatewayAuth.pcUserId,
     recipientPrivateChannelUserId: input.recipient.privateChannelUserId,
     senderWalletId: input.wallet.walletId,
+    custodyWalletId: input.wallet.id,
     recipientVerifiedWalletId: input.recipient.verifiedWalletId,
     sender,
     recipient: recipientAddress,

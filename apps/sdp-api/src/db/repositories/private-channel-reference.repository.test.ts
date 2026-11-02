@@ -194,20 +194,22 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
       name: "Archived Ops",
     });
 
+    expect(byKey[WALLET_ID]).toBeUndefined();
+    expect(byKey[BLANK_LABEL_WALLET_ID]).toBeUndefined();
     expect(byKey[PUBLIC_KEY]).toEqual({
       kind: "wallet",
       key: PUBLIC_KEY,
       name: "Treasury Wallet",
     });
-    expect(byKey[WALLET_ID]).toEqual({
+    expect(byKey[CUSTODY_WALLET_ROW_ID]).toEqual({
       kind: "wallet",
-      key: WALLET_ID,
+      key: CUSTODY_WALLET_ROW_ID,
       name: "Treasury Wallet",
     });
     expect(byKey[BLANK_LABEL_PUBLIC_KEY]).toEqual({
       kind: "wallet",
       key: BLANK_LABEL_PUBLIC_KEY,
-      name: BLANK_LABEL_WALLET_ID,
+      name: BLANK_LABEL_WALLET_ROW_ID,
     });
 
     expect(byKey[PCU_A]).toEqual({ kind: "member", key: PCU_A, name: "Ada Lovelace" });
@@ -250,7 +252,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
 
     // Wallet labels stay visible — wallets:read is already held by members.
     expect(byKey[PUBLIC_KEY]?.name).toBe("Treasury Wallet");
-    expect(byKey[WALLET_ID]?.name).toBe("Treasury Wallet");
+    expect(byKey[CUSTODY_WALLET_ROW_ID]?.name).toBe("Treasury Wallet");
 
     // Token symbols and the visible instance resolve for channel members.
     expect(byKey[ISSUED_TOKEN_MINT]?.name).toBe("ITT");
@@ -273,7 +275,7 @@ describe("PrivateChannelReferenceRepository (postgres)", () => {
 
     const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
     expect(byKey[PUBLIC_KEY]).toBeUndefined();
-    expect(byKey[WALLET_ID]).toBeUndefined();
+    expect(byKey[CUSTODY_WALLET_ROW_ID]).toBeUndefined();
     expect(byKey[BLANK_LABEL_PUBLIC_KEY]).toBeUndefined();
     // Everything the caller may read still resolves.
     expect(byKey[CHANNEL_A]?.name).toBe("Treasury");

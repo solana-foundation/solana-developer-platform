@@ -35,7 +35,7 @@ export async function emitDepositEvent(
     status,
     payload: {
       depositId: deposit.id,
-      senderWalletId: deposit.wallet_id,
+      custodyWalletId: deposit.custody_wallet_id ?? null,
       sender: deposit.depositor,
       amount: deposit.amount,
       mint: deposit.mint,

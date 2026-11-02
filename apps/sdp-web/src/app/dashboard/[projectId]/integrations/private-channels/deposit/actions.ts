@@ -14,7 +14,7 @@ import {
 } from "@/lib/sdp-api";
 
 export interface CreateDepositInput {
-  walletId: string;
+  custodyWalletId: string;
   amount: string;
   /**
    * Selected token mint. Forwarded as-is: the API validates it against the
@@ -46,7 +46,7 @@ export type CreateDepositResult =
   | { ok: false; kind: "server"; message: string; answer: ApiAnswer };
 
 export async function createDepositAction(input: CreateDepositInput): Promise<CreateDepositResult> {
-  if (!input.walletId) {
+  if (!input.custodyWalletId) {
     return {
       ok: false,
       kind: "validation",
@@ -62,7 +62,7 @@ export async function createDepositAction(input: CreateDepositInput): Promise<Cr
     const deposit = await createPrivateChannelDeposit(
       client,
       {
-        walletId: input.walletId,
+        custodyWalletId: input.custodyWalletId,
         amount: input.amount,
         ...(input.mint ? { mint: input.mint } : {}),
         ...(input.recipient ? { recipient: input.recipient } : {}),

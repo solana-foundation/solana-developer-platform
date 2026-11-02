@@ -14,7 +14,7 @@ function makeTransfer(overrides: Partial<PrivateChannelTransfer> = {}): PrivateC
     projectId: "project_test",
     instanceId: "pci_test",
     channelId: "pch_test",
-    walletId: "wallet_sender",
+    custodyWalletId: "custody_sender",
     sender: "Sender1111111111111111111111111111111111",
     recipient: "Recipient11111111111111111111111111111111",
     mint: "Usdc111111111111111111111111111111111111",

@@ -22,15 +22,13 @@ export function intersectEligibleTransferChannels(
   return memberships.filter((membership) => activeChannelIds.has(membership.id));
 }
 
-/** Strict walletId + pubkey intersection prevents stale or other-user sources. */
+/** Exact internal ID + pubkey intersection prevents stale or sibling sources. */
 export function intersectVerifiedSourceWallets(
   signableWallets: CustodyWalletSummary[],
   actingUserVerifiedWallets: PrivateChannelVerifiedWalletDto[]
 ): CustodyWalletSummary[] {
   const verified = new Set(
-    actingUserVerifiedWallets.map((wallet) => `${wallet.walletId}\0${wallet.pubkey}`)
+    actingUserVerifiedWallets.map((wallet) => `${wallet.custodyWalletId}\0${wallet.pubkey}`)
   );
-  return signableWallets.filter((wallet) =>
-    verified.has(`${wallet.walletId}\0${wallet.publicKey}`)
-  );
+  return signableWallets.filter((wallet) => verified.has(`${wallet.id}\0${wallet.publicKey}`));
 }

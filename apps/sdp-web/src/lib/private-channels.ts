@@ -92,7 +92,7 @@ export function fetchPrivateChannelDeposit(
  */
 export function createPrivateChannelDeposit(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; mint?: string; recipient?: string },
+  body: { custodyWalletId: string; amount: string; mint?: string; recipient?: string },
   idempotencyKey: string
 ): Promise<PrivateChannelDeposit> {
   return client.fetch<PrivateChannelDeposit>("/v1/private-channels/deposits", {
@@ -121,7 +121,7 @@ export function fetchPrivateChannelWithdrawal(
  */
 export function createPrivateChannelWithdrawal(
   client: SdpApiClient,
-  body: { walletId: string; amount: string; mint?: string; destination?: string },
+  body: { custodyWalletId: string; amount: string; mint?: string; destination?: string },
   idempotencyKey: string
 ): Promise<PrivateChannelWithdrawal> {
   return client.fetch<PrivateChannelWithdrawal>("/v1/private-channels/withdrawals", {
@@ -151,7 +151,7 @@ export function createPrivateChannelTransfer(
   client: SdpApiClient,
   channelId: string,
   body: {
-    walletId: string;
+    custodyWalletId: string;
     recipientVerifiedWalletId: string;
     amount: string;
     /** Must be one the instance allows; omitting it uses its first allowed token. */
@@ -289,8 +289,8 @@ export async function fetchVerifiedSignableWallets(
     fetchCustodyWallets(client),
     fetchVerifiedWallets(client),
   ]);
-  const verifiedIds = new Set(verified.map((w) => w.walletId));
-  return custodyWallets.filter((w) => verifiedIds.has(w.walletId));
+  const verifiedIds = new Set(verified.map((w) => w.custodyWalletId));
+  return custodyWallets.filter((w) => verifiedIds.has(w.id));
 }
 
 /** The caller's custody wallets that have completed SPC verification, newest first. */

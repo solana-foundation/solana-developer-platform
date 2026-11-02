@@ -1,6 +1,7 @@
 import type { PrivateChannelDepositRow } from "@/db/repositories/private-channel-deposit.repository";
 import type { PrivateChannelTransferRow } from "@/db/repositories/private-channel-transfer.repository";
 import type { PrivateChannelWithdrawalRow } from "@/db/repositories/private-channel-withdrawal.repository";
+import { getAuth, requireProjectId } from "@/lib/auth";
 import { conflict, missingAction } from "@/lib/errors";
 import {
   buildPrivateChannelDepositFingerprint,
@@ -8,6 +9,7 @@ import {
   buildPrivateChannelWithdrawalFingerprint,
 } from "@/lib/idempotency";
 import { callerMayPerform } from "@/middleware/require-action";
+import { resolvePrivateChannelCustodyLinks } from "@/services/private-channels/custody-links";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { AppContext } from "./context";
 
@@ -30,8 +32,21 @@ type MovementRow =
 /** Replay and recovery authorize the historical source, never its replacement. */
 export async function authorizeMovementReplay<
   T extends { wallet: CustodyWallet; instance: { id: string } },
->(c: AppContext, row: MovementRow, authorizeWrite: () => Promise<T>): Promise<T> {
+>(
+  c: AppContext,
+  row: MovementRow,
+  custodyWalletId: string,
+  authorizeWrite: () => Promise<T>
+): Promise<T> {
   await requireMovementWrite(c);
+  const [original] = await resolvePrivateChannelCustodyLinks(
+    c.env,
+    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+    [row]
+  );
+  if (original.custody_wallet_id !== custodyWalletId) {
+    throw conflict("The original operation's source wallet cannot be authorized");
+  }
   const context = await authorizeWrite();
   const walletId = "sender_wallet_id" in row ? row.sender_wallet_id : row.wallet_id;
   const publicKey = "depositor" in row ? row.depositor : "owner" in row ? row.owner : row.sender;
@@ -48,7 +63,6 @@ export async function authorizeMovementReplay<
 export function matchesWithdrawalReplay(
   row: PrivateChannelWithdrawalRow,
   input: {
-    walletId: string;
     amount: string;
     mint?: string;
     /** Resolved by the access seam from the body, exactly as on the first request. */
@@ -56,15 +70,14 @@ export function matchesWithdrawalReplay(
   }
 ): void {
   if (
-    (input.walletId !== row.wallet_id && input.walletId !== row.owner) ||
     row.idempotency_fingerprint !==
-      buildPrivateChannelWithdrawalFingerprint({
-        instanceId: row.instance_id,
-        walletId: row.wallet_id,
-        destination: input.destination,
-        mint: input.mint ?? row.mint,
-        amount: input.amount,
-      })
+    buildPrivateChannelWithdrawalFingerprint({
+      instanceId: row.instance_id,
+      walletId: row.wallet_id,
+      destination: input.destination,
+      mint: input.mint ?? row.mint,
+      amount: input.amount,
+    })
   ) {
     throw conflict("Idempotency key already used with different request payload");
   }
@@ -74,23 +87,21 @@ export function matchesTransferReplay(
   row: PrivateChannelTransferRow,
   input: {
     channelId: string;
-    walletId: string;
     recipientVerifiedWalletId: string;
     amount: string;
     mint?: string;
   }
 ): void {
   if (
-    input.walletId !== row.sender_wallet_id ||
     row.idempotency_fingerprint !==
-      buildPrivateChannelTransferFingerprint({
-        instanceId: row.instance_id,
-        channelId: input.channelId,
-        walletId: input.walletId,
-        recipientVerifiedWalletId: input.recipientVerifiedWalletId,
-        mint: input.mint ?? row.mint,
-        amount: input.amount,
-      })
+    buildPrivateChannelTransferFingerprint({
+      instanceId: row.instance_id,
+      channelId: input.channelId,
+      walletId: row.sender_wallet_id,
+      recipientVerifiedWalletId: input.recipientVerifiedWalletId,
+      mint: input.mint ?? row.mint,
+      amount: input.amount,
+    })
   ) {
     throw conflict("Idempotency key already used with different request payload");
   }
@@ -99,7 +110,6 @@ export function matchesTransferReplay(
 export function matchesDepositReplay(
   row: PrivateChannelDepositRow,
   input: {
-    walletId: string;
     amount: string;
     mint?: string;
     /** Resolved by the access seam from the body, exactly as on the first request. */
@@ -107,15 +117,14 @@ export function matchesDepositReplay(
   }
 ): void {
   if (
-    (input.walletId !== row.wallet_id && input.walletId !== row.depositor) ||
     row.idempotency_fingerprint !==
-      buildPrivateChannelDepositFingerprint({
-        instanceId: row.instance_id,
-        walletId: row.wallet_id,
-        recipient: input.recipient,
-        mint: input.mint ?? row.mint,
-        amount: input.amount,
-      })
+    buildPrivateChannelDepositFingerprint({
+      instanceId: row.instance_id,
+      walletId: row.wallet_id,
+      recipient: input.recipient,
+      mint: input.mint ?? row.mint,
+      amount: input.amount,
+    })
   ) {
     throw conflict("Idempotency key already used with different request payload");
   }

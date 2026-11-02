@@ -206,7 +206,7 @@ function TransferFormState({
     submittedTransfer,
   } = state;
 
-  const selectedSource = sourceWallets.find((wallet) => wallet.walletId === walletId);
+  const selectedSource = sourceWallets.find((wallet) => wallet.id === walletId);
   const sourcePubkey = selectedSource?.publicKey;
   const recipientOptions = useMemo(
     () =>
@@ -365,7 +365,7 @@ function TransferFormState({
     // mints a new key.
     const requestPayload = {
       channelId,
-      walletId,
+      custodyWalletId: walletId,
       recipientVerifiedWalletId,
       amount: amount.trim(),
       mint: selectedToken?.mint,
@@ -611,7 +611,7 @@ function TransferFields(props: {
           }}
         >
           {props.sourceWallets.map((wallet) => (
-            <SelectItem key={wallet.walletId} value={wallet.walletId}>
+            <SelectItem key={wallet.id} value={wallet.id}>
               {walletLabel(wallet)}
             </SelectItem>
           ))}
