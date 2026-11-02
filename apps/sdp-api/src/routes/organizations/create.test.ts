@@ -17,6 +17,7 @@ import {
   stubClerkBackend,
 } from "@/test/helpers/clerk-backend";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
@@ -299,19 +300,20 @@ describe("POST /v1/organizations", () => {
 
   it("refuses a session naming an organization SDP links and a request with none, reaching Clerk for neither", async () => {
     const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, status) VALUES ('org_linked', 'Linked', 'linked', 'active')`
-        )
-        .bind(),
-      db
-        .prepare(
-          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-           VALUES ('aoi_linked', 'clerk', 'org_clerk_already_active', 'org_linked', 'linked')`
-        )
-        .bind(),
-    ]);
+    const creator = organizationCreator("org_linked");
+    await seedOrganization(db, {
+      id: "org_linked",
+      name: "Linked",
+      slug: "linked",
+      status: "active",
+      creator,
+    });
+    await db
+      .prepare(
+        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+         VALUES ('aoi_linked', 'clerk', 'org_clerk_already_active', 'org_linked', 'linked')`
+      )
+      .run();
     const withOrganization = await signTestClerkJwt({
       clerkUserId: CLERK_USER_ID,
       clerkOrgId: "org_clerk_already_active",
@@ -331,6 +333,6 @@ describe("POST /v1/organizations", () => {
     expect(anonymous.status).toBe(401);
     expect(clerk.requests).toEqual([]);
     expect(await db.queryMany("SELECT id FROM organizations")).toEqual([{ id: "org_linked" }]);
-    expect(await db.queryMany("SELECT id FROM users")).toEqual([]);
+    expect(await db.queryMany("SELECT id FROM users")).toEqual([{ id: creator.id }]);
   });
 });
