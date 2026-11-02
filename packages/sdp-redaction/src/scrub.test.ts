@@ -109,9 +109,9 @@ describe("scrubTelemetry", () => {
     // an echoed request body carries the end user without any object key.
     assert.equal(
       scrubTelemetryString(
-        `GET /v1/earn/external-wallet/positions?ownerAddress=${OWNER_ADDRESS}&strategyId=str_1`
+        `GET /v1/earn/positions/caller-signed?ownerAddress=${OWNER_ADDRESS}&strategyId=str_1`
       ),
-      "GET /v1/earn/external-wallet/positions?ownerAddress=[REDACTED]&strategyId=str_1"
+      "GET /v1/earn/positions/caller-signed?ownerAddress=[REDACTED]&strategyId=str_1"
     );
     assert.equal(
       scrubTelemetryString(

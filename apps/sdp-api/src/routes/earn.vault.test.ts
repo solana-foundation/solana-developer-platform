@@ -558,7 +558,7 @@ describe("POST /v1/earn/deposits/execute — catalogue admission", () => {
       error: { code: string; message: string };
     };
     expect(missingFloorBody.error.code).toBe("BAD_REQUEST");
-    expect(missingFloorBody.error.message).toContain("POST /v1/earn/vault-deposit-previews");
+    expect(missingFloorBody.error.message).toContain("POST /v1/earn/deposits/preview");
     expect(depositIntoVault).not.toHaveBeenCalled();
 
     const res = await postVaultDeposit(
@@ -1281,10 +1281,10 @@ describe("POST /v1/earn/deposits/execute — Veda", () => {
   });
 });
 
-describe("POST /v1/earn/vault-deposit-previews", () => {
+describe("POST /v1/earn/deposits/preview", () => {
   function postVaultDepositPreview(body: Record<string, unknown>) {
     return app.request(
-      "/v1/earn/vault-deposit-previews",
+      "/v1/earn/deposits/preview",
       {
         method: "POST",
         headers: {

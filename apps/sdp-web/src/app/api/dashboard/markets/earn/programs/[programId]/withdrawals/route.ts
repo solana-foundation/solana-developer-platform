@@ -14,7 +14,7 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.withdrawals.list",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}/withdrawals${programProxyQuery(request, { page: true })}`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}/withdrawals${programProxyQuery(request, { page: true })}`,
   });
 }
 
@@ -26,6 +26,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.withdrawals.create",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}/withdrawals/execute`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}/withdrawals/execute`,
   });
 }

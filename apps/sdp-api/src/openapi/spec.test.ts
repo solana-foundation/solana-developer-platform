@@ -245,23 +245,23 @@ describe("OpenAPI spec", () => {
       [
         "GET /v1/earn/strategies",
         "GET /v1/earn/strategies/{strategyId}",
-        "POST /v1/earn/vault-deposit-previews",
-        "GET /v1/earn/external-wallet/positions/summary",
-        "GET /v1/earn/external-wallet/positions",
-        "GET /v1/earn/external-wallet/movements",
-        "GET /v1/earn/external-wallet/movements/{movementId}",
-        "GET /v1/earn/external-wallet/earnings",
+        "POST /v1/earn/deposits/preview",
+        "GET /v1/earn/positions/caller-signed/project-summary",
+        "GET /v1/earn/positions/caller-signed",
+        "GET /v1/earn/movements/caller-signed",
+        "GET /v1/earn/movements/caller-signed/{movementId}",
+        "GET /v1/earn/earnings/caller-signed",
         "POST /v1/earn/deposits/build-unsigned-transaction",
         "POST /v1/earn/deposits/submit-signed-transaction",
-        "POST /v1/earn/external-wallet/withdrawal-previews",
+        "POST /v1/earn/withdrawals/caller-signed/preview",
         "POST /v1/earn/withdrawals/build-unsigned-transaction",
         "POST /v1/earn/withdrawals/submit-signed-transaction",
-        "POST /v1/earn/external-wallet/withdrawal-options",
-        "POST /v1/earn/external-wallet/queued-withdrawal-previews",
+        "POST /v1/earn/withdrawals/caller-signed/options",
+        "POST /v1/earn/withdrawal-requests/caller-signed/preview",
         "POST /v1/earn/withdrawal-requests/build-unsigned-transaction",
         "POST /v1/earn/withdrawal-requests/submit-signed-transaction",
-        "GET /v1/earn/external-wallet/withdrawal-requests",
-        "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "GET /v1/earn/withdrawal-requests/caller-signed",
+        "GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}",
         "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
         "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ].sort()
@@ -295,15 +295,13 @@ describe("OpenAPI spec", () => {
     }
 
     const depositPreviewRequest = getJsonSchema(
-      publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.requestBody
+      publicDocument.paths?.["/v1/earn/deposits/preview"]?.post?.requestBody
     );
     expect(depositPreviewRequest.required).toEqual(
       expect.arrayContaining(["strategyId", "amount"])
     );
     expect(
-      JSON.stringify(
-        publicDocument.paths?.["/v1/earn/vault-deposit-previews"]?.post?.responses?.["200"]
-      )
+      JSON.stringify(publicDocument.paths?.["/v1/earn/deposits/preview"]?.post?.responses?.["200"])
     ).toContain("sharesOut");
 
     const withdrawalBuildRequest = getJsonSchema(
@@ -316,7 +314,7 @@ describe("OpenAPI spec", () => {
 
     expect(
       JSON.stringify(
-        publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
+        publicDocument.paths?.["/v1/earn/positions/caller-signed"]?.get?.responses?.["200"]
       )
     ).toContain('"unlockTimestamp"');
 
@@ -359,12 +357,12 @@ describe("OpenAPI spec", () => {
 
     expect(referencedPaths).toEqual(
       expect.arrayContaining([
-        "/v1/earn/external-wallet/withdrawal-options",
-        "/v1/earn/external-wallet/queued-withdrawal-previews",
+        "/v1/earn/withdrawals/caller-signed/options",
+        "/v1/earn/withdrawal-requests/caller-signed/preview",
         "/v1/earn/withdrawal-requests/build-unsigned-transaction",
         "/v1/earn/withdrawal-requests/submit-signed-transaction",
-        "/v1/earn/external-wallet/withdrawal-requests",
-        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "/v1/earn/withdrawal-requests/caller-signed",
+        "/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}",
         "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
         "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ])
@@ -404,7 +402,7 @@ describe("OpenAPI spec", () => {
     }
 
     const options = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
+      doc.paths?.["/v1/earn/withdrawals/caller-signed/options"]?.post?.responses?.["200"]
     );
     expect(options.properties?.data?.properties?.parRedemption).toMatchObject({
       nullable: true,
@@ -419,7 +417,7 @@ describe("OpenAPI spec", () => {
     });
 
     const preview = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
+      doc.paths?.["/v1/earn/withdrawal-requests/caller-signed/preview"]?.post?.responses?.["200"]
     );
     const operatorPreview = preview.properties?.data?.anyOf?.find((variant) =>
       variant.properties?.mechanism?.enum?.includes("operatorRedemption")
@@ -429,7 +427,7 @@ describe("OpenAPI spec", () => {
     );
 
     const record = getJsonSchema(
-      doc.paths?.["/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}"]?.get
+      doc.paths?.["/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}"]?.get
         ?.responses?.["200"]
     );
     const recordVariants = record.properties?.data?.properties?.withdrawalRequest?.anyOf ?? [];

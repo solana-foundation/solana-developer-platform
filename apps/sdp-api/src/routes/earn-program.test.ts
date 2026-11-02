@@ -307,7 +307,7 @@ async function requestEarnAsClerk(
   );
 }
 
-const PROGRAMS_PATH = "/v1/earn/programs";
+const PROGRAMS_PATH = "/v1/earn/portfolio-accounts";
 const programPath = (programId: string, suffix: string) => `${PROGRAMS_PATH}/${programId}${suffix}`;
 
 const createProgramBody = (extra: Record<string, unknown>) => ({
@@ -402,7 +402,7 @@ afterEach(async () => {
   await clearKVStores(env);
 });
 
-describe("Earn program — POST /programs (create) and PUT /programs/:id (re-target)", () => {
+describe("Earn program — POST /portfolio-accounts (create) and PUT /portfolio-accounts/:id/allocation (re-target)", () => {
   it("creates a program, then re-targets that program in place", async () => {
     await seedAuth({ entitleGround: true });
     await seedUpshiftStrategy({ environment: "sandbox" });
@@ -447,7 +447,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -492,7 +492,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
         requestId: retargetRequestId,
@@ -520,7 +520,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     const headerKey = "retarget-9f2b";
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       { allocations: VALID_ALLOCATIONS },
       { "Idempotency-Key": headerKey }
     );
@@ -531,7 +531,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const both = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       { allocations: VALID_ALLOCATIONS, requestId: crypto.randomUUID() },
       { "Idempotency-Key": headerKey }
     );
@@ -547,7 +547,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const unentitled = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -564,7 +564,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const noCredentials = await requestEarn(
       "PUT",
-      programPath(reseeded.id, ""),
+      programPath(reseeded.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -1280,7 +1280,7 @@ describe("Earn program — live reads", () => {
   it.each<[string, string, string, Record<string, unknown> | undefined]>([
     ["program", "GET", "", undefined],
     ["deposits", "GET", "/deposits", undefined],
-    ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
+    ["withdrawal preview", "POST", "/withdrawals/preview", { amountUsd: "25.50", token: "usdc" }],
   ])("404s another project's program on %s", async (_name, method, suffix, body) => {
     await seedAuth({ entitleGround: true });
     const program = await seedProgramWallet({});
@@ -1432,7 +1432,7 @@ describe("Earn program — un-surfaced provider", () => {
 
     const retarget = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -1463,7 +1463,7 @@ describe("Earn program — un-surfaced provider", () => {
 
     const res = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: [
           { token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] },
@@ -1493,7 +1493,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const previewRes = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       {
         amountUsd: "25.50",
         token: "usdc",
@@ -1555,7 +1555,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawal-preview"),
+        programPath(program.id, "/withdrawals/preview"),
         {
           token: "usdc",
         },
@@ -1603,7 +1603,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawal-preview"),
+        programPath(program.id, "/withdrawals/preview"),
         {
           token: "usdc",
         },
@@ -2052,7 +2052,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(getWithdrawal).not.toHaveBeenCalled();
   });
 
-  describe("GET /programs/:programId/withdrawals — the ledger list", () => {
+  describe("GET /portfolio-accounts/:programId/withdrawals — the ledger list", () => {
     it("returns the house list envelope from the ledger, newest first", async () => {
       await seedAuth({ entitleGround: true });
       const program = await seedProgramWallet({});
@@ -2267,7 +2267,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     const res = await requestAsWalletScopedKey(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       { token: "usdc" }
     );
 
@@ -2381,7 +2381,7 @@ describe("Earn program — metered quotas", () => {
 
     const liquidity = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       {
         token: "usdc",
       },

@@ -42,7 +42,7 @@ describe("dashboard queued-withdrawal request proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_withdrawal_requests.list",
-      path: "/v1/earn/vault-withdrawal-requests?limit=50&before=abc_123&status=expiredCancelable&settled=false",
+      path: "/v1/earn/withdrawal-requests/provider-signed?limit=50&before=abc_123&status=expiredCancelable&settled=false",
     });
   });
 

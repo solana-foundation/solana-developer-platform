@@ -18,6 +18,6 @@ export async function GET(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.external_wallet_positions.list",
-    path: `/v1/earn/external-wallet/positions?ownerAddress=${encodeURIComponent(ownerAddress)}${validated.query.replace(/^\?/, "&")}`,
+    path: `/v1/earn/positions/caller-signed?ownerAddress=${encodeURIComponent(ownerAddress)}${validated.query.replace(/^\?/, "&")}`,
   });
 }

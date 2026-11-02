@@ -192,8 +192,8 @@ continue either way.
 
 The asymmetry is the ADR 0002 exit-safety invariant — **money out always
 beats money off**: money-in requires an _active_ strategy plus the full
-entitled+configured provider gate (`POST /programs` and
-`PUT /programs/:programId` via `assertProviderAvailable` +
+entitled+configured provider gate (`POST /portfolio-accounts` and
+`PUT /portfolio-accounts/:programId/allocation` via `assertProviderAvailable` +
 `assertKnownYieldSources`), while withdrawals ignore strategy status and need
 only provider credentials
 (`assertEarnProviderConfigured`) — and the withdrawal-ledger list needs not
@@ -686,7 +686,7 @@ Nothing else. Three consumers read it and none of them names a provider:
 | Surface                                   | Effect                                                                                                                                                                                     |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /v1/earn/strategies` (list + detail) | Rows hidden. The list filters in SQL (`providers: SURFACED_EARN_PROVIDERS`) so `total` and the page window describe what the caller can see; the detail route 404s via `isHiddenStrategy`. |
-| `POST /v1/earn/programs`                  | 403 `"… is not currently offered."` (`assertProviderAvailable`, `details.reason: "provider_not_offered"`), refused before the provider is called.                                          |
+| `POST /v1/earn/portfolio-accounts`                  | 403 `"… is not currently offered."` (`assertProviderAvailable`, `details.reason: "provider_not_offered"`), refused before the provider is called.                                          |
 | Dashboard                                 | `EARN_PROGRAM_CREATION_ENABLED` drops the onboarding CTA, "Add strategy", "Change strategy", and the `/deposit` route itself.                                                              |
 
 ### What un-surfacing must never do
@@ -694,7 +694,7 @@ Nothing else. Three consumers read it and none of them names a provider:
 Money out beats money off, so the switch gates the way IN and nothing else.
 **Every route that reads or exits an existing program ignores it**: the programs
 list and detail, deposits, withdrawal previews, withdrawals, the ledger, and
-`PUT /programs/:programId` (re-targeting a position already taken). An
+`PUT /portfolio-accounts/:programId/allocation` (re-targeting a position already taken). An
 organization holding a program with an un-surfaced provider loses no access to
 its money — it loses the ability to open a new one.
 

@@ -223,7 +223,7 @@ export const earnExternalWalletDepositTransactionRequest = z
       description:
         "Slippage floor in share units. Required exactly when the selected strategy's " +
         "`depositSlippage` is non-null. Derive it " +
-        "from `POST /v1/earn/vault-deposit-previews`, never from the deposit amount.",
+        "from `POST /v1/earn/deposits/preview`, never from the deposit amount.",
       example: "24.9",
     }),
     sourceTokenMint: earnSolanaMintSchema.optional().openapi({

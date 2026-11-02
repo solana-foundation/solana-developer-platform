@@ -19,10 +19,10 @@ const EARN_POST_ROUTES: readonly { path: RegExp; movement: MovementOf<"earn"> | 
   { path: /^\/deposits\/execute$/, movement: "earn.deposit" },
   { path: /^\/deposits\/build-unsigned-transaction$/, movement: "earn.deposit" },
   { path: /^\/deposits\/submit-signed-transaction$/, movement: "earn.deposit" },
-  { path: /^\/external-wallet\/withdrawal-previews$/, movement: "read" },
+  { path: /^\/withdrawals\/caller-signed\/preview$/, movement: "read" },
   { path: /^\/withdrawals\/build-unsigned-transaction$/, movement: "earn.withdraw" },
-  { path: /^\/external-wallet\/withdrawal-options$/, movement: "read" },
-  { path: /^\/external-wallet\/queued-withdrawal-previews$/, movement: "read" },
+  { path: /^\/withdrawals\/caller-signed\/options$/, movement: "read" },
+  { path: /^\/withdrawal-requests\/caller-signed\/preview$/, movement: "read" },
   {
     path: /^\/withdrawal-requests\/build-unsigned-transaction$/,
     movement: "earn.queued_withdraw_request",
@@ -41,16 +41,16 @@ const EARN_POST_ROUTES: readonly { path: RegExp; movement: MovementOf<"earn"> | 
     movement: "earn.queued_withdraw_cancel",
   },
   { path: /^\/withdrawals\/execute$/, movement: "earn.withdraw" },
-  { path: /^\/vault-withdrawal-previews$/, movement: "read" },
-  { path: /^\/vault-withdrawal-options$/, movement: "read" },
-  { path: /^\/vault-queued-withdrawal-previews$/, movement: "read" },
+  { path: /^\/withdrawals\/provider-signed\/preview$/, movement: "read" },
+  { path: /^\/withdrawals\/provider-signed\/options$/, movement: "read" },
+  { path: /^\/withdrawal-requests\/provider-signed\/preview$/, movement: "read" },
   { path: /^\/withdrawal-requests\/execute$/, movement: "earn.queued_withdraw_request" },
   {
     path: /^\/withdrawal-requests\/[^/]+\/cancel\/execute$/,
     movement: "earn.queued_withdraw_cancel",
   },
-  { path: /^\/programs\/[^/]+\/withdrawal-preview$/, movement: "read" },
-  { path: /^\/programs\/[^/]+\/withdrawals\/execute$/, movement: "earn.withdraw" },
+  { path: /^\/portfolio-accounts\/[^/]+\/withdrawals\/preview$/, movement: "read" },
+  { path: /^\/portfolio-accounts\/[^/]+\/withdrawals\/execute$/, movement: "earn.withdraw" },
 ];
 
 /**

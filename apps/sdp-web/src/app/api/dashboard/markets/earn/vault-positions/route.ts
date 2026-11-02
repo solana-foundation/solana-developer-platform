@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_positions.list",
-    path: `/v1/earn/vault-positions${validated.query}`,
+    path: `/v1/earn/positions/provider-signed${validated.query}`,
   });
 }

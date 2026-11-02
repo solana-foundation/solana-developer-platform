@@ -149,7 +149,7 @@ nothing else; the program create still sends the body `requestId` form.
   `…/withdrawal-transactions` + `…/withdrawals` or through the queued lifecycle:
   options, queued preview, request build/submit, request list/detail, and
   post-deadline cancellation build/submit. The treasury
-  route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
+  route (`/deposits/provider-signed` + `custodyWalletId`) must not reappear in the
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the docs guide
@@ -332,7 +332,7 @@ nothing else; the program create still sends the body `requestId` form.
   - It deliberately does NOT track which deposits are in flight any more. That
     was browser state pretending to be a ledger: it could not see a deposit
     signed in another tab, and it restored the previous project's watches after
-    a workspace switch. `GET /v1/earn/vault-deposits` owns it now and is
+    a workspace switch. `GET /v1/earn/deposits/provider-signed` owns it now and is
     workspace-scoped by construction.
 
 - `earn-vault-withdraw-modal.tsx` — the `vault_direct` EXIT (PRO-1702):

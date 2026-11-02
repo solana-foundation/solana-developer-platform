@@ -17,7 +17,7 @@ describe("GET external-wallet position summary proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.external_wallet_positions.summary",
-      path: "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true",
+      path: "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=true&includePositions=true",
     });
     const { path } = mocks.proxyToSdpApi.mock.calls[0][0] as { path: string };
     const query = new URL(path, "https://api.example.test").searchParams;

@@ -8,6 +8,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.programs.withdrawal-preview",
-    path: `/v1/earn/programs/${encodeURIComponent(programId)}/withdrawal-preview`,
+    path: `/v1/earn/portfolio-accounts/${encodeURIComponent(programId)}/withdrawals/preview`,
   });
 }

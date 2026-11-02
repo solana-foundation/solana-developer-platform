@@ -11,12 +11,12 @@ import { isEarnExitOrRead } from "./exits";
  * among the exits in `index.ts`, is a deliberate choice this test forces.
  */
 const EARN_ENTRY_ROUTES = [
-  "POST /v1/earn/vault-deposit-previews",
+  "POST /v1/earn/deposits/preview",
   "POST /v1/earn/deposits/build-unsigned-transaction",
   "POST /v1/earn/deposits/execute",
   "POST /v1/earn/deposits/submit-signed-transaction",
-  "POST /v1/earn/programs",
-  "PUT /v1/earn/programs/:programId",
+  "POST /v1/earn/portfolio-accounts",
+  "PUT /v1/earn/portfolio-accounts/:programId/allocation",
   // Cancelling a queued withdrawal puts the shares back, so it is a start
   // (`earn.queued_withdraw_cancel`), refused here before any provider call.
   "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
@@ -78,8 +78,8 @@ describe("Earn exits without the production entitlement (APE-351, ADR 0002)", ()
   });
 
   it("refuses unknown methods and paths outside Earn", () => {
-    expect(isEarnExitOrRead("DELETE", "/v1/earn/vault-withdrawals")).toBe(false);
+    expect(isEarnExitOrRead("DELETE", "/v1/earn/withdrawals/provider-signed")).toBe(false);
     expect(isEarnExitOrRead("POST", "/v1/payments/transfers/execute")).toBe(false);
-    expect(isEarnExitOrRead("POST", "/v1/earn/vault-withdrawals/extra")).toBe(false);
+    expect(isEarnExitOrRead("POST", "/v1/earn/withdrawals/provider-signed/extra")).toBe(false);
   });
 });

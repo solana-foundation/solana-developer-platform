@@ -3186,7 +3186,7 @@ Ramp quote endpoints use the same public shape for every provider: `destinationC
 ## Prerequisites
 
 1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
-2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
+2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/ramp-requirements?provider=…&direction=…` and submit collected fields with `POST /v1/counterparties/{counterpartyId}/ramp-requirements/check` until `status` reads `ready`.
 3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
 
 ## Discovering corridors

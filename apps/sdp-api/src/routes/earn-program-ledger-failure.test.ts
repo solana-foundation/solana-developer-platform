@@ -183,7 +183,7 @@ describe("Earn withdrawal ledger — post-acceptance bookkeeping failure", () =>
     vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
 
     const res = await app.request(
-      `/v1/earn/programs/${program.id}/withdrawals/execute`,
+      `/v1/earn/portfolio-accounts/${program.id}/withdrawals/execute`,
       {
         method: "POST",
         headers: {

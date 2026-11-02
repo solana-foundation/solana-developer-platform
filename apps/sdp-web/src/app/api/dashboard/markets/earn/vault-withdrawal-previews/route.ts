@@ -9,6 +9,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.earn.vault_withdrawal_previews.create",
-    path: "/v1/earn/vault-withdrawal-previews",
+    path: "/v1/earn/withdrawals/provider-signed/preview",
   });
 }

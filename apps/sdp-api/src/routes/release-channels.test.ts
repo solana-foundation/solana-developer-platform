@@ -31,10 +31,10 @@ const MODULE_PROBES = {
   // Markets has no route of its own: it is the parent of Earn and DvP, and
   // leaving it out refuses both.
   markets: [
-    ["GET", "/v1/earn/movements"],
+    ["GET", "/v1/earn/treasury/movements"],
     ["GET", "/v1/dvp/trades"],
   ],
-  earn: [["GET", "/v1/earn/movements"]],
+  earn: [["GET", "/v1/earn/treasury/movements"]],
   dvp: [["GET", "/v1/dvp/trades"]],
   private_channels: [["GET", "/v1/private-channels/instance-connection/check-gateway-health"]],
   helius_rings: [

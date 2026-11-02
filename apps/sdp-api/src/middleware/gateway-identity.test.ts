@@ -302,7 +302,7 @@ describe("gateway identity (X-SF-Identity)", () => {
   it("reaches a keyed Earn route with only the gateway identity, as with the key itself", async () => {
     await seedSfKey();
     const earnEnv = { ...gatewayEnv(), EARN_ENABLED: "true", MARKETS_ENABLED: "true" };
-    const path = "/v1/earn/external-wallet/positions";
+    const path = "/v1/earn/positions/caller-signed";
 
     const viaGateway = await app.request(
       path,

@@ -241,14 +241,14 @@ describe("external-wallet position reads", () => {
     );
 
     // The observing read still answers what it saw.
-    const first = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const first = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`);
     expect(first.status).toBe(200);
     const firstBody = (await first.json()) as { data: { positions: Array<{ shares: string }> } };
     expect(firstBody.data.positions).toHaveLength(1);
     expect(firstBody.data.positions[0]?.shares).toBe("0");
     expect(await closedAtOf(positionId)).not.toBeNull();
 
-    const second = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const second = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`);
     await expect(second.json()).resolves.toMatchObject({ data: { positions: [] } });
   });
 
@@ -274,10 +274,10 @@ describe("external-wallet position reads", () => {
         }))
     );
 
-    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const response = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`);
     expect(response.status).toBe(200);
     expect(await closedAtOf(positionId)).toBeNull();
-    const again = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const again = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`);
     const body = (await again.json()) as { data: { positions: unknown[] } };
     expect(body.data.positions).toHaveLength(1);
   });
@@ -313,7 +313,7 @@ describe("external-wallet position reads", () => {
         async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
           snapshots(input, "1")
       );
-    const path = `/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`;
+    const path = `/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`;
 
     // A's chain read is in flight and will answer the balance from before the deposit.
     const first = get(path);
@@ -348,7 +348,7 @@ describe("external-wallet position reads", () => {
       tokenMint: USDC,
       label: "USDC vault",
     });
-    const response = await getAsProduction("/v1/earn/external-wallet/positions/summary");
+    const response = await getAsProduction("/v1/earn/positions/caller-signed/project-summary");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       data: { summary: { walletCount: 0, positionCount: 0, totalsByStrategy: [] } },
@@ -376,7 +376,7 @@ describe("external-wallet position reads", () => {
     });
 
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=true&includePositions=true"
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
@@ -521,8 +521,8 @@ describe("external-wallet position reads", () => {
         })
     );
 
-    const first = get("/v1/earn/external-wallet/positions/summary");
-    const second = get("/v1/earn/external-wallet/positions/summary");
+    const first = get("/v1/earn/positions/caller-signed/project-summary");
+    const second = get("/v1/earn/positions/caller-signed/project-summary");
     try {
       await vi.waitFor(() => expect(projectScopeReads).toHaveBeenCalledTimes(2));
       await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
@@ -546,7 +546,7 @@ describe("external-wallet position reads", () => {
 
     // A fresh earn:read key with no flag: totals only. The address book is
     // opt-in, never the default.
-    const response = await get("/v1/earn/external-wallet/positions/summary");
+    const response = await get("/v1/earn/positions/caller-signed/project-summary");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
@@ -577,7 +577,7 @@ describe("external-wallet position reads", () => {
     });
 
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=true"
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -621,7 +621,7 @@ describe("external-wallet position reads", () => {
     );
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
 
-    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    const response = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { positions: Array<Record<string, unknown>> } };
     expect(body.data.positions).toHaveLength(1);
@@ -639,7 +639,9 @@ describe("external-wallet position reads", () => {
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain(OWNER_B);
 
-    const summary = (await (await get("/v1/earn/external-wallet/positions/summary")).json()) as {
+    const summary = (await (
+      await get("/v1/earn/positions/caller-signed/project-summary")
+    ).json()) as {
       data: {
         summary: {
           unavailablePositionCount: number;
@@ -672,7 +674,7 @@ describe("external-wallet position reads", () => {
     ]);
     const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
 
-    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`);
+    const response = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`);
 
     expect(response.status).toBe(200);
     expect(warn).toHaveBeenCalledWith(
@@ -699,7 +701,7 @@ describe("external-wallet position reads", () => {
     });
 
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=false"
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -722,14 +724,14 @@ describe("external-wallet position reads", () => {
 
   it("summary rejects a malformed includeOwnerAddresses rather than guessing", async () => {
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=maybe"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=maybe"
     );
     expect(response.status).toBe(400);
   });
 
   it("rejects position details when owner addresses are explicitly omitted", async () => {
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=false&includePositions=true"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=false&includePositions=true"
     );
     expect(response.status).toBe(400);
   });
@@ -737,14 +739,16 @@ describe("external-wallet position reads", () => {
   it("rejects position details without an explicit owner-address opt-in (PRO-1908)", async () => {
     // Positions name their owners, so the old dashboard shape (includePositions
     // alone) may not quietly re-enable the address book under the new default.
-    const response = await get("/v1/earn/external-wallet/positions/summary?includePositions=true");
+    const response = await get(
+      "/v1/earn/positions/caller-signed/project-summary?includePositions=true"
+    );
     expect(response.status).toBe(400);
   });
 
   it("answers a never-seen owner with an empty page, not 404", async () => {
     // A customer who has not deposited yet is content, not an error: the
     // partner's balance screen renders an empty list.
-    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    const response = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
     expect(((await response.json()) as { data: unknown }).data).toEqual({
       ownerAddress: OWNER_B,
@@ -778,7 +782,7 @@ describe("external-wallet position reads", () => {
 
     // Same bytes as an owner nobody has seen: the query is org/project scoped,
     // so a foreign claim is indistinguishable from no claim.
-    const response = await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_B}`);
+    const response = await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_B}`);
     expect(response.status).toBe(200);
     expect(((await response.json()) as { data: unknown }).data).toEqual({
       ownerAddress: OWNER_B,
@@ -798,7 +802,7 @@ describe("external-wallet position reads", () => {
         label: "Query",
       });
       expect(
-        (await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}${query}`)).status
+        (await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}${query}`)).status
       ).toBe(400);
     }
   );
@@ -817,7 +821,7 @@ describe("external-wallet position reads", () => {
     expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).status).toBe(404);
     // The query-addressed replacements answer for the same owner, so the 404s
     // above assert the SHAPE is gone rather than the data.
-    expect((await get(`/v1/earn/external-wallet/positions?ownerAddress=${OWNER_A}`)).status).toBe(
+    expect((await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`)).status).toBe(
       200
     );
   });

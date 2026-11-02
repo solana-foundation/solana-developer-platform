@@ -78,7 +78,7 @@ Independent switches, all runtime-safe:
 - **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
   registered providers SDP currently OFFERS. An un-surfaced provider keeps its
   code, credentials, crons and catalogue rows, but its strategies vanish from
-  every public read and `POST /programs` refuses it. This is the _product_
+  every public read and `POST /portfolio-accounts` refuses it. This is the _product_
   switch — the four above are deployment and customer switches — and it is the
   only one that no per-organization override can lift.
 
@@ -376,10 +376,10 @@ promised had nowhere to live. It now lives between programs.
   the duplicate it exists to prevent. A ref held by a different organization or
   environment is the one genuine conflict — refuse it, never adopt it.
 - **Gate ordering is part of the decision, not an implementation detail.**
-  `POST /programs` resolves the idempotency key LAST: schema → capability (501)
+  `POST /portfolio-accounts` resolves the idempotency key LAST: schema → capability (501)
   → availability (403) → known yield sources (400) → project scope → key (400).
   An unentitled caller sending no key must still learn it is unentitled.
-- **Listing has a credential gate that fires on an EMPTY list.** `GET /programs`
+- **Listing has a credential gate that fires on an EMPTY list.** `GET /portfolio-accounts`
   with a `provider` asserts credentials before reading rows. A collection cannot
   404 for emptiness, so without it a missing provider key would be
   indistinguishable from "this organization has no programs" — onboarding shown
@@ -387,7 +387,7 @@ promised had nowhere to live. It now lives between programs.
   oldest-first (`created_at ASC, id ASC`) so the head stays stable for a
   program's whole life; a newest-first order would silently re-point any
   consumer that tracks one program across polls.
-- **Cross-program BOLA.** `GET /programs/:programId/withdrawals/:ref` now
+- **Cross-program BOLA.** `GET /portfolio-accounts/:programId/withdrawals/:ref` now
   compares the ledger row's `wallet_id` to the path program, not the caller's
   organization. An org-only check was complete while an org held one program;
   with several, asking program A for program B's ref would pass and then drive
@@ -399,8 +399,8 @@ promised had nowhere to live. It now lives between programs.
   still caps each token group at one allocation entry; this addendum is about
   how many programs an org may hold, not what one program may contain.
 - **Path rename.** Every `/v1/earn/program*` path named in the addenda above is
-  now `/v1/earn/programs` (list, create) or
-  `/v1/earn/programs/:programId/...` (get, re-target, deposits, withdrawal
+  now `/v1/earn/portfolio-accounts` (list, create) or
+  `/v1/earn/portfolio-accounts/:programId/...` (get, re-target, deposits, withdrawal
   preview/create/list/detail). The implicit create-or-update `PUT /program` is
   gone: it was keyed on the triple that stops being addressable the moment a
   second program exists.
@@ -479,7 +479,7 @@ is "what this deployment can talk to", the former is "what we offer today".
 
 - **One declaration, three consumers, no provider ids anywhere else.**
   `GET /strategies` (list and detail) hides an un-surfaced provider's rows;
-  `POST /programs` refuses to open a new position with it
+  `POST /portfolio-accounts` refuses to open a new position with it
   (`assertProviderAvailable`, `provider_not_offered`); the dashboard derives
   `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
   the API rather than in the browser is deliberate — the API is the surface the
@@ -494,7 +494,7 @@ is "what this deployment can talk to", the former is "what we offer today".
   surfacing entirely. This is the money-out-beats-money-off invariant applied to
   a new switch: an organization holding a position taken while a provider was
   offered keeps every route that reads or exits it, and un-surfacing can never
-  trap funds. `POST /programs` is the only route that opens a _new_ commitment,
+  trap funds. `POST /portfolio-accounts` is the only route that opens a _new_ commitment,
   so it is the only one that refuses.
 - **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
   organization-scoped question and tells the caller to request manual
@@ -630,7 +630,7 @@ the provider. Customer-initiated custodial deposits remain unledgered because SD
 has no intent moment for them; when an observed-deposit feed is built, it writes
 rows into this ledger rather than a third table.
 
-Exit safety is unchanged and extended to the new read: `GET /v1/earn/movements`
+Exit safety is unchanged and extended to the new read: `GET /v1/earn/treasury/movements`
 takes **no provider gate**, like the reads it generalises. It reports on money
 that has already moved, so un-offering a provider, removing its credentials, or
 un-entitling an organization closes the door IN and must never remove the record
@@ -1104,7 +1104,7 @@ balance-plus-earned read. All three take `earn:read` only (no `wallets:read` —
 an end-user wallet carries no custody binding) and no provider gate (they
 report on money that already moved). Scope is the 0070 claim key — org, EXACT
 project, environment, owner — collapsed to one 404 for anything outside it.
-`GET /v1/earn/movements` deliberately stays custody-scoped: its vault arm
+`GET /v1/earn/treasury/movements` deliberately stays custody-scoped: its vault arm
 requires a custody-wallet match an owner-signed row can never satisfy, so the
 per-owner reads are a separate surface rather than a widened union. Index:
 `idx_earn_movements_external_wallet_owner` (migration 0073).

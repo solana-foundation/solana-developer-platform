@@ -213,14 +213,14 @@ describe("EarnIntegrationGuide", () => {
     // ... and the guide is the WHOLE loop (PRO-1772), not just the deposit:
     // poll the movement, read balance + earned, list activity, withdraw the
     // same two-call way money came in.
-    expect(code).toContain("/v1/earn/external-wallet/movements/");
-    expect(code).toContain("/v1/earn/external-wallet/movements?");
-    expect(code).toContain("/v1/earn/external-wallet/earnings?");
-    expect(code).toContain("/v1/earn/external-wallet/positions?");
+    expect(code).toContain("/v1/earn/movements/caller-signed/");
+    expect(code).toContain("/v1/earn/movements/caller-signed?");
+    expect(code).toContain("/v1/earn/earnings/caller-signed?");
+    expect(code).toContain("/v1/earn/positions/caller-signed?");
     // The path-addressed owner shapes were retired for the query form; a
     // snippet regression here would hand partners a 404ing example.
-    expect(code).not.toContain("/v1/earn/external-wallet/earnings/");
-    expect(code).not.toContain("/v1/earn/external-wallet/positions/");
+    expect(code).not.toContain("/v1/earn/earnings/caller-signed/");
+    expect(code).not.toContain("/v1/earn/positions/caller-signed/");
     expect(code).toContain("/v1/earn/withdrawals/build-unsigned-transaction");
     expect(code).toContain("/v1/earn/withdrawals/submit-signed-transaction");
     expect(code).toContain("/v1/earn/withdrawal-requests/build-unsigned-transaction");
@@ -266,7 +266,7 @@ describe("EarnIntegrationGuide", () => {
     // Every section rides along even though only the Client tab is rendered.
     expect(copied).toContain('const SDP_API_URL = "http://127.0.0.1:8787"');
     expect(copied).toContain("/v1/earn/deposits/build-unsigned-transaction");
-    expect(copied).toContain("/v1/earn/external-wallet/earnings?");
+    expect(copied).toContain("/v1/earn/earnings/caller-signed?");
     expect(copied).toContain("/v1/earn/withdrawals/submit-signed-transaction");
     expect(copied).not.toContain("custodyWalletId");
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
@@ -331,8 +331,8 @@ describe("EarnIntegrationGuide", () => {
     });
     const code = [sections.client, sections.deposit, sections.withdraw].join("\n");
 
-    expect(code).toContain("/v1/earn/vault-deposit-previews");
-    expect(code).toContain("/v1/earn/external-wallet/withdrawal-previews");
+    expect(code).toContain("/v1/earn/deposits/preview");
+    expect(code).toContain("/v1/earn/withdrawals/caller-signed/preview");
     expect(code).toContain("floorForTolerance(quote.sharesOut");
     expect(code).toContain("floorForTolerance(quote.assetsOut");
     expect(code).toContain("minSharesOut");

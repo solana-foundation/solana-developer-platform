@@ -206,14 +206,16 @@ const WALLET_SCOPE_ROUTES = {
       test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
     },
   },
-  "POST /v1/earn/programs/:programId/withdrawals/execute": {
+  "POST /v1/earn/portfolio-accounts/:programId/withdrawals/execute": {
     refusedEarly: {
       file: "routes/earn-program.test.ts",
       test: "refuses a wallet-scoped key on the payout, before the provider is driven",
     },
   },
-  "POST /v1/earn/programs": { exempt: "links a provider account; signs nothing" },
-  "PUT /v1/earn/programs/:programId": { exempt: "edits a provider account link; signs nothing" },
+  "POST /v1/earn/portfolio-accounts": { exempt: "links a provider account; signs nothing" },
+  "PUT /v1/earn/portfolio-accounts/:programId/allocation": {
+    exempt: "edits a provider account link; signs nothing",
+  },
   "POST /v1/earn/deposits/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/deposits/submit-signed-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/withdrawals/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
