@@ -6,6 +6,7 @@ import type {
 } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { OrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
@@ -53,7 +54,28 @@ async function syncOrganization(c: AppContext, data: OrganizationJSON) {
     logIgnoredClerkEvent(c, "organization", data.id);
     return;
   }
-  await syncClerkOrganization({ db: getDb(c.env), organization: current });
+  // Audited with the sync, so a mainnet entitlement change commits with its record, and the
+  // record is what emails the organization's admins (HOO-2299).
+  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const synced = await syncClerkOrganization({ db: tx, organization: current });
+    return {
+      entry:
+        synced && synced.productionEntitlementChangedTo !== null
+          ? {
+              action: "update",
+              resourceType: "organization",
+              resourceId: synced.organizationId,
+              organizationId: synced.organizationId,
+              metadata: {
+                event: "production_entitlement_changed",
+                enabled: synced.productionEntitlementChangedTo,
+                source: "clerk",
+              },
+            }
+          : null,
+      result: undefined,
+    };
+  });
 }
 
 /**
@@ -220,7 +242,11 @@ async function auditedMembershipDeletionMirror(
  */
 function membershipDeletionMirrorAuditEntry(
   params: { organizationId: string; userId: string },
-  mirrored: { removedMemberId: string | null; revokedInvitations: number }
+  mirrored: {
+    removedMemberId: string | null;
+    removedRole: OrganizationRole | null;
+    revokedInvitations: number;
+  }
 ): AuditLogEntry | null {
   const metadata = {
     userId: params.userId,
@@ -232,7 +258,7 @@ function membershipDeletionMirrorAuditEntry(
       action: "delete",
       resourceType: "member",
       resourceId: mirrored.removedMemberId,
-      metadata,
+      metadata: { ...metadata, previousRole: mirrored.removedRole },
       organizationId: params.organizationId,
     };
   }

@@ -10,7 +10,9 @@ vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 import {
+  loadOrganizationAlertEmails,
   loadOrganizationIpAllowlist,
+  saveOrganizationAlertEmailsAction,
   saveOrganizationIpAllowlistAction,
 } from "./organization-access-actions";
 
@@ -95,5 +97,43 @@ describe("organization IP allowlist", () => {
     answer({ settings: { allowedIpAddresses: "203.0.113.0/24" } });
 
     expect((await loadOrganizationIpAllowlist()).ok).toBe(false);
+  });
+});
+
+describe("organization alert emails", () => {
+  it.each([
+    [{ settings: {} }, true],
+    [{ settings: null }, true],
+    [{ settings: { alertEmails: true } }, true],
+    [{ settings: { alertEmails: false } }, false],
+  ])("reads %j as enabled=%s, on unless turned off", async (organization, enabled) => {
+    answer(organization);
+
+    expect(await loadOrganizationAlertEmails()).toEqual({ ok: true, enabled });
+  });
+
+  it("turns alert emails off through the organization settings and returns the stored value", async () => {
+    answer({ settings: { alertEmails: false } });
+
+    const result = await saveOrganizationAlertEmailsAction(false, "key_alerts_off");
+
+    expect(result).toEqual({ ok: true, enabled: false });
+    const { init } = organizationCall();
+    expect(init?.method).toBe("PATCH");
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_alerts_off");
+    expect(JSON.parse(String(init?.body))).toEqual({ settings: { alertEmails: false } });
+    expect(mocks.revalidatePath).toHaveBeenCalledOnce();
+  });
+
+  it("reports an API refusal without throwing", async () => {
+    answer(null, 403);
+
+    expect((await saveOrganizationAlertEmailsAction(false, "key_alerts_denied")).ok).toBe(false);
+  });
+
+  it("refuses a response it cannot read rather than showing alerts as on", async () => {
+    answer({ settings: { alertEmails: "no" } });
+
+    expect((await loadOrganizationAlertEmails()).ok).toBe(false);
   });
 });

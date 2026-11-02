@@ -8,6 +8,7 @@ import { LeaveOrganizationCard } from "./leave-organization-card";
 import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
+import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 
 /** Anything that is not a positive integer falls back to the first page. */
 function resolveMembersPage(value: string | string[] | undefined): number {
@@ -18,7 +19,7 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 
 /**
  * Organization settings: the quick start for API key managers, and the members,
- * mainnet access and API-key IP allowlist sections for organization admins.
+ * mainnet access, API-key IP allowlist and email alert sections for organization admins.
  *
  * @param props - The route props.
  * @param props.searchParams - The query, carrying the members page.
@@ -53,6 +54,9 @@ export default async function SettingsPage({
       ) : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <MainnetAccessSection /> : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <OrganizationAlertEmailsSection />
+      ) : null}
       {/* Admins cannot leave; another admin removes them. */}
       {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
     </div>

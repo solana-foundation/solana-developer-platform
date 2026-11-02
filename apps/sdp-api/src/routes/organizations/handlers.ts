@@ -124,7 +124,9 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
   // Settings are one JSON column patched by read-merge-write. Unsynchronized,
   // the second commit silently drops the first — an unrelated edit could revert
   // a just-installed allowlist. The row lock makes concurrent merges compose.
-  const org = await getDb(c.env).transaction(async (tx) => {
+  // The update and its audit record commit together: the record is what emails the admins about
+  // a settings change (HOO-2299), so turning alert emails off can never commit unannounced.
+  const org = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const existing = await tx
       .prepare(
         `SELECT id, name, slug, tier, status, settings, created_at, updated_at
@@ -174,17 +176,16 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
       throw notFound("Organization");
     }
 
-    return updated;
-  });
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "update",
-    resourceType: "organization",
-    resourceId: orgId,
-    // Canonical form, not the submitted spelling: the trail records what was granted.
-    metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
+    return {
+      result: updated,
+      entry: {
+        action: "update",
+        resourceType: "organization",
+        resourceId: orgId,
+        // Canonical form, not the submitted spelling: the trail records what was granted.
+        metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
+      },
+    };
   });
 
   // SDP owns the name (ADR 0012); Clerk's copy only labels the session's

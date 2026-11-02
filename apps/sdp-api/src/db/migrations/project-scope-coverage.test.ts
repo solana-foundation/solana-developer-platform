@@ -5,6 +5,8 @@ const EARN_FORENSIC_HISTORY =
   "ADR 0002: Earn history is forensic, so its project_id is ON DELETE SET NULL";
 
 const NULLABLE_PROJECT_TABLES = {
+  admin_alerts:
+    "HOO-2299: organization-wide alerts (members, the entitlement, settings) are about no project",
   earn_external_wallet_transactions: EARN_FORENSIC_HISTORY,
   earn_external_wallet_withdrawal_request_transactions: EARN_FORENSIC_HISTORY,
   earn_movements: EARN_FORENSIC_HISTORY,
