@@ -134,7 +134,7 @@ describe("Clerk auth request cache", () => {
     return {
       sub: "clerk_user_cached",
       v: 2,
-      o: { id: "org_test_clerk_cached", rol: "admin", slg: TEST_ORG.slug },
+      o: { id: "org_test_clerk_cached", slg: TEST_ORG.slug },
       email: TEST_USER.email,
     };
   }
@@ -266,7 +266,7 @@ describe("Clerk auth request cache", () => {
     const payload: ClerkJwtPayload = {
       sub: "clerk_user_first_login",
       v: 2,
-      o: { id: "org_test_clerk_cached", rol: "member", slg: TEST_ORG.slug },
+      o: { id: "org_test_clerk_cached", slg: TEST_ORG.slug },
       email: "collision-target@example.com",
     };
     const { request } = await createProtectedApp(payload);
