@@ -25,6 +25,11 @@
       "tailwindDirectives": true
     }
   },
+  "markdown": {
+    "formatter": {
+      "formatEmbeds": false
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -91,6 +96,12 @@
     }
   },
   "overrides": [
+    {
+      "includes": ["**/SKILL.md"],
+      "formatter": {
+        "enabled": false
+      }
+    },
     {
       "includes": ["**/apps/sdp-api/**/*.ts", "**/apps/sdp-api/**/*.tsx"],
       "linter": {
@@ -474,6 +485,8 @@
       "!**/dist",
       "!**/*.d.ts",
       "!**/pnpm-lock.yaml",
+      "!**/*.svg",
+      "!CHANGELOG.md",
       "!**/.source",
       "!**/packages/sdp-spc-escrow/src/generated",
       "!**/packages/sdp-spc-withdraw/src/generated",
