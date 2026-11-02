@@ -793,6 +793,7 @@
       "solanaAddressPlaceholder": "Solana address (32-44 chars)",
       "usdc": "USDC",
       "optionalMemo": "Optional memo",
+      "optionalCounterpartyAccount": "Optional counterparty account ID",
       "listTransfers": "List Transfers",
       "getTransfer": "Get Transfer",
       "createOnrampQuote": "Create Onramp Quote",

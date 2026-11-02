@@ -47,7 +47,10 @@ function canonicalTransferInput(input: CreateTransferInput): CreateTransferInput
 /**
  * What makes two sends the SAME payment: the source wallet, the destination, the
  * token, the amount (in canonical spelling) and the memo. Change any one and it
- * is a different payment, not a retry.
+ * is a different payment, not a retry. The contact account the destination
+ * belongs to (`counterpartyAccountId`) is not part of it: naming one pays the
+ * same address, so a retry that only changes it stays under the same key, where
+ * the API refuses the changed body (422) instead of sending the money again.
  */
 export function transferRequestFingerprint(input: CreateTransferInput): string {
   const canonical = canonicalTransferInput(input);

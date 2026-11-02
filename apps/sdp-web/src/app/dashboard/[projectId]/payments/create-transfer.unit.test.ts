@@ -56,6 +56,23 @@ describe("createTransfer", () => {
     expect(JSON.parse(String(init?.body)).transferId).toBe("xfr_ramp");
   });
 
+  it("names the contact account the destination belongs to, and only when given", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTransfer({ ...SUBMISSION, counterpartyAccountId: "cpacct_1" }, t, {
+      value: "key_1",
+      persisted: true,
+    });
+    await createTransfer(SUBMISSION, t, { value: "key_2", persisted: true });
+
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies[0].counterpartyAccountId).toBe("cpacct_1");
+    expect(bodies[1]).not.toHaveProperty("counterpartyAccountId");
+  });
+
   it("refuses a success answer that carries no transfer", async () => {
     vi.stubGlobal(
       "fetch",

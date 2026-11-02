@@ -191,6 +191,12 @@ Poll status for async confirmations:
 
 </HowItWorks>
 
+## Pay a counterparty
+
+When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
+
+The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
+
 ## SOL and the rent-exempt minimum
 
 A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL). SDP refuses a native SOL transfer with `409 AMOUNT_BELOW_RENT_MINIMUM` if it would fund an empty address below that minimum or leave the source with a nonzero balance below it. Nothing is written or sent.

@@ -13,6 +13,7 @@ import { AuditService } from "@/services/audit.service";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -30,6 +31,7 @@ import {
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
+  TEST_USER,
   TEST_WALLET_ID,
   testKoraAdapter,
 } from "@/test/helpers/payments-routes";
@@ -252,6 +254,87 @@ describe("Payments routes — on-chain transfers", () => {
     expect(row.status).toBe("finalized");
     expect(row.signature).toBeTruthy();
     expect(row.confirmed_at).not.toBeNull();
+  });
+
+  it("ties the transfer to the contact whose account it names", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_named_payee",
+      counterpartyAccountId: "cpacct_named_payee",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        counterpartyAccountId: "cpacct_named_payee",
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+
+    expect(res.status).toBe(200);
+    const body = await readTransferResponse(res);
+    expect(body.data.transfer.counterpartyId).toBe("cpty_named_payee");
+    expect((await readTransferRow(body.data.transfer.id)).counterparty_id).toBe("cpty_named_payee");
+  });
+
+  it("refuses a contact account from another project before writing anything", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_other_project",
+      counterpartyAccountId: "cpacct_other_project",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        counterpartyAccountId: "cpacct_other_project",
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+
+    expect(res.status).toBe(404);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
+  });
+
+  it("refuses a contact account whose address is not the destination", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_elsewhere",
+      counterpartyAccountId: "cpacct_elsewhere",
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+    });
+
+    const res = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        counterpartyAccountId: "cpacct_elsewhere",
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+
+    expect(res.status).toBe(400);
+    const body = await readErrorResponse(res);
+    expect(body.error.message).toContain("destination must be the address");
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(await countTransferRows()).toBe(0);
   });
 
   it("appends a tamper-evident audit intent and outcome for an executed transfer", async () => {

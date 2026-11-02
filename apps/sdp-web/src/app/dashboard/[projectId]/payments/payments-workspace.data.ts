@@ -439,6 +439,8 @@ export interface CreateTransferInput {
   transferId?: string;
   sourceCustodyWalletId: string;
   destination: string;
+  /** The contact account `destination` belongs to, so the transfer is tied to that contact. */
+  counterpartyAccountId?: string;
   token: Address;
   amount: string;
   memo?: string;
@@ -516,6 +518,9 @@ export async function createTransfer(
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
+      ...(input.counterpartyAccountId
+        ? { counterpartyAccountId: input.counterpartyAccountId }
+        : {}),
       token: input.token,
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),

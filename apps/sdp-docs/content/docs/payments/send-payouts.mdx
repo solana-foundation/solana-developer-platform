@@ -123,6 +123,8 @@ For destinations that are not registered counterparty accounts, a run can send o
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
 
+To tie a single transfer to a registered counterparty account, pass `counterpartyAccountId` with it. See [Pay a counterparty](/docs/payments/send-basic-payment#pay-a-counterparty).
+
 ### Dedup and retries for single transfers
 
 Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
