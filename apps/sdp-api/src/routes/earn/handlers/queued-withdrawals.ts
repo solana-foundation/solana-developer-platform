@@ -1,4 +1,7 @@
-import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
+import {
+  supportsProviderRedemptionModes,
+  supportsVaultProviderOrderWithdraw,
+} from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import type {
   EarnVaultParRedemptionQuote,
@@ -350,6 +353,9 @@ export async function readOptions(
     return {
       instant,
       providerOrder,
+      ...(withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient)
+        ? { providerRedemptionModes: withdrawalClient.getProviderRedemptionModes() }
+        : {}),
       queued: false,
       withdrawAuthority: null,
       queueState: null,
@@ -367,6 +373,9 @@ export async function readOptions(
     return {
       instant: queueOptions ? instant && queueOptions.instant : instant,
       providerOrder,
+      ...(withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient)
+        ? { providerRedemptionModes: withdrawalClient.getProviderRedemptionModes() }
+        : {}),
       queued: queueOptions?.queued ?? false,
       withdrawAuthority: queueOptions?.withdrawAuthority ?? null,
       queueState: queueOptions?.queueState ?? null,

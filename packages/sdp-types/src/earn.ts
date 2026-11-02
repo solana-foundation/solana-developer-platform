@@ -504,6 +504,8 @@ export type EarnTerminalVaultMovementStatus =
 
 /** Durable result of a submitted vault deposit (fresh or idempotently replayed). */
 export interface EarnVaultDeposit {
+  /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
+  settlementOutcome?: "delivered" | "cancelled";
   positionId: string;
   movementId: string;
   status: EarnVaultMovementStatus;
@@ -536,6 +538,8 @@ export interface EarnVaultDeposit {
  * which is a property of a WRITE, not of the row.
  */
 export interface EarnVaultDepositRecord {
+  /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
+  settlementOutcome?: "delivered" | "cancelled";
   movementId: string;
   positionId: string;
   provider: string;
@@ -572,6 +576,7 @@ export interface EarnVaultDepositsPage {
 
 /** JSON body for POST /v1/earn/vault-withdrawals. Idempotency is header-only. */
 export interface EarnVaultWithdrawalRequest {
+  redemptionMode?: "standard" | "instant";
   /** The vault position being exited — from GET /v1/earn/vault-positions. */
   positionId: string;
   /** Shares to redeem; the position's `withdrawableShares` is the observed ceiling. */
@@ -587,6 +592,9 @@ export interface EarnVaultWithdrawalRequest {
 
 /** One signed vault withdrawal movement. */
 export interface EarnVaultWithdrawal {
+  redemptionMode?: "standard" | "instant";
+  /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
+  settlementOutcome?: "delivered" | "cancelled";
   movementId: string;
   positionId: string;
   provider: string;
@@ -650,6 +658,7 @@ export interface EarnVaultParRedemptionTerms {
 
 /** Independently available exit routes for one owned vault position. */
 export interface EarnVaultWithdrawalOptions {
+  providerRedemptionModes?: readonly ("standard" | "instant")[];
   positionId: string;
   /** Redeem shares and receive assets atomically in the same transaction. */
   instant: boolean;
@@ -945,6 +954,8 @@ export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
 
 /** One recorded external-wallet vault movement, either direction. */
 export interface EarnExternalWalletMovement {
+  /** Verified cross-chain fulfillment; cancelled means shares returned and no USDC payout. */
+  settlementOutcome?: "delivered" | "cancelled";
   movementId: string;
   positionId: string;
   provider: string;

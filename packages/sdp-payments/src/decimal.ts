@@ -4,6 +4,7 @@ import {
   decimalFixedPoint,
   decimalFixedPointToString,
   divideDecimalFixedPoint,
+  multiplyDecimalFixedPoint,
   subtractDecimalFixedPoint,
 } from "@solana/fixed-points";
 import { badRequest } from "./errors";
@@ -81,6 +82,16 @@ export function divideDecimalAmounts(numerator: string, denominator: string): st
 
 export function addDecimalAmounts(left: string, right: string): string {
   return sumDecimalAmounts([left, right]);
+}
+
+/** Exact multiplication for valuing token shares at a provider-reported NAV. */
+export function multiplyDecimalAmounts(left: string, right: string): string {
+  return decimalFixedPointToString(
+    multiplyDecimalFixedPoint(
+      parseAmount(left, decimalScale(left)),
+      parseAmount(right, decimalScale(right))
+    )
+  );
 }
 
 /**

@@ -71,6 +71,7 @@ import {
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
+import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import { EarnVaultWithdrawalRequestsCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
 import {
   EarnSummarySkeleton,
@@ -1719,6 +1720,7 @@ export function TreasuryWorkspaceContent({
         withdrawals={vaultWithdrawals}
       />
       <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
+      <EarnProviderOrdersCard onChanged={onHoldingsChanged} />
       <TreasuryStrategies
         devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}

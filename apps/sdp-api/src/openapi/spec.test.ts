@@ -466,6 +466,15 @@ describe("OpenAPI spec", () => {
           publicDocument.paths?.[path],
           `Onboarding must remain internal: ${path}`
         ).toBeUndefined();
+      } else if (path.startsWith("/v1/earn/provider-actions")) {
+        expect(
+          internalDocument.paths?.[path],
+          `Missing internal OpenAPI path: ${path}`
+        ).toBeDefined();
+        expect(
+          publicDocument.paths?.[path],
+          `Unreviewed public promotion: ${path}`
+        ).toBeUndefined();
       } else {
         expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
       }

@@ -1,0 +1,96 @@
+import type { SolanaRpc } from "@sdp/rpc/solana";
+import { PLUME_PROGRAMS, PLUME_VAULTS } from "@sdp/types/plume-programs";
+import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { address, getAddressEncoder } from "@solana/kit";
+import { describe, expect, it, vi } from "vitest";
+import { readPlumeVault } from "./chain";
+
+const vault = PLUME_VAULTS[0],
+  usdc = wellKnownMint("USDC", "mainnet-beta");
+if (!vault || !usdc) throw new Error("Missing pinned deployment fixture");
+const owner = "11111111111111111111111111111112",
+  tokenProgram = SPL_TOKEN_PROGRAMS["spl-token"];
+const pubkey = (value: string) => Buffer.from(getAddressEncoder().encode(address(value)));
+function token(mint: string, ownerAddress: string, balance: bigint) {
+  const bytes = Buffer.alloc(165);
+  pubkey(mint).copy(bytes);
+  pubkey(ownerAddress).copy(bytes, 32);
+  bytes.writeBigUInt64LE(balance, 64);
+  bytes[108] = 1;
+  return bytes;
+}
+function mint() {
+  const bytes = Buffer.alloc(82);
+  bytes[44] = 6;
+  bytes[45] = 1;
+  return bytes;
+}
+function fixture() {
+  const deployment = vault,
+    depositMint = usdc;
+  if (!deployment || !depositMint) throw new Error("Missing fixture");
+  const store = Buffer.alloc(113);
+  Buffer.from([195, 215, 104, 134, 185, 195, 240, 114]).copy(store);
+  store.writeBigUInt64LE(1n, 9);
+  pubkey(deployment.shareMint).copy(store, 17);
+  pubkey(deployment.tokenEscrow).copy(store, 49);
+  pubkey(PLUME_PROGRAMS.endpoint).copy(store, 81);
+  let shares = 10_000_000n;
+  const send = vi.fn(async (keys: readonly string[]) => ({
+    context: { slot: 1n },
+    value: keys.map((key) => {
+      const data =
+        key === deployment.oftStore
+          ? store
+          : key === deployment.tokenEscrow
+            ? token(deployment.shareMint, deployment.oftStore, 100_000_000n)
+            : key === deployment.shareMint || key === depositMint
+              ? mint()
+              : token(deployment.shareMint, owner, shares);
+      return {
+        owner: key === deployment.oftStore ? PLUME_PROGRAMS.oft : tokenProgram,
+        data: [data.toString("base64"), "base64"],
+        lamports: 1n,
+        executable: false,
+        space: BigInt(data.length),
+      };
+    }),
+  }));
+  // SAFETY: the proof uses only getMultipleAccounts; this fixture returns its account envelope.
+  const rpc = {
+    getMultipleAccounts: (keys: readonly string[]) => ({ send: () => send(keys) }),
+  } as unknown as SolanaRpc;
+  return {
+    rpc,
+    send,
+    setShares: (value: bigint) => {
+      shares = value;
+    },
+  };
+}
+describe("Plume RPC budget", () => {
+  it("batches five cold and three warm accounts while keeping holdings live", async () => {
+    const f = fixture();
+    const initial = await readPlumeVault(f.rpc, vault, owner, usdc);
+    f.setShares(5_000_000n);
+    const next = await readPlumeVault(f.rpc, vault, owner, usdc);
+    expect(initial.shares).toBe(10_000_000n);
+    expect(next.shares).toBe(5_000_000n);
+    expect(f.send.mock.calls.map(([keys]) => keys.length)).toEqual([5, 3]);
+  });
+  it("shares identical concurrent reads", async () => {
+    const f = fixture();
+    await Promise.all([
+      readPlumeVault(f.rpc, vault, owner, usdc),
+      readPlumeVault(f.rpc, vault, owner, usdc),
+    ]);
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+  it("never caches a failed identity proof", async () => {
+    const f = fixture();
+    f.send.mockRejectedValueOnce(new Error("RPC unavailable"));
+    await expect(readPlumeVault(f.rpc, vault, owner, usdc)).rejects.toThrow();
+    await readPlumeVault(f.rpc, vault, owner, usdc);
+    expect(f.send.mock.calls.map(([keys]) => keys.length)).toEqual([5, 5]);
+  });
+});

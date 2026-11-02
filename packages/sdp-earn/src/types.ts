@@ -114,6 +114,30 @@ export interface EarnVaultProvider {
   listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]>;
 }
 
+/** Correlates a source transaction with the provider's eventual Solana delivery.
+ * This is a candidate receipt; the API independently verifies chain finality,
+ * program identity and the recipient's token delta before it can settle money.
+ */
+export interface EarnProviderSettlementProvider extends EarnVaultProvider {
+  readProviderSettlement(
+    ctx: EarnRuntimeContext,
+    input: {
+      providerReference: string;
+      owner: string;
+      sourceSignature: string;
+      direction: "deposit" | "withdrawal";
+    }
+  ): Promise<{
+    sourceSignature: string;
+    owner: string;
+    destinationSignature: string | null;
+    tokenMint: string;
+    programAddress: string;
+    requiredAccount: string;
+    phase: "processing" | "recovery_required";
+  }>;
+}
+
 /**
  * The volatile half of a catalogue row: the numbers that move on their own
  * between syncs. Deliberately NOT a whole snapshot — a refresh may only update
@@ -400,6 +424,13 @@ export interface EarnVaultInstruction {
  * signed bytes that exceed Solana's packet limit.
  */
 export interface EarnVaultTransactionPlan {
+  /** Already verified provider signatures bind this exact message. It cannot be recomposed. */
+  providerTransaction?: {
+    transactionBase64: string;
+    additionalSigners: readonly string[];
+    /** Conservative upper bound, proven against the managed pool after the build. */
+    lastValidBlockHeight: string;
+  };
   cluster: SolanaCluster;
   instructions: EarnVaultInstruction[];
   /** Address lookup tables the caller should apply when compiling. */
@@ -444,6 +475,8 @@ export interface EarnVaultAssetIdentity {
 
 /** What a built plan encodes, per mint. All values are decimal strings. */
 export interface EarnVaultAcceptedAmounts {
+  /** Effective provider rail, including the builder default when omitted by the caller. */
+  redemptionMode?: "standard" | "instant";
   amount?: string;
   minSharesOut?: string;
   shares?: string;
@@ -478,6 +511,8 @@ export interface EarnVaultDepositInput {
 }
 
 export interface EarnVaultWithdrawInput {
+  /** Provider-managed redemption rail; absent preserves the provider's ordinary route. */
+  redemptionMode?: "standard" | "instant";
   providerReference: string;
   owner: string;
   /** Shares to redeem, as a decimal string. */
@@ -559,6 +594,7 @@ export interface EarnVaultQueuedWithdrawalTerms {
 
 /** Independently reported exit routes. The provider never chooses one for the caller. */
 export interface EarnVaultWithdrawalOptions {
+  providerRedemptionModes?: readonly ("standard" | "instant")[];
   /**
    * The direct withdrawal builder pays assets atomically with the share
    * redemption. Mutually exclusive with `providerOrder`: the latter only opens
@@ -1027,6 +1063,38 @@ export interface EarnVaultWithdrawProvider extends EarnVaultDirectProvider {
  */
 export interface EarnVaultProviderOrderWithdrawProvider extends EarnVaultWithdrawProvider {
   readonly vaultWithdrawalSettlement: "provider_order";
+}
+
+export interface EarnProviderRedemptionModesProvider extends EarnVaultWithdrawProvider {
+  getProviderRedemptionModes(): readonly ("standard" | "instant")[];
+}
+
+export interface EarnVaultPreparationProvider extends EarnVaultDirectProvider {
+  buildVaultPreparation(
+    ctx: EarnRuntimeContext,
+    input: { providerReference: string; owner: string; rentPayer?: string }
+  ): Promise<EarnVaultTransactionPlan>;
+}
+
+export interface EarnProviderOrderCancellationProvider extends EarnProviderSettlementProvider {
+  buildProviderOrderCancellation(
+    ctx: EarnRuntimeContext,
+    input: {
+      providerReference: string;
+      owner: string;
+      sourceTransaction: string;
+      rentPayer?: string;
+    }
+  ): Promise<EarnVaultTransactionPlan>;
+  readProviderOrderCancellation(
+    ctx: EarnRuntimeContext,
+    input: {
+      providerReference: string;
+      owner: string;
+      sourceSignature: string;
+      sourceTransaction: string;
+    }
+  ): ReturnType<EarnProviderSettlementProvider["readProviderSettlement"]>;
 }
 
 export interface EarnDepositEligibilityInput {

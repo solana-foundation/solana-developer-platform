@@ -72,6 +72,7 @@ export const EARN_PROVIDERS = [
   "ondo",
   "hastra",
   "wisdomtree",
+  "plume",
 ] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
 
@@ -94,6 +95,7 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   // Redemptions pay USDC back, but through the vault-direct model (the org's
   // own wallet sends fund tokens), never through a program-style payout rail.
   wisdomtree: [],
+  plume: [],
 } as const satisfies Record<EarnProviderId, readonly EarnPortfolioToken[]>;
 
 /** Fail closed for provider ids from open database read models. */
@@ -177,6 +179,8 @@ export const EARN_PROVIDER_SURFACING = {
   // is Solana-mainnet-only, so that E2E is blocked on production vault deposits
   // opening (PRO-1703) and on real WisdomTree Connect credentials.
   wisdomtree: false,
+  // Enable only after live cross-chain settlement and recovery validation.
+  plume: false,
 } as const satisfies Record<EarnProviderId, boolean>;
 
 /**
@@ -252,6 +256,7 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   // not a subscription. Money moves only when SDP builds the transfer for an
   // eligibility-checked owner and that owner signs — the vault_direct shape.
   wisdomtree: "vault_direct",
+  plume: "vault_direct",
 } as const satisfies Record<EarnProviderId, EarnDepositStyle>;
 
 /**
@@ -272,6 +277,7 @@ export const EARN_PROVIDER_DEPOSIT_SETTLEMENT = {
   // the same Solana transaction; there is no provider order after finality.
   hastra: "atomic",
   wisdomtree: "provider_order",
+  plume: "provider_order",
 } as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
 
 /**
@@ -293,7 +299,28 @@ export const EARN_PROVIDER_WITHDRAWAL_SETTLEMENT = {
   // reconciliation semantics.
   hastra: "atomic",
   wisdomtree: "provider_order",
+  plume: "provider_order",
 } as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
+
+/** Whether the provider has a verified destination-settlement observer in this deployment. */
+export const EARN_PROVIDER_SETTLEMENT_TRACKING = {
+  veda: false,
+  upshift: false,
+  perena: false,
+  kamino: false,
+  jupiter_lend: false,
+  ondo: false,
+  hastra: false,
+  wisdomtree: false,
+  plume: true,
+} as const satisfies Record<EarnProviderId, boolean>;
+export function earnTracksProviderSettlement(provider: string): boolean {
+  // SAFETY: the membership check precedes indexing an open DB provider id.
+  return (
+    Object.hasOwn(EARN_PROVIDER_SETTLEMENT_TRACKING, provider) &&
+    EARN_PROVIDER_SETTLEMENT_TRACKING[provider as EarnProviderId]
+  );
+}
 
 /** Unknown providers fail closed because atomicity is a positive settlement claim. */
 export function earnProviderDepositSettlement(provider: string): "atomic" | "provider_order" {
@@ -365,6 +392,7 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   // inventing one the on-chain programs cannot enforce.
   hastra: null,
   wisdomtree: null,
+  plume: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /**
@@ -381,6 +409,7 @@ export const EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT = {
   ondo: "enforceable",
   hastra: "unsupported",
   wisdomtree: "unsupported",
+  plume: "unsupported",
 } as const satisfies Record<EarnProviderId, "enforceable" | "unsupported">;
 
 /** Unknown providers fail closed to the ordinary enforceable-floor policy. */
@@ -468,6 +497,7 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   // on final USDC output; runtime surfaces hide it while that rail is off.
   hastra: { defaultToleranceBps: 50 },
   wisdomtree: null,
+  plume: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
 /** Exit slippage-floor policy for an OPEN provider string — fails closed to none. */
@@ -516,6 +546,7 @@ export const EARN_PROVIDER_DEPLOYED_CLUSTERS = {
   // and provider-order settlement are release-ready. Mainnet identities live
   // in `wisdomtree-programs.ts`; this is the money-in admission gate.
   wisdomtree: [],
+  plume: [],
 } as const satisfies Record<EarnProviderId, readonly SolanaCluster[]>;
 
 /**
@@ -752,4 +783,13 @@ export function resolveOrganizationProviderEntitlements(input: {
       earn: applyOverrides(defaults.earn, input.providerOverrides?.earn),
     },
   };
+}
+
+/** Providers whose mint builder requires a pre-existing share account for sponsorship. */
+export function earnRequiresVaultPreparation(provider: string): boolean {
+  return provider === "plume";
+}
+/** Provider orders with a signed cancellation and verified share-return lifecycle. */
+export function earnCanCancelProviderOrder(provider: string): boolean {
+  return provider === "plume";
 }

@@ -40,7 +40,7 @@ interface EarnVaultExitModalProps {
   projectId: string | null;
 }
 
-type RouteChoice = "instant" | "async";
+type RouteChoice = "instant" | "async" | "provider_instant";
 
 type ExitOptions = Awaited<ReturnType<typeof fetchEarnVaultWithdrawalOptions>> | undefined;
 
@@ -54,7 +54,11 @@ function autoRouteChoice(
   asyncRoute: ReturnType<typeof earnVaultAsyncWithdrawalRoute>,
   ready: ExitOptionsValue | null
 ): RouteChoice | null {
-  if (!ready) return null;
+  if (
+    !ready ||
+    (ready.providerRedemptionModes !== undefined && ready.providerRedemptionModes.length > 1)
+  )
+    return null;
   if (ready.instant && !asyncRoute) return "instant";
   if (!ready.instant && asyncRoute) return "async";
   return null;
@@ -137,6 +141,14 @@ function ExitRouteOptions({
     <>
       <p className="mt-2 text-body text-secondary">{t("DashboardEarn.exitRoute.description")}</p>
       <div className="mt-5 grid gap-2">
+        {ready?.providerRedemptionModes?.includes("instant") ? (
+          <RouteOption
+            description={t("DashboardEarn.exitRoute.providerInstantDescription")}
+            icon={ZapIcon}
+            onClick={() => onChoose("provider_instant")}
+            title={t("DashboardEarn.exitRoute.providerInstantTitle")}
+          />
+        ) : null}
         {ready?.instant ? (
           <RouteOption
             description={t("DashboardEarn.exitRoute.instantDescription")}
@@ -249,10 +261,12 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
       : null
     : (choice ?? autoRouteChoice(asyncRoute, ready));
 
-  if (activeChoice === "instant") {
+  if (activeChoice === "instant" || activeChoice === "provider_instant") {
     return (
       <EarnVaultWithdrawModal
         environment={props.environment}
+        settlement={activeChoice === "provider_instant" ? "provider_order" : "atomic"}
+        redemptionMode={activeChoice === "provider_instant" ? "instant" : undefined}
         onClose={props.onClose}
         onMovementUpdated={props.onMovementUpdated}
         onWithdrawn={props.onWithdrawn}

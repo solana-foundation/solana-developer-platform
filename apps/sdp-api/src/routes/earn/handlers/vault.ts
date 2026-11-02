@@ -11,6 +11,7 @@ import type {
   EarnVaultWithdrawalResponse,
   EarnVaultWithdrawalsPage,
 } from "@sdp/types/earn";
+import { providerSettlementFromData } from "@sdp/types/earn-provider-orders";
 import { type EarnProviderId, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -245,6 +246,7 @@ function buildEarnVaultDepositResponse(
     positionId: result.position.id,
     movementId: result.movement.id,
     // The ledger says `requested`; this contract's word for it is `pending`.
+    settlementOutcome: providerSettlementFromData(result.movement.provider_data)?.outcome,
     status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
@@ -695,6 +697,7 @@ function toEarnVaultDepositRecord(movement: EarnMovementRow): EarnVaultDepositRe
     );
   }
   return {
+    settlementOutcome: providerSettlementFromData(movement.provider_data)?.outcome,
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
@@ -1074,6 +1077,7 @@ export async function extractEarnVaultWithdrawal(
       provider: position.provider,
       positionId: position.id,
       shares: body.shares,
+      redemptionMode: body.redemptionMode,
       minAmountOut: body.minAmountOut ?? null,
     }),
   };
@@ -1243,6 +1247,7 @@ export async function createEarnVaultWithdrawal(
     shareMint: position.shareMint,
     wallet,
     shares: parsedData.shares,
+    redemptionMode: parsedData.redemptionMode,
     minAmountOut: parsedData.minAmountOut,
     requestId,
     userId: auth.userId ?? null,
@@ -1267,6 +1272,7 @@ export async function createEarnVaultWithdrawal(
       provider: position.provider,
       positionId: position.id,
       shares: parsedData.shares,
+      redemptionMode: parsedData.redemptionMode,
       minAmountOut: parsedData.minAmountOut ?? null,
       signature: result.movement.signature,
       requestId,
@@ -1306,12 +1312,18 @@ function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): E
   }
   const { status, settledAt } = movementStatusOnWire(movement);
   return {
+    settlementOutcome: providerSettlementFromData(movement.provider_data)?.outcome,
     movementId: movement.id,
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
     status: status as EarnVaultWithdrawal["status"],
     signature: movement.signature,
+    redemptionMode:
+      movement.provider_data.redemptionMode === "standard" ||
+      movement.provider_data.redemptionMode === "instant"
+        ? movement.provider_data.redemptionMode
+        : undefined,
     shares: movement.amount_requested,
     shareMint: movement.denomination,
     failureReason: movement.failure_reason,

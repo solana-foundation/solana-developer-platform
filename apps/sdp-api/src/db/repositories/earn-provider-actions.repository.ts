@@ -1,0 +1,202 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import {
+  EARN_PROVIDER_ACTION_CHAIN_STATUSES,
+  EARN_PROVIDER_ACTION_KINDS,
+  EARN_PROVIDER_ACTION_STATUSES,
+  EARN_PROVIDER_ACTION_TRANSITIONS,
+  type EarnProviderActionStatus,
+} from "@sdp/types/earn-provider-orders";
+import { z } from "zod";
+import type { DatabaseClient } from "@/db/client";
+import { conflict } from "@/lib/errors";
+
+const rowSchema = z.object({
+  id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+  provider: z.string(),
+  action: z.enum(EARN_PROVIDER_ACTION_KINDS),
+  status: z.enum(EARN_PROVIDER_ACTION_STATUSES),
+  parent_movement_id: z.string().nullable(),
+  custody_wallet_id: z.string().nullable(),
+  owner_address: z.string(),
+  vault_address: z.string(),
+  token_mint: z.string(),
+  share_mint: z.string(),
+  fee_payer: z.string().nullable(),
+  request_id: z.string(),
+  fingerprint: z.string(),
+  unsigned_transaction: z.string().nullable(),
+  signed_transaction: z.string().nullable(),
+  signature: z.string().nullable(),
+  last_valid_block_height: z.string().nullable(),
+  delivery_signature: z.string().nullable(),
+  error: z.string().nullable(),
+  unknown_signature_observed_at: z.string().nullable(),
+  lease_until: z.string(),
+  next_check_at: z.string(),
+  created_by: z.string().nullable(),
+  initiated_by_key_id: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type EarnProviderActionRow = z.infer<typeof rowSchema>;
+export type EarnProviderActionClaim = Pick<
+  EarnProviderActionRow,
+  | "organization_id"
+  | "project_id"
+  | "environment"
+  | "provider"
+  | "action"
+  | "parent_movement_id"
+  | "custody_wallet_id"
+  | "owner_address"
+  | "vault_address"
+  | "token_mint"
+  | "share_mint"
+  | "fee_payer"
+  | "request_id"
+  | "fingerprint"
+  | "created_by"
+  | "initiated_by_key_id"
+>;
+type Scope = {
+  organizationId: string;
+  projectId: string;
+  actionId: string;
+  preparationLeaseUntil?: string;
+};
+
+export function createEarnProviderActionsRepository(db: DatabaseClient) {
+  return {
+    async get(scope: Scope): Promise<EarnProviderActionRow | null> {
+      const row = await db
+        .prepare(
+          "SELECT * FROM earn_provider_actions WHERE id=? AND organization_id=? AND project_id=?"
+        )
+        .bind(scope.actionId, scope.organizationId, scope.projectId)
+        .first();
+      return row === null ? null : rowSchema.parse(row);
+    },
+    async claim(
+      input: EarnProviderActionClaim
+    ): Promise<{ row: EarnProviderActionRow; owned: boolean }> {
+      const columns = Object.keys(input);
+      const row = await db
+        .prepare(`INSERT INTO earn_provider_actions(id,status,lease_until,${columns.join(",")})
+        VALUES (?,'preparing',?,${columns.map(() => "?").join(",")}) ON CONFLICT DO NOTHING RETURNING *`)
+        .bind(
+          `earn_provider_action_${crypto.randomUUID()}`,
+          new Date(Date.now() + 120_000).toISOString(),
+          ...Object.values(input)
+        )
+        .first();
+      if (row !== null) return { row: rowSchema.parse(row), owned: true };
+      const prior = await db
+        .prepare(
+          "SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND request_id=?"
+        )
+        .bind(input.organization_id, input.project_id, input.request_id)
+        .first();
+      if (prior === null && input.action === "cancellation") {
+        const active = await db
+          .prepare(
+            "SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND action='cancellation' AND status<>'failed'"
+          )
+          .bind(input.organization_id, input.project_id, input.parent_movement_id)
+          .first();
+        if (active !== null) return { row: rowSchema.parse(active), owned: false };
+      }
+      const existing = rowSchema.parse(prior);
+      if (existing.fingerprint !== input.fingerprint)
+        throw conflict("Idempotency key already used with different request payload");
+      const taken = await db
+        .prepare(
+          "UPDATE earn_provider_actions SET lease_until=? WHERE id=? AND organization_id=? AND project_id=? AND status='preparing' AND lease_until<? RETURNING *"
+        )
+        .bind(
+          new Date(Date.now() + 120_000).toISOString(),
+          existing.id,
+          input.organization_id,
+          input.project_id,
+          new Date().toISOString()
+        )
+        .first();
+      return taken === null
+        ? { row: existing, owned: false }
+        : { row: rowSchema.parse(taken), owned: true };
+    },
+    async advance(
+      scope: Scope,
+      from: EarnProviderActionStatus,
+      to: EarnProviderActionStatus,
+      values: Partial<
+        Pick<
+          EarnProviderActionRow,
+          | "unsigned_transaction"
+          | "signed_transaction"
+          | "signature"
+          | "last_valid_block_height"
+          | "delivery_signature"
+          | "fee_payer"
+          | "error"
+        >
+      > = {}
+    ): Promise<EarnProviderActionRow | null> {
+      const allowed: readonly EarnProviderActionStatus[] = EARN_PROVIDER_ACTION_TRANSITIONS[from];
+      if (!allowed.includes(to)) throw new Error("Invalid provider action transition");
+      if (from === "preparing" && scope.preparationLeaseUntil === undefined)
+        throw new Error("Preparation requires its ownership lease");
+      const fields = Object.keys(values);
+      const row = await db
+        .prepare(
+          `UPDATE earn_provider_actions SET status=?,updated_at=sdp_iso_now(),next_check_at=?${fields.length === 0 ? "" : `,${fields.map((f) => `${f}=?`).join(",")}`} WHERE id=? AND organization_id=? AND project_id=? AND status=?${from === "preparing" ? " AND lease_until=?" : ""} RETURNING *`
+        )
+        .bind(
+          to,
+          new Date(Date.now() + 120_000).toISOString(),
+          ...Object.values(values),
+          scope.actionId,
+          scope.organizationId,
+          scope.projectId,
+          from,
+          ...(from === "preparing" ? [scope.preparationLeaseUntil] : [])
+        )
+        .first();
+      return row === null ? null : rowSchema.parse(row);
+    },
+    async releasePreparation(scope: Scope): Promise<void> {
+      await db
+        .prepare(
+          "UPDATE earn_provider_actions SET lease_until=sdp_iso_now() WHERE id=? AND organization_id=? AND project_id=? AND status='preparing' AND lease_until=?"
+        )
+        .bind(scope.actionId, scope.organizationId, scope.projectId, scope.preparationLeaseUntil)
+        .run();
+    },
+    async observeUnknownSignature(scope: Scope, status: EarnProviderActionStatus): Promise<void> {
+      await db
+        .prepare(
+          "UPDATE earn_provider_actions SET unknown_signature_observed_at=COALESCE(unknown_signature_observed_at,sdp_iso_now()) WHERE id=? AND organization_id=? AND project_id=? AND status=?"
+        )
+        .bind(scope.actionId, scope.organizationId, scope.projectId, status)
+        .run();
+    },
+    async claimDue(
+      environment: EarnProviderActionRow["environment"]
+    ): Promise<EarnProviderActionRow | null> {
+      const states = [...EARN_PROVIDER_ACTION_CHAIN_STATUSES, "awaiting_delivery"];
+      const row = await db
+        .prepare(`WITH due AS (SELECT id FROM earn_provider_actions WHERE environment=? AND status=ANY(?::text[]) AND next_check_at<=? ORDER BY next_check_at,id LIMIT 1 FOR UPDATE SKIP LOCKED)
+        UPDATE earn_provider_actions a SET next_check_at=? FROM due WHERE a.id=due.id RETURNING a.*`)
+        .bind(
+          environment,
+          states,
+          new Date().toISOString(),
+          new Date(Date.now() + 60_000).toISOString()
+        )
+        .first();
+      return row === null ? null : rowSchema.parse(row);
+    },
+  };
+}
