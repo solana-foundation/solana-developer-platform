@@ -32,12 +32,18 @@ import {
   isInstructionForProgram,
   isInstructionWithAccounts,
   isInstructionWithData,
+  isSolanaError,
   type Signature,
+  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+  unwrapSimulationError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
+  TOKEN_2022_ERROR__INSUFFICIENT_FUNDS,
+  TOKEN_2022_ERROR__OWNER_MISMATCH,
 } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
@@ -630,6 +636,54 @@ interface RecurringPaymentPause {
    * an alert can tell a payer's or issuer's refusal from an SDP or dependency fault.
    */
   errorCode: ErrorCode | "UNEXPECTED";
+  /**
+   * Who refused the collection, when that is proven: `payer` for a custody policy refusal or a
+   * preflight refusal for the payer's balance or delegation, `issuer` for a frozen account, and
+   * `unconfirmed` for everything else, an expired or on-chain failed send included, so an alert
+   * on `unconfirmed` misses no SDP or dependency fault.
+   */
+  failureSource: RecurringPaymentFailureSource;
+}
+
+type RecurringPaymentFailureSource = "payer" | "issuer" | "unconfirmed";
+
+/**
+ * Program errors a preflight refusal proves are the payer's: a drained source token account, a
+ * delegation revoked on the token account (the program is no longer its delegate, so the token
+ * program sees an owner mismatch), or a subscription delegation the payer let expire. The token
+ * codes match the classic and 2022 token programs; the subscriptions program's own codes start
+ * at 100, so none collides.
+ */
+const PAYER_REFUSAL_PROGRAM_ERRORS: ReadonlySet<number> = new Set([
+  TOKEN_2022_ERROR__INSUFFICIENT_FUNDS,
+  TOKEN_2022_ERROR__OWNER_MISMATCH,
+  subscriptionsProgram.SUBSCRIPTIONS_ERROR__DELEGATION_EXPIRED,
+]);
+
+/**
+ * Classifies a pausing failure's source from what it proves (see `RecurringPaymentPause`).
+ *
+ * @param error - The failure.
+ * @returns Its source.
+ */
+function recurringPaymentFailureSource(error: Error): RecurringPaymentFailureSource {
+  if (!(error instanceof AppError)) return "unconfirmed";
+  if (error.code === "CUSTODY_POLICY_REFUSED") return "payer";
+  if (error.code === "ACCOUNT_FROZEN") return "issuer";
+  if (
+    error.code !== "TRANSACTION_FAILED" ||
+    !isSolanaError(
+      error.cause,
+      SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE
+    )
+  ) {
+    return "unconfirmed";
+  }
+  const programError = unwrapSimulationError(error.cause);
+  return isSolanaError(programError, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM) &&
+    PAYER_REFUSAL_PROGRAM_ERRORS.has(programError.context.code)
+    ? "payer"
+    : "unconfirmed";
 }
 
 /**
@@ -683,7 +737,12 @@ async function pauseFailingRecurringPayment(
   });
   if (paused === null) return null;
   const errorCode = input.error instanceof AppError ? input.error.code : "UNEXPECTED";
-  return { reason, failedAttempts, errorCode };
+  return {
+    reason,
+    failedAttempts,
+    errorCode,
+    failureSource: recurringPaymentFailureSource(input.error),
+  };
 }
 
 /**
@@ -709,6 +768,7 @@ function logRecurringPaymentPaused(
     reason: pause.reason,
     failed_attempts: pause.failedAttempts,
     error_code: pause.errorCode,
+    failure_source: pause.failureSource,
     organization_id: context.organizationId,
     project_id: context.projectId,
     recurring_payment_id: context.recurringPaymentId,
