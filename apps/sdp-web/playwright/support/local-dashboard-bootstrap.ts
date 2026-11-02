@@ -610,15 +610,13 @@ async function ensureLinkedOrg(
 
       await client.query(
         `INSERT INTO organizations
-           (id, name, slug, status, settings, onboarding_completed_at, onboarding_version)
-         VALUES ($1, $2, $3, 'active', $4, sdp_datetime_now(), 1)
+           (id, name, slug, status, settings)
+         VALUES ($1, $2, $3, 'active', $4)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
            slug = EXCLUDED.slug,
            status = EXCLUDED.status,
            settings = EXCLUDED.settings,
-           onboarding_completed_at = sdp_datetime_now(),
-           onboarding_version = 1,
            updated_at = sdp_datetime_now()`,
         [
           organization.id,

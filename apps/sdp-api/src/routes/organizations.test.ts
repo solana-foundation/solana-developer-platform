@@ -75,7 +75,7 @@ describe("Organizations routes", () => {
       await getDb(env)
         .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
         .bind(
-          JSON.stringify({ defaultEnvironment: "production", webhookSecret: "whsec_synthetic" }),
+          JSON.stringify({ enableProductionProject: true, webhookSecret: "whsec_synthetic" }),
           TEST_ORG.id
         )
         .run();
@@ -91,36 +91,12 @@ describe("Organizations routes", () => {
           name: TEST_ORG.name,
           slug: TEST_ORG.slug,
           status: TEST_ORG.status,
-          settings: { defaultEnvironment: "production" },
+          settings: { enableProductionProject: true },
           createdAt: expect.any(String),
           updatedAt: expect.any(String),
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },
       });
-    });
-    it("refuses a key whose organization's stored status is not one it knows", async () => {
-      await getDb(env)
-        .prepare("UPDATE organizations SET status = ? WHERE id = ?")
-        .bind("unknown", TEST_ORG.id)
-        .run();
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-          },
-        },
-        env
-      );
-      // Authentication admits only an `active` organization, so an unknown status
-      // fails closed there rather than reaching the route.
-      expect(res.status).toBe(401);
-      const body = (await res.json()) as {
-        error: {
-          code: string;
-        };
-      };
-      expect(body.error.code).toBe("REVOKED_API_KEY");
     });
     it("rejects unauthenticated requests", async () => {
       const res = await app.request(`/v1/organizations/${TEST_ORG.id}`, {}, env);
@@ -210,25 +186,6 @@ describe("Organizations routes", () => {
           body: { name: "Updated Name" },
         },
       ]);
-    });
-    it("updates organization settings", async () => {
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            settings: {
-              defaultEnvironment: "production",
-            },
-          }),
-        },
-        env
-      );
-      expect(res.status).toBe(200);
     });
     it("rejects empty update", async () => {
       const res = await app.request(

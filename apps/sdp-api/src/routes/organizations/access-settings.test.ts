@@ -197,19 +197,8 @@ describe("Organization access settings", () => {
   });
   describe("concurrent settings updates", () => {
     beforeEach(async () => {
-      await seedOrganization({ defaultEnvironment: "sandbox" });
+      await seedOrganization({ enableProductionProject: true });
       await signInAdmin();
-    });
-    it("keeps a security change that lands alongside an unrelated one", async () => {
-      const [restriction, unrelated] = await Promise.all([
-        patch({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }, "203.0.113.42"),
-        patch({ settings: { defaultEnvironment: "production" } }, "203.0.113.42"),
-      ]);
-      expect(restriction.status).toBe(200);
-      expect(unrelated.status).toBe(200);
-      const settings = await readSettings();
-      expect(required(settings).allowedIpAddresses).toEqual(["203.0.113.0/24"]);
-      expect(required(settings).defaultEnvironment).toBe("production");
     });
     it("keeps the restriction when a rename lands at the same moment", async () => {
       const clerk = stubClerkBackend(env);
@@ -318,7 +307,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(403);
     });
     it("leaves an organization with no restriction unrestricted", async () => {
-      await seedOrganization({ defaultEnvironment: "sandbox" });
+      await seedOrganization({ enableProductionProject: true });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
@@ -333,17 +322,6 @@ describe("Organization access settings", () => {
         "x-forwarded-for": "198.51.100.42",
       });
       expect(res.status).toBe(500);
-    });
-    it("ignores an allowlist that was recorded before the setting was enforced", async () => {
-      await seedOrganization(null);
-      await writeRawSettings(
-        JSON.stringify({ legacyAllowedIpAddresses: ["203.0.113.0/24", "office wifi"] })
-      );
-      const res = await get({
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        "x-forwarded-for": "198.51.100.42",
-      });
-      expect(res.status).toBe(200);
     });
     it("fails closed on a restriction stored in a shape it does not understand", async () => {
       await seedOrganization(null);

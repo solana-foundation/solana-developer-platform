@@ -93,30 +93,6 @@ function custodyConfig(
   };
 }
 
-async function seedDefaultSandboxCustodyWallet() {
-  await seedTestCustodyRows(env, {
-    configs: [
-      custodyConfig({
-        id: "cfg_onboarding_test",
-        projectId: PROJECT_ID,
-        provider: "privy",
-        status: "active",
-      }),
-    ],
-    wallets: [
-      {
-        id: "cw_onboarding_test",
-        owner: { kind: "config", custodyConfigId: "cfg_onboarding_test" },
-        walletId: "wallet_onboarding_test",
-        publicKey: "11111111111111111111111111111111",
-        label: "Onboarding wallet",
-        purpose: null,
-        status: "active",
-      },
-    ],
-  });
-}
-
 async function seedPrivyConnection(params: {
   connectionId: string;
   lastCheckStatus: "success" | "retry_unknown";
@@ -166,44 +142,13 @@ describe("organization onboarding handlers", () => {
     await seedOrganization();
   });
 
-  it("starts a newly created organization at custody", async () => {
-    expect(await getSetup()).toEqual({
-      status: "not_started",
-      currentStep: "custody",
-      custodyProviders: [],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
-  });
-
-  it("moves to in progress once the default sandbox custody config exists", async () => {
-    await seedDefaultSandboxCustodyWallet();
-
-    expect(await getSetup()).toEqual({
-      status: "in_progress",
-      currentStep: "custody",
-      custodyProviders: ["privy"],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
-  });
-
-  it("moves to in progress on an active BYOK connection alone", async () => {
+  it("lists the provider of an active BYOK connection alone", async () => {
     await seedPrivyConnection({
       connectionId: "cconn_onboarding_active",
       lastCheckStatus: "success",
     });
 
-    expect(await getSetup()).toEqual({
-      status: "in_progress",
-      currentStep: "custody",
-      custodyProviders: ["privy"],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
+    expect(await getSetup()).toEqual({ custodyProviders: ["privy"], canManage: true });
   });
 
   it("lists distinct active sandbox providers in catalog order", async () => {
@@ -284,13 +229,6 @@ describe("organization onboarding handlers", () => {
       lastCheckStatus: "retry_unknown",
     });
 
-    expect(await getSetup()).toEqual({
-      status: "not_started",
-      currentStep: "custody",
-      custodyProviders: [],
-      completedAt: null,
-      version: 1,
-      canManage: true,
-    });
+    expect(await getSetup()).toEqual({ custodyProviders: [], canManage: true });
   });
 });

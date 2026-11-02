@@ -25,7 +25,6 @@ import { env } from "@/test/helpers/env";
 import { seedInvitation } from "@/test/helpers/invitations";
 import { organizationMember, seedActiveMemberships } from "@/test/helpers/organization-members";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { ONBOARDING_VERSION } from "./state";
 
 const ORGANIZATION_ID = "org_onboarding_isolation";
 const CLERK_ORG_ID = "org_clerk_onboarding_isolation";
@@ -193,14 +192,7 @@ describe("onboarding status under database tenant isolation", () => {
             createdAt: expect.any(String),
             updatedAt: expect.any(String),
           },
-          setup: {
-            status: "not_started",
-            currentStep: "custody",
-            custodyProviders: [],
-            completedAt: null,
-            version: ONBOARDING_VERSION,
-            canManage: false,
-          },
+          setup: { custodyProviders: [], canManage: false },
         },
         meta: { requestId: expect.any(String), timestamp: expect.any(String) },
       });

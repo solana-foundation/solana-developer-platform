@@ -61,7 +61,7 @@ describe("decideMoneyStart", () => {
   it.each<[string, string | null]>([
     ["no settings", null],
     ["the entitlement off", JSON.stringify({ enableProductionProject: false })],
-    ["other settings only", JSON.stringify({ defaultEnvironment: "production" })],
+    ["other settings only", JSON.stringify({ providerOverrides: { custody: { local: true } } })],
   ])("refuses a production project with %s", (_label, rawSettings) => {
     expect(decideMoneyStart(facts({ rawSettings }))).toEqual({
       admitted: false,

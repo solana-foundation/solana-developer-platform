@@ -526,7 +526,7 @@ describe("provider-availability.service", () => {
               local: true,
             },
           },
-          defaultEnvironment: "sandbox",
+          allowedIpAddresses: ["203.0.113.0/24"],
         }),
         TEST_ORG_ID
       )
@@ -545,7 +545,7 @@ describe("provider-availability.service", () => {
       .first<{ settings: string | null }>();
 
     expect(organization?.settings ? JSON.parse(organization.settings) : null).toEqual({
-      defaultEnvironment: "sandbox",
+      allowedIpAddresses: ["203.0.113.0/24"],
     });
   });
 
@@ -585,7 +585,7 @@ describe("provider-availability.service", () => {
       .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
       .bind(
         JSON.stringify({
-          defaultEnvironment: "sandbox",
+          allowedIpAddresses: ["203.0.113.0/24"],
           enableProductionProject: true,
         }),
         TEST_ORG_ID
@@ -605,7 +605,7 @@ describe("provider-availability.service", () => {
       .bind(TEST_ORG_ID)
       .first<{ settings: string | null }>();
     expect(stripped?.settings ? JSON.parse(stripped.settings) : null).toEqual({
-      defaultEnvironment: "sandbox",
+      allowedIpAddresses: ["203.0.113.0/24"],
     });
   });
 
