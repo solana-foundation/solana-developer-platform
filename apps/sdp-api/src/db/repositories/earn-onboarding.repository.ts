@@ -35,7 +35,7 @@ export interface EarnOnboardingRepository {
     input: { moderatorGuid: string; organizationGuid: string | null; personGuid: string | null }
   ): Promise<EarnOnboardingCustomer | null>;
   claimWallet(scope: EarnOnboardingScope, owner: string): Promise<boolean>;
-  /** Deletes an unverified claim so a rejected registration cannot block the real owner. */
+  /** Archives an unverified claim so a rejected registration cannot block the real owner. */
   releaseWallet(scope: EarnOnboardingScope, owner: string): Promise<void>;
   linkWallet(scope: EarnOnboardingScope, owner: string): Promise<boolean>;
   findByWallet(

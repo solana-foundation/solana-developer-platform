@@ -34,6 +34,7 @@ CREATE INDEX earn_onboarding_documents_customer_idx ON earn_onboarding_documents
   (organization_id, project_id, environment, counterparty_id);
 
 CREATE TABLE earn_onboarding_wallets (
+  id TEXT PRIMARY KEY,
   organization_id TEXT NOT NULL,
   project_id TEXT NOT NULL,
   counterparty_id TEXT NOT NULL,
@@ -41,8 +42,13 @@ CREATE TABLE earn_onboarding_wallets (
   owner_address TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed', 'linked', 'archived')),
   created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
-  PRIMARY KEY (environment, owner_address)
+  updated_at TEXT NOT NULL DEFAULT sdp_iso_now()
 );
+-- Soft delete only: archived claims keep their history, so one address may
+-- hold many archived rows. Only live claims and registrations block the
+-- globally shared address for other customers.
+CREATE UNIQUE INDEX earn_onboarding_wallets_active_address_key ON earn_onboarding_wallets
+  (environment, owner_address) WHERE status <> 'archived';
 ALTER TABLE earn_onboarding_customers ADD CONSTRAINT earn_onboarding_customer_parent_fk
   FOREIGN KEY (counterparty_id, organization_id, project_id) REFERENCES counterparties(id, organization_id, project_id) NOT VALID;
 ALTER TABLE earn_onboarding_documents ADD CONSTRAINT earn_onboarding_document_parent_fk

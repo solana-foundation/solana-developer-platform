@@ -53,16 +53,18 @@ export function createPostgresEarnOnboardingRepository(
     async claimWallet(scope, owner) {
       const row = await db
         .prepare(`INSERT INTO earn_onboarding_wallets
-        (organization_id, project_id, environment, counterparty_id, owner_address)
-        VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING owner_address`)
-        .bind(...scopeValues(scope), owner)
+        (id, organization_id, project_id, environment, counterparty_id, owner_address)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING owner_address`)
+        .bind(`earn_wallet_${crypto.randomUUID()}`, ...scopeValues(scope), owner)
         .first();
       return row !== null;
     },
     async releaseWallet(scope, owner) {
-      // Only an unverified claim is deletable; a linked registration stands.
+      // Soft delete only: archiving an unverified claim frees the globally
+      // shared address for the real owner while keeping the row's history. A
+      // linked registration is confirmed and is never released.
       await db
-        .prepare(`DELETE FROM earn_onboarding_wallets
+        .prepare(`UPDATE earn_onboarding_wallets SET status = 'archived', updated_at = sdp_iso_now()
         WHERE ${scopeWhere} AND owner_address = ? AND status = 'claimed'`)
         .bind(...scopeValues(scope), owner)
         .run();

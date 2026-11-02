@@ -33,6 +33,23 @@ type Provider = Pick<
   | "registerSolanaWallet"
 >;
 
+/**
+ * WisdomTree processed and refused the registration (any 4xx), or the write
+ * could never start (unconfigured credentials, thrown before any HTTP call):
+ * nothing was written, so the unverified claim can be released. Timeouts, 5xx
+ * and malformed responses leave the outcome unknown — the wallet may be
+ * registered — so those claims stay for reconciliation instead.
+ */
+function isConfirmedWalletRejection(error: unknown): boolean {
+  return (
+    error instanceof SdpEarnError &&
+    (error.code === "BAD_REQUEST" ||
+      error.code === "CONFLICT" ||
+      error.code === "RATE_LIMITED" ||
+      error.code === "PROVIDER_NOT_CONFIGURED")
+  );
+}
+
 /** No PII is persisted. Only immutable identity links and encrypted upload references. */
 export class WisdomTreeOnboardingService {
   constructor(
@@ -220,9 +237,10 @@ export class WisdomTreeOnboardingService {
       await this.provider.registerSolanaWallet(this.runtime, row.organization_guid, owner);
     } catch (error) {
       // The address is globally unique per environment across every customer.
-      // Until WisdomTree accepts the registration the claim is unverified, and
-      // keeping it would permanently block the real owner from registering.
-      await this.repository.releaseWallet(scope, owner);
+      // A confirmed rejection releases the unverified claim so it cannot block
+      // the real owner; an uncertain outcome (timeout, 5xx, malformed reply)
+      // keeps the claim — the provider may have accepted the wallet.
+      if (isConfirmedWalletRejection(error)) await this.repository.releaseWallet(scope, owner);
       throw error;
     }
     if (!(await this.repository.linkWallet(scope, owner)))
