@@ -37,6 +37,23 @@ const order: EarnVaultWithdrawal = {
   settledAt: null,
   redemptionMode: "standard",
 };
+
+const actionOf = (movementId: string, status: string, error: string | null = null) => ({
+  actionId: `action_${movementId}`,
+  action: "cancellations",
+  status,
+  provider: "plume",
+  providerReference: "vault",
+  ownerAddress: order.ownerAddress,
+  feePayer: null,
+  parentMovementId: movementId,
+  signature: null,
+  deliverySignature: null,
+  lastValidBlockHeight: null,
+  error,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  transaction: null,
+});
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.rows = [order];
@@ -112,6 +129,52 @@ describe("provider cancellation controls", () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       expect(mocks.read).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("applies the slower reply of one poll batch instead of dropping it", async () => {
+    vi.useFakeTimers();
+    try {
+      const second = { ...order, movementId: "order-2" };
+      mocks.rows = [order, second];
+      mocks.create.mockImplementation(async (_kind, input) => ({
+        ...actionOf(input.movementId as string, "requested"),
+      }));
+      let releaseSecond: (action: unknown) => void = () => {};
+      const secondReply = new Promise((resolve) => {
+        releaseSecond = resolve;
+      });
+      mocks.read.mockImplementation(async (actionId: string) =>
+        actionId === "action_order"
+          ? actionOf("order", "confirmed")
+          : await secondReply.then(() => actionOf("order-2", "failed", "boom"))
+      );
+      renderCard();
+      // File both cancellations, so one poll batch reads two pending actions.
+      fireEvent.click(screen.getAllByRole("button", { name: "Cancel pending redemption" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      fireEvent.click(screen.getAllByRole("button", { name: "Cancel pending redemption" })[1]);
+      fireEvent.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(mocks.read).toHaveBeenCalledTimes(2);
+      // The first reply lands alone: it must not restart the poll in a way
+      // that strands the slower second reply — its failed outcome surfaces
+      // (and its retry key retires) as soon as the batch settles.
+      releaseSecond(null);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toContain("boom");
     } finally {
       vi.useRealTimers();
     }

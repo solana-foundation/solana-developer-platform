@@ -1317,7 +1317,10 @@ function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): E
     positionId: movement.position_id,
     provider: movement.provider,
     providerReference: movement.vault_address,
-    ownerAddress: movement.owner_address,
+    // Custody rows record no owner — the movement's wallet identity is the
+    // destination it pays, and leaving it off makes equal-sized orders from
+    // different wallets indistinguishable.
+    ownerAddress: movement.owner_address ?? movement.destination_address,
     status: status as EarnVaultWithdrawal["status"],
     signature: movement.signature,
     redemptionMode:
