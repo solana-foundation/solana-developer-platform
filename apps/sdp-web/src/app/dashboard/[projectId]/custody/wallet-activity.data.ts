@@ -211,17 +211,30 @@ async function fetchWalletPaymentActivity(
   return { ok: true, data: pages.flatMap((page) => page.data ?? []).slice(0, limit) };
 }
 
+/**
+ * One wallet's activity: payment transfers merged with issuance transactions, newest first.
+ *
+ * @param request - The request-scoped SDP API client's `request`.
+ * @param wallet - The wallet's SDP and provider ids.
+ * @param t - Translator for row labels and notices.
+ * @param options - `issuanceEnabled` (the `issuance` flag for this request) decides whether issuance
+ *   is a source at all: off, it is never read, so a deployment without Issuance shows payments
+ *   alone rather than an "issuance unavailable" notice. `pageSize` widens the window.
+ * @returns The merged rows, a notice for a source that failed, and whether older rows exist.
+ */
 export async function loadWalletActivity(
   request: SdpApiClient["request"],
   wallet: WalletActivityIdentity,
   t: Translate,
-  options: { pageSize?: number } = {}
+  options: { issuanceEnabled: boolean; pageSize?: number }
 ): Promise<FetchResult<WalletActivityPayload>> {
   const pageSize = options.pageSize ?? WALLET_ACTIVITY_LIMIT;
 
   const [paymentsResult, issuanceResult] = await Promise.all([
     fetchWalletPaymentActivity(request, wallet.custodyWalletId, pageSize),
-    fetchWalletIssuanceActivity(request, wallet.custodyWalletId, t, pageSize),
+    options.issuanceEnabled
+      ? fetchWalletIssuanceActivity(request, wallet.custodyWalletId, t, pageSize)
+      : Promise.resolve<FetchResult<TokenTransactionListItem[]>>({ ok: true, data: [] }),
   ]);
 
   const transfers = paymentsResult.data ?? [];

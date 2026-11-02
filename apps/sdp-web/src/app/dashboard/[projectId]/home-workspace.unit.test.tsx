@@ -251,6 +251,16 @@ describe("Overview (HomeWorkspace)", () => {
     expect(actions.queryByText("Send a payment")).toBeNull();
   });
 
+  // Stable runs no Issuance, and its first run told a new organization about tokens it issues.
+  it("names the token in the first-run prompt only where Issuance runs", () => {
+    mocks.workspace.flags.issuance = false;
+    renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
+    expect(
+      screen.getByText("Everything else here needs one: a payment has to leave from somewhere.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/token you issue/)).toBeNull();
+  });
+
   it("offers nothing a viewer cannot do", () => {
     mocks.workspace.flags = { custody: false, issuance: false, payments: false };
     mocks.workspace.dashboardAccess.capabilities = {

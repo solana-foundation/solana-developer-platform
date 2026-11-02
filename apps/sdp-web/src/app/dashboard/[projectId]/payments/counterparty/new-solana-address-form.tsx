@@ -18,6 +18,7 @@ import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
+import { useAddressScreeningEnabled } from "./use-address-screening";
 
 type Phase = "idle" | "screening" | "flagged" | "adding";
 
@@ -51,6 +52,7 @@ export function NewSolanaAddressForm({
   const [error, setError] = useState<string | null>(null);
   const [flag, setFlag] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  const screeningEnabled = useAddressScreeningEnabled();
   const trimmedAddress = address.trim();
   const busy = phase === "screening" || phase === "adding";
   const flagged = phase === "flagged";
@@ -96,6 +98,10 @@ export function NewSolanaAddressForm({
       return;
     }
     setError(null);
+    if (!screeningEnabled) {
+      await save();
+      return;
+    }
     setPhase("screening");
     try {
       const snapshot = await runComplianceCheck(trimmedAddress, "wallet_address_addition");
@@ -128,7 +134,9 @@ export function NewSolanaAddressForm({
         ? t("DashboardPayments.counterparty.adding")
         : flagged
           ? t("DashboardPayments.counterparty.addAnyway")
-          : t("DashboardPayments.counterparty.screenAndAdd");
+          : screeningEnabled
+            ? t("DashboardPayments.counterparty.screenAndAdd")
+            : t("DashboardPayments.counterparty.addAddress");
 
   return (
     <div

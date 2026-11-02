@@ -57,6 +57,9 @@
         "chosen": "onchain finance"
       },
       "lede": "One platform, thirty partners, one integration. Issue the asset, move the money, earn on the balance. Switch a partner without rebuilding.",
+      "ledeIssuanceSoon": "One platform, thirty partners, one integration. Move the money and earn on the balance, with issuing the asset coming soon. Switch a partner without rebuilding.",
+      "ledeMarketsSoon": "One platform, thirty partners, one integration. Issue the asset and move the money, with earning on the balance coming soon. Switch a partner without rebuilding.",
+      "ledeSoon": "One platform, thirty partners, one integration. Move the money today, with issuing the asset and earning on the balance coming soon. Switch a partner without rebuilding.",
       "globe": {
         "label": "Payments crossing the network",
         "from": "from {city}",
@@ -289,6 +292,7 @@
       "titleHighlight": "wave of finance",
       "titleAfter": " on Solana",
       "sub": "One platform for issuance, payments, and the infrastructure behind them.",
+      "subIssuanceSoon": "One platform for payments and the infrastructure behind them, with issuance coming soon.",
       "openSandbox": "Open the sandbox",
       "doorNote": "Devnet keys and the full console. No wallet, no contract, no wait."
     },

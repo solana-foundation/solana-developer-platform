@@ -1,10 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import {
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-create-workspace";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -30,7 +28,7 @@ export default async function RecurringPaymentCreatePage() {
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
         trace.step("fetch_issued_token_symbols", () =>
-          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          fetchIssuedTokenSymbolsWhenIssuanceEnabled(apiClient.request)
         ),
         trace.step("fetch_counterparties", () =>
           fetchCounterparties(apiClient.request, { pageSize: 100 })

@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createOrgSdpApiClient: vi.fn(),
   createSdpApiClient: vi.fn(),
   fetchCounterparties: vi.fn(),
-  fetchPaymentsIssuedTokenSymbols: vi.fn(),
+  fetchIssuedTokenSymbolsWhenIssuanceEnabled: vi.fn(),
   fetchProviderAvailability: vi.fn(),
   getEnabledRampProviders: vi.fn(),
+  isModuleInDeploymentReleaseChannel: vi.fn(),
+  isRampsEnabled: vi.fn(),
   privateChannels: vi.fn(),
   loadInstance: vi.fn(),
 }));
@@ -18,8 +20,8 @@ vi.mock("@/lib/sdp-api", () => ({
 vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data", () => ({
   fetchCounterparties: mocks.fetchCounterparties,
 }));
-vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
-  fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
+vi.mock("@/app/dashboard/[projectId]/payments/issued-tokens.server", () => ({
+  fetchIssuedTokenSymbolsWhenIssuanceEnabled: mocks.fetchIssuedTokenSymbolsWhenIssuanceEnabled,
 }));
 vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
   const actual = await importOriginal();
@@ -30,8 +32,12 @@ vi.mock(import("@/lib/provider-availability"), async (importOriginal) => {
 });
 vi.mock("@/flags/ramps", () => ({
   getEnabledRampProviders: mocks.getEnabledRampProviders,
+  isRampsEnabled: mocks.isRampsEnabled,
 }));
 vi.mock("@/flags", () => ({ privateChannels: mocks.privateChannels }));
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: mocks.isModuleInDeploymentReleaseChannel,
+}));
 vi.mock(
   "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data",
   () => ({
@@ -50,6 +56,12 @@ function deferred<T>() {
 }
 
 describe("loadPaymentsActionPageData", () => {
+  beforeEach(() => {
+    // Ramps and Compliance run, as on experimental, unless a test says otherwise.
+    mocks.isModuleInDeploymentReleaseChannel.mockReturnValue(true);
+    mocks.isRampsEnabled.mockResolvedValue(true);
+  });
+
   it("starts provider access as soon as onboarding resolves while sibling reads remain pending", async () => {
     const issuedTokens = deferred<{
       ok: true;
@@ -75,7 +87,7 @@ describe("loadPaymentsActionPageData", () => {
       request: orgRequest,
     });
     mocks.createSdpApiClient.mockResolvedValue({ request: apiRequest });
-    mocks.fetchPaymentsIssuedTokenSymbols.mockReturnValue(issuedTokens.promise);
+    mocks.fetchIssuedTokenSymbolsWhenIssuanceEnabled.mockReturnValue(issuedTokens.promise);
     mocks.fetchCounterparties.mockReturnValue(counterparties.promise);
     mocks.fetchProviderAvailability.mockResolvedValue(providerAvailability);
     mocks.getEnabledRampProviders.mockResolvedValue(["moonpay", "stripe"]);
@@ -85,7 +97,7 @@ describe("loadPaymentsActionPageData", () => {
     await vi.waitFor(() => {
       expect(mocks.fetchProviderAvailability).toHaveBeenCalledWith(orgRequest, "org_test");
     });
-    expect(mocks.fetchPaymentsIssuedTokenSymbols).toHaveBeenCalledWith(apiRequest);
+    expect(mocks.fetchIssuedTokenSymbolsWhenIssuanceEnabled).toHaveBeenCalledWith(apiRequest);
     expect(mocks.fetchCounterparties).toHaveBeenCalledWith(apiRequest);
 
     issuedTokens.resolve({
@@ -113,7 +125,7 @@ describe("loadPaymentsActionPageData", () => {
       fetch: vi.fn().mockResolvedValue({ linked: false, organization: null }),
     });
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({ ok: true, data: [] });
+    mocks.fetchIssuedTokenSymbolsWhenIssuanceEnabled.mockResolvedValue({ ok: true, data: [] });
     mocks.fetchCounterparties.mockResolvedValue({ ok: true, data: [], total: 0 });
     mocks.getEnabledRampProviders.mockResolvedValue([]);
     mocks.loadInstance.mockResolvedValue({ ok: true, data: { isActive: true } });
@@ -128,5 +140,25 @@ describe("loadPaymentsActionPageData", () => {
     expect(
       (await loadPaymentsActionPageData({ includePrivateSendStatus: true })).privateSend
     ).toBeNull();
+  });
+
+  it("skips provider access where the channel runs neither Ramps nor Compliance", async () => {
+    // Stable: the access feeds only the fiat rails and screening, so both reads were wasted.
+    const fetch = vi.fn();
+    mocks.isModuleInDeploymentReleaseChannel.mockReturnValue(false);
+    mocks.isRampsEnabled.mockResolvedValue(false);
+    mocks.createOrgSdpApiClient.mockResolvedValue({ request: vi.fn(), fetch });
+    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
+    mocks.fetchIssuedTokenSymbolsWhenIssuanceEnabled.mockResolvedValue({ ok: true, data: [] });
+    mocks.fetchCounterparties.mockResolvedValue({ ok: true, data: [], total: 0 });
+    mocks.getEnabledRampProviders.mockResolvedValue([]);
+    mocks.fetchProviderAvailability.mockClear();
+
+    const result = await loadPaymentsActionPageData();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.fetchProviderAvailability).not.toHaveBeenCalled();
+    expect(result.rampProviderAccess).toBeNull();
+    expect(result.enabledComplianceProviders).toEqual([]);
   });
 });

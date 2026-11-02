@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
+  issuance: vi.fn(),
   loadWalletActivity: vi.fn(),
+}));
+
+vi.mock("@/flags", () => ({
+  issuance: mocks.issuance,
 }));
 
 vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", () => ({
@@ -22,6 +27,7 @@ import { GET } from "./route";
 describe("GET /api/dashboard/wallets/:walletId/activity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.issuance.mockResolvedValue(false);
   });
 
   it.each([
@@ -84,7 +90,7 @@ describe("GET /api/dashboard/wallets/:walletId/activity", () => {
       apiRequest,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
       expect.any(Function),
-      { pageSize }
+      { issuanceEnabled: false, pageSize }
     );
   });
 });

@@ -26,7 +26,7 @@ export function DashboardLoadingScreen({
   const path = pathname.split(/[?#]/)[0];
   const route = resolveDashboardLoadingRoute(path) ?? "home";
   const PageLoading = resolvePageLoadingComponent(route);
-  const config = getDashboardPageConfig(path, t, flags?.payments);
+  const config = getDashboardPageConfig(path, t, flags?.payments, flags?.ramps);
 
   return (
     <FullscreenLoadingIndicator

@@ -3,6 +3,7 @@ import { getTranslations } from "@/i18n/server";
 import { FormHeadline } from "./form-headline";
 import shared from "./homepage.module.css";
 import type { HomepageLinks } from "./homepage-links";
+import { startSubKey } from "./release-gate";
 import { Rise } from "./rise";
 import { LoopGate } from "./start/loop-gate";
 import styles from "./start/start.module.css";
@@ -27,7 +28,7 @@ export async function StartSection({ links }: { links: HomepageLinks }) {
               t("Homepage.start.titleAfter"),
             ]}
           />
-          <p className={styles.sub}>{t("Homepage.start.sub")}</p>
+          <p className={styles.sub}>{t(startSubKey())}</p>
         </Rise>
         <Rise index={1} className={styles.doorRise}>
           {/* the note promises devnet keys, which the waitlist cannot give */}

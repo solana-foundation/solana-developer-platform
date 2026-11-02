@@ -1,4 +1,10 @@
-import type { Action, ActionModule, ActionVerb } from "@sdp/types/actions";
+import {
+  ACTION_MODULES,
+  type Action,
+  type ActionModule,
+  type ActionVerb,
+  actionModuleOf,
+} from "@sdp/types/actions";
 import type { useTranslations } from "@/i18n/provider";
 import { summarizeGrants } from "./api-key-authoring";
 
@@ -8,8 +14,28 @@ export function grantModuleLabel(module: ActionModule, t: Translate): string {
   return t(`DashboardCustody.apiKeyGrantModule.${module}.label`);
 }
 
-export function grantModuleDescription(module: ActionModule, t: Translate): string {
+/**
+ * A module's line in the grant picker. Counterparties' Execute also submits ramp provider
+ * requirements, a Ramps route, so its line names them only where the deployment offers Ramps.
+ *
+ * @param module - The grant module.
+ * @param t - Translator.
+ * @param offered - The actions this deployment's channel lets a key hold.
+ * @returns The module's description.
+ */
+export function grantModuleDescription(
+  module: ActionModule,
+  t: Translate,
+  offered: readonly Action[]
+): string {
+  if (module === "counterparties" && !offersRamps(offered)) {
+    return t("DashboardCustody.apiKeyGrantModule.counterparties.descriptionWithoutRamps");
+  }
   return t(`DashboardCustody.apiKeyGrantModule.${module}.description`);
+}
+
+function offersRamps(offered: readonly Action[]): boolean {
+  return offered.some((action) => ACTION_MODULES[actionModuleOf(action)].owner === "ramps");
 }
 
 export function grantVerbLabel(verb: ActionVerb, t: Translate): string {

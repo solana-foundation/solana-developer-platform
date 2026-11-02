@@ -1,6 +1,6 @@
 import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type GatedSurface, isComingSoon } from "./release-gate";
+import { type GatedSurface, heroLedeKey, isComingSoon, startSubKey } from "./release-gate";
 
 const SURFACES: readonly GatedSurface[] = ["issuance", "markets", "privacy", "compliance", "ramps"];
 
@@ -39,4 +39,21 @@ describe("isComingSoon", () => {
       ).toEqual(comingSoon);
     }
   );
+});
+
+describe("the homepage's words per channel", () => {
+  // Stable's hero and close sold issuing and earning as live; each now says coming soon.
+  it.each([
+    { channel: "stable", lede: "Homepage.hero.ledeSoon", sub: "Homepage.start.subIssuanceSoon" },
+    {
+      channel: "beta",
+      lede: "Homepage.hero.ledeIssuanceSoon",
+      sub: "Homepage.start.subIssuanceSoon",
+    },
+    { channel: "experimental", lede: "Homepage.hero.lede", sub: "Homepage.start.sub" },
+  ] as const)("says coming soon for what $channel holds back", ({ channel, lede, sub }) => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", channel);
+    expect(heroLedeKey()).toBe(lede);
+    expect(startSubKey()).toBe(sub);
+  });
 });

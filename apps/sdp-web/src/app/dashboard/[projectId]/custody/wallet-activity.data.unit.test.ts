@@ -13,13 +13,33 @@ describe("loadWalletActivity", () => {
     await loadWalletActivity(
       request,
       { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
-      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2],
+      { issuanceEnabled: true }
     );
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
       "/v1/issuance/transactions?custodyWalletId=cwlt_1&page=1&pageSize=20",
     ]);
+  });
+
+  it("never reads Issuance when it is off, and raises no issuance notice", async () => {
+    const request = vi.fn(
+      async (_path: string) => new Response(JSON.stringify({ data: [] }), { status: 200 })
+    );
+
+    const result = await loadWalletActivity(
+      request,
+      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2],
+      { issuanceEnabled: false }
+    );
+
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
+    ]);
+    expect(result.data?.activityNotice).toBeNull();
+    expect(result.data?.activityError).toBeNull();
   });
 });
 
@@ -70,7 +90,10 @@ describe("loadWalletActivity windows", () => {
   it("reads a window wider than a transfers page across parallel pages of 100", async () => {
     const request = requestWith(250, 3);
 
-    const result = await loadWalletActivity(request, wallet, t, { pageSize: 220 });
+    const result = await loadWalletActivity(request, wallet, t, {
+      issuanceEnabled: true,
+      pageSize: 220,
+    });
 
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/v1/payments/transfers?page=1&pageSize=100&custodyWalletId=cwlt_1&includeObserved=true",
@@ -86,14 +109,18 @@ describe("loadWalletActivity windows", () => {
   });
 
   it("reports older rows while a source fills the window or the merge drops rows", async () => {
-    const full = await loadWalletActivity(requestWith(20, 0), wallet, t);
+    const full = await loadWalletActivity(requestWith(20, 0), wallet, t, { issuanceEnabled: true });
     expect(full.data?.hasMore).toBe(true);
 
-    const merged = await loadWalletActivity(requestWith(15, 10), wallet, t);
+    const merged = await loadWalletActivity(requestWith(15, 10), wallet, t, {
+      issuanceEnabled: true,
+    });
     expect(merged.data?.activityRows).toHaveLength(20);
     expect(merged.data?.hasMore).toBe(true);
 
-    const complete = await loadWalletActivity(requestWith(12, 3), wallet, t);
+    const complete = await loadWalletActivity(requestWith(12, 3), wallet, t, {
+      issuanceEnabled: true,
+    });
     expect(complete.data?.activityRows).toHaveLength(15);
     expect(complete.data?.hasMore).toBe(false);
   });
@@ -106,7 +133,10 @@ describe("loadWalletActivity windows", () => {
       return new Response(JSON.stringify({ data: [] }), { status: 200 });
     });
 
-    const result = await loadWalletActivity(request, wallet, t, { pageSize: 150 });
+    const result = await loadWalletActivity(request, wallet, t, {
+      issuanceEnabled: true,
+      pageSize: 150,
+    });
 
     expect(result.data?.activityRows).toEqual([]);
     expect(result.data?.activityNotice).toBe("DashboardCustody.paymentsActivityUnavailable");

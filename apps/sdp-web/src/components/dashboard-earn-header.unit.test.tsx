@@ -95,6 +95,20 @@ describe("Integrations dashboard headers", () => {
   });
 });
 
+describe("Deposit header", () => {
+  // A provider deposit is an on-ramp; without Ramps in the channel the tab led to a dead end.
+  it("offers the provider tab only where the channel runs Ramps", () => {
+    expect(
+      getDashboardPageConfig("/dashboard/payments/deposit", t, true, false).headerTabs
+    ).toBeUndefined();
+    expect(
+      getDashboardPageConfig("/dashboard/payments/deposit", t, true, true).headerTabs?.tabs.map(
+        (tab) => tab.id
+      )
+    ).toEqual(["address", "provider"]);
+  });
+});
+
 describe("dashboard route headers", () => {
   it.each([
     ["/dashboard/api-keys", "Shared.dashboardShell.apiKeys"],

@@ -1,9 +1,10 @@
 import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import { fetchPaymentsIssuedTokenSymbols } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
 import { privateChannels } from "@/flags";
-import { getEnabledRampProviders } from "@/flags/ramps";
+import { getEnabledRampProviders, isRampsEnabled } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import {
   fetchProviderAvailability,
   filterEnabledRampProviderAccess,
@@ -30,17 +31,27 @@ async function loadPrivateSendStatus(
 export async function loadPaymentsActionPageData(
   options: { includePrivateSendStatus?: boolean } = {}
 ) {
-  const [orgClient, apiClient] = await Promise.all([createOrgSdpApiClient(), createSdpApiClient()]);
-  const onboardingStatusPromise = orgClient
-    .fetch<OnboardingStatusResponse>("/v1/onboarding/status")
-    .catch(() => UNLINKED_ONBOARDING_STATUS);
-  const providerAccessPromise = onboardingStatusPromise.then((onboardingStatus) =>
-    onboardingStatus.organization
-      ? fetchProviderAvailability(orgClient.request, onboardingStatus.organization.id).catch(
-          () => null
-        )
-      : null
-  );
+  const [orgClient, apiClient, rampsOffered] = await Promise.all([
+    createOrgSdpApiClient(),
+    createSdpApiClient(),
+    isRampsEnabled(),
+  ]);
+  // Provider access serves only Ramps (the fiat rails) and Compliance (address screening), so
+  // where neither runs here, its two reads are skipped.
+  const providerAccessPromise =
+    rampsOffered || isModuleInDeploymentReleaseChannel("compliance")
+      ? orgClient
+          .fetch<OnboardingStatusResponse>("/v1/onboarding/status")
+          .catch(() => UNLINKED_ONBOARDING_STATUS)
+          .then((onboardingStatus) =>
+            onboardingStatus.organization
+              ? fetchProviderAvailability(
+                  orgClient.request,
+                  onboardingStatus.organization.id
+                ).catch(() => null)
+              : null
+          )
+      : Promise.resolve(null);
   const [
     issuedTokenSymbolsResult,
     counterpartiesResult,
@@ -48,7 +59,7 @@ export async function loadPaymentsActionPageData(
     enabledRampProviders,
     privateSend,
   ] = await Promise.all([
-    fetchPaymentsIssuedTokenSymbols(apiClient.request),
+    fetchIssuedTokenSymbolsWhenIssuanceEnabled(apiClient.request),
     fetchCounterparties(apiClient.request),
     providerAccessPromise,
     getEnabledRampProviders(),

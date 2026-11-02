@@ -1,17 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import {
-  fetchIssuedTokensByMint,
-  fetchPaymentsWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
-import { enabledTransactionModules } from "./transaction-modules";
+import { enabledPaymentTransactionKinds, enabledTransactionModules } from "./transaction-modules";
 import { fetchTransactionsPage } from "./transactions-page.data";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
@@ -34,7 +32,8 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
     // The ledger's old deep link to one transaction; it has its own page now.
     redirect(await requestProjectHref(transactionHref(openId)));
   }
-  const modules = enabledTransactionModules(await getDashboardFlags());
+  const flags = await getDashboardFlags();
+  const modules = enabledTransactionModules(flags);
   const filters = parseTransactionFilters(params, modules);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
   const apiClient = await trace.step("create_sdp_api_client", () =>
@@ -42,7 +41,9 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   );
   const [result, issuedTokensByMint, wallets, counterparties] = await Promise.all([
     trace.step("fetch_transactions_page", () => fetchTransactionsPage(apiClient, filters)),
-    trace.step("fetch_issued_tokens", () => fetchIssuedTokensByMint(apiClient.request)),
+    trace.step("fetch_issued_tokens", () =>
+      fetchIssuedTokensByMintWhenIssuanceEnabled(apiClient.request)
+    ),
     trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request, { view: "summary" })),
     trace.step("fetch_counterparties", () =>
       fetchCounterparties(apiClient.request, { page: 1, pageSize: CONTACT_OPTION_LIMIT })
@@ -54,6 +55,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
     <TransactionsWorkspace
       initialFilters={filters}
       modules={modules}
+      paymentKinds={enabledPaymentTransactionKinds(flags)}
       initialResult={result}
       issuedTokensByMint={issuedTokensByMint}
       wallets={(wallets.data ?? []).map((wallet) => ({

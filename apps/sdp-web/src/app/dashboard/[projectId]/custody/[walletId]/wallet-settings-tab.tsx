@@ -16,6 +16,7 @@ import {
   formatDateTime,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import type { WalletPageView } from "./wallet-detail.shared";
@@ -25,6 +26,7 @@ const LABEL_MAX_LENGTH = 100;
 /** The wallet's label, edited in place for a custody admin and read-only for everyone else. */
 function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
+  const { flags } = useDashboardWorkspace();
   const router = useRouter();
   const saved = wallet.label ?? "";
   const [draft, setDraft] = useState(saved);
@@ -87,7 +89,13 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
             placeholder={t("DashboardCustody.untitledWallet")}
             size="xl"
           />
-          <p className="text-meta text-tertiary">{t("DashboardCustody.walletLabelSettingsHint")}</p>
+          <p className="text-meta text-tertiary">
+            {t(
+              flags.issuance
+                ? "DashboardCustody.walletLabelSettingsHint"
+                : "DashboardCustody.walletLabelSettingsHintPayments"
+            )}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" size="sm" disabled={!changed || pending}>

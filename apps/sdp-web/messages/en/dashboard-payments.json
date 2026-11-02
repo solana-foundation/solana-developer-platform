@@ -580,6 +580,7 @@
       },
       "addExternalAccount": "Add crypto address",
       "addExternalAccountDescription": "Attach a crypto wallet for this counterparty. The address is screened for risk before it's added.",
+      "addExternalAccountDescriptionUnscreened": "Attach a crypto wallet for this counterparty.",
       "addCounterparty": "Add counterparty",
       "created": "{name} created",
       "createdSuccess": "Counterparty created",
@@ -774,6 +775,7 @@
       },
       "newSolanaAddress": "New Solana address",
       "screenAndAdd": "Screen and add",
+      "addAddress": "Add address",
       "doNotAdd": "Do not add",
       "addressAdded": "Address added",
       "addressLabelPlaceholder": "Ops wallet",
@@ -1587,7 +1589,11 @@
       },
       "commandCenter": {
         "payDescription": "Onchain or fiat, checked.",
+        "payDescriptionFiat": "Onchain or fiat.",
+        "payDescriptionChecked": "Onchain, checked.",
+        "payDescriptionOnchain": "Onchain, from your wallets.",
         "depositDescription": "Crypto in, or a fiat ramp.",
+        "depositDescriptionOnchain": "Crypto in, to a wallet address.",
         "requestPayment": "Request",
         "requestPaymentDescription": "A sponsored QR or a link.",
         "scheduleDescription": "A payment that repeats."
