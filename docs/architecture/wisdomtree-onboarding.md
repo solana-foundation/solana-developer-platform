@@ -22,7 +22,7 @@ claim a production Moderator trading launch.
   deployments. Local/self-hosted testing can use a separate 32-byte base64
   `EARN_ONBOARDING_ENCRYPTION_KEY`, like the SPC credential cipher. Never reuse
   custody or SPC key material. The KMS transport uses the existing transport keys.
-- Run migrations 0184 and 0185 before deploying the writer. They add tables,
+- Run migrations 0207 and 0208 before deploying the writer. They add tables,
   composite parent FKs and forced RLS; the previous API revision is compatible.
 - Use a sandbox project and sandbox provider credentials for laptop testing.
   Connect onboarding sandbox works independently of Solana; it does not make
@@ -36,14 +36,14 @@ writes take `earn.execute` and a required `Idempotency-Key`. The project sets
 the environment; callers cannot supply provider GUIDs or change parentage.
 Responses use `Cache-Control: no-store`.
 
-| Method and path | Behavior |
-| --- | --- |
-| `GET /forms/{entityType}` | Current `business` or `individual` form, including `can_create`, template, choices, CDD conditions and agreements. |
-| `POST /{counterpartyId}` | `{ application, documents? }`: create KYC, or save/submit the same business application. |
-| `GET /{counterpartyId}` | Live provider status and business correction requests; `claimed` means operator reconciliation is required. |
-| `POST /{counterpartyId}/documents` | `{ documentType, filename, contentType, contentBase64 }`; one PDF/JPEG/PNG, up to 20 MiB decoded; returns `{ documentId }`. |
-| `POST /{counterpartyId}/corrections/{reasonId}` | Answer one reason with `values`, `explanation`, `attested`, or a customer-scoped `documentId`. Answering does not resubmit. |
-| `POST /{counterpartyId}/wallets` | `{ owner }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. |
+| Method and path                                 | Behavior                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /forms/{entityType}`                       | Current `business` or `individual` form, including `can_create`, template, choices, CDD conditions and agreements.             |
+| `POST /{counterpartyId}`                        | `{ application, documents? }`: create KYC, or save/submit the same business application.                                       |
+| `GET /{counterpartyId}`                         | Live provider status and business correction requests; `claimed` means operator reconciliation is required.                    |
+| `POST /{counterpartyId}/documents`              | `{ documentType, filename, contentType, contentBase64 }`; one PDF/JPEG/PNG, up to 20 MiB decoded; returns `{ documentId }`.    |
+| `POST /{counterpartyId}/corrections/{reasonId}` | Answer one reason with `values`, `explanation`, `attested`, or a customer-scoped `documentId`. Answering does not resubmit.    |
+| `POST /{counterpartyId}/wallets`                | `{ owner }`: register a Solana wallet only after business status is `active` and the moderator still has the child assignment. |
 
 Start from the current form's `submission_template`, use its choices exactly,
 and collect each applicant's actual agreement answers. Never infer agreement
