@@ -75,6 +75,14 @@ describe("provider cancellation controls", () => {
     // so the confirmation names exactly whose shares it would cancel.
     expect(screen.getByText("Wallet 7WLcnn…Aoxnpg · vault vault")).toBeTruthy();
   });
+  it("identifies the vault before confirming when the owner is unknown", () => {
+    mocks.rows = [{ ...order, ownerAddress: null }];
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel pending redemption" }));
+    // The movement's wallet is unresolvable, so the confirmation still names
+    // the vault it would cancel against.
+    expect(screen.getByText("Vault vault")).toBeTruthy();
+  });
   it("keeps polling when every read fails identically", async () => {
     vi.useFakeTimers();
     try {

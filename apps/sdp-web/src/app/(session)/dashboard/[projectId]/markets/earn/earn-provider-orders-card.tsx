@@ -89,12 +89,19 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
           <h2 className="text-lg font-medium text-primary">
             {t("DashboardEarn.providerAction.cancel")}
           </h2>
-          {selected !== null && selected.ownerAddress !== null ? (
+          {/* Equal-sized redemptions from different wallets render identical
+              rows, so the confirmation names the target even when the
+              movement's owner is unknown to the API. */}
+          {selected !== null ? (
             <p className="text-sm font-medium text-primary">
-              {t("DashboardEarn.providerAction.cancelTarget", {
-                wallet: shortenMarketAddress(selected.ownerAddress),
-                vault: shortenMarketAddress(selected.providerReference),
-              })}
+              {selected.ownerAddress !== null
+                ? t("DashboardEarn.providerAction.cancelTarget", {
+                    wallet: shortenMarketAddress(selected.ownerAddress),
+                    vault: shortenMarketAddress(selected.providerReference),
+                  })
+                : t("DashboardEarn.providerAction.cancelVault", {
+                    vault: shortenMarketAddress(selected.providerReference),
+                  })}
             </p>
           ) : null}
           <p className="text-sm text-secondary">
