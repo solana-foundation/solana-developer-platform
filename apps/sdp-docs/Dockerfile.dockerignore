@@ -55,6 +55,8 @@ packages/*
 !packages/sdp-payments
 !packages/sdp-fee-payment
 !packages/sdp-issuance
+!packages/sdp-helius-rings
+!packages/sdp-helius-rings-sdk
 docs
 infra
 scripts/*
