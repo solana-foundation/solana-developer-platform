@@ -312,6 +312,27 @@ describe("wallet onboarding and deposit admission", () => {
     });
     expect(await repo.findByWallet({ ...scope, projectId: "other" }, "owner")).toBeNull();
   });
+  it("releases the shared address when WisdomTree rejects the registration", async () => {
+    await linkBusiness();
+    vi.spyOn(provider, "getModerator").mockResolvedValue({
+      guid: moderatorGuid,
+      client_organizations: [{ guid: childGuid }],
+    });
+    vi.spyOn(provider, "getBusiness").mockResolvedValue({
+      org_guid: childGuid,
+      onboarding_status: "active",
+      sensitive_data_redacted: true,
+    });
+    const register = vi.spyOn(provider, "registerSolanaWallet").mockResolvedValue({});
+    register.mockRejectedValueOnce(new SdpEarnError("BAD_REQUEST", "wallet already registered"));
+    await expect(service.registerWallet(scope, "owner")).rejects.toThrow("already registered");
+    // The address is globally unique per environment: an unverified claim must
+    // not block the real owner, so another customer can win it after a reject.
+    expect(await repo.claimWallet(sibling, "owner")).toBe(true);
+    await repo.releaseWallet(sibling, "owner");
+    await service.registerWallet(scope, "owner");
+    expect(register).toHaveBeenCalledTimes(2);
+  });
   it("refuses an unlinked wallet before contacting the eligibility provider", async () => {
     const earn = new WisdomTreeEarnClient();
     const check = vi.spyOn(earn, "checkDepositEligibility");
