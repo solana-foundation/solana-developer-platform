@@ -18,6 +18,7 @@ import type {
   Zone,
 } from "@sdp/helius-rings/types";
 import {
+  HELIUS_RINGS_CONNECTION_STATUSES,
   HELIUS_RINGS_OPERATION_STATUSES,
   HELIUS_RINGS_OPERATION_TYPES,
 } from "@sdp/types/helius-rings";
@@ -38,7 +39,7 @@ export const ringsConnectionSchema = z.strictObject({
   id: z.string(),
   name: z.string(),
   network: z.literal("devnet"),
-  status: z.enum(["active", "failed", "deactivated"]),
+  status: z.enum(HELIUS_RINGS_CONNECTION_STATUSES),
   isDefault: z.boolean(),
   allowInsecureHttp: z.boolean(),
   endpoints: z.strictObject({

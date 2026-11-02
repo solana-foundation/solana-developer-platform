@@ -1,5 +1,5 @@
 /** Existing mounted operations. Registered only on the internal document. */
-import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import type { OpenAPIRegistry, RouteConfig } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -312,7 +312,14 @@ export function registerHeliusRingsPaths(registry: OpenAPIRegistry) {
     ["/v1/helius-rings", routes, false],
     ["/internal/dashboard/helius-rings", connections, true],
   ] as const) {
-    for (const route of definitions)
+    for (const route of definitions) {
+      const request: NonNullable<RouteConfig["request"]> = {
+        headers: projectScopeHeaders,
+        params: route.params,
+        query: route.query,
+      };
+      if (route.body !== undefined)
+        request.body = { required: true, content: jsonContent(route.body) };
       registry.registerPath({
         method: route.method,
         path: prefix + route.path,
@@ -323,14 +330,7 @@ export function registerHeliusRingsPaths(registry: OpenAPIRegistry) {
         security: sessionOnly
           ? [{ clerkBearerAuth: [] }]
           : [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
-        request: {
-          headers: projectScopeHeaders,
-          params: route.params,
-          query: route.query,
-          ...(route.body === undefined
-            ? {}
-            : { body: { required: true, content: jsonContent(route.body) } }),
-        },
+        request,
         responses: {
           [route.status ?? 200]: {
             description: route.summary,
@@ -343,5 +343,6 @@ export function registerHeliusRingsPaths(registry: OpenAPIRegistry) {
           ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 503]),
         },
       });
+    }
   }
 }

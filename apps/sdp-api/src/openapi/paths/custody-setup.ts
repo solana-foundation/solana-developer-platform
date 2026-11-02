@@ -1,5 +1,5 @@
 /** Dashboard custody helpers. Registered only on the internal document. */
-import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import type { OpenAPIRegistry, RouteConfig } from "@asteasolutions/zod-to-openapi";
 import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
@@ -48,6 +48,30 @@ interface Route {
   key?: "required" | "csr";
 }
 const base = "/internal/dashboard/custody";
+
+/**
+ * Headers for a route's idempotency declaration (ADR 0009): the required-key
+ * money movers, the CSR route whose declared recovery reruns server errors,
+ * and every other session-gated read or lifecycle action.
+ */
+function routeHeaders(key: Route["key"]) {
+  switch (key) {
+    case "required":
+      return projectScopeWithRequiredIdempotencyHeaders;
+    case "csr":
+      return projectScopeWithDeclaredIdempotencyHeaders({
+        key: "required",
+        serverErrors: "rerun",
+      });
+    case undefined:
+      return projectScopeHeaders;
+    default: {
+      const exhaustive: never = key;
+      throw new Error(`Unhandled custody route key: ${String(exhaustive)}`);
+    }
+  }
+}
+
 const credentialResult = z.strictObject({ providerCredential: safeCredentialSchema });
 const connectionResult = z.strictObject({ connection: installationConnectionSchema });
 const humanProject =
@@ -263,7 +287,14 @@ export function registerCustodySetupPaths(registry: OpenAPIRegistry) {
       data: fireblocksDestinationSchema,
     },
   ];
-  for (const route of routes)
+  for (const route of routes) {
+    const request: NonNullable<RouteConfig["request"]> = {
+      headers: routeHeaders(route.key),
+      params: route.params,
+      query: route.query,
+    };
+    if (route.body !== undefined)
+      request.body = { required: true, content: jsonContent(route.body) };
     registry.registerPath({
       method: route.method,
       path: route.path,
@@ -272,19 +303,7 @@ export function registerCustodySetupPaths(registry: OpenAPIRegistry) {
       summary: route.summary,
       description: route.description,
       security: [{ clerkBearerAuth: [] }],
-      request: {
-        headers:
-          route.key === "csr"
-            ? projectScopeWithDeclaredIdempotencyHeaders({ key: "required", serverErrors: "rerun" })
-            : route.key === "required"
-              ? projectScopeWithRequiredIdempotencyHeaders
-              : projectScopeHeaders,
-        params: route.params,
-        query: route.query,
-        ...(route.body === undefined
-          ? {}
-          : { body: { required: true, content: jsonContent(route.body) } }),
-      },
+      request,
       responses: {
         [route.status ?? 200]: {
           description: route.summary,
@@ -293,4 +312,5 @@ export function registerCustodySetupPaths(registry: OpenAPIRegistry) {
         ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 503]),
       },
     });
+  }
 }
