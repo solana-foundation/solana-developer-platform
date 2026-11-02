@@ -2940,8 +2940,12 @@ function assertVaultTransitionMetadata(input: AdvanceVaultMovementInput): void {
   if (input.tokenAmountSettled !== undefined && input.toStatus !== "finalized") {
     throw new Error("tokenAmountSettled is only valid when finalizing an earn vault movement");
   }
-  if (input.sharesOut !== undefined && input.toStatus !== "confirmed") {
-    throw new Error("sharesOut is only valid when confirming an earn vault movement");
+  if (
+    input.sharesOut !== undefined &&
+    input.toStatus !== "confirmed" &&
+    input.toStatus !== "finalized"
+  ) {
+    throw new Error("sharesOut is only valid when confirming or finalizing an earn vault movement");
   }
   if (
     input.sharesOut !== undefined &&
@@ -2968,6 +2972,9 @@ async function insertVaultWithdrawalMovement(
   db: AppDb,
   input: CreateSignedVaultWithdrawalIntentInput
 ): Promise<EarnMovementRow | null> {
+  // Built explicitly: a conditional empty-object spread is a banned form.
+  const providerData: { redemptionMode?: string } = {};
+  if (input.redemptionMode !== undefined) providerData.redemptionMode = input.redemptionMode;
   const row = await db
     .prepare(
       `INSERT INTO earn_movements (
@@ -3008,9 +3015,7 @@ async function insertVaultWithdrawalMovement(
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
       ...shareAccountClaimBindings(input),
-      JSON.stringify(
-        input.redemptionMode === undefined ? {} : { redemptionMode: input.redemptionMode }
-      )
+      JSON.stringify(providerData)
     )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;

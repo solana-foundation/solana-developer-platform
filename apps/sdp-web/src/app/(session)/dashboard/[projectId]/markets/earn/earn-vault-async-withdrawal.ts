@@ -80,17 +80,17 @@ export function earnVaultAsyncWithdrawalRoute(
     };
   }
   if (options.providerOrder) {
-    return {
+    const route: EarnVaultAsyncWithdrawalRoute = {
       kind: "provider_order",
-      ...(options.providerRedemptionModes === undefined
-        ? {}
-        : { redemptionModes: options.providerRedemptionModes }),
       summary: {
         titleKey: "DashboardEarn.exitRoute.providerOrderTitle",
         messageKey: "DashboardEarn.exitRoute.providerOrderDescription",
         values: {},
       },
     };
+    if (options.providerRedemptionModes !== undefined)
+      route.redemptionModes = options.providerRedemptionModes;
+    return route;
   }
   if (parRedemption) {
     return {

@@ -1,6 +1,6 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
-  EARN_PROVIDER_ACTION_CHAIN_STATUSES,
+  EARN_PROVIDER_ACTION_DUE_STATUSES,
   EARN_PROVIDER_ACTION_KINDS,
   EARN_PROVIDER_ACTION_STATUSES,
   EARN_PROVIDER_ACTION_TRANSITIONS,
@@ -182,16 +182,32 @@ export function createEarnProviderActionsRepository(db: DatabaseClient) {
         .bind(scope.actionId, scope.organizationId, scope.projectId, status)
         .run();
     },
+    /**
+     * The one cancellation still holding a movement's single active slot besides
+     * `scope.actionId`, oldest first. A submit that lost the one-active-cancellation
+     * race reports this row instead of its own unique-violation database error.
+     */
+    async findActiveCancellation(
+      scope: Scope,
+      parentMovementId: string
+    ): Promise<EarnProviderActionRow | null> {
+      const row = await db
+        .prepare(
+          "SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND action='cancellation' AND id<>? AND status<>'failed' ORDER BY created_at LIMIT 1"
+        )
+        .bind(scope.organizationId, scope.projectId, parentMovementId, scope.actionId)
+        .first();
+      return row === null ? null : rowSchema.parse(row);
+    },
     async claimDue(
       environment: EarnProviderActionRow["environment"]
     ): Promise<EarnProviderActionRow | null> {
-      const states = [...EARN_PROVIDER_ACTION_CHAIN_STATUSES, "awaiting_delivery"];
       const row = await db
         .prepare(`WITH due AS (SELECT id FROM earn_provider_actions WHERE environment=? AND status=ANY(?::text[]) AND next_check_at<=? ORDER BY next_check_at,id LIMIT 1 FOR UPDATE SKIP LOCKED)
         UPDATE earn_provider_actions a SET next_check_at=? FROM due WHERE a.id=due.id RETURNING a.*`)
         .bind(
           environment,
-          states,
+          EARN_PROVIDER_ACTION_DUE_STATUSES,
           new Date().toISOString(),
           new Date(Date.now() + 60_000).toISOString()
         )

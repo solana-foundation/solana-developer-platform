@@ -570,6 +570,46 @@ describe("Unified earn movement ledger (postgres)", () => {
       ).toBe("3");
     });
 
+    it("finalizes a provider deposit with the verified share amount in one step", async () => {
+      // Mirrors reconcileEarnProviderOrders: a provider-order deposit whose
+      // delivery the chain verifies goes straight to finalized, carrying the
+      // observed share amount — no separate confirmation stop exists to hold it.
+      const created = await ledger.createSignedVaultDepositIntent(
+        intent({ provider: "plume", signature: "plume-delivery-source" })
+      );
+      const observedAt = new Date().toISOString();
+      await ledger.advanceVaultMovement({
+        movementId: created.movement.id,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: observedAt,
+        settledAt: observedAt,
+        sharesOut: "97.5",
+        providerSettlement: {
+          outcome: "delivered",
+          sourceSignature: "plume-delivery-source",
+          destinationSignature: "plume-delivery-destination",
+          ownerAddress: WALLET_PUBKEY,
+          providerReference: VAULT,
+          tokenMint: SHARE_MINT,
+          amount: "97.5",
+          observedSlot: "123456789",
+        },
+      });
+      expect(await onlyMovement()).toMatchObject({
+        status: "finalized",
+        shares_out: "97.5",
+        settled_at: observedAt,
+        confirmed_at: observedAt,
+        provider_data: {
+          providerSettlement: expect.objectContaining({
+            outcome: "delivered",
+            amount: "97.5",
+          }),
+        },
+      });
+    });
+
     it("hides legacy projections and rejects premature receipt provenance", async () => {
       const created = await ledger.createSignedVaultDepositIntent(intent());
       await getDb(env)

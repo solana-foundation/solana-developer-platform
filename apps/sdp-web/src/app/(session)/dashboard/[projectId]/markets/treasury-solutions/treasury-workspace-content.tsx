@@ -54,6 +54,7 @@ import {
   EarnRowIdentity,
   EarnSummary,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-page-blocks";
+import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import {
   type EarnProviderAccess,
   earnVaultDepositAvailability,
@@ -71,7 +72,6 @@ import {
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
-import { EarnProviderOrdersCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-orders-card";
 import { EarnVaultWithdrawalRequestsCard } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
 import {
   EarnSummarySkeleton,

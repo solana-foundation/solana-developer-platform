@@ -8,9 +8,14 @@ import type { FeePaymentPort } from "@sdp/fee-payment/port";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getSignatureStatuses, sendTransaction } from "@sdp/rpc/solana";
+import {
+  type EarnProviderActionStatus,
+  isEarnProviderActionChainStatus,
+} from "@sdp/types/earn-provider-orders";
 import type { MovementId } from "@sdp/types/movements";
 import { address, signature } from "@solana/kit";
-import { getDb } from "@/db/client";
+import { type DatabaseClient, getDb } from "@/db/client";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import {
   createEarnProviderActionsRepository,
@@ -55,27 +60,41 @@ const scopeOf = (row: EarnProviderActionRow) => ({
 });
 
 /** Claim before builds or signatures. A retry of recorded bytes never creates another transaction. */
+export async function claimProviderAction(
+  env: Env,
+  input: EarnProviderActionClaim,
+  db: DatabaseClient = getDb(env)
+): Promise<{ row: EarnProviderActionRow; owned: boolean }> {
+  const claim = await createEarnProviderActionsRepository(db).claim(input);
+  if (!claim.owned && claim.row.status === "preparing")
+    throw providerUnavailable(
+      "This provider action is being prepared. Retry shortly with the same key."
+    );
+  return claim;
+}
+
+/** Builds, signs and broadcasts a claimed action; only its claim's owner runs the provider tail. */
+export async function executeClaimedProviderAction(
+  env: Env,
+  claim: { row: EarnProviderActionRow; owned: boolean },
+  admit?: () => Promise<void>
+): Promise<EarnProviderActionRow> {
+  if (!claim.owned) return claim.row;
+  try {
+    return await executeProviderAction(env, claim.row, admit);
+  } catch (cause) {
+    await createEarnProviderActionsRepository(getDb(env)).releasePreparation(scopeOf(claim.row));
+    throw cause;
+  }
+}
+
+/** Composition of the claim and its execution, for callers without an audited transaction. */
 export async function createProviderAction(
   env: Env,
   input: EarnProviderActionClaim,
   admit?: () => Promise<void>
 ): Promise<EarnProviderActionRow> {
-  const db = getDb(env),
-    repo = createEarnProviderActionsRepository(db);
-  const claim = await repo.claim(input);
-  if (!claim.owned) {
-    if (claim.row.status === "preparing")
-      throw providerUnavailable(
-        "This provider action is being prepared. Retry shortly with the same key."
-      );
-    return claim.row;
-  }
-  try {
-    return await executeProviderAction(env, claim.row, admit);
-  } catch (cause) {
-    await repo.releasePreparation(scopeOf(claim.row));
-    throw cause;
-  }
+  return executeClaimedProviderAction(env, await claimProviderAction(env, input), admit);
 }
 
 async function executeProviderAction(
@@ -99,8 +118,22 @@ async function executeProviderAction(
   const client = resolveEarnExecutionClient(env, row.provider, deadline);
   if (client === null) throw notImplemented(row.provider, "provider actions");
   const fee = await providerActionFee(env, row, deadline);
-  const rentPayer =
-    fee.kind === "wallet-pays" ? undefined : fee.kind === "sponsored" ? fee.sponsor : fee.feePayer;
+  let rentPayer: string | undefined;
+  switch (fee.kind) {
+    case "wallet-pays":
+      rentPayer = undefined;
+      break;
+    case "sponsored":
+      rentPayer = fee.sponsor;
+      break;
+    case "caller-provided":
+      rentPayer = fee.feePayer;
+      break;
+    default: {
+      const unhandled: never = fee;
+      throw internalError(`Unknown provider action fee mode ${String(unhandled)}`);
+    }
+  }
   let plan = await buildProviderActionPlan(env, row, client, rentPayer, deadline);
   if (row.action === "preparation" && plan.instructions.length === 0) {
     const ready = await repo.advance(scope, "preparing", "not_required");
@@ -155,10 +188,26 @@ export async function submitExternalProviderAction(
   );
   const repo = createEarnProviderActionsRepository(getDb(env)),
     scope = scopeOf(row);
-  const claimed = await repo.advance(scope, "prepared", "requested", {
-    signed_transaction: signed.signedTransactionBase64,
-    signature: signed.signature,
-  });
+  let claimed: EarnProviderActionRow | null;
+  try {
+    claimed = await repo.advance(scope, "prepared", "requested", {
+      signed_transaction: signed.signedTransactionBase64,
+      signature: signed.signature,
+    });
+  } catch (cause) {
+    if (!isPostgresUniqueViolation(cause)) throw cause;
+    // Two prepared builds for one movement cannot both become requested: the
+    // one-active-cancellation index excludes `prepared`, so the second submit
+    // loses the race at this transition. `prepared → failed` is not a legal
+    // transition, so the loser reports the surviving action instead of a
+    // database error.
+    const surviving =
+      row.action === "cancellation" && row.parent_movement_id !== null
+        ? await repo.findActiveCancellation(scope, row.parent_movement_id)
+        : null;
+    if (surviving === null) throw conflict("This provider action was already submitted");
+    return surviving;
+  }
   if (claimed !== null) {
     await repo.advance(scope, "requested", "submitted");
     try {
@@ -181,28 +230,38 @@ export async function readProviderAction(
   env: Env,
   row: EarnProviderActionRow
 ): Promise<EarnProviderActionRow> {
-  if (row.signature === null || !["requested", "submitted", "confirmed"].includes(row.status))
-    return row;
+  if (row.signature === null || !isEarnProviderActionChainStatus(row.status)) return row;
   const [observed] = await getSignatureStatuses(
     createClusterRpc({ timeoutMs: 5_000 }),
     [signature(row.signature)],
     { searchTransactionHistory: true }
   );
   if (observed?.confirmationStatus !== "finalized") return row;
-  const repo = createEarnProviderActionsRepository(getDb(env));
-  const target =
-    observed.err !== null
-      ? "failed"
-      : row.action === "preparation"
-        ? "finalized"
-        : "awaiting_delivery";
-  return (
-    (await repo.advance(scopeOf(row), row.status, target, {
-      error: observed.err !== null ? "Source transaction failed on chain" : null,
-    })) ??
-    (await repo.get(scopeOf(row))) ??
-    row
-  );
+  const repo = createEarnProviderActionsRepository(getDb(env)),
+    scope = scopeOf(row);
+  let target: EarnProviderActionStatus;
+  switch (row.action) {
+    case "preparation":
+      target = observed.err === null ? "finalized" : "failed";
+      break;
+    case "cancellation":
+      target = observed.err === null ? "awaiting_delivery" : "failed";
+      break;
+    default: {
+      const unhandled: never = row.action;
+      throw internalError(`Unknown provider action kind ${String(unhandled)}`);
+    }
+  }
+  const advanced = await repo.advance(scope, row.status, target, {
+    error: observed.err !== null ? "Source transaction failed on chain" : null,
+  });
+  if (advanced !== null) return advanced;
+  // A competing update moved the row on, so the fresh read is the answer; its
+  // absence is a broken invariant, never stale state to replay.
+  const current = await repo.get(scope);
+  if (current === null)
+    throw internalError("Provider action disappeared while reading its outcome");
+  return current;
 }
 
 async function buildProviderActionPlan(
@@ -294,7 +353,7 @@ async function executeCustodyProviderAction(
     scope = scopeOf(row),
     identity = { depositTokenMint: row.token_mint, shareMint: row.share_mint },
     movement = ACTION_MOVEMENTS[row.action];
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"earn">(
     env,
     row.organization_id,
     row.project_id,
@@ -314,16 +373,31 @@ async function executeCustodyProviderAction(
       expectedAssetIdentity: identity,
       prepared,
     });
+    let persistenceUnknown = false;
     try {
       const submission = await fee.feePayment.prepareOwnedSubmission(ownerSigned.bytes, {
         async persistSigned(signed) {
           assertVaultSignaturesPreserved(ownerSigned.bytes, signed.signedTransaction);
-          const saved = await repo.advance(scope, "preparing", "requested", {
-            signature: signed.signature,
-            signed_transaction: Buffer.from(signed.signedTransaction).toString("base64"),
-            last_valid_block_height: ownerSigned.lastValidBlockHeight,
-            fee_payer: fee.sponsor,
-          });
+          let saved: EarnProviderActionRow | null;
+          try {
+            saved = await repo.advance(scope, "preparing", "requested", {
+              signature: signed.signature,
+              signed_transaction: Buffer.from(signed.signedTransaction).toString("base64"),
+              last_valid_block_height: ownerSigned.lastValidBlockHeight,
+              fee_payer: fee.sponsor,
+            });
+          } catch (cause) {
+            // A commit whose reply was lost still leaves recorded bytes the
+            // reconciler can send. Swallowing keeps the sponsorship reservation
+            // that spending must stay accountable to; the durable re-read below
+            // is the only authority on whether the bytes were recorded.
+            persistenceUnknown = true;
+            getLogger().error(
+              { actionId: row.id, error: cause },
+              "Provider action submission persistence outcome is unknown"
+            );
+            return;
+          }
           if (saved === null) throw conflict("Provider action ownership changed before submission");
         },
         async markStarted() {
@@ -331,6 +405,8 @@ async function executeCustodyProviderAction(
           // also send these bytes, so no later refusal releases this reservation.
         },
       });
+      if (persistenceUnknown)
+        throw internalError("Provider action submission could not be recorded durably");
       await repo.advance(scope, "requested", "submitted");
       await broadcastProviderAction(row, submission.signedTransaction);
     } catch (cause) {

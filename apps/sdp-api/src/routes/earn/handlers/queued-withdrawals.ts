@@ -335,12 +335,14 @@ async function resolveCustodyQueueTarget(
   };
 }
 
+type ReadOptions = Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & {
+  withdrawAuthority: string | null;
+};
+
 export async function readOptions(
   c: AppContext,
   position: QueuedWithdrawalPosition
-): Promise<
-  Omit<EarnVaultWithdrawalOptions, "withdrawAuthority"> & { withdrawAuthority: string | null }
-> {
+): Promise<ReadOptions> {
   const deadline = createVaultDeadline();
   const withdrawalClient = resolveVaultWithdrawClient(c.env, position.provider, deadline);
   const providerOrder =
@@ -350,18 +352,18 @@ export async function readOptions(
   const parClient = resolveVaultParRedemptionClient(c.env, position.provider, deadline);
   if (!client && !parClient) {
     if (!withdrawalClient) throw notImplemented(position.provider, "vault withdrawals");
-    return {
+    const options: ReadOptions = {
       instant,
       providerOrder,
-      ...(withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient)
-        ? { providerRedemptionModes: withdrawalClient.getProviderRedemptionModes() }
-        : {}),
       queued: false,
       withdrawAuthority: null,
       queueState: null,
       queueAsset: null,
       parRedemption: null,
     };
+    if (withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient))
+      options.providerRedemptionModes = withdrawalClient.getProviderRedemptionModes();
+    return options;
   }
   try {
     const runtime = earnRuntime(c.env);
@@ -370,18 +372,18 @@ export async function readOptions(
       client ? client.getWithdrawalOptions(runtime, reference) : Promise.resolve(null),
       parClient ? parClient.getParRedemptionOptions(runtime, reference) : Promise.resolve(null),
     ]);
-    return {
+    const options: ReadOptions = {
       instant: queueOptions ? instant && queueOptions.instant : instant,
       providerOrder,
-      ...(withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient)
-        ? { providerRedemptionModes: withdrawalClient.getProviderRedemptionModes() }
-        : {}),
       queued: queueOptions?.queued ?? false,
       withdrawAuthority: queueOptions?.withdrawAuthority ?? null,
       queueState: queueOptions?.queueState ?? null,
       queueAsset: queueOptions?.queueAsset ?? null,
       parRedemption,
     };
+    if (withdrawalClient !== null && supportsProviderRedemptionModes(withdrawalClient))
+      options.providerRedemptionModes = withdrawalClient.getProviderRedemptionModes();
+    return options;
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }

@@ -1,37 +1,57 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as dbClient from "@/db/client";
 import type {
   EarnProviderActionClaim,
   EarnProviderActionRow,
 } from "@/db/repositories/earn-provider-actions.repository";
+import * as repoModule from "@/db/repositories/earn-provider-actions.repository";
+import * as moneyAdmission from "@/lib/money-admission";
+import * as executionRegistry from "@/services/earn/execution-registry";
+import * as solanaSigner from "@/services/solana/signer";
 import type { Env } from "@/types/env";
-import { createProviderAction } from "./provider-actions.service";
+import * as providerActions from "./provider-actions.service";
+import * as vaultSponsorship from "./vault-sponsorship";
 
-const mocks = vi.hoisted(() => ({
-  claim: vi.fn(),
-  advance: vi.fn(),
-  release: vi.fn(),
-  build: vi.fn(),
-  resolve: vi.fn(),
-  admit: vi.fn(),
-  signer: vi.fn(),
-}));
-vi.mock("@/db/client", () => ({ getDb: () => ({}) }));
-vi.mock("@/db/repositories/earn-provider-actions.repository", () => ({
-  createEarnProviderActionsRepository: () => ({
-    claim: mocks.claim,
-    advance: mocks.advance,
-    releasePreparation: mocks.release,
-  }),
-}));
-vi.mock("@/services/earn/execution-registry", () => ({
-  resolveEarnExecutionClient: mocks.resolve,
-}));
-vi.mock("@/lib/money-admission", () => ({ assertMoneyStartAdmitted: mocks.admit }));
-vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet: mocks.signer }));
-vi.mock("./vault-sponsorship", () => ({
-  resolveVaultSponsorship: async () => ({ kind: "wallet-pays" }),
-}));
+const claim = vi.fn(),
+  advance = vi.fn(),
+  release = vi.fn(),
+  build = vi.fn(),
+  resolve = vi.fn(),
+  admit = vi.fn(),
+  signer = vi.fn();
+
+/** A client whose every statement throws: the dependencies under test are spied. */
+const unusedExecutor: dbClient.DatabaseExecutor = {
+  prepare: (query) => {
+    throw new Error(`This test runs no SQL: ${query}`);
+  },
+  queryOne: async () => {
+    throw new Error("This test runs no SQL");
+  },
+  queryMany: async () => {
+    throw new Error("This test runs no SQL");
+  },
+  execute: async () => {
+    throw new Error("This test runs no SQL");
+  },
+};
+const repo = {
+  get: vi.fn(),
+  claim,
+  advance,
+  releasePreparation: release,
+  observeUnknownSignature: vi.fn(),
+  findActiveCancellation: vi.fn(),
+  claimDue: vi.fn(),
+};
+vi.spyOn(dbClient, "getDb").mockReturnValue(dbClient.asTransactionalClient(unusedExecutor));
+vi.spyOn(repoModule, "createEarnProviderActionsRepository").mockReturnValue(repo);
+vi.spyOn(executionRegistry, "resolveEarnExecutionClient").mockImplementation(resolve);
+vi.spyOn(moneyAdmission, "assertMoneyStartAdmitted").mockImplementation(admit);
+vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet").mockImplementation(signer);
+vi.spyOn(vaultSponsorship, "resolveVaultSponsorship").mockResolvedValue({ kind: "wallet-pays" });
+
 const input: EarnProviderActionClaim = {
   organization_id: "org",
   project_id: "project",
@@ -69,59 +89,59 @@ const row: EarnProviderActionRow = {
 const env = {} as Env;
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.claim.mockResolvedValue({ row, owned: true });
-  mocks.resolve.mockReturnValue({ buildVaultPreparation: mocks.build });
-  mocks.build.mockResolvedValue({
+  claim.mockResolvedValue({ row, owned: true });
+  resolve.mockReturnValue({ buildVaultPreparation: build });
+  build.mockResolvedValue({
     instructions: [],
     lookupTables: [],
     assetIdentity: { depositTokenMint: "token", shareMint: "share" },
     cluster: "mainnet-beta",
   });
-  mocks.advance.mockResolvedValue({ ...row, status: "not_required" });
+  advance.mockResolvedValue({ ...row, status: "not_required" });
 });
 describe("provider action claim before spend", () => {
   it("replays recorded actions without a provider, signer or current money-in admission", async () => {
     const recorded = { ...row, status: "finalized" as const };
-    mocks.claim.mockResolvedValue({ row: recorded, owned: false });
-    mocks.resolve.mockImplementation(() => {
+    claim.mockResolvedValue({ row: recorded, owned: false });
+    resolve.mockImplementation(() => {
       throw new Error("provider down");
     });
-    expect(await createProviderAction(env, input)).toBe(recorded);
-    expect(mocks.admit).not.toHaveBeenCalled();
-    expect(mocks.signer).not.toHaveBeenCalled();
+    expect(await providerActions.createProviderAction(env, input)).toBe(recorded);
+    expect(admit).not.toHaveBeenCalled();
+    expect(signer).not.toHaveBeenCalled();
   });
   it("does not build or sign when another request owns preparation", async () => {
-    mocks.claim.mockResolvedValue({ row, owned: false });
-    await expect(createProviderAction(env, input)).rejects.toMatchObject({
+    claim.mockResolvedValue({ row, owned: false });
+    await expect(providerActions.createProviderAction(env, input)).rejects.toMatchObject({
       code: "PROVIDER_UNAVAILABLE",
     });
-    expect(mocks.resolve).not.toHaveBeenCalled();
-    expect(mocks.signer).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(signer).not.toHaveBeenCalled();
   });
   it("skips signatures and fees when the live share account already exists", async () => {
     expect(
       (
         await runInClusterScope({ environment: "production", projectId: "project" }, () =>
-          createProviderAction(env, input)
+          providerActions.createProviderAction(env, input)
         )
       ).status
     ).toBe("not_required");
-    expect(mocks.advance).toHaveBeenCalledWith(
+    expect(advance).toHaveBeenCalledWith(
       expect.objectContaining({ preparationLeaseUntil: "lease" }),
       "preparing",
       "not_required"
     );
-    expect(mocks.signer).not.toHaveBeenCalled();
+    expect(signer).not.toHaveBeenCalled();
   });
   it("releases only its preparation lease after an admission refusal", async () => {
     const refusal = new Error("closed");
     await expect(
-      createProviderAction(env, input, async () => {
+      providerActions.createProviderAction(env, input, async () => {
         throw refusal;
       })
     ).rejects.toBe(refusal);
-    expect(mocks.build).not.toHaveBeenCalled();
-    expect(mocks.release).toHaveBeenCalledWith(
+    expect(build).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(
       expect.objectContaining({ preparationLeaseUntil: "lease" })
     );
   });

@@ -3,7 +3,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getSignatureStatuses, getTransaction, sendTransaction } from "@sdp/rpc/solana";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import { EARN_PROVIDER_ACTION_CHAIN_STATUSES } from "@sdp/types/earn-provider-orders";
+import { isEarnProviderActionChainStatus } from "@sdp/types/earn-provider-orders";
 import { signature } from "@solana/kit";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -27,7 +27,7 @@ export async function reconcileEarnProviderActions(env: Env): Promise<void> {
     const row = await repo.claimDue(environment);
     if (row === null) break;
     try {
-      if ((EARN_PROVIDER_ACTION_CHAIN_STATUSES as readonly string[]).includes(row.status)) {
+      if (isEarnProviderActionChainStatus(row.status)) {
         await reconcileProviderActionSource(env, row);
         continue;
       }

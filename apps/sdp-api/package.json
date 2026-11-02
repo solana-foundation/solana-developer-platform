@@ -70,7 +70,6 @@
     "@sdp/ondo": "workspace:*",
     "@sdp/plume": "workspace:*",
     "@sdp/payments": "workspace:*",
-    "@sdp/payments": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",
     "@sdp/rpc": "workspace:*",

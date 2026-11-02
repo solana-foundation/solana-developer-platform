@@ -1,7 +1,10 @@
 "use client";
 
 import type { EarnVaultWithdrawal } from "@sdp/types/earn";
-import type { EarnProviderAction } from "@sdp/types/earn-provider-orders";
+import {
+  type EarnProviderAction,
+  isTerminalEarnProviderActionStatus,
+} from "@sdp/types/earn-provider-orders";
 import { earnCanCancelProviderOrder } from "@sdp/types/provider-access";
 import { Button } from "@sdp/ui/button";
 import { Card } from "@sdp/ui/card";
@@ -38,7 +41,7 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
   );
   useEffect(() => {
     const pending = Object.entries(actions).filter(
-      ([, action]) => !["finalized", "failed"].includes(action.status)
+      ([, action]) => !isTerminalEarnProviderActionStatus(action.status)
     );
     if (pending.length === 0) return;
     let active = true;
@@ -49,7 +52,15 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
             const next = await fetchEarnProviderAction(action.actionId);
             if (!active) return;
             setActions((current) => ({ ...current, [movementId]: next }));
-            if (["finalized", "failed"].includes(next.status)) {
+            if (isTerminalEarnProviderActionStatus(next.status)) {
+              // The attempt under this key concluded, so polling retires the
+              // key the moment it first sees the outcome — the next confirmed
+              // submit must be free to do new work, not replay a dead one.
+              const fingerprint = JSON.stringify([projectId, movementId]);
+              const { key } = cancellationKeys.claim(fingerprint);
+              cancellationKeys.release(fingerprint, key);
+              if (next.status === "failed")
+                setFailure(next.error ?? t("DashboardEarn.providerAction.error"));
               refresh();
               onChanged?.();
             }
@@ -66,7 +77,7 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
       active = false;
       clearTimeout(timer);
     };
-  }, [actions, onChanged, refresh, t]);
+  }, [actions, onChanged, projectId, refresh, t]);
 
   async function cancel() {
     if (!selected || busy) return;
@@ -100,7 +111,7 @@ export function EarnProviderOrdersCard({ onChanged }: { onChanged?: () => void }
   if (orders.length === 0 && !error) return null;
   return (
     <section>
-      <h2 className="mb-4 text-[19px] font-medium leading-6 text-primary">
+      <h2 className="mb-4 text-subheading font-medium text-primary">
         {t("DashboardEarn.providerAction.title")}
       </h2>
       <Card className="overflow-hidden rounded-2xl py-0">
