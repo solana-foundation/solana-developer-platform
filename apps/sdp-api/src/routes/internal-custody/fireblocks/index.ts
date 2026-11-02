@@ -20,4 +20,4 @@ fireblocksCustody.post(
   createCsr
 );
 // Credentials are POSTed to avoid placing API user IDs in URLs or access logs.
-fireblocksCustody.post("/vaults", requireAction("wallets.configure"), discoverVaults);
+fireblocksCustody.post("/vaults/discover", requireAction("wallets.configure"), discoverVaults);

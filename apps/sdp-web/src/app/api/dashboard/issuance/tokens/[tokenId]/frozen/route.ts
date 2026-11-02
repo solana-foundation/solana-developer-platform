@@ -13,7 +13,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       trace.childContext("route.dashboard.issuance.token.frozen.api")
     );
     const response = await apiClient.request(
-      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/frozen?page=1&pageSize=1`
+      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/frozen-accounts?page=1&pageSize=1`
     );
     if (!response.ok) {
       const body = await response.text();

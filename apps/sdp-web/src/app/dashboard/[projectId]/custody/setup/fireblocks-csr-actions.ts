@@ -61,7 +61,7 @@ export async function loadFireblocksVaultsAction(input: {
   try {
     const client = await createSdpApiClient();
     const result = await client.fetch<{ vaults: FireblocksVault[]; nextCursor: string | null }>(
-      "/internal/dashboard/custody/fireblocks/vaults",
+      "/internal/dashboard/custody/fireblocks/vaults/discover",
       { method: "POST", body: JSON.stringify(input) }
     );
     return { status: "success", ...result };

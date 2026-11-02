@@ -75,8 +75,8 @@ beforeEach(() => {
     }),
     projectClient: apiClient({
       [`/v1/projects/${SANDBOX_PROJECT.id}/provider-availability`]: AVAILABILITY,
-      "/v1/wallets/configs": { data: { configs: [] } },
-      "/v1/private-channels/instance": { instance: { isActive: true } },
+      "/v1/wallets/managed-signing/configurations": { data: { configs: [] } },
+      "/v1/private-channels/instance-connection": { instance: { isActive: true } },
     }),
   }));
 });

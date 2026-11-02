@@ -88,9 +88,9 @@ describe("OpenAPI spec", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
       ["/v1/private-channels/balance", "get"],
-      ["/v1/private-channels/wallets", "get"],
+      ["/v1/private-channels/verified-wallets", "get"],
       ["/v1/private-channels/wallets/{walletId}/verify", "post"],
-      ["/v1/private-channels/wallets/{pubkey}", "delete"],
+      ["/v1/private-channels/verified-wallets/{pubkey}", "delete"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security).toEqual([
         { apiKeyAuth: [] },
@@ -101,7 +101,8 @@ describe("OpenAPI spec", () => {
 
   it("keeps a route's own 403 reasons after its action requirement", () => {
     const forbidden = forbiddenResponseSchema.parse(
-      createOpenApiDocument().paths?.["/v1/wallets/initialize"]?.post?.responses?.["403"]
+      createOpenApiDocument().paths?.["/v1/wallets/managed-signing/initialize-with-wallet"]?.post
+        ?.responses?.["403"]
     );
     expect(forbidden.description).toContain("Requires the `wallets.configure` action");
     expect(forbidden.description).toContain("custody_mode_not_allowed");
@@ -133,7 +134,7 @@ describe("OpenAPI spec", () => {
       ["/v1/members", "get"],
       ["/v1/members/me", "get"],
       ["/v1/members/me", "delete"],
-      ["/v1/members/invite", "post"],
+      ["/v1/members/invitations", "post"],
       ["/v1/members/invitations/{invitationId}", "delete"],
       ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],
@@ -178,7 +179,9 @@ describe("OpenAPI spec", () => {
 
   it("documents private-channel probe deployment addresses as a pair", () => {
     const doc = createOpenApiDocument();
-    const probeSchema = getJsonSchema(doc.paths?.["/v1/private-channels/probe"]?.post?.requestBody);
+    const probeSchema = getJsonSchema(
+      doc.paths?.["/v1/private-channels/instance-connection/probe"]?.post?.requestBody
+    );
 
     expect(probeSchema.oneOf).toEqual([
       { required: ["escrowProgramId", "escrowInstanceAddr"] },
@@ -458,13 +461,13 @@ describe("OpenAPI spec", () => {
   it("documents allowlist search/label filters and the labels endpoint", () => {
     const doc = createOpenApiDocument();
 
-    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist"]?.get;
+    const listPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list"]?.get;
     const queryParamNames = listPath?.parameters
       ?.filter((parameter) => "in" in parameter && parameter.in === "query")
       .map((parameter) => ("name" in parameter ? parameter.name : undefined));
     expect(queryParamNames).toEqual(expect.arrayContaining(["search", "label"]));
 
-    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/allowlist/labels"]?.get;
+    const labelsPath = doc.paths?.["/v1/issuance/tokens/{tokenId}/control-list/labels"]?.get;
     expect(labelsPath).toBeDefined();
     expect(labelsPath?.operationId).toBe("listTokenAllowlistLabels");
   });
@@ -636,8 +639,8 @@ describe("OpenAPI spec", () => {
     expect(doc.paths?.["/v1/wallets"]?.post?.responses).toHaveProperty("503");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("400");
     expect(doc.paths?.["/v1/wallets"]?.get?.responses).toHaveProperty("409");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("400");
-    expect(doc.paths?.["/v1/wallets/aggregate"]?.get?.responses).toHaveProperty("409");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("400");
+    expect(doc.paths?.["/v1/wallets/balances/aggregate"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/public-key"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("409");
     expect(doc.paths?.["/v1/wallets/{walletId}"]?.get?.responses).toHaveProperty("503");
@@ -648,7 +651,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("documents unavailable aggregates instead of partial wallet totals", () => {
-    const operation = createOpenApiDocument().paths?.["/v1/wallets/aggregate"]?.get;
+    const operation = createOpenApiDocument().paths?.["/v1/wallets/balances/aggregate"]?.get;
     expect(operation?.responses).toHaveProperty("503");
     expect(operation?.description).toContain("rather than returning an incomplete total");
   });
@@ -660,7 +663,7 @@ describe("OpenAPI spec", () => {
     if (paths === undefined) {
       expect.fail("Expected OpenAPI paths");
     }
-    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/requirements"];
+    const requirementsPathItem = paths["/v1/counterparties/{counterpartyId}/ramp-requirements"];
     if (requirementsPathItem === undefined) {
       expect.fail("Expected counterparty requirements path");
     }
@@ -709,7 +712,7 @@ describe("OpenAPI spec", () => {
 
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();
     expect(doc.paths?.["/v1/members"]).toBeUndefined();
-    expect(doc.paths?.["/admin/allowlist"]).toBeUndefined();
+    expect(doc.paths?.["/admin/onboarding-allowlist"]).toBeUndefined();
     expect(doc.paths?.["/v1/onboarding/status"]).toBeUndefined();
     expect(doc.components?.securitySchemes?.adminKey).toBeUndefined();
 
@@ -845,8 +848,8 @@ describe("OpenAPI spec", () => {
       "Counterparties",
     ]);
     expect(stable.paths?.["/v1/payments/recurring-payments"]?.post).toBeDefined();
-    expect(stable.paths?.["/v1/payments/ramps/onramp/quote"]).toBeUndefined();
-    expect(stable.paths?.["/v1/counterparties/{counterpartyId}/requirements"]).toBeUndefined();
+    expect(stable.paths?.["/v1/payments/ramps/onramp/start"]).toBeUndefined();
+    expect(stable.paths?.["/v1/counterparties/{counterpartyId}/ramp-requirements"]).toBeUndefined();
     expect(stable.paths?.["/v1/issuance/tokens"]).toBeUndefined();
   });
 

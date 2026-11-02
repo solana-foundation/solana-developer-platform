@@ -50,7 +50,7 @@ import { type CustodyConnectionsContext, IntegrationDetailView } from "./integra
 async function getConnectedCustodyProviders(
   request: SdpApiClient["request"]
 ): Promise<KnownCustodyProvider[]> {
-  const res = await request("/v1/wallets/configs");
+  const res = await request("/v1/wallets/managed-signing/configurations");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);

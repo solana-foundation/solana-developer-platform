@@ -8,6 +8,7 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { createTokenWithAssetProfile } from "@/routes/asset-profiles/create";
 import type { Env } from "@/types/env";
 import {
   addAllowlistEntry,
@@ -53,6 +54,7 @@ import {
   burnSchema,
   confirmDeploySchema,
   createTokenSchema,
+  createTokenWithAssetProfileSchema,
   deployTokenSchema,
   forceBurnSchema,
   freezeSchema,
@@ -90,6 +92,12 @@ issuance.get("/templates", requireAction("issuance.read"), listTokenTemplates);
 issuance.get("/templates/:templateId", requireAction("issuance.read"), getTokenTemplate);
 
 // Token CRUD
+issuance.post(
+  "/tokens/create-with-asset-profile",
+  requireAction("issuance.manage"),
+  validateBody(createTokenWithAssetProfileSchema),
+  createTokenWithAssetProfile
+);
 issuance.post(
   "/tokens",
   requireAction("issuance.manage"),
@@ -256,36 +264,40 @@ issuance.post(
 
 // Freeze/Unfreeze
 issuance.post(
-  "/tokens/:tokenId/freeze",
+  "/tokens/:tokenId/freeze-account",
   requireAction("issuance.enforce"),
   validateBody(freezeSchema),
   freezeAccount
 );
 issuance.post(
-  "/tokens/:tokenId/unfreeze",
+  "/tokens/:tokenId/unfreeze-account",
   requireAction("issuance.enforce"),
   validateBody(unfreezeSchema),
   unfreezeAccount
 );
-issuance.get("/tokens/:tokenId/frozen", requireAction("issuance.read"), listFrozenAccounts);
+issuance.get(
+  "/tokens/:tokenId/frozen-accounts",
+  requireAction("issuance.read"),
+  listFrozenAccounts
+);
 
-// Allowlist
-// `/allowlist/labels` (GET) is registered before the `/allowlist/:entryId`
+// Control list
+// `/control-list/labels` (GET) is registered before the `/control-list/:entryId`
 // (DELETE) route; distinct methods mean there is no path collision either way.
 issuance.get(
-  "/tokens/:tokenId/allowlist/labels",
+  "/tokens/:tokenId/control-list/labels",
   requireAction("issuance.read"),
   listAllowlistLabels
 );
-issuance.get("/tokens/:tokenId/allowlist", requireAction("issuance.read"), listAllowlist);
+issuance.get("/tokens/:tokenId/control-list", requireAction("issuance.read"), listAllowlist);
 issuance.post(
-  "/tokens/:tokenId/allowlist",
+  "/tokens/:tokenId/control-list",
   requireAction("issuance.enforce"),
   validateBody(addAllowlistSchema),
   addAllowlistEntry
 );
 issuance.delete(
-  "/tokens/:tokenId/allowlist/:entryId",
+  "/tokens/:tokenId/control-list/:entryId",
   requireAction("issuance.enforce"),
   removeAllowlistEntry
 );
@@ -300,13 +312,13 @@ async function requireAssetProfilesFeature(c: AppContext, next: Next) {
 
 // Holders (KYC-wallet enrollment for an asset)
 issuance.get(
-  "/tokens/:tokenId/holders",
+  "/tokens/:tokenId/holder-enrollments",
   requireAssetProfilesFeature,
   requireAction("issuance.read"),
   listHolders
 );
 issuance.post(
-  "/tokens/:tokenId/holders",
+  "/tokens/:tokenId/holder-enrollments",
   requireAssetProfilesFeature,
   requireAction("issuance.manage"),
   validateBody(enrollHolderSchema),

@@ -85,15 +85,19 @@ privateChannels.use("*", requirePrivateChannelsFeature);
 privateChannels.use("*", unifiedAuthMiddleware());
 privateChannels.use("*", projectContextMiddleware());
 
-// --- /health --------------------------------------------------------------
+// --- /instance-connection/check-gateway-health --------------------------------------------------------------
 // Gateway-only probe of a caller-supplied URL. Returns PrivateChannelHealth DTO.
-privateChannels.get("/health", requireAction("private_channels.read"), getPrivateChannelHealth);
+privateChannels.get(
+  "/instance-connection/check-gateway-health",
+  requireAction("private_channels.read"),
+  getPrivateChannelHealth
+);
 
-// --- /probe ---------------------------------------------------------------
+// --- /instance-connection/probe ---------------------------------------------------------------
 // Full connect-time probe (gateway + chain RPC). What the connect flow's
 // re-probe runs; wired here so the web's Test-connection matches Connect.
 privateChannels.post(
-  "/probe",
+  "/instance-connection/probe",
   requireAction("private_channels.read"),
   validateBody(probeConnectionSchema),
   probePrivateChannelConnection
@@ -103,7 +107,7 @@ privateChannels.post(
 const instance = new Hono<{ Bindings: Env }>();
 instance.get("/", requireAction("private_channels.read"), getPrivateChannelInstance);
 instance.post(
-  "/",
+  "/connect",
   requireAction("private_channels.configure"),
   validateBody(connectPrivateChannelInstanceSchema),
   connectPrivateChannelInstance
@@ -120,17 +124,21 @@ instance.post(
   requireAction("private_channels.configure"),
   disconnectPrivateChannelInstance
 );
-instance.get("/overview", requireAction("private_channels.read"), getPrivateChannelOverview);
-privateChannels.route("/instance", instance);
+privateChannels.route("/instance-connection", instance);
+privateChannels.get(
+  "/instance/overview",
+  requireAction("private_channels.read"),
+  getPrivateChannelOverview
+);
 
 // --- /balance -------------------------------------------------------------
 // Read an owner's channel token balance (per wallet+mint) through the gateway.
 privateChannels.get("/balance", requireAction("private_channels.read"), getPrivateChannelBalance);
 
-// --- /tokens --------------------------------------------------------------
+// --- /token-eligibility --------------------------------------------------------------
 // Registered tokens with per-instance on-chain enablement and exclusion reasons.
 privateChannels.get(
-  "/tokens",
+  "/token-eligibility",
   requireAction("private_channels.read"),
   listPrivateChannelTokenEligibility
 );
@@ -178,7 +186,7 @@ privateChannels.get(
 
 // --- /events --------------------------------------------------------------
 privateChannels.get(
-  "/events/references",
+  "/events/reference-labels",
   requireAction("private_channels.read"),
   listPrivateChannelEventReferences
 );
@@ -229,7 +237,11 @@ privateChannels.get(
 // Wallet verification: the gate for money-movement. Verifying signs an SPC auth
 // challenge with the custody wallet (any SDP provider) server-side and records
 // it; deleting revokes it with SPC and removes the row.
-privateChannels.get("/wallets", requireAction("private_channels.read"), listVerifiedWallets);
+privateChannels.get(
+  "/verified-wallets",
+  requireAction("private_channels.read"),
+  listVerifiedWallets
+);
 privateChannels.post(
   "/wallets/:walletId/verify",
   requireAction("private_channels.execute"),
@@ -237,21 +249,21 @@ privateChannels.post(
   verifyWallet
 );
 privateChannels.delete(
-  "/wallets/:pubkey",
+  "/verified-wallets/:pubkey",
   requireAction("private_channels.manage"),
   deleteVerifiedWallet
 );
 
-// --- /channels/:channelId/principals --------------------------------------
+// --- /channels/:channelId/principal-memberships --------------------------------------
 // Junction between a channel and a project-scoped SPC principal.
 privateChannels.post(
-  "/channels/:channelId/principals",
+  "/channels/:channelId/principal-memberships",
   requireAction("private_channels.configure"),
   validateBody(addPrincipalMembershipBodySchema),
   addPrincipalChannelMembership
 );
 privateChannels.delete(
-  "/channels/:channelId/principals/:principalId",
+  "/channels/:channelId/principal-memberships/:principalId",
   requireAction("private_channels.configure"),
   removePrincipalChannelMembership
 );

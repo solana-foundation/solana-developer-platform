@@ -5,7 +5,7 @@
  * These tests manage real allowlist entries on Solana devnet.
  *
  * Note: ABL operations require a token deployed with enableAbl=true.
- * The allowlist API (/v1/issuance/tokens/:tokenId/allowlist) manages
+ * The allowlist API (/v1/issuance/tokens/:tokenId/control-list) manages
  * database records, while the on-chain ABL is managed via Mosaic SDK.
  */
 
@@ -74,7 +74,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     const tokenId = created.data.token.id;
 
     // Add wallet to allowlist (database level)
-    const addRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    const addRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +114,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
 
     // Add multiple wallets
     for (const [key, address] of Object.entries(TEST_WALLETS)) {
-      await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+      await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -127,7 +127,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     }
 
     // List allowlist entries
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`);
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`);
 
     expect(listRes.status).toBe(200);
     const list = (await listRes.json()) as {
@@ -165,7 +165,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     const tokenId = created.data.token.id;
 
     // Add wallet
-    const addRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    const addRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -180,7 +180,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     const entryId = entry.data.entry.id;
 
     // Remove wallet
-    const removeRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`, {
+    const removeRes = await request(`/v1/issuance/tokens/${tokenId}/control-list/${entryId}`, {
       method: "DELETE",
     });
 
@@ -189,7 +189,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     // Verify removal: the list endpoint only returns active entries, so a
     // removed address must not appear. If removal silently failed and the
     // entry stayed active, it would show up here.
-    const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`);
+    const listRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`);
 
     const list = (await listRes.json()) as {
       data: Array<{ address: string; status: string }>;
@@ -219,7 +219,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     const tokenId = created.data.token.id;
 
     // Add wallet first time
-    await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -231,7 +231,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     });
 
     // Try to add same wallet again
-    const dupeRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    const dupeRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -266,7 +266,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
     const tokenId = created.data.token.id;
 
     // Try to add invalid address
-    const invalidRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`, {
+    const invalidRes = await request(`/v1/issuance/tokens/${tokenId}/control-list`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

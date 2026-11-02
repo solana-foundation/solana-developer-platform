@@ -39,7 +39,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     }
 
     const response = await apiClient.request(
-      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist?${query.toString()}`
+      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/control-list?${query.toString()}`
     );
 
     if (!response.ok) {
@@ -91,6 +91,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.issuance.token.allowlist.add",
-    path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist`,
+    path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/control-list`,
   });
 }

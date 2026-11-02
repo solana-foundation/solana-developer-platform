@@ -139,11 +139,11 @@ describe("Custody routes — self-hosted deployment mode", () => {
     await clearKVStores(env);
   });
 
-  it("POST /v1/wallets/initialize with a non-configured provider returns 403", async () => {
+  it("POST /v1/wallets/managed-signing/initialize-with-wallet with a non-configured provider returns 403", async () => {
     await seedAuth("individual");
 
     const res = await app.request(
-      "/v1/wallets/initialize",
+      "/v1/wallets/managed-signing/initialize-with-wallet",
       {
         method: "POST",
         headers: {
@@ -190,7 +190,7 @@ describe("Custody routes — managed-mode regression", () => {
     await seedAuth("individual");
 
     const res = await app.request(
-      "/v1/wallets/initialize",
+      "/v1/wallets/managed-signing/initialize-with-wallet",
       {
         method: "POST",
         headers: {

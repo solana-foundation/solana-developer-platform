@@ -120,7 +120,7 @@ export async function fetchCredentialLifecycle(
 ): Promise<CustodyCredentialLifecycle | "restricted" | null> {
   try {
     const res = await request(
-      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/provider-credential`
+      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/provider-credential/lifecycle`
     );
     if (res.status === 403) {
       return "restricted";

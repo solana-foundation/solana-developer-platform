@@ -38,7 +38,7 @@ members.use("*", requireHumanSession());
 members.get("/", requireAction("members.read"), listMembers);
 members.get("/me", requireAction("members.read"), getCurrentMember);
 members.post(
-  "/invite",
+  "/invitations",
   projectContextMiddleware(),
   requireAction("members.manage"),
   validateBody(inviteSchema),

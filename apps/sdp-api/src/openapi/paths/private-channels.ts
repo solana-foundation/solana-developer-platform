@@ -53,7 +53,7 @@ const TAG = "Private Channels";
 export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Get the active Private Channels instance for the project",
     operationId: "getPrivateChannelInstance",
@@ -72,7 +72,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "patch",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Update the active Private Channels instance",
     operationId: "updatePrivateChannelInstance",
@@ -96,7 +96,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection/connect",
     tags: [TAG],
     summary: "Connect a Private Channels instance",
     operationId: "connectPrivateChannelInstance",
@@ -146,7 +146,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/instance/disconnect",
+    path: "/v1/private-channels/instance-connection/disconnect",
     tags: [TAG],
     summary: "Disconnect the active Private Channels instance",
     operationId: "disconnectPrivateChannelInstance",
@@ -165,7 +165,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Delete the active Private Channels instance",
     operationId: "deletePrivateChannelInstance",
@@ -183,7 +183,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/probe",
+    path: "/v1/private-channels/instance-connection/probe",
     tags: [TAG],
     summary: "Probe a candidate SPC configuration",
     operationId: "probePrivateChannelConnection",
@@ -205,7 +205,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/health",
+    path: "/v1/private-channels/instance-connection/check-gateway-health",
     tags: [TAG],
     summary: "Probe a candidate gateway's health",
     operationId: "getPrivateChannelHealth",
@@ -243,7 +243,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/tokens",
+    path: "/v1/private-channels/token-eligibility",
     tags: [TAG],
     summary: "List token eligibility for the active instance",
     operationId: "listPrivateChannelTokenEligibility",
@@ -548,7 +548,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/events/references",
+    path: "/v1/private-channels/events/reference-labels",
     tags: [TAG],
     summary: "List display-name references for events",
     operationId: "listPrivateChannelEventReferences",
@@ -606,7 +606,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/wallets",
+    path: "/v1/private-channels/verified-wallets",
     tags: [TAG],
     summary: "List the project's verified wallets",
     operationId: "listPrivateChannelVerifiedWallets",
@@ -650,7 +650,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/private-channels/wallets/{pubkey}",
+    path: "/v1/private-channels/verified-wallets/{pubkey}",
     tags: [TAG],
     summary: "Revoke a verified wallet",
     operationId: "deletePrivateChannelVerifiedWallet",

@@ -27,7 +27,7 @@ import {
 } from "./integrations-status";
 
 async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
-  const res = await request("/v1/wallets/configs");
+  const res = await request("/v1/wallets/managed-signing/configurations");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);
@@ -42,7 +42,7 @@ async function getConnectedCustodyProviders(request: SdpApiClient["request"]) {
 async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean | null> {
   try {
     const response = await client.fetch<PrivateChannelInstanceEnvelope>(
-      "/v1/private-channels/instance"
+      "/v1/private-channels/instance-connection"
     );
     return response.instance?.isActive === true;
   } catch {

@@ -103,7 +103,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
       custodyWalletId
     );
 
-    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+    const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -119,7 +119,9 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
     expect(frozen.data.frozenAccount.accountAddress).toBe(tokenAccount);
     expect(frozen.data.frozenAccount.signature).toBeTruthy();
 
-    const frozenListRes = await request(`/v1/issuance/tokens/${tokenId}/frozen?page=1&pageSize=10`);
+    const frozenListRes = await request(
+      `/v1/issuance/tokens/${tokenId}/frozen-accounts?page=1&pageSize=10`
+    );
     expect(frozenListRes.status).toBe(200);
     const frozenListBody = (await frozenListRes.json()) as {
       data: Array<{ accountAddress: string }>;
@@ -128,7 +130,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Execute 
     expect(frozenListBody.meta.total).toBeGreaterThanOrEqual(1);
     expect(frozenListBody.data.some((entry) => entry.accountAddress === tokenAccount)).toBe(true);
 
-    const unfreezeRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+    const unfreezeRes = await request(`/v1/issuance/tokens/${tokenId}/unfreeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

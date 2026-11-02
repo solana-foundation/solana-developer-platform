@@ -378,7 +378,7 @@ earn.get(
 // describes money the org already holds), project-scoped like the positions
 // read, which is why it carries the same action.
 earn.get(
-  "/vault-share-reconciliation",
+  "/positions/provider-signed/share-reconciliation-report",
   requireAction("earn.read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnVaultShareReconciliation

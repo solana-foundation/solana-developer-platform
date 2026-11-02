@@ -37,17 +37,18 @@ const CONNECTION =
   "dashboard-internal custody connection lifecycle; not part of the public API contract yet";
 
 const EXEMPT = {
-  "POST /internal/dashboard/custody/fireblocks/vaults":
+  "POST /internal/dashboard/custody/fireblocks/vaults/discover":
     "read-only vault discovery; uses POST to keep credential references out of URLs and never stores a response",
   "POST /internal/dashboard/custody/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/connections/:connectionId/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/rotate": CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/complete-rotation":
     CREDENTIALS,
-  "POST /internal/dashboard/custody/provider-credentials/:credentialId/rollback": CREDENTIALS,
+  "POST /internal/dashboard/custody/provider-credentials/:credentialId/rollback-rotation":
+    CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/deactivate": CREDENTIALS,
-  "POST /internal/dashboard/custody/connections/:connectionId/cancel": CONNECTION,
-  "POST /internal/dashboard/custody/connections/:connectionId/complete": CONNECTION,
+  "POST /internal/dashboard/custody/connections/:connectionId/cancel-installation": CONNECTION,
+  "POST /internal/dashboard/custody/connections/:connectionId/complete-installation": CONNECTION,
   "POST /internal/dashboard/custody/connections/:connectionId/deactivate": CONNECTION,
   "POST /internal/dashboard/wallets/:walletId/faucet":
     "dashboard-internal devnet faucet: airdrops free devnet SOL and stores nothing, so each press is a new airdrop",
@@ -69,7 +70,8 @@ const EXEMPT = {
 const NAMES_NOTHING = {
   "POST /v1/counterparties":
     "creates a counterparty in the caller's own project; it names no existing resource",
-  "POST /v1/wallets/initialize": "connects a provider in the caller's own project",
+  "POST /v1/wallets/managed-signing/initialize-with-wallet":
+    "connects a provider in the caller's own project",
 } as const satisfies Record<string, string>;
 
 interface RouteSteps {

@@ -5,50 +5,50 @@ Internal working document · October 27, 2026 · original source commit `d735d38
 <!-- API-NAMING-PROPOSALS:START -->
 ## Proposed API naming changes
 
-Naming review · November 2, 2026 · reviewed all **289 endpoints** in this file against the current route inventory, with source checks for ambiguous behavior. **32 proposals cover 110 endpoints.** **30 route names are updated: 29 proposal mappings are complete, plus the execution suffix in N13.** The remaining naming decisions await your review. The other 179 have no path-only rename recommended in this pass.
+Naming review · November 2, 2026 · reviewed all **289 endpoints** in this file against the current route inventory, with source checks for ambiguous behavior. **32 proposals cover 110 endpoints.** **80 route names are updated: 79 proposal mappings are complete, plus the execution suffix in N13.** Only N11, N12, and the rest of N13 await your review. The other 179 have no path-only rename recommended in this pass.
 
-**Implementation status · November 2, 2026.** N01, N02, N07, N08, and N09 are implemented. N13 is partially implemented: its withdrawal execution suffix is applied under the existing `/programs` family. All other proposals remain for your review. Endpoint verdicts and review notes are unchanged. Proposal numbers (`N01`–`N32`) are separate from endpoint IDs (`E001`–`E289`); you can approve or reject a proposal as a group, or select individual rows.
+**Implementation status · November 2, 2026.** All proposals except N11, N12, and the remaining N13 family changes are implemented. N13 retains the execution suffix already applied under `/programs`. Endpoint verdicts and review notes are unchanged. Proposal numbers (`N01`–`N32`) are separate from endpoint IDs (`E001`–`E289`); you can approve or reject a proposal as a group, or select individual rows.
 
 The goal is to make the route tell the caller what happens: execute through a connected provider, build an unsigned transaction, submit already-signed bytes, read a record, or start a provider-hosted flow. I would keep ordinary resource CRUD and already-clear action verbs; every POST does not need an `/execute` suffix.
 
 The tables show the **same HTTP method** on both sides. Proposed path-only changes retain existing bodies, selectors, response schemas, permissions, idempotency, signing, publication boundaries, and runtime behavior. A new URL still requires updating clients; “name-only” does not mean backward compatible. Body/query IDs are not silently moved into paths.
 
-**Remaining priorities:** **N03–N06 and N10** are the unimplemented priority-1 decisions. **N11–N24** improve resource and flow clarity; N13 is partial. **N25–N32** are lower-priority consistency improvements.
+**Remaining decisions:** N11 (Earn read families), N12 (Earn previews/options), and N13 (Earn portfolio-account naming).
 
 | Proposal | Priority | Decision | Affected endpoints | Status |
 | --- | --- | --- | ---: | --- |
 | [N01](#n01-issuance-distinguish-execution-unsigned-builds-and-confirmation) | 1 | Issuance: distinguish execution, unsigned builds, and confirmation | 14 | Implemented |
 | [N02](#n02-subscriptions-say-that-prepare-returns-an-unsigned-transaction) | 1 | Subscriptions: say that prepare returns an unsigned transaction | 5 | Implemented |
-| [N03](#n03-issuance-an-allowlist-can-actually-be-a-blocklist) | 1 | Issuance: an allowlist can actually be a blocklist | 4 | Pending |
-| [N04](#n04-issuance-holder-enrollment-is-different-from-an-on-chain-holder-list) | 1 | Issuance: holder enrollment is different from an on-chain holder list | 2 | Pending |
-| [N05](#n05-issuance-disclose-that-creating-an-asset-profile-also-creates-a-token) | 1 | Issuance: disclose that creating an asset profile also creates a token | 1 | Pending |
-| [N06](#n06-ramps-quote-starts-a-tracked-provider-flow) | 1 | Ramps: quote starts a tracked provider flow | 2 | Pending |
+| [N03](#n03-issuance-an-allowlist-can-actually-be-a-blocklist) | 1 | Issuance: an allowlist can actually be a blocklist | 4 | Implemented |
+| [N04](#n04-issuance-holder-enrollment-is-different-from-an-on-chain-holder-list) | 1 | Issuance: holder enrollment is different from an on-chain holder list | 2 | Implemented |
+| [N05](#n05-issuance-disclose-that-creating-an-asset-profile-also-creates-a-token) | 1 | Issuance: disclose that creating an asset profile also creates a token | 1 | Implemented |
+| [N06](#n06-ramps-quote-starts-a-tracked-provider-flow) | 1 | Ramps: quote starts a tracked provider flow | 2 | Implemented |
 | [N07](#n07-payments-make-immediate-transfer-execution-explicit) | 1 | Payments: make immediate transfer execution explicit | 2 | Implemented |
 | [N08](#n08-rings-distinguish-starting-execution-from-recovering-an-existing-operation) | 1 | Rings: distinguish starting execution from recovering an existing operation | 2 | Implemented |
 | [N09](#n09-earn-extend-the-explicit-names-to-queued-withdrawal-transactions) | 1 | Earn: extend the explicit names to queued withdrawal transactions | 6 | Implemented |
-| [N10](#n10-fireblocks-setup-vault-discovery-does-not-create-a-vault) | 1 | Fireblocks setup: vault discovery does not create a vault | 1 | Pending |
+| [N10](#n10-fireblocks-setup-vault-discovery-does-not-create-a-vault) | 1 | Fireblocks setup: vault discovery does not create a vault | 1 | Implemented |
 | [N11](#n11-earn-reads-replace-external-wallet-and-vault-prefixes-with-explicit-flow-families) | 2 | Earn reads: replace external-wallet and vault prefixes with explicit flow families | 15 | Pending |
 | [N12](#n12-earn-quotes-place-previews-and-options-beside-the-relevant-action) | 2 | Earn quotes: place previews and options beside the relevant action | 7 | Pending |
 | [N13](#n13-earn-programs-name-the-provider-portfolio-account-and-its-allocation) | 2 | Earn programs: name the provider portfolio account and its allocation | 9 | Partial: execution suffix |
-| [N14](#n14-earn-reconciliation-say-that-the-endpoint-returns-a-report) | 2 | Earn reconciliation: say that the endpoint returns a report | 1 | Pending |
-| [N15](#n15-issuance-distinguish-account-freezing-from-token-wide-pausing) | 2 | Issuance: distinguish account freezing from token-wide pausing | 3 | Pending |
-| [N16](#n16-private-channels-connect-to-an-instance-rather-than-imply-remote-deployment-or-destruction) | 2 | Private Channels: connect to an instance, rather than imply remote deployment or destruction | 5 | Pending |
-| [N17](#n17-private-channels-make-pre-connection-diagnostics-explicit) | 2 | Private Channels: make pre-connection diagnostics explicit | 2 | Pending |
-| [N18](#n18-private-channels-distinguish-verified-wallets-from-the-general-wallet-registry) | 2 | Private Channels: distinguish verified wallets from the general wallet registry | 2 | Pending |
-| [N19](#n19-private-channels-channel-membership-is-different-from-principal-creation-or-deletion) | 2 | Private Channels: channel membership is different from principal creation or deletion | 2 | Pending |
-| [N20](#n20-private-channels-name-eligibility-results-and-event-labels) | 2 | Private Channels: name eligibility results and event labels | 2 | Pending |
-| [N21](#n21-rings-make-the-identity-scope-of-rekey-explicit) | 2 | Rings: make the identity scope of rekey explicit | 1 | Pending |
-| [N22](#n22-rings-setup-distinguish-registration-and-identity-provisioning-from-wallet-creation) | 2 | Rings setup: distinguish registration and identity provisioning from wallet creation | 2 | Pending |
-| [N23](#n23-wallets-name-the-balance-aggregate-and-the-managed-signing-setup) | 2 | Wallets: name the balance aggregate and the managed signing setup | 3 | Pending |
-| [N24](#n24-counterparties-name-form-options-and-ramp-requirement-checks-accurately) | 2 | Counterparties: name form options and ramp requirement checks accurately | 3 | Pending |
-| [N25](#n25-ramps-currency-lists-actually-describe-supported-pairs) | 3 | Ramps: currency lists actually describe supported pairs | 2 | Pending |
-| [N26](#n26-payment-requests-the-link-endpoint-returns-a-link-token) | 3 | Payment requests: the link endpoint returns a link token | 1 | Pending |
-| [N27](#n27-organizations-use-the-same-provider-availability-term-as-projects) | 3 | Organizations: use the same provider-availability term as projects | 1 | Pending |
-| [N28](#n28-members-keep-invitation-creation-beside-invitation-revocation) | 3 | Members: keep invitation creation beside invitation revocation | 1 | Pending |
-| [N29](#n29-admin-qualify-the-onboarding-allowlist) | 3 | Admin: qualify the onboarding allowlist | 3 | Pending |
-| [N30](#n30-dashboard-provider-setup-name-installation-rotation-recovery-and-lifecycle-status) | 3 | Dashboard provider setup: name installation, rotation recovery, and lifecycle status | 4 | Pending |
-| [N31](#n31-dashboard-fireblocks-name-the-destination-eligibility-check) | 3 | Dashboard Fireblocks: name the destination eligibility check | 1 | Pending |
-| [N32](#n32-clerk-webhook-the-handler-synchronizes-more-than-organization-links) | 3 | Clerk webhook: the handler synchronizes more than organization links | 1 | Pending |
+| [N14](#n14-earn-reconciliation-say-that-the-endpoint-returns-a-report) | 2 | Earn reconciliation: say that the endpoint returns a report | 1 | Implemented |
+| [N15](#n15-issuance-distinguish-account-freezing-from-token-wide-pausing) | 2 | Issuance: distinguish account freezing from token-wide pausing | 3 | Implemented |
+| [N16](#n16-private-channels-connect-to-an-instance-rather-than-imply-remote-deployment-or-destruction) | 2 | Private Channels: connect to an instance, rather than imply remote deployment or destruction | 5 | Implemented |
+| [N17](#n17-private-channels-make-pre-connection-diagnostics-explicit) | 2 | Private Channels: make pre-connection diagnostics explicit | 2 | Implemented |
+| [N18](#n18-private-channels-distinguish-verified-wallets-from-the-general-wallet-registry) | 2 | Private Channels: distinguish verified wallets from the general wallet registry | 2 | Implemented |
+| [N19](#n19-private-channels-channel-membership-is-different-from-principal-creation-or-deletion) | 2 | Private Channels: channel membership is different from principal creation or deletion | 2 | Implemented |
+| [N20](#n20-private-channels-name-eligibility-results-and-event-labels) | 2 | Private Channels: name eligibility results and event labels | 2 | Implemented |
+| [N21](#n21-rings-make-the-identity-scope-of-rekey-explicit) | 2 | Rings: make the identity scope of rekey explicit | 1 | Implemented |
+| [N22](#n22-rings-setup-distinguish-registration-and-identity-provisioning-from-wallet-creation) | 2 | Rings setup: distinguish registration and identity provisioning from wallet creation | 2 | Implemented |
+| [N23](#n23-wallets-name-the-balance-aggregate-and-the-managed-signing-setup) | 2 | Wallets: name the balance aggregate and the managed signing setup | 3 | Implemented |
+| [N24](#n24-counterparties-name-form-options-and-ramp-requirement-checks-accurately) | 2 | Counterparties: name form options and ramp requirement checks accurately | 3 | Implemented |
+| [N25](#n25-ramps-currency-lists-actually-describe-supported-pairs) | 3 | Ramps: currency lists actually describe supported pairs | 2 | Implemented |
+| [N26](#n26-payment-requests-the-link-endpoint-returns-a-link-token) | 3 | Payment requests: the link endpoint returns a link token | 1 | Implemented |
+| [N27](#n27-organizations-use-the-same-provider-availability-term-as-projects) | 3 | Organizations: use the same provider-availability term as projects | 1 | Implemented |
+| [N28](#n28-members-keep-invitation-creation-beside-invitation-revocation) | 3 | Members: keep invitation creation beside invitation revocation | 1 | Implemented |
+| [N29](#n29-admin-qualify-the-onboarding-allowlist) | 3 | Admin: qualify the onboarding allowlist | 3 | Implemented |
+| [N30](#n30-dashboard-provider-setup-name-installation-rotation-recovery-and-lifecycle-status) | 3 | Dashboard provider setup: name installation, rotation recovery, and lifecycle status | 4 | Implemented |
+| [N31](#n31-dashboard-fireblocks-name-the-destination-eligibility-check) | 3 | Dashboard Fireblocks: name the destination eligibility check | 1 | Implemented |
+| [N32](#n32-clerk-webhook-the-handler-synchronizes-more-than-organization-links) | 3 | Clerk webhook: the handler synchronizes more than organization links | 1 | Implemented |
 
 ### Naming vocabulary used below
 
@@ -102,9 +102,11 @@ Preserve the current preparation side effects, including storing the plan PDA. T
 
 ### N03: Issuance: an allowlist can actually be a blocklist
 
+**Status: Implemented — path names only.**
+
 The token control-list implementation supports allowlist mode and blocklist mode. Calling both `/allowlist` can reverse a reader’s understanding of what adding an address does. Use the neutral resource name `/control-list`.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E110](#e110-list-token-allowlist) | `GET /v1/issuance/tokens/{tokenId}/allowlist` | `GET /v1/issuance/tokens/{tokenId}/control-list` |
 | [E111](#e111-add-token-allowlist-entry) | `POST /v1/issuance/tokens/{tokenId}/allowlist` | `POST /v1/issuance/tokens/{tokenId}/control-list` |
@@ -115,18 +117,22 @@ The token’s existing mode still determines whether membership permits or block
 
 ### N04: Issuance: holder enrollment is different from an on-chain holder list
 
+**Status: Implemented — path names only.**
+
 These endpoints list or register asset enrollments and KYC identities. `/holders` sounds like an index of everyone who currently owns the token, which this endpoint does not provide.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E127](#e127-list-verified-holders) | `GET /v1/issuance/tokens/{tokenId}/holders` | `GET /v1/issuance/tokens/{tokenId}/holder-enrollments` |
 | [E128](#e128-enroll-a-verified-holder) | `POST /v1/issuance/tokens/{tokenId}/holders` | `POST /v1/issuance/tokens/{tokenId}/holder-enrollments` |
 
 ### N05: Issuance: disclose that creating an asset profile also creates a token
 
+**Status: Implemented — path names only.**
+
 This POST atomically creates a token record and its asset profile. Its current collection name only advertises half of that operation.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E097](#e097-create-token-with-asset-profile) | `POST /v1/issuance/asset-profiles` | `POST /v1/issuance/tokens/create-with-asset-profile` |
 
@@ -134,9 +140,11 @@ The token is a stored record at this step; the name must not imply deployment to
 
 ### N06: Ramps: quote starts a tracked provider flow
 
+**Status: Implemented — path names only.**
+
 These routes call a provider and persist a payment transfer, returning a hosted flow or funding instructions. `/quote` understates that commitment. `/start` distinguishes them from the read-only price estimates without promising immediate settlement.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E089](#e089-create-offramp-quote) | `POST /v1/payments/ramps/offramp/quote` | `POST /v1/payments/ramps/offramp/start` |
 | [E092](#e092-create-on-ramp-quote) | `POST /v1/payments/ramps/onramp/quote` | `POST /v1/payments/ramps/onramp/start` |
@@ -188,9 +196,11 @@ Creating a queued request starts escrow or an intermediate-token conversion; it 
 
 ### N10: Fireblocks setup: vault discovery does not create a vault
 
+**Status: Implemented — path names only.**
+
 `POST .../vaults` looks like resource creation. The handler discovers existing vaults using the supplied setup credentials.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E262](#e262-discover-vaults) | `POST /internal/dashboard/custody/fireblocks/vaults` | `POST /internal/dashboard/custody/fireblocks/vaults/discover` |
 
@@ -258,19 +268,23 @@ Keep PUT, the existing IDs, parameter names, and payload fields for a name-only 
 
 ### N14: Earn reconciliation: say that the endpoint returns a report
 
+**Status: Implemented — path names only.**
+
 The current GET compares scoped connected-wallet share balances with recorded positions and writes nothing. “Reconciliation” alone can sound like it repairs or imports records.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/vault-share-reconciliation` | `GET /v1/earn/positions/provider-signed/share-reconciliation-report` |
 
-Use the same flow label chosen in N11. Keep this report read-only; the proposed name adds no import or repair behavior.
+The report uses the proposed `provider-signed` path; N11 remains a separate pending decision. Keep this report read-only; the proposed name adds no import or repair behavior.
 
 ### N15: Issuance: distinguish account freezing from token-wide pausing
 
+**Status: Implemented — path names only.**
+
 `/freeze` and `/frozen` under a token can read like freezing the entire token. These routes operate on token accounts; `/pause` and `/unpause` are the token-wide operations.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E125](#e125-freeze-account) | `POST /v1/issuance/tokens/{tokenId}/freeze` | `POST /v1/issuance/tokens/{tokenId}/freeze-account` |
 | [E126](#e126-list-frozen-accounts) | `GET /v1/issuance/tokens/{tokenId}/frozen` | `GET /v1/issuance/tokens/{tokenId}/frozen-accounts` |
@@ -280,9 +294,11 @@ Keep the target account in its existing input field. This proposal does not add 
 
 ### N16: Private Channels: connect to an instance, rather than imply remote deployment or destruction
 
+**Status: Implemented — path names only.**
+
 These routes manage the project’s persisted connection to an existing gateway/deployment. The POST probes and connects; DELETE hard-deletes the local connection row and cascades its dependent records; disconnect is a separate lifecycle action.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E211](#e211-get-the-active-private-channels-instance-for-the-project) | `GET /v1/private-channels/instance` | `GET /v1/private-channels/instance-connection` |
 | [E212](#e212-connect-a-private-channels-instance) | `POST /v1/private-channels/instance` | `POST /v1/private-channels/instance-connection/connect` |
@@ -294,9 +310,11 @@ The GET overview can remain at `/instance/overview`: it describes the connected 
 
 ### N17: Private Channels: make pre-connection diagnostics explicit
 
+**Status: Implemented — path names only.**
+
 `/health` checks a caller-supplied candidate gateway, and `/probe` checks candidate connection settings more fully. Neither is the API service’s own health endpoint.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E210](#e210-probe-a-candidate-gateways-health) | `GET /v1/private-channels/health` | `GET /v1/private-channels/instance-connection/check-gateway-health` |
 | [E220](#e220-probe-a-candidate-spc-configuration) | `POST /v1/private-channels/probe` | `POST /v1/private-channels/instance-connection/probe` |
@@ -305,9 +323,11 @@ Preserve GET with query inputs for the gateway check and POST with a body for th
 
 ### N18: Private Channels: distinguish verified wallets from the general wallet registry
 
+**Status: Implemented — path names only.**
+
 The GET lists only wallets with an SPC verification, and DELETE revokes that verification rather than deleting the underlying wallet.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E224](#e224-list-the-projects-verified-wallets) | `GET /v1/private-channels/wallets` | `GET /v1/private-channels/verified-wallets` |
 | [E225](#e225-revoke-a-verified-wallet) | `DELETE /v1/private-channels/wallets/{pubkey}` | `DELETE /v1/private-channels/verified-wallets/{pubkey}` |
@@ -316,9 +336,11 @@ Keep `{pubkey}` as a public-key selector. The existing `POST /wallets/{walletId}
 
 ### N19: Private Channels: channel membership is different from principal creation or deletion
 
+**Status: Implemented — path names only.**
+
 These routes add or remove an existing principal’s membership in one channel. The separate `/principals` routes manage principals themselves.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E198](#e198-add-principal-channel-membership) | `POST /v1/private-channels/channels/{channelId}/principals` | `POST /v1/private-channels/channels/{channelId}/principal-memberships` |
 | [E199](#e199-remove-principal-channel-membership) | `DELETE /v1/private-channels/channels/{channelId}/principals/{principalId}` | `DELETE /v1/private-channels/channels/{channelId}/principal-memberships/{principalId}` |
@@ -327,9 +349,11 @@ The deletion selector remains a principal ID, as it is today; it is not a newly 
 
 ### N20: Private Channels: name eligibility results and event labels
 
+**Status: Implemented — path names only.**
+
 These are specialized read models rather than a general token list or a list of event references.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E221](#e221-list-token-eligibility-for-the-active-instance) | `GET /v1/private-channels/tokens` | `GET /v1/private-channels/token-eligibility` |
 | [E209](#e209-list-display-name-references-for-events) | `GET /v1/private-channels/events/references` | `GET /v1/private-channels/events/reference-labels` |
@@ -338,9 +362,11 @@ Token eligibility can include negative results, so I would not call this `/eligi
 
 ### N21: Rings: make the identity scope of rekey explicit
 
+**Status: Implemented — path names only.**
+
 `/wallets/{walletId}/rekey` can sound like rotating the connected wallet’s provider signing key. It rotates the Rings identity, with the current foreign-identity checks and typed confirmation.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E245](#e245-rekey-rings-wallet) | `POST /v1/helius-rings/wallets/{walletId}/rekey` | `POST /v1/helius-rings/wallets/{walletId}/identity/rekey` |
 
@@ -348,9 +374,11 @@ Preserve the existing consequences for balances associated with the old Rings id
 
 ### N22: Rings setup: distinguish registration and identity provisioning from wallet creation
 
+**Status: Implemented — path names only.**
+
 The ring POST records an existing custom program ID and performs bring-up. The wallet POST binds an existing SDP wallet and provisions its Rings identity. More specific verbs make those setup steps clearer.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E239](#e239-create-rings-project-ring) | `POST /v1/helius-rings/rings` | `POST /v1/helius-rings/rings/register-and-initialize` |
 | [E242](#e242-create-rings-wallet) | `POST /v1/helius-rings/wallets` | `POST /v1/helius-rings/wallets/provision-identity` |
@@ -359,9 +387,11 @@ No Solana program deployment or creation of an underlying provider wallet is imp
 
 ### N23: Wallets: name the balance aggregate and the managed signing setup
 
+**Status: Implemented — path names only.**
+
 `aggregate`, `configs`, and `initialize` omit what is aggregated, configured, or initialized. Initialization also creates the first wallet, which is useful to surface.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E029](#e029-aggregate-wallet-balances) | `GET /v1/wallets/aggregate` | `GET /v1/wallets/balances/aggregate` |
 | [E030](#e030-list-wallet-signing-configs) | `GET /v1/wallets/configs` | `GET /v1/wallets/managed-signing/configurations` |
@@ -371,9 +401,11 @@ The configuration list retains its current Config-owned scope; it does not expan
 
 ### N24: Counterparties: name form options and ramp requirement checks accurately
 
+**Status: Implemented — path names only.**
+
 `metadata` returns form field choices. `requirements` concerns ramp providers. The POST currently validates the existing counterparty/provider data and returns requirements; despite its handler name, it does not persist submitted documents or fulfill onboarding actions.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E039](#e039-get-counterparty-field-options) | `GET /v1/counterparties/metadata` | `GET /v1/counterparties/field-options` |
 | [E049](#e049-get-counterparty-ramp-requirements) | `GET /v1/counterparties/{counterpartyId}/requirements` | `GET /v1/counterparties/{counterpartyId}/ramp-requirements` |
@@ -383,18 +415,22 @@ The GET and POST retain their current, different inputs. Calling the POST `/subm
 
 ### N25: Ramps: currency lists actually describe supported pairs
 
+**Status: Implemented — path names only.**
+
 These responses include source/destination pairs and providers, not just a single currency or a flat currency catalog.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E087](#e087-list-off-ramp-currency-support) | `GET /v1/payments/ramps/offramp/currency` | `GET /v1/payments/ramps/offramp/supported-pairs` |
 | [E090](#e090-list-on-ramp-currency-support) | `GET /v1/payments/ramps/onramp/currency` | `GET /v1/payments/ramps/onramp/supported-pairs` |
 
 ### N26: Payment requests: the link endpoint returns a link token
 
+**Status: Implemented — path names only.**
+
 The response is `{ id, publicToken }`, not a complete link URL. Name the artifact the caller receives.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E065](#e065-get-payment-request-link) | `GET /v1/payments/requests/{paymentRequestId}/link` | `GET /v1/payments/requests/{paymentRequestId}/link-token` |
 
@@ -402,9 +438,11 @@ Keep the existing manage-level permission. Making the response return a full URL
 
 ### N27: Organizations: use the same provider-availability term as projects
 
+**Status: Implemented — path names only.**
+
 The organization helper returns provider availability, while the project route already calls the concept `provider-availability`. “Access” can sound like a separate permission object.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E012](#e012-get-organization-provider-access) | `GET /v1/organizations/{orgId}/provider-access` | `GET /v1/organizations/{orgId}/provider-availability` |
 
@@ -412,17 +450,21 @@ Only align the term. Organization-level availability keeps its current scope and
 
 ### N28: Members: keep invitation creation beside invitation revocation
 
+**Status: Implemented — path names only.**
+
 The existing DELETE already uses `/members/invitations/{invitationId}`. A collection POST is easier to discover beside it than `/members/invite`.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E015](#e015-invite-member) | `POST /v1/members/invite` | `POST /v1/members/invitations` |
 
 ### N29: Admin: qualify the onboarding allowlist
 
+**Status: Implemented — path names only.**
+
 The unqualified admin allowlist controls onboarding by email or domain. Qualifying it avoids confusion with token control lists or provider destination lists.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E281](#e281-list-allowlist-entries) | `GET /admin/allowlist` | `GET /admin/onboarding-allowlist` |
 | [E282](#e282-add-allowlist-entry) | `POST /admin/allowlist` | `POST /admin/onboarding-allowlist` |
@@ -430,9 +472,11 @@ The unqualified admin allowlist controls onboarding by email or domain. Qualifyi
 
 ### N30: Dashboard provider setup: name installation, rotation recovery, and lifecycle status
 
+**Status: Implemented — path names only.**
+
 Generic connection “complete” or “cancel” actions are installation steps. The credential GET returns safe lifecycle information, and rollback restores the predecessor credential after rotation.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E255](#e255-post-cancel) | `POST /internal/dashboard/custody/connections/{connectionId}/cancel` | `POST /internal/dashboard/custody/connections/{connectionId}/cancel-installation` |
 | [E256](#e256-post-complete) | `POST /internal/dashboard/custody/connections/{connectionId}/complete` | `POST /internal/dashboard/custody/connections/{connectionId}/complete-installation` |
@@ -443,21 +487,25 @@ Leave `/rotate` as an action: it can submit and complete a rotation immediately,
 
 ### N31: Dashboard Fireblocks: name the destination eligibility check
 
+**Status: Implemented — path names only.**
+
 This GET checks a contact destination against the Fireblocks address book and returns a state and asset ID. It does not return a wallet’s receive address.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E269](#e269-get-destination) | `GET /internal/dashboard/fireblocks/destination` | `GET /internal/dashboard/fireblocks/destination-eligibility` |
 
 ### N32: Clerk webhook: the handler synchronizes more than organization links
 
+**Status: Implemented — path names only.**
+
 The signed webhook handles organization and user lifecycle events as well as membership deletion. `/link-orgs` describes only part of its work.
 
-| Endpoint | Current route | Suggested route |
+| Endpoint | Previous route | Implemented route |
 | --- | --- | --- |
 | [E278](#e278-handle-clerk-webhook) | `POST /webhooks/clerk/link-orgs` | `POST /webhooks/clerk` |
 
-A future rollout must also update Clerk’s configured delivery URL. This proposal does not change webhook authentication or accepted event handling.
+Deploying this rename also requires updating Clerk’s configured delivery URL to `/webhooks/clerk`. This proposal does not change webhook authentication or accepted event handling.
 
 ### Items that need a contract decision, rather than a path-only rename
 
@@ -484,7 +532,7 @@ These five endpoints are included in the 289-endpoint audit, but not in the prop
 
 ### Coverage of the full endpoint inventory
 
-Every endpoint in each section was considered. Of the 110 candidates, 29 mappings are fully implemented, one has its execution suffix implemented, and 80 are untouched. “No path-only proposal” means no naming change is recommended here; it is not a Good verdict or approval of the endpoint’s behavior.
+Every endpoint in each section was considered. Of the 110 candidates, 79 mappings are fully implemented, one has its execution suffix implemented, and 30 are untouched. “No path-only proposal” means no naming change is recommended here; it is not a Good verdict or approval of the endpoint’s behavior.
 
 | Review section | Endpoints considered | Candidates identified | No path-only proposal |
 | --- | ---: | ---: | ---: |
@@ -1106,7 +1154,7 @@ Organization provisioning, settings, and provider access.
 | [E009](#e009-get-organization) | `GET /v1/organizations/{orgId}` | Outside public OpenAPI | Pending |
 | [E010](#e010-update-organization) | `PATCH /v1/organizations/{orgId}` | Outside public OpenAPI | Pending |
 | [E011](#e011-delete-organization) | `DELETE /v1/organizations/{orgId}` | Outside public OpenAPI | Pending |
-| [E012](#e012-get-organization-provider-access) | `GET /v1/organizations/{orgId}/provider-access` | Outside public OpenAPI | Pending |
+| [E012](#e012-get-organization-provider-access) | `GET /v1/organizations/{orgId}/provider-availability` | Outside public OpenAPI | Pending |
 
 ### E008: Create organization
 
@@ -1370,7 +1418,7 @@ Soft deletes the organization and revokes all API keys.
 
 ### E012: Get Organization Provider Access
 
-`GET /v1/organizations/{orgId}/provider-access`
+`GET /v1/organizations/{orgId}/provider-availability`
 
 - [ ] Good
 - [ ] Needs work
@@ -1400,7 +1448,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 
 ```typescript
 organizations.get(
-  "/:orgId/provider-access",
+  "/:orgId/provider-availability",
   requireAction("organizations.read"),
   getOrganizationProviderAccess
 )
@@ -1445,7 +1493,7 @@ Organization members, invitations, and roles.
 | --- | --- | --- | --- |
 | [E013](#e013-list-organization-members) | `GET /v1/members` | Outside public OpenAPI | Pending |
 | [E014](#e014-revoke-invitation) | `DELETE /v1/members/invitations/{invitationId}` | Outside public OpenAPI | Pending |
-| [E015](#e015-invite-member) | `POST /v1/members/invite` | Outside public OpenAPI | Pending |
+| [E015](#e015-invite-member) | `POST /v1/members/invitations` | Outside public OpenAPI | Pending |
 | [E016](#e016-get-current-member) | `GET /v1/members/me` | Outside public OpenAPI | Pending |
 | [E017](#e017-leave-organization) | `DELETE /v1/members/me` | Outside public OpenAPI | Pending |
 | [E018](#e018-change-member-role) | `PATCH /v1/members/{memberId}` | Outside public OpenAPI | Pending |
@@ -1577,7 +1625,7 @@ Withdraws a pending invitation, in SDP and then in Clerk. An accepted or expired
 
 ### E015: Invite member
 
-`POST /v1/members/invite`
+`POST /v1/members/invitations`
 
 - [ ] Good
 - [ ] Needs work
@@ -2324,9 +2372,9 @@ Wallet discovery, creation, signing, and lifecycle.
 | [E026](#e026-list-wallets) | `GET /v1/wallets` | Public — stable, beta, experimental | Pending |
 | [E027](#e027-create-wallet) | `POST /v1/wallets` | Public — stable, beta, experimental | Pending |
 | [E028](#e028-delete-wallet) | `DELETE /v1/wallets` | Public — stable, beta, experimental | Pending |
-| [E029](#e029-aggregate-wallet-balances) | `GET /v1/wallets/aggregate` | Public — stable, beta, experimental | Pending |
-| [E030](#e030-list-wallet-signing-configs) | `GET /v1/wallets/configs` | Public — stable, beta, experimental | Pending |
-| [E031](#e031-initialize-wallet-signing) | `POST /v1/wallets/initialize` | Public — stable, beta, experimental | Pending |
+| [E029](#e029-aggregate-wallet-balances) | `GET /v1/wallets/balances/aggregate` | Public — stable, beta, experimental | Pending |
+| [E030](#e030-list-wallet-signing-configs) | `GET /v1/wallets/managed-signing/configurations` | Public — stable, beta, experimental | Pending |
+| [E031](#e031-initialize-wallet-signing) | `POST /v1/wallets/managed-signing/initialize-with-wallet` | Public — stable, beta, experimental | Pending |
 | [E032](#e032-get-wallet-public-key) | `GET /v1/wallets/public-key` | Public — stable, beta, experimental | Pending |
 | [E033](#e033-check-signer-via-simulated-memo-transaction) | `POST /v1/wallets/signer-check` | Public — stable, beta, experimental | Pending |
 | [E034](#e034-get-wallet-by-id) | `GET /v1/wallets/{walletId}` | Public — stable, beta, experimental | Pending |
@@ -2551,7 +2599,7 @@ Deletes the wallet from its exact owning provider account when that Provider sup
 
 ### E029: Aggregate wallet balances
 
-`GET /v1/wallets/aggregate`
+`GET /v1/wallets/balances/aggregate`
 
 - [ ] Good
 - [ ] Needs work
@@ -2610,9 +2658,11 @@ Aggregates tracked balances for active wallets under the same owner-aware inclus
 
 ---
 
-### E030: List wallet signing configs
+<a id="e030-list-wallet-signing-configs"></a>
 
-`GET /v1/wallets/configs`
+### E030: List managed signing configurations
+
+`GET /v1/wallets/managed-signing/configurations`
 
 - [ ] Good
 - [ ] Needs work
@@ -2673,7 +2723,7 @@ Returns the active Config-owned wallet signing configurations for the requested 
 
 ### E031: Initialize wallet signing
 
-`POST /v1/wallets/initialize`
+`POST /v1/wallets/managed-signing/initialize-with-wallet`
 
 - [ ] Good
 - [ ] Needs work
@@ -3027,7 +3077,7 @@ Customer and beneficiary identity, account records, and provider requirements.
 | [E036](#e036-list-counterparties) | `GET /v1/counterparties` | Public — stable, beta, experimental | Pending |
 | [E037](#e037-create-counterparty) | `POST /v1/counterparties` | Public — stable, beta, experimental | Pending |
 | [E038](#e038-list-project-counterparty-accounts) | `GET /v1/counterparties/accounts` | Outside public OpenAPI | Pending |
-| [E039](#e039-get-counterparty-field-options) | `GET /v1/counterparties/metadata` | Public — stable, beta, experimental | Pending |
+| [E039](#e039-get-counterparty-field-options) | `GET /v1/counterparties/field-options` | Public — stable, beta, experimental | Pending |
 | [E040](#e040-get-counterparty) | `GET /v1/counterparties/{counterpartyId}` | Public — stable, beta, experimental | Pending |
 | [E041](#e041-update-counterparty) | `PATCH /v1/counterparties/{counterpartyId}` | Public — stable, beta, experimental | Pending |
 | [E042](#e042-archive-counterparty) | `DELETE /v1/counterparties/{counterpartyId}` | Public — stable, beta, experimental | Pending |
@@ -3037,8 +3087,8 @@ Customer and beneficiary identity, account records, and provider requirements.
 | [E046](#e046-update-counterparty-account) | `PATCH /v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Public — stable, beta, experimental | Pending |
 | [E047](#e047-archive-counterparty-account) | `DELETE /v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | Public — stable, beta, experimental | Pending |
 | [E048](#e048-list-counterparty-provider-accounts) | `GET /v1/counterparties/{counterpartyId}/provider-accounts` | Public — experimental | Pending |
-| [E049](#e049-get-counterparty-ramp-requirements) | `GET /v1/counterparties/{counterpartyId}/requirements` | Public — experimental | Pending |
-| [E050](#e050-submit-counterparty-requirements) | `POST /v1/counterparties/{counterpartyId}/requirements` | Outside public OpenAPI | Pending |
+| [E049](#e049-get-counterparty-ramp-requirements) | `GET /v1/counterparties/{counterpartyId}/ramp-requirements` | Public — experimental | Pending |
+| [E050](#e050-submit-counterparty-requirements) | `POST /v1/counterparties/{counterpartyId}/ramp-requirements/check` | Outside public OpenAPI | Pending |
 
 ### E036: List counterparties
 
@@ -3062,7 +3112,7 @@ Lists counterparties for the authenticated organization.
 | Operation ID | `listCounterparties` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L50) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L72) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L61)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L54) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L72) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L61)
 
 **Request parameters**
 
@@ -3134,7 +3184,7 @@ Creates a counterparty. If externalId is provided, it must be unique within the 
 | Operation ID | `createCounterparty` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L51) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L269) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L82)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L55) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L269) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L82)
 
 **Request parameters**
 
@@ -3210,7 +3260,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L45) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L102)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L49) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L102)
 
 **Source validation schemas**
 
@@ -3313,7 +3363,7 @@ listProjectCounterpartyAccounts = async (c: AppContext) => {
 
 ### E039: Get counterparty field options
 
-`GET /v1/counterparties/metadata`
+`GET /v1/counterparties/field-options`
 
 - [ ] Good
 - [ ] Needs work
@@ -3390,7 +3440,7 @@ Gets counterparty details by id.
 | Operation ID | `getCounterparty` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L59) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L146) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L107)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L63) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L146) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L107)
 
 **Request parameters**
 
@@ -3457,7 +3507,7 @@ Updates counterparty attributes. At least one field must be provided. Use null o
 | Operation ID | `updateCounterparty` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L71) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L322) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L130)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L75) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L322) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L130)
 
 **Request parameters**
 
@@ -3536,7 +3586,7 @@ Archives a counterparty. Archived counterparties are hidden from default lists.
 | Operation ID | `archiveCounterparty` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L80) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L375) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L183)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L84) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L375) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L183)
 
 **Request parameters**
 
@@ -4000,7 +4050,7 @@ Lists provider-owned fiat payout accounts for a counterparty. Provider details a
 
 ### E049: Get counterparty ramp requirements
 
-`GET /v1/counterparties/{counterpartyId}/requirements`
+`GET /v1/counterparties/{counterpartyId}/ramp-requirements`
 
 - [ ] Good
 - [ ] Needs work
@@ -4020,7 +4070,7 @@ Evaluates whether a counterparty is ready to create a quote with the selected ra
 | Operation ID | `getCounterpartyRequirements` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L60) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L170) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L158)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L64) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L170) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/counterparties.ts#L158)
 
 **Request parameters**
 
@@ -4062,7 +4112,7 @@ Evaluates whether a counterparty is ready to create a quote with the selected ra
 
 ### E050: Submit Counterparty Requirements
 
-`POST /v1/counterparties/{counterpartyId}/requirements`
+`POST /v1/counterparties/{counterpartyId}/ramp-requirements/check`
 
 - [ ] Good
 - [ ] Needs work
@@ -4081,7 +4131,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L65) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L235)
+**Source:** [route registration](../../apps/sdp-api/src/routes/counterparties/index.ts#L69) · [handler](../../apps/sdp-api/src/routes/counterparties/handlers.ts#L235)
 
 **Path parameters:** `counterpartyId`. Constraints come from the validators and handler below.
 
@@ -4131,7 +4181,7 @@ counterpartyIdParamsSchema = z.object({
 
 ```typescript
 counterparties.post(
-  "/:counterpartyId/requirements",
+  "/:counterpartyId/ramp-requirements/check",
   requireAction("counterparties.execute"),
   validateBody(submitCounterpartyRequirementsSchema),
   submitCounterpartyRequirements
@@ -5060,7 +5110,7 @@ Payment request management and the public payment-link transaction flow.
 | [E062](#e062-list-payment-requests) | `GET /v1/payments/requests` | Outside public OpenAPI | Pending |
 | [E063](#e063-create-payment-request) | `POST /v1/payments/requests` | Outside public OpenAPI | Pending |
 | [E064](#e064-get-payment-request) | `GET /v1/payments/requests/{paymentRequestId}` | Outside public OpenAPI | Pending |
-| [E065](#e065-get-payment-request-link) | `GET /v1/payments/requests/{paymentRequestId}/link` | Outside public OpenAPI | Pending |
+| [E065](#e065-get-payment-request-link) | `GET /v1/payments/requests/{paymentRequestId}/link-token` | Outside public OpenAPI | Pending |
 
 ### E059: Get Payment Request
 
@@ -5619,7 +5669,7 @@ export async function getPaymentRequest(c: AppContext) {
 
 ### E065: Get Payment Request Link
 
-`GET /v1/payments/requests/{paymentRequestId}/link`
+`GET /v1/payments/requests/{paymentRequestId}/link-token`
 
 - [ ] Good
 - [ ] Needs work
@@ -7648,18 +7698,18 @@ Currency discovery, estimates, quotes, transfer creation, and cancellation.
 
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
-| [E087](#e087-list-off-ramp-currency-support) | `GET /v1/payments/ramps/offramp/currency` | Public — experimental | Pending |
+| [E087](#e087-list-off-ramp-currency-support) | `GET /v1/payments/ramps/offramp/supported-pairs` | Public — experimental | Pending |
 | [E088](#e088-estimate-offramp) | `POST /v1/payments/ramps/offramp/estimate` | Outside public OpenAPI | Pending |
-| [E089](#e089-create-offramp-quote) | `POST /v1/payments/ramps/offramp/quote` | Outside public OpenAPI | Pending |
-| [E090](#e090-list-on-ramp-currency-support) | `GET /v1/payments/ramps/onramp/currency` | Public — experimental | Pending |
+| [E089](#e089-create-offramp-quote) | `POST /v1/payments/ramps/offramp/start` | Outside public OpenAPI | Pending |
+| [E090](#e090-list-on-ramp-currency-support) | `GET /v1/payments/ramps/onramp/supported-pairs` | Public — experimental | Pending |
 | [E091](#e091-estimate-onramp) | `POST /v1/payments/ramps/onramp/estimate` | Outside public OpenAPI | Pending |
-| [E092](#e092-create-on-ramp-quote) | `POST /v1/payments/ramps/onramp/quote` | Public — experimental | Pending |
+| [E092](#e092-create-on-ramp-quote) | `POST /v1/payments/ramps/onramp/start` | Public — experimental | Pending |
 | [E093](#e093-simulate-sandbox-transfer) | `POST /v1/payments/ramps/sandbox/simulate` | Public — experimental | Pending |
 | [E094](#e094-cancel-ramp-transfer) | `POST /v1/payments/ramps/transfers/cancel` | Outside public OpenAPI | Pending |
 
 ### E087: List off-ramp currency support
 
-`GET /v1/payments/ramps/offramp/currency`
+`GET /v1/payments/ramps/offramp/supported-pairs`
 
 - [ ] Good
 - [ ] Needs work
@@ -7820,7 +7870,7 @@ export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOff
 
 ### E089: Create Offramp Quote
 
-`POST /v1/payments/ramps/offramp/quote`
+`POST /v1/payments/ramps/offramp/start`
 
 - [ ] Good
 - [ ] Needs work
@@ -8039,7 +8089,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
 
 ### E090: List on-ramp currency support
 
-`GET /v1/payments/ramps/onramp/currency`
+`GET /v1/payments/ramps/onramp/supported-pairs`
 
 - [ ] Good
 - [ ] Needs work
@@ -8198,16 +8248,18 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
 
 ---
 
-### E092: Create on-ramp quote
+<a id="e092-create-on-ramp-quote"></a>
 
-`POST /v1/payments/ramps/onramp/quote`
+### E092: Start on-ramp
+
+`POST /v1/payments/ramps/onramp/start`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.
+Starts a tracked provider-specific on-ramp flow. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.
 
 | Property | Value |
 | --- | --- |
@@ -8552,7 +8604,7 @@ Templates, token creation and operations, allowlists, and asset metadata.
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
 | [E096](#e096-list-asset-profiles) | `GET /v1/issuance/asset-profiles` | Public — experimental | Pending |
-| [E097](#e097-create-token-with-asset-profile) | `POST /v1/issuance/asset-profiles` | Public — experimental | Pending |
+| [E097](#e097-create-token-with-asset-profile) | `POST /v1/issuance/tokens/create-with-asset-profile` | Public — experimental | Pending |
 | [E098](#e098-get-asset-profile-by-token) | `GET /v1/issuance/asset-profiles/by-token/{tokenId}` | Public — experimental | Pending |
 | [E099](#e099-get-asset-profile-field-options) | `GET /v1/issuance/asset-profiles/field-options` | Public — experimental | Pending |
 | [E100](#e100-get-asset-profile) | `GET /v1/issuance/asset-profiles/{profileId}` | Public — experimental | Pending |
@@ -8565,10 +8617,10 @@ Templates, token creation and operations, allowlists, and asset metadata.
 | [E107](#e107-list-token-filter-facets) | `GET /v1/issuance/tokens/facets` | Public — experimental | Pending |
 | [E108](#e108-get-token) | `GET /v1/issuance/tokens/{tokenId}` | Public — experimental | Pending |
 | [E109](#e109-update-token) | `PATCH /v1/issuance/tokens/{tokenId}` | Public — experimental | Pending |
-| [E110](#e110-list-token-allowlist) | `GET /v1/issuance/tokens/{tokenId}/allowlist` | Public — experimental | Pending |
-| [E111](#e111-add-token-allowlist-entry) | `POST /v1/issuance/tokens/{tokenId}/allowlist` | Public — experimental | Pending |
-| [E112](#e112-list-token-allowlist-labels) | `GET /v1/issuance/tokens/{tokenId}/allowlist/labels` | Public — experimental | Pending |
-| [E113](#e113-remove-token-allowlist-entry) | `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Public — experimental | Pending |
+| [E110](#e110-list-token-allowlist) | `GET /v1/issuance/tokens/{tokenId}/control-list` | Public — experimental | Pending |
+| [E111](#e111-add-token-allowlist-entry) | `POST /v1/issuance/tokens/{tokenId}/control-list` | Public — experimental | Pending |
+| [E112](#e112-list-token-allowlist-labels) | `GET /v1/issuance/tokens/{tokenId}/control-list/labels` | Public — experimental | Pending |
+| [E113](#e113-remove-token-allowlist-entry) | `DELETE /v1/issuance/tokens/{tokenId}/control-list/{entryId}` | Public — experimental | Pending |
 | [E114](#e114-get-asset-audit-history) | `GET /v1/issuance/tokens/{tokenId}/audit` | Public — experimental | Pending |
 | [E115](#e115-execute-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/update/execute` | Public — experimental | Pending |
 | [E116](#e116-prepare-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction` | Public — experimental | Pending |
@@ -8580,10 +8632,10 @@ Templates, token creation and operations, allowlists, and asset metadata.
 | [E122](#e122-prepare-metadata-uri-follow-up-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction` | Public — experimental | Pending |
 | [E123](#e123-execute-force-burn) | `POST /v1/issuance/tokens/{tokenId}/force-burn/execute` | Public — experimental | Pending |
 | [E124](#e124-prepare-force-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction` | Public — experimental | Pending |
-| [E125](#e125-freeze-account) | `POST /v1/issuance/tokens/{tokenId}/freeze` | Public — experimental | Pending |
-| [E126](#e126-list-frozen-accounts) | `GET /v1/issuance/tokens/{tokenId}/frozen` | Public — experimental | Pending |
-| [E127](#e127-list-verified-holders) | `GET /v1/issuance/tokens/{tokenId}/holders` | Public — experimental | Pending |
-| [E128](#e128-enroll-a-verified-holder) | `POST /v1/issuance/tokens/{tokenId}/holders` | Public — experimental | Pending |
+| [E125](#e125-freeze-account) | `POST /v1/issuance/tokens/{tokenId}/freeze-account` | Public — experimental | Pending |
+| [E126](#e126-list-frozen-accounts) | `GET /v1/issuance/tokens/{tokenId}/frozen-accounts` | Public — experimental | Pending |
+| [E127](#e127-list-verified-holders) | `GET /v1/issuance/tokens/{tokenId}/holder-enrollments` | Public — experimental | Pending |
+| [E128](#e128-enroll-a-verified-holder) | `POST /v1/issuance/tokens/{tokenId}/holder-enrollments` | Public — experimental | Pending |
 | [E129](#e129-get-public-token-metadata-json) | `GET /v1/issuance/tokens/{tokenId}/metadata.json` | Public — experimental | Pending |
 | [E130](#e130-execute-mint) | `POST /v1/issuance/tokens/{tokenId}/mint/execute` | Public — experimental | Pending |
 | [E131](#e131-prepare-mint-transaction) | `POST /v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction` | Public — experimental | Pending |
@@ -8592,7 +8644,7 @@ Templates, token creation and operations, allowlists, and asset metadata.
 | [E134](#e134-prepare-seize-transaction) | `POST /v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction` | Public — experimental | Pending |
 | [E135](#e135-refresh-cached-token-supply) | `POST /v1/issuance/tokens/{tokenId}/supply/refresh` | Public — experimental | Pending |
 | [E136](#e136-list-token-transactions) | `GET /v1/issuance/tokens/{tokenId}/transactions` | Public — experimental | Pending |
-| [E137](#e137-unfreeze-account) | `POST /v1/issuance/tokens/{tokenId}/unfreeze` | Public — experimental | Pending |
+| [E137](#e137-unfreeze-account) | `POST /v1/issuance/tokens/{tokenId}/unfreeze-account` | Public — experimental | Pending |
 | [E138](#e138-unpause-token-transfers) | `POST /v1/issuance/tokens/{tokenId}/unpause` | Public — experimental | Pending |
 | [E139](#e139-list-issuance-transactions) | `GET /v1/issuance/transactions` | Public — experimental | Pending |
 
@@ -8618,7 +8670,7 @@ Lists asset profiles for the authenticated organization and project.
 | Operation ID | `listAssetProfiles` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L25) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L142) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L41)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L23) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L142) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L41)
 
 **Request parameters**
 
@@ -8675,7 +8727,7 @@ Lists asset profiles for the authenticated organization and project.
 
 ### E097: Create token with asset profile
 
-`POST /v1/issuance/asset-profiles`
+`POST /v1/issuance/tokens/create-with-asset-profile`
 
 - [ ] Good
 - [ ] Needs work
@@ -8695,7 +8747,7 @@ Creates an issued token and its asset profile atomically in a single transaction
 | Operation ID | `createTokenWithAssetProfile` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L26) · [handler](../../apps/sdp-api/src/routes/asset-profiles/create.ts#L27) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L62)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L95) · [handler](../../apps/sdp-api/src/routes/asset-profiles/create.ts#L27) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L62)
 
 **Request parameters**
 
@@ -8834,7 +8886,7 @@ Gets the active asset profile for an issued token, if one exists.
 | Operation ID | `getAssetProfileByToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L32) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L198) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L87)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L24) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L198) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L87)
 
 **Request parameters**
 
@@ -8904,7 +8956,7 @@ Returns the supported asset categories and the asset types available within each
 | Operation ID | `getAssetProfileFieldOptions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L24) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L132) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L20)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L22) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L132) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L20)
 
 **Request parameters**
 
@@ -8961,7 +9013,7 @@ Gets an asset profile by id.
 | Operation ID | `getAssetProfile` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L33) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L174) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L110)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L25) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L174) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L110)
 
 **Request parameters**
 
@@ -9031,7 +9083,7 @@ Updates an asset profile. At least one field must be provided. The resulting cat
 | Operation ID | `updateAssetProfile` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L34) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L222) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L133)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L26) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L222) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L133)
 
 **Request parameters**
 
@@ -9121,7 +9173,7 @@ Archives an asset profile. Archived profiles are hidden from default lists.
 | Operation ID | `archiveAssetProfile` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L40) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L331) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L161)
+**Source:** [route registration](../../apps/sdp-api/src/routes/asset-profiles/index.ts#L32) · [handler](../../apps/sdp-api/src/routes/asset-profiles/handlers.ts#L331) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/asset-profiles.ts#L161)
 
 **Request parameters**
 
@@ -9168,7 +9220,7 @@ Returns all available token templates with their default configuration and suppo
 | Operation ID | `listTokenTemplates` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L89) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/templates.ts#L20) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L89)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L91) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/templates.ts#L20) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L89)
 
 **Request parameters**
 
@@ -9233,7 +9285,7 @@ Returns details for a specific token template including default decimals, requir
 | Operation ID | `getTokenTemplate` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L90) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/templates.ts#L31) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L110)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L92) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/templates.ts#L31) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L110)
 
 **Request parameters**
 
@@ -9300,7 +9352,7 @@ Lists tokens for the current project or organization. Supports contains-style se
 | Operation ID | `listTokens` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L99) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L204) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L162)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L107) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L204) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L162)
 
 **Request parameters**
 
@@ -9403,7 +9455,7 @@ Creates a token record that can later be deployed to Solana.
 | Operation ID | `createToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L93) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L122) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L138)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L101) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L122) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L138)
 
 **Request parameters**
 
@@ -9519,7 +9571,7 @@ Returns the filter choices available for the project's token list — template i
 | Operation ID | `listTokenFacets` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L103) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L249) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L184)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L111) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L249) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L184)
 
 **Request parameters**
 
@@ -9581,7 +9633,7 @@ Gets token details with optional read-only authority lookups for wallet selectio
 | Operation ID | `getToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L104) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L258) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L246)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L112) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L258) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L246)
 
 **Request parameters**
 
@@ -9675,7 +9727,7 @@ Updates stored token fields. For deployed tokens, metadata fields are also writt
 | Operation ID | `updateToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L117) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L341) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L387)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L125) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/tokens.ts#L341) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L387)
 
 **Request parameters**
 
@@ -9757,16 +9809,18 @@ Updates stored token fields. For deployed tokens, metadata fields are also writt
 
 ---
 
-### E110: List token allowlist
+<a id="e110-list-token-allowlist"></a>
 
-`GET /v1/issuance/tokens/{tokenId}/allowlist`
+### E110: List token control list
+
+`GET /v1/issuance/tokens/{tokenId}/control-list`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Lists allowlist entries for a token.
+Lists control-list entries for a token, using its configured allowlist or blocklist mode.
 
 | Property | Value |
 | --- | --- |
@@ -9779,7 +9833,7 @@ Lists allowlist entries for a token.
 | Operation ID | `listTokenAllowlist` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L280) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L196) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L925)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L292) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L196) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L925)
 
 **Request parameters**
 
@@ -9829,16 +9883,18 @@ Lists allowlist entries for a token.
 
 ---
 
-### E111: Add token allowlist entry
+<a id="e111-add-token-allowlist-entry"></a>
 
-`POST /v1/issuance/tokens/{tokenId}/allowlist`
+### E111: Add token control-list entry
+
+`POST /v1/issuance/tokens/{tokenId}/control-list`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Adds an allowlist entry for a token.
+Adds a control-list entry for a token, using its configured allowlist or blocklist mode.
 
 | Property | Value |
 | --- | --- |
@@ -9851,7 +9907,7 @@ Adds an allowlist entry for a token.
 | Operation ID | `addTokenAllowlistEntry` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L281) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L249) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L978)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L293) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L249) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L979)
 
 **Request parameters**
 
@@ -9905,9 +9961,11 @@ Adds an allowlist entry for a token.
 
 ---
 
-### E112: List token allowlist labels
+<a id="e112-list-token-allowlist-labels"></a>
 
-`GET /v1/issuance/tokens/{tokenId}/allowlist/labels`
+### E112: List token control list labels
+
+`GET /v1/issuance/tokens/{tokenId}/control-list/labels`
 
 - [ ] Good
 - [ ] Needs work
@@ -9927,7 +9985,7 @@ Lists the distinct labels used across a token's active control-list entries, for
 | Operation ID | `listTokenAllowlistLabels` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L275) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L229) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L954)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L287) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L229) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L955)
 
 **Request parameters**
 
@@ -9963,16 +10021,18 @@ Lists the distinct labels used across a token's active control-list entries, for
 
 ---
 
-### E113: Remove token allowlist entry
+<a id="e113-remove-token-allowlist-entry"></a>
 
-`DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
+### E113: Remove token control-list entry
+
+`DELETE /v1/issuance/tokens/{tokenId}/control-list/{entryId}`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Removes an allowlist entry from a token.
+Removes a control-list entry from a token, using its configured allowlist or blocklist mode.
 
 | Property | Value |
 | --- | --- |
@@ -9985,7 +10045,7 @@ Removes an allowlist entry from a token.
 | Operation ID | `removeTokenAllowlistEntry` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L287) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L351) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1005)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L299) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/allowlist.ts#L351) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1007)
 
 **Request parameters**
 
@@ -10036,7 +10096,7 @@ Returns the aggregated audit history for an issued token: events logged against 
 | Operation ID | `getAssetAuditHistory` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L110) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/audit.ts#L36) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L358)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L118) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/audit.ts#L36) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L358)
 
 **Request parameters**
 
@@ -10107,7 +10167,7 @@ Updates token authorities using the connected provider for signing.
 | Operation ID | `executeUpdateAuthority` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L231) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/authority.ts#L380) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L763)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L239) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/authority.ts#L380) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L763)
 
 **Request parameters**
 
@@ -10198,7 +10258,7 @@ Builds an unsigned authority update transaction for client-side signing.
 | Operation ID | `prepareUpdateAuthority` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L224) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/authority.ts#L187) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L736)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L232) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/authority.ts#L187) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L736)
 
 **Request parameters**
 
@@ -10296,7 +10356,7 @@ Burns tokens by requesting a signature from the connected provider, then submitt
 | Operation ID | `executeBurn` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L186) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/burn.ts#L245) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L601)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L194) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/burn.ts#L245) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L601)
 
 **Request parameters**
 
@@ -10387,7 +10447,7 @@ Builds an unsigned burn transaction for client-side signing. The authority walle
 | Operation ID | `prepareBurn` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L179) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/burn.ts#L134) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L573)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L187) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/burn.ts#L134) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L573)
 
 **Request parameters**
 
@@ -10485,7 +10545,7 @@ Deploys the token to Solana using the connected provider for signing.
 | Operation ID | `deployToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L125) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L382) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L415)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L133) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L382) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L415)
 
 **Request parameters**
 
@@ -10591,7 +10651,7 @@ Records the mint after the client signs and submits a prepared deploy transactio
 | Operation ID | `confirmDeploy` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L142) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L906) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L466)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L150) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L906) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L466)
 
 **Request parameters**
 
@@ -10692,7 +10752,7 @@ Builds an unsigned deploy transaction for client-side signing. A signing wallet 
 | Operation ID | `prepareDeployToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L131) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L733) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L442)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L139) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L733) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L442)
 
 **Request parameters**
 
@@ -10765,7 +10825,7 @@ Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `me
 | Operation ID | `prepareDeployMetadata` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L150) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L1107) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L494)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L158) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/deploy.ts#L1107) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L494)
 
 **Request parameters**
 
@@ -10834,7 +10894,7 @@ Burns tokens using permanent delegate authority.
 | Operation ID | `executeForceBurn` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L216) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/force-burn.ts#L138) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L709)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L224) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/force-burn.ts#L138) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L709)
 
 **Request parameters**
 
@@ -10926,7 +10986,7 @@ Builds an unsigned force burn transaction for client-side signing.
 | Operation ID | `prepareForceBurn` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L209) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/force-burn.ts#L34) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L682)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L217) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/force-burn.ts#L34) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L682)
 
 **Request parameters**
 
@@ -11005,7 +11065,7 @@ Builds an unsigned force burn transaction for client-side signing.
 
 ### E125: Freeze account
 
-`POST /v1/issuance/tokens/{tokenId}/freeze`
+`POST /v1/issuance/tokens/{tokenId}/freeze-account`
 
 - [ ] Good
 - [ ] Needs work
@@ -11025,7 +11085,7 @@ Freezes a token account to prevent transfers.
 | Operation ID | `freezeAccount` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L258) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L226) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L844)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L266) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L226) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L844)
 
 **Request parameters**
 
@@ -11083,7 +11143,7 @@ Freezes a token account to prevent transfers.
 
 ### E126: List frozen accounts
 
-`GET /v1/issuance/tokens/{tokenId}/frozen`
+`GET /v1/issuance/tokens/{tokenId}/frozen-accounts`
 
 - [ ] Good
 - [ ] Needs work
@@ -11103,7 +11163,7 @@ Lists frozen accounts for a token.
 | Operation ID | `listFrozenAccounts` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L270) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L449) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L898)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L278) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L449) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L898)
 
 **Request parameters**
 
@@ -11151,9 +11211,11 @@ Lists frozen accounts for a token.
 
 ---
 
-### E127: List verified holders
+<a id="e127-list-verified-holders"></a>
 
-`GET /v1/issuance/tokens/{tokenId}/holders`
+### E127: List holder enrollments
+
+`GET /v1/issuance/tokens/{tokenId}/holder-enrollments`
 
 - [ ] Good
 - [ ] Needs work
@@ -11173,7 +11235,7 @@ Returns the wallets enrolled for this asset (KYC identity + enrollment state).
 | Operation ID | `listHolders` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L302) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/holders.ts#L87) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1052)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L314) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/holders.ts#L87) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1055)
 
 **Request parameters**
 
@@ -11202,9 +11264,11 @@ Schema: HoldersResponse.
 
 ---
 
-### E128: Enroll a verified holder
+<a id="e128-enroll-a-verified-holder"></a>
 
-`POST /v1/issuance/tokens/{tokenId}/holders`
+### E128: Enroll a holder
+
+`POST /v1/issuance/tokens/{tokenId}/holder-enrollments`
 
 - [ ] Good
 - [ ] Needs work
@@ -11224,7 +11288,7 @@ Registers a wallet for this asset (upserts its KYC identity + an active enrollme
 | Operation ID | `enrollHolder` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L308) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/holders.ts#L28) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1067)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L320) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/holders.ts#L28) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L1070)
 
 **Request parameters**
 
@@ -11280,7 +11344,7 @@ Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / Metaplex fu
 | Operation ID | `getTokenMetadataJson` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L79) · [handler](../../apps/sdp-api/src/routes/issuance/index.ts#L82) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L271)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L81) · [handler](../../apps/sdp-api/src/routes/issuance/index.ts#L84) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L271)
 
 **Request parameters**
 
@@ -11328,7 +11392,7 @@ Mints tokens by requesting a signature from the connected provider, then submitt
 | Operation ID | `executeMint` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L166) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/mint.ts#L717) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L546)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L174) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/mint.ts#L717) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L546)
 
 **Request parameters**
 
@@ -11420,7 +11484,7 @@ Builds an unsigned mint transaction for client-side signing. The authority walle
 | Operation ID | `prepareMint` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L159) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/mint.ts#L430) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L518)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L167) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/mint.ts#L430) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L518)
 
 **Request parameters**
 
@@ -11519,7 +11583,7 @@ Pauses transfers for a token using the pause authority.
 | Operation ID | `pauseToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L244) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/pause.ts#L28) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L790)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L252) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/pause.ts#L28) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L790)
 
 **Request parameters**
 
@@ -11606,7 +11670,7 @@ Forces a transfer using permanent delegate authority.
 | Operation ID | `executeSeize` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L201) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/seize.ts#L149) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L655)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L209) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/seize.ts#L149) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L655)
 
 **Request parameters**
 
@@ -11699,7 +11763,7 @@ Builds an unsigned force transfer transaction for client-side signing.
 | Operation ID | `prepareSeize` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L194) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/seize.ts#L35) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L628)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L202) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/seize.ts#L35) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L628)
 
 **Request parameters**
 
@@ -11799,7 +11863,7 @@ Fetches the current on-chain supply and refreshes the cached totalSupply value.
 | Operation ID | `refreshTokenSupply` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L111) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/supply.ts#L55) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L306)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L119) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/supply.ts#L55) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L306)
 
 **Request parameters**
 
@@ -11889,7 +11953,7 @@ Lists token transactions for an issued token.
 | Operation ID | `listTokenTransactions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L105) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/transactions.ts#L206) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L329)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L113) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/transactions.ts#L206) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L329)
 
 **Request parameters**
 
@@ -11950,7 +12014,7 @@ Lists token transactions for an issued token.
 
 ### E137: Unfreeze account
 
-`POST /v1/issuance/tokens/{tokenId}/unfreeze`
+`POST /v1/issuance/tokens/{tokenId}/unfreeze-account`
 
 - [ ] Good
 - [ ] Needs work
@@ -11970,7 +12034,7 @@ Unfreezes a token account so it can be used again.
 | Operation ID | `unfreezeAccount` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L264) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L476) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L871)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L272) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/freeze.ts#L476) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L871)
 
 **Request parameters**
 
@@ -12047,7 +12111,7 @@ Resumes transfers for a token using the pause authority.
 | Operation ID | `unpauseToken` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L250) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/pause.ts#L206) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L817)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L258) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/pause.ts#L206) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L817)
 
 **Request parameters**
 
@@ -12134,7 +12198,7 @@ Lists issuance transactions across tokens for the current organization or projec
 | Operation ID | `listIssuanceTransactions` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L100) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/transactions.ts#L244) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L205)
+**Source:** [route registration](../../apps/sdp-api/src/routes/issuance/index.ts#L108) · [handler](../../apps/sdp-api/src/routes/issuance/handlers/transactions.ts#L244) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/issuance.ts#L205)
 
 **Request parameters**
 
@@ -12246,7 +12310,7 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E173](#e173-read-one-custody-deposit) | `GET /v1/earn/vault-deposits/{movementId}` | Unpublished — Earn launch hold | Pending |
 | [E174](#e174-list-live-custody-positions) | `GET /v1/earn/vault-positions` | Unpublished — Earn launch hold | Pending |
 | [E175](#e175-preview-a-queued-custody-withdrawal) | `POST /v1/earn/vault-queued-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
-| [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/vault-share-reconciliation` | Unpublished — Earn launch hold | Pending |
+| [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/positions/provider-signed/share-reconciliation-report` | Unpublished — Earn launch hold | Pending |
 | [E177](#e177-discover-custody-withdrawal-routes) | `POST /v1/earn/vault-withdrawal-options` | Unpublished — Earn launch hold | Pending |
 | [E178](#e178-preview-a-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
 | [E179](#e179-list-custody-withdrawal-requests) | `GET /v1/earn/vault-withdrawal-requests` | Unpublished — Earn launch hold | Pending |
@@ -15032,7 +15096,7 @@ Schema: one of 3 variants.
 
 ### E176: Reconcile vault shares against recorded positions
 
-`GET /v1/earn/vault-share-reconciliation`
+`GET /v1/earn/positions/provider-signed/share-reconciliation-report`
 
 - [ ] Good
 - [ ] Needs work
@@ -16428,8 +16492,8 @@ Instance setup, channels, principals, wallets, transfers, and balances.
 | [E195](#e195-read-an-owners-channel-token-balance) | `GET /v1/private-channels/balance` | Outside public OpenAPI | Pending |
 | [E196](#e196-list-channels-for-the-connected-instance) | `GET /v1/private-channels/channels` | Outside public OpenAPI | Pending |
 | [E197](#e197-create-a-channel) | `POST /v1/private-channels/channels` | Outside public OpenAPI | Pending |
-| [E198](#e198-add-principal-channel-membership) | `POST /v1/private-channels/channels/{channelId}/principals` | Outside public OpenAPI | Pending |
-| [E199](#e199-remove-principal-channel-membership) | `DELETE /v1/private-channels/channels/{channelId}/principals/{principalId}` | Outside public OpenAPI | Pending |
+| [E198](#e198-add-principal-channel-membership) | `POST /v1/private-channels/channels/{channelId}/principal-memberships` | Outside public OpenAPI | Pending |
+| [E199](#e199-remove-principal-channel-membership) | `DELETE /v1/private-channels/channels/{channelId}/principal-memberships/{principalId}` | Outside public OpenAPI | Pending |
 | [E200](#e200-list-eligible-verified-wallet-transfer-recipients) | `GET /v1/private-channels/channels/{channelId}/transfer-recipients` | Outside public OpenAPI | Pending |
 | [E201](#e201-create-a-verified-principal-to-principal-channel-transfer) | `POST /v1/private-channels/channels/{channelId}/transfers` | Outside public OpenAPI | Pending |
 | [E202](#e202-get-a-channel) | `GET /v1/private-channels/channels/{id}` | Outside public OpenAPI | Pending |
@@ -16439,23 +16503,23 @@ Instance setup, channels, principals, wallets, transfers, and balances.
 | [E206](#e206-create-a-deposit-into-the-channel-escrow) | `POST /v1/private-channels/deposits` | Outside public OpenAPI | Pending |
 | [E207](#e207-get-a-deposit) | `GET /v1/private-channels/deposits/{id}` | Outside public OpenAPI | Pending |
 | [E208](#e208-list-activity-events-for-the-project) | `GET /v1/private-channels/events` | Outside public OpenAPI | Pending |
-| [E209](#e209-list-display-name-references-for-events) | `GET /v1/private-channels/events/references` | Outside public OpenAPI | Pending |
-| [E210](#e210-probe-a-candidate-gateways-health) | `GET /v1/private-channels/health` | Outside public OpenAPI | Pending |
-| [E211](#e211-get-the-active-private-channels-instance-for-the-project) | `GET /v1/private-channels/instance` | Outside public OpenAPI | Pending |
-| [E212](#e212-connect-a-private-channels-instance) | `POST /v1/private-channels/instance` | Outside public OpenAPI | Pending |
-| [E213](#e213-update-the-active-private-channels-instance) | `PATCH /v1/private-channels/instance` | Outside public OpenAPI | Pending |
-| [E214](#e214-delete-the-active-private-channels-instance) | `DELETE /v1/private-channels/instance` | Outside public OpenAPI | Pending |
-| [E215](#e215-disconnect-the-active-private-channels-instance) | `POST /v1/private-channels/instance/disconnect` | Outside public OpenAPI | Pending |
+| [E209](#e209-list-display-name-references-for-events) | `GET /v1/private-channels/events/reference-labels` | Outside public OpenAPI | Pending |
+| [E210](#e210-probe-a-candidate-gateways-health) | `GET /v1/private-channels/instance-connection/check-gateway-health` | Outside public OpenAPI | Pending |
+| [E211](#e211-get-the-active-private-channels-instance-for-the-project) | `GET /v1/private-channels/instance-connection` | Outside public OpenAPI | Pending |
+| [E212](#e212-connect-a-private-channels-instance) | `POST /v1/private-channels/instance-connection/connect` | Outside public OpenAPI | Pending |
+| [E213](#e213-update-the-active-private-channels-instance) | `PATCH /v1/private-channels/instance-connection` | Outside public OpenAPI | Pending |
+| [E214](#e214-delete-the-active-private-channels-instance) | `DELETE /v1/private-channels/instance-connection` | Outside public OpenAPI | Pending |
+| [E215](#e215-disconnect-the-active-private-channels-instance) | `POST /v1/private-channels/instance-connection/disconnect` | Outside public OpenAPI | Pending |
 | [E216](#e216-post-connect-instance-overview-gateway-health--chain-reads) | `GET /v1/private-channels/instance/overview` | Outside public OpenAPI | Pending |
 | [E217](#e217-list-private-channel-principals) | `GET /v1/private-channels/principals` | Outside public OpenAPI | Pending |
 | [E218](#e218-create-private-channel-principal) | `POST /v1/private-channels/principals` | Outside public OpenAPI | Pending |
 | [E219](#e219-disable-private-channel-principal) | `DELETE /v1/private-channels/principals/{principalId}` | Outside public OpenAPI | Pending |
-| [E220](#e220-probe-a-candidate-spc-configuration) | `POST /v1/private-channels/probe` | Outside public OpenAPI | Pending |
-| [E221](#e221-list-token-eligibility-for-the-active-instance) | `GET /v1/private-channels/tokens` | Outside public OpenAPI | Pending |
+| [E220](#e220-probe-a-candidate-spc-configuration) | `POST /v1/private-channels/instance-connection/probe` | Outside public OpenAPI | Pending |
+| [E221](#e221-list-token-eligibility-for-the-active-instance) | `GET /v1/private-channels/token-eligibility` | Outside public OpenAPI | Pending |
 | [E222](#e222-list-private-channel-transfers-for-the-project) | `GET /v1/private-channels/transfers` | Outside public OpenAPI | Pending |
 | [E223](#e223-get-a-private-channel-transfer) | `GET /v1/private-channels/transfers/{id}` | Outside public OpenAPI | Pending |
-| [E224](#e224-list-the-projects-verified-wallets) | `GET /v1/private-channels/wallets` | Outside public OpenAPI | Pending |
-| [E225](#e225-revoke-a-verified-wallet) | `DELETE /v1/private-channels/wallets/{pubkey}` | Outside public OpenAPI | Pending |
+| [E224](#e224-list-the-projects-verified-wallets) | `GET /v1/private-channels/verified-wallets` | Outside public OpenAPI | Pending |
+| [E225](#e225-revoke-a-verified-wallet) | `DELETE /v1/private-channels/verified-wallets/{pubkey}` | Outside public OpenAPI | Pending |
 | [E226](#e226-verify-a-connected-wallet-with-the-spc-auth-service) | `POST /v1/private-channels/wallets/{walletId}/verify` | Outside public OpenAPI | Pending |
 | [E227](#e227-list-withdrawals-for-the-project) | `GET /v1/private-channels/withdrawals` | Outside public OpenAPI | Pending |
 | [E228](#e228-create-a-withdrawal-from-the-channel-balance) | `POST /v1/private-channels/withdrawals` | Outside public OpenAPI | Pending |
@@ -16483,7 +16547,7 @@ Reads an owner's token balance on the channel via the gateway (per wallet+mint; 
 | Operation ID | `getPrivateChannelBalance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L128) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/balance.ts#L33) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L225)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L136) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/balance.ts#L33) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L225)
 
 **Request parameters**
 
@@ -16548,7 +16612,7 @@ Lists logical channels for the project's active instance (newest first). Ensures
 | Operation ID | `listPrivateChannels` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L189) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L33) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L468)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L197) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L33) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L468)
 
 **Request parameters**
 
@@ -16611,7 +16675,7 @@ Creates a named channel in the project's active instance. Names are unique per i
 | Operation ID | `createPrivateChannel` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L190) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L40) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L487)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L198) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L40) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L487)
 
 **Request parameters**
 
@@ -16662,7 +16726,7 @@ Creates a named channel in the project's active instance. Names are unique per i
 
 ### E198: Add Principal Channel Membership
 
-`POST /v1/private-channels/channels/{channelId}/principals`
+`POST /v1/private-channels/channels/{channelId}/principal-memberships`
 
 - [ ] Good
 - [ ] Needs work
@@ -16681,7 +16745,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L247) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L177)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L259) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L177)
 
 **Path parameters:** `channelId`. Constraints come from the validators and handler below.
 
@@ -16713,7 +16777,7 @@ addPrincipalMembershipBodySchema = z.object({
 
 ```typescript
 privateChannels.post(
-  "/channels/:channelId/principals",
+  "/channels/:channelId/principal-memberships",
   requireAction("private_channels.configure"),
   validateBody(addPrincipalMembershipBodySchema),
   addPrincipalChannelMembership
@@ -16774,7 +16838,7 @@ addPrincipalChannelMembership = async (
 
 ### E199: Remove Principal Channel Membership
 
-`DELETE /v1/private-channels/channels/{channelId}/principals/{principalId}`
+`DELETE /v1/private-channels/channels/{channelId}/principal-memberships/{principalId}`
 
 - [ ] Good
 - [ ] Needs work
@@ -16793,7 +16857,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L253) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L216)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L265) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L216)
 
 **Path parameters:** `channelId`, `principalId`. Constraints come from the validators and handler below.
 
@@ -16804,7 +16868,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 
 ```typescript
 privateChannels.delete(
-  "/channels/:channelId/principals/:principalId",
+  "/channels/:channelId/principal-memberships/:principalId",
   requireAction("private_channels.configure"),
   removePrincipalChannelMembership
 )
@@ -16872,7 +16936,7 @@ Accepts a Clerk JWT or an API key. Requires the project's default principal to h
 | Operation ID | `listPrivateChannelTransferRecipients` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L203) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L50) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L379)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L211) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L50) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L379)
 
 **Request parameters**
 
@@ -16936,7 +17000,7 @@ Accepts a Clerk JWT or an API key (a wallet-scoped key must be bound to the sour
 | Operation ID | `createPrivateChannelTransfer` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L208) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L61) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L401)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L216) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L61) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L401)
 
 **Request parameters**
 
@@ -17020,7 +17084,7 @@ Get a channel.
 | Operation ID | `getPrivateChannel` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L196) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L103) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L509)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L204) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L103) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L509)
 
 **Request parameters**
 
@@ -17085,7 +17149,7 @@ Deletes a channel. The auto-provisioned default channel cannot be deleted.
 | Operation ID | `deletePrivateChannel` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L202) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L120) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L592)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L210) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/channels.ts#L120) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L592)
 
 **Request parameters**
 
@@ -17135,7 +17199,7 @@ Paginated activity feed for a channel (newest first). Includes instance-level li
 | Operation ID | `listPrivateChannelEvents` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L197) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/events.ts#L96) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L526)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L205) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/events.ts#L96) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L526)
 
 **Request parameters**
 
@@ -17213,7 +17277,7 @@ Lists the project's deposits, newest first.
 | Operation ID | `listPrivateChannelDeposits` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L147) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L146) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L285)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L155) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L146) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L285)
 
 **Request parameters**
 
@@ -17285,7 +17349,7 @@ Builds an escrow deposit from a connected wallet, requests signing through its p
 | Operation ID | `createPrivateChannelDeposit` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L141) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L49) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L263)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L149) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L49) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L263)
 
 **Request parameters**
 
@@ -17369,7 +17433,7 @@ Reads one deposit for the project (poll this for status transitions).
 | Operation ID | `getPrivateChannelDeposit` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L152) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L122) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L303)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L160) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/deposits.ts#L122) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L303)
 
 **Request parameters**
 
@@ -17442,7 +17506,7 @@ Project-scoped activity feed across all instances and channels (newest first). I
 | Operation ID | `listProjectPrivateChannelEvents` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L185) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/events.ts#L137) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L570)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L193) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/events.ts#L137) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L570)
 
 **Request parameters**
 
@@ -17497,7 +17561,7 @@ Project-scoped activity feed across all instances and channels (newest first). I
 
 ### E209: List display-name references for events
 
-`GET /v1/private-channels/events/references`
+`GET /v1/private-channels/events/reference-labels`
 
 - [ ] Good
 - [ ] Needs work
@@ -17517,7 +17581,7 @@ Flat id→name dictionary for enriching Private Channels event feeds: channel na
 | Operation ID | `listPrivateChannelEventReferences` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L180) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/event-references.ts#L22) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L549)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L188) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/event-references.ts#L22) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L549)
 
 **Request parameters**
 
@@ -17553,7 +17617,7 @@ Flat id→name dictionary for enriching Private Channels event feeds: channel na
 
 ### E210: Probe a candidate gateway's health
 
-`GET /v1/private-channels/health`
+`GET /v1/private-channels/instance-connection/check-gateway-health`
 
 - [ ] Good
 - [ ] Needs work
@@ -17609,7 +17673,7 @@ Pre-connect test of a caller-supplied gateway URL. Always 200 with a discriminat
 
 ### E211: Get the active Private Channels instance for the project
 
-`GET /v1/private-channels/instance`
+`GET /v1/private-channels/instance-connection`
 
 - [ ] Good
 - [ ] Needs work
@@ -17629,7 +17693,7 @@ Get the active Private Channels instance for the project.
 | Operation ID | `getPrivateChannelInstance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L104) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L39) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L54)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L108) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L39) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L54)
 
 **Request parameters**
 
@@ -17678,7 +17742,7 @@ Get the active Private Channels instance for the project.
 
 ### E212: Connect a Private Channels instance
 
-`POST /v1/private-channels/instance`
+`POST /v1/private-channels/instance-connection/connect`
 
 - [ ] Good
 - [ ] Needs work
@@ -17698,7 +17762,7 @@ Server-probes both the gateway (/health + /ready) and the chain RPC (getVersion)
 | Operation ID | `connectPrivateChannelInstance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L105) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L55) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L97)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L109) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L55) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L97)
 
 **Request parameters**
 
@@ -17761,7 +17825,7 @@ Server-probes both the gateway (/health + /ready) and the chain RPC (getVersion)
 
 ### E213: Update the active Private Channels instance
 
-`PATCH /v1/private-channels/instance`
+`PATCH /v1/private-channels/instance-connection`
 
 - [ ] Good
 - [ ] Needs work
@@ -17781,7 +17845,7 @@ Server-probes the proposed gateway, auth service, and escrow deployment before r
 | Operation ID | `updatePrivateChannelInstance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L111) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L227) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L73)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L115) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L227) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L73)
 
 **Request parameters**
 
@@ -17845,7 +17909,7 @@ Server-probes the proposed gateway, auth service, and escrow deployment before r
 
 ### E214: Delete the active Private Channels instance
 
-`DELETE /v1/private-channels/instance`
+`DELETE /v1/private-channels/instance-connection`
 
 - [ ] Good
 - [ ] Needs work
@@ -17865,7 +17929,7 @@ Hard-deletes the active row. Downstream FKs cascade.
 | Operation ID | `deletePrivateChannelInstance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L117) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L315) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L166)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L121) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L315) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L166)
 
 **Request parameters**
 
@@ -17902,7 +17966,7 @@ Hard-deletes the active row. Downstream FKs cascade.
 
 ### E215: Disconnect the active Private Channels instance
 
-`POST /v1/private-channels/instance/disconnect`
+`POST /v1/private-channels/instance-connection/disconnect`
 
 - [ ] Good
 - [ ] Needs work
@@ -17922,7 +17986,7 @@ Disconnect the active Private Channels instance.
 | Operation ID | `disconnectPrivateChannelInstance` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L118) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L292) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L147)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L122) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/instance.ts#L292) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L147)
 
 **Request parameters**
 
@@ -17992,7 +18056,7 @@ Post-connect instance overview (gateway health + chain reads).
 | Operation ID | `getPrivateChannelOverview` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L123) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/overview.ts#L17) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L123)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L128) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/overview.ts#L17) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L123)
 
 **Request parameters**
 
@@ -18067,7 +18131,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L261) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L63)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L273) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L63)
 
 **Request and response contract:** No OpenAPI operation. Review the source below for query/header inputs, response fields, and status codes.
 
@@ -18155,7 +18219,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L266) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L102)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L278) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L102)
 
 **Source validation schemas**
 
@@ -18246,7 +18310,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L272) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L122)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L284) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/members.ts#L122)
 
 **Path parameters:** `principalId`. Constraints come from the validators and handler below.
 
@@ -18333,7 +18397,7 @@ disablePrivateChannelPrincipal = async (c: AppContext) => {
 
 ### E220: Probe a candidate SPC configuration
 
-`POST /v1/private-channels/probe`
+`POST /v1/private-channels/instance-connection/probe`
 
 - [ ] Good
 - [ ] Needs work
@@ -18353,7 +18417,7 @@ Full pre-connect probe: gateway `/health` + `/ready`, project RPC connectivity, 
 | Operation ID | `probePrivateChannelConnection` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L95) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/probe.ts#L14) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L184)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L99) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/probe.ts#L14) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L184)
 
 **Request parameters**
 
@@ -18401,7 +18465,7 @@ Full pre-connect probe: gateway `/health` + `/ready`, project RPC connectivity, 
 
 ### E221: List token eligibility for the active instance
 
-`GET /v1/private-channels/tokens`
+`GET /v1/private-channels/token-eligibility`
 
 - [ ] Good
 - [ ] Needs work
@@ -18421,7 +18485,7 @@ Combines SDP's token registry with the active instance's on-chain allowed-mint a
 | Operation ID | `listPrivateChannelTokenEligibility` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L132) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/tokens.ts#L13) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L244)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L140) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/tokens.ts#L13) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L244)
 
 **Request parameters**
 
@@ -18484,7 +18548,7 @@ Lists retained project transfer history, newest first, optionally filtered by ch
 | Operation ID | `listPrivateChannelTransfers` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L217) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L172) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L425)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L225) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L172) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L425)
 
 **Request parameters**
 
@@ -18557,7 +18621,7 @@ Reads one retained transfer within the request's project scope.
 | Operation ID | `getPrivateChannelTransfer` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L222) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L152) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L447)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L230) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/transfers.ts#L152) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L447)
 
 **Request parameters**
 
@@ -18610,7 +18674,7 @@ Reads one retained transfer within the request's project scope.
 
 ### E224: List the project's verified wallets
 
-`GET /v1/private-channels/wallets`
+`GET /v1/private-channels/verified-wallets`
 
 - [ ] Good
 - [ ] Needs work
@@ -18630,7 +18694,7 @@ Lists connected wallets that have completed SPC verification for the project's d
 | Operation ID | `listPrivateChannelVerifiedWallets` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L232) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L58) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L607)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L240) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L58) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L607)
 
 **Request parameters**
 
@@ -18670,7 +18734,7 @@ Lists connected wallets that have completed SPC verification for the project's d
 
 ### E225: Revoke a verified wallet
 
-`DELETE /v1/private-channels/wallets/{pubkey}`
+`DELETE /v1/private-channels/verified-wallets/{pubkey}`
 
 - [ ] Good
 - [ ] Needs work
@@ -18690,7 +18754,7 @@ Revokes a wallet verification for the project's default principal with the SPC a
 | Operation ID | `deletePrivateChannelVerifiedWallet` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L239) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L109) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L651)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L251) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L109) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L651)
 
 **Request parameters**
 
@@ -18751,7 +18815,7 @@ Runs the SPC challenge → sign → verify handshake for a connected wallet (any
 | Operation ID | `verifyPrivateChannelWallet` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L233) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L67) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L626)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L245) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/wallets.ts#L67) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L626)
 
 **Request parameters**
 
@@ -18821,7 +18885,7 @@ Lists the project's withdrawals, newest first.
 | Operation ID | `listPrivateChannelWithdrawals` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L168) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L162) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L343)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L176) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L162) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L343)
 
 **Request parameters**
 
@@ -18893,7 +18957,7 @@ Requests signing through the connected wallet's provider for a burn of its chann
 | Operation ID | `createPrivateChannelWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L162) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L53) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L321)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L170) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L53) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L321)
 
 **Request parameters**
 
@@ -18977,7 +19041,7 @@ Reads one withdrawal for the project (poll this for status transitions).
 | Operation ID | `getPrivateChannelWithdrawal` |
 | Contract coverage | Internal OpenAPI |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L173) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L138) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L361)
+**Source:** [route registration](../../apps/sdp-api/src/routes/private-channels/index.ts#L181) · [handler](../../apps/sdp-api/src/routes/private-channels/handlers/withdrawals.ts#L138) · [OpenAPI definition](../../apps/sdp-api/src/openapi/paths/private-channels.ts#L361)
 
 **Request parameters**
 
@@ -19047,13 +19111,13 @@ Rings, wallet identities, zones, and operation lifecycle.
 | [E236](#e236-retry-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/retry` | Outside public OpenAPI | Pending |
 | [E237](#e237-void-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/void` | Outside public OpenAPI | Pending |
 | [E238](#e238-list-rings-project-rings) | `GET /v1/helius-rings/rings` | Outside public OpenAPI | Pending |
-| [E239](#e239-create-rings-project-ring) | `POST /v1/helius-rings/rings` | Outside public OpenAPI | Pending |
+| [E239](#e239-create-rings-project-ring) | `POST /v1/helius-rings/rings/register-and-initialize` | Outside public OpenAPI | Pending |
 | [E240](#e240-get-rings-setup) | `GET /v1/helius-rings/setup-status` | Outside public OpenAPI | Pending |
 | [E241](#e241-list-rings-wallets) | `GET /v1/helius-rings/wallets` | Outside public OpenAPI | Pending |
-| [E242](#e242-create-rings-wallet) | `POST /v1/helius-rings/wallets` | Outside public OpenAPI | Pending |
+| [E242](#e242-create-rings-wallet) | `POST /v1/helius-rings/wallets/provision-identity` | Outside public OpenAPI | Pending |
 | [E243](#e243-get-rings-wallet) | `GET /v1/helius-rings/wallets/{walletId}` | Outside public OpenAPI | Pending |
 | [E244](#e244-get-rings-wallet-identity) | `GET /v1/helius-rings/wallets/{walletId}/identity` | Outside public OpenAPI | Pending |
-| [E245](#e245-rekey-rings-wallet) | `POST /v1/helius-rings/wallets/{walletId}/rekey` | Outside public OpenAPI | Pending |
+| [E245](#e245-rekey-rings-wallet) | `POST /v1/helius-rings/wallets/{walletId}/identity/rekey` | Outside public OpenAPI | Pending |
 | [E246](#e246-sync-rings-wallet) | `POST /v1/helius-rings/wallets/{walletId}/sync` | Outside public OpenAPI | Pending |
 | [E247](#e247-list-rings-zones) | `GET /v1/helius-rings/wallets/{walletId}/zones` | Outside public OpenAPI | Pending |
 | [E248](#e248-create-rings-zone) | `POST /v1/helius-rings/wallets/{walletId}/zones` | Outside public OpenAPI | Pending |
@@ -19133,7 +19197,7 @@ GET /operations — the project's activity feed, newest first.
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L69) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L358)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L77) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L358)
 
 **Source validation schemas**
 
@@ -19210,7 +19274,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L70) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L344)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L78) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L344)
 
 **Source validation schemas**
 
@@ -19341,7 +19405,7 @@ GET /operations/:operationId — full detail with the event timeline.
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L75) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L371)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L83) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L371)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19399,7 +19463,7 @@ POST /operations/:operationId/resume-execution — advance an operation a crash 
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L76) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L385)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L84) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L385)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19464,7 +19528,7 @@ POST /operations/:operationId/recheck — ask the indexer about a signed failure
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L88) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L302)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L96) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L302)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19534,7 +19598,7 @@ POST /operations/:operationId/retry — file a linked retry of a failed op. The 
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L81) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L399)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L89) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L399)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19625,7 +19689,7 @@ POST /operations/:operationId/void — operator confirms a signed failure never 
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L93) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L276)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L101) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L276)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19751,14 +19815,14 @@ export async function listRingsProjectRings(c: AppContext) {
 
 ### E239: Create Rings Project Ring
 
-`POST /v1/helius-rings/rings`
+`POST /v1/helius-rings/rings/register-and-initialize`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-POST /rings — record a named custom ring's program id and complete bring-up through the gateway. Re-submitting the same name and id resumes a failed bring-up. Once the ring is active, operations can target it (`ring: "<name>"`); default-ring operations and sync are never blocked by it.
+POST /rings/register-and-initialize — record a named custom ring's program id and complete bring-up through the gateway. Re-submitting the same name and id resumes a failed bring-up. Once the ring is active, operations can target it (`ring: "<name>"`); default-ring operations and sync are never blocked by it.
 
 | Property | Value |
 | --- | --- |
@@ -19810,7 +19874,7 @@ createProjectRingSchema = z.object({
 <summary>Exact route registration</summary>
 
 ```typescript
-heliusRings.post("/rings", requireAction("helius_rings.execute"), createRingsProjectRing)
+heliusRings.post("/rings/register-and-initialize", requireAction("helius_rings.execute"), createRingsProjectRing)
 ```
 
 </details>
@@ -19820,7 +19884,7 @@ heliusRings.post("/rings", requireAction("helius_rings.execute"), createRingsPro
 
 ```typescript
 /**
- * POST /rings — record a named custom ring's program id and complete bring-up
+ * POST /rings/register-and-initialize — record a named custom ring's program id and complete bring-up
  * through the gateway. Re-submitting the same name and id resumes a failed
  * bring-up. Once the ring is active, operations can target it (`ring:
  * "<name>"`); default-ring operations and sync are never blocked by it.
@@ -19912,7 +19976,7 @@ GET /wallets — the project's rings wallets, newest first.
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L51) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L125)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L55) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L125)
 
 **Source validation schemas**
 
@@ -19965,7 +20029,7 @@ export async function listRingsWallets(c: AppContext) {
 
 ### E242: Create Rings Wallet
 
-`POST /v1/helius-rings/wallets`
+`POST /v1/helius-rings/wallets/provision-identity`
 
 - [ ] Good
 - [ ] Needs work
@@ -19984,7 +20048,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L52) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L98)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L56) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L98)
 
 **Source validation schemas**
 
@@ -20016,7 +20080,7 @@ createRingsWalletSchema = z.object({
 <summary>Exact route registration</summary>
 
 ```typescript
-heliusRings.post("/wallets", requireAction("helius_rings.manage"), createRingsWallet)
+heliusRings.post("/wallets/provision-identity", requireAction("helius_rings.manage"), createRingsWallet)
 ```
 
 </details>
@@ -20027,7 +20091,7 @@ heliusRings.post("/wallets", requireAction("helius_rings.manage"), createRingsWa
 ```typescript
 // --- wallets ----------------------------------------------------------------
 
-/** POST /wallets — bind a Rings wallet to a connected wallet and provision its identity. */
+/** POST /wallets/provision-identity — bind a Rings wallet to a connected wallet and provision its identity. */
 export async function createRingsWallet(c: AppContext) {
   const parsed = createRingsWalletSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -20080,7 +20144,7 @@ GET /wallets/:walletId
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L53) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L133)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L61) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L133)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20134,7 +20198,7 @@ GET /wallets/:walletId/identity
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L60) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L256)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L68) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L256)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20186,14 +20250,14 @@ export async function getRingsWalletIdentity(c: AppContext) {
 
 ### E245: Rekey Rings Wallet
 
-`POST /v1/helius-rings/wallets/{walletId}/rekey`
+`POST /v1/helius-rings/wallets/{walletId}/identity/rekey`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-POST /wallets/:walletId/rekey — rotate a wallet whose owner publishes an identity this deployment cannot derive, abandoning whatever those keys hold. The body carries the wallet's name as a typed confirmation. The service is what compares it and what reads the chain to confirm the record really is foreign; this handler supplies the custody owner for a wallet that never provisioned and so records no owner of its own.
+POST /wallets/:walletId/identity/rekey — rotate a wallet whose owner publishes an identity this deployment cannot derive, abandoning whatever those keys hold. The body carries the wallet's name as a typed confirmation. The service is what compares it and what reads the chain to confirm the record really is foreign; this handler supplies the custody owner for a wallet that never provisioned and so records no owner of its own.
 
 | Property | Value |
 | --- | --- |
@@ -20205,7 +20269,7 @@ POST /wallets/:walletId/rekey — rotate a wallet whose owner publishes an ident
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L55) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L169)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L63) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L169)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20237,7 +20301,7 @@ rekeyRingsWalletSchema = z.object({
 
 ```typescript
 heliusRings.post(
-  "/wallets/:walletId/rekey",
+  "/wallets/:walletId/identity/rekey",
   requireAction("helius_rings.execute"),
   rekeyRingsWallet
 )
@@ -20250,7 +20314,7 @@ heliusRings.post(
 
 ```typescript
 /**
- * POST /wallets/:walletId/rekey — rotate a wallet whose owner publishes an
+ * POST /wallets/:walletId/identity/rekey — rotate a wallet whose owner publishes an
  * identity this deployment cannot derive, abandoning whatever those keys hold.
  *
  * The body carries the wallet's name as a typed confirmation. The service is
@@ -20311,7 +20375,7 @@ POST /wallets/:walletId/sync — read the wallet's shielded state from Photon. A
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L54) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L146)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L62) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L146)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20379,7 +20443,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L65) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L315)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L73) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L315)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20437,7 +20501,7 @@ POST /wallets/:walletId/zones — idempotent per (wallet, name).
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L67) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L324)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L75) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L324)
 
 **Path parameters:** `walletId`. Constraints come from the validators and handler below.
 
@@ -20883,21 +20947,21 @@ Provider setup, credentials, rotation, recovery, and development helpers.
 | --- | --- | --- | --- |
 | [E253](#e253-get-connections) | `GET /internal/dashboard/custody/connections` | Internal dashboard helper | Pending |
 | [E254](#e254-get-connections-connectionid) | `GET /internal/dashboard/custody/connections/{connectionId}` | Internal dashboard helper | Pending |
-| [E255](#e255-post-cancel) | `POST /internal/dashboard/custody/connections/{connectionId}/cancel` | Internal dashboard helper | Pending |
-| [E256](#e256-post-complete) | `POST /internal/dashboard/custody/connections/{connectionId}/complete` | Internal dashboard helper | Pending |
+| [E255](#e255-post-cancel) | `POST /internal/dashboard/custody/connections/{connectionId}/cancel-installation` | Internal dashboard helper | Pending |
+| [E256](#e256-post-complete) | `POST /internal/dashboard/custody/connections/{connectionId}/complete-installation` | Internal dashboard helper | Pending |
 | [E257](#e257-post-deactivate) | `POST /internal/dashboard/custody/connections/{connectionId}/deactivate` | Internal dashboard helper | Pending |
-| [E258](#e258-get-provider-credential) | `GET /internal/dashboard/custody/connections/{connectionId}/provider-credential` | Internal dashboard helper | Pending |
+| [E258](#e258-get-provider-credential) | `GET /internal/dashboard/custody/connections/{connectionId}/provider-credential/lifecycle` | Internal dashboard helper | Pending |
 | [E259](#e259-post-provider-credentials) | `POST /internal/dashboard/custody/connections/{connectionId}/provider-credentials` | Internal dashboard helper | Pending |
 | [E260](#e260-get-csr) | `GET /internal/dashboard/custody/fireblocks/csr` | Internal dashboard helper | Pending |
 | [E261](#e261-create-csr) | `POST /internal/dashboard/custody/fireblocks/csr` | Internal dashboard helper | Pending |
-| [E262](#e262-discover-vaults) | `POST /internal/dashboard/custody/fireblocks/vaults` | Internal dashboard helper | Pending |
+| [E262](#e262-discover-vaults) | `POST /internal/dashboard/custody/fireblocks/vaults/discover` | Internal dashboard helper | Pending |
 | [E263](#e263-post-provider-credentials) | `POST /internal/dashboard/custody/provider-credentials` | Internal dashboard helper | Pending |
 | [E264](#e264-post-complete-rotation) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/complete-rotation` | Internal dashboard helper | Pending |
 | [E265](#e265-post-deactivate) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/deactivate` | Internal dashboard helper | Pending |
-| [E266](#e266-post-rollback) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback` | Internal dashboard helper | Pending |
+| [E266](#e266-post-rollback) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback-rotation` | Internal dashboard helper | Pending |
 | [E267](#e267-post-rotate) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/rotate` | Internal dashboard helper | Pending |
 | [E268](#e268-get-providers) | `GET /internal/dashboard/custody/providers` | Internal dashboard helper | Pending |
-| [E269](#e269-get-destination) | `GET /internal/dashboard/fireblocks/destination` | Internal dashboard helper | Pending |
+| [E269](#e269-get-destination) | `GET /internal/dashboard/fireblocks/destination-eligibility` | Internal dashboard helper | Pending |
 | [E270](#e270-request-wallet-faucet) | `POST /internal/dashboard/wallets/{walletId}/faucet` | Internal dashboard helper | Pending |
 
 ### E253: Get connections
@@ -21139,7 +21203,7 @@ async (c) => {
 
 ### E255: Post cancel
 
-`POST /internal/dashboard/custody/connections/{connectionId}/cancel`
+`POST /internal/dashboard/custody/connections/{connectionId}/cancel-installation`
 
 - [ ] Good
 - [ ] Needs work
@@ -21184,7 +21248,7 @@ connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).st
 
 ```typescript
 internalCustody.post(
-  "/connections/:connectionId/cancel",
+  "/connections/:connectionId/cancel-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -21219,7 +21283,7 @@ async (c) => {
 
 ### E256: Post complete
 
-`POST /internal/dashboard/custody/connections/{connectionId}/complete`
+`POST /internal/dashboard/custody/connections/{connectionId}/complete-installation`
 
 - [ ] Good
 - [ ] Needs work
@@ -21264,7 +21328,7 @@ connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).st
 
 ```typescript
 internalCustody.post(
-  "/connections/:connectionId/complete",
+  "/connections/:connectionId/complete-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -21381,7 +21445,7 @@ async (c) => {
 
 ### E258: Get provider credential
 
-`GET /internal/dashboard/custody/connections/{connectionId}/provider-credential`
+`GET /internal/dashboard/custody/connections/{connectionId}/provider-credential/lifecycle`
 
 - [ ] Good
 - [ ] Needs work
@@ -21426,7 +21490,7 @@ connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).st
 
 ```typescript
 internalCustody.get(
-  "/connections/:connectionId/provider-credential",
+  "/connections/:connectionId/provider-credential/lifecycle",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -21710,7 +21774,7 @@ export async function createCsr(c: AppContext) {
 
 ### E262: Discover Vaults
 
-`POST /internal/dashboard/custody/fireblocks/vaults`
+`POST /internal/dashboard/custody/fireblocks/vaults/discover`
 
 - [ ] Good
 - [ ] Needs work
@@ -22041,7 +22105,7 @@ async (c) => {
 
 ### E266: Post rollback
 
-`POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback`
+`POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback-rotation`
 
 - [ ] Good
 - [ ] Needs work
@@ -22086,7 +22150,7 @@ credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).st
 
 ```typescript
 internalCustody.post(
-  "/provider-credentials/:credentialId/rollback",
+  "/provider-credentials/:credentialId/rollback-rotation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = credentialParamsSchema.safeParse(c.req.param());
@@ -22304,7 +22368,7 @@ async (c) => {
 
 ### E269: Get destination
 
-`GET /internal/dashboard/fireblocks/destination`
+`GET /internal/dashboard/fireblocks/destination-eligibility`
 
 - [ ] Good
 - [ ] Needs work
@@ -22331,7 +22395,7 @@ Registered runtime endpoint. The exact request handling and returned payload are
 <summary>Exact route registration</summary>
 
 ```typescript
-internalFireblocks.get("/destination", requireAction("wallets.read"), async (c) => {
+internalFireblocks.get("/destination-eligibility", requireAction("wallets.read"), async (c) => {
   assertCallerMayPerform(c, "counterparties.read");
   const parsed = input.safeParse(c.req.query());
   if (!parsed.success) throw badRequest("Invalid Fireblocks destination");
@@ -23000,13 +23064,13 @@ Clerk and ramp-provider event delivery.
 
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
-| [E278](#e278-handle-clerk-webhook) | `POST /webhooks/clerk/link-orgs` | Provider webhook ingress | Pending |
+| [E278](#e278-handle-clerk-webhook) | `POST /webhooks/clerk` | Provider webhook ingress | Pending |
 | [E279](#e279-post-production-provider) | `POST /webhooks/payments/ramps/production/{provider}` | Provider webhook ingress | Pending |
 | [E280](#e280-post-sandbox-provider) | `POST /webhooks/payments/ramps/sandbox/{provider}` | Provider webhook ingress | Pending |
 
 ### E278: Handle Clerk Webhook
 
-`POST /webhooks/clerk/link-orgs`
+`POST /webhooks/clerk`
 
 - [ ] Good
 - [ ] Needs work
@@ -23034,7 +23098,7 @@ Signed webhook: Clerk's signature authenticates it.
 
 ```typescript
 webhooks.post(
-  "/clerk/link-orgs",
+  "/clerk",
   publicRoute("signed webhook: Clerk's signature authenticates it"),
   handleClerkWebhook
 )
@@ -23213,13 +23277,13 @@ Operator allowlist management.
 
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
-| [E281](#e281-list-allowlist-entries) | `GET /admin/allowlist` | Operator API | Pending |
-| [E282](#e282-add-allowlist-entry) | `POST /admin/allowlist` | Operator API | Pending |
-| [E283](#e283-remove-allowlist-entry) | `DELETE /admin/allowlist/{id}` | Operator API | Pending |
+| [E281](#e281-list-allowlist-entries) | `GET /admin/onboarding-allowlist` | Operator API | Pending |
+| [E282](#e282-add-allowlist-entry) | `POST /admin/onboarding-allowlist` | Operator API | Pending |
+| [E283](#e283-remove-allowlist-entry) | `DELETE /admin/onboarding-allowlist/{id}` | Operator API | Pending |
 
 ### E281: List allowlist entries
 
-`GET /admin/allowlist`
+`GET /admin/onboarding-allowlist`
 
 - [ ] Good
 - [ ] Needs work
@@ -23282,7 +23346,7 @@ Lists allowlist entries for onboarding.
 
 ### E282: Add allowlist entry
 
-`POST /admin/allowlist`
+`POST /admin/onboarding-allowlist`
 
 - [ ] Good
 - [ ] Needs work
@@ -23354,7 +23418,7 @@ Adds an allowlist entry for onboarding.
 
 ### E283: Remove allowlist entry
 
-`DELETE /admin/allowlist/{id}`
+`DELETE /admin/onboarding-allowlist/{id}`
 
 - [ ] Good
 - [ ] Needs work
@@ -43725,7 +43789,7 @@ References such as `#/components/schemas/Name` use the following component defin
   "required": [
     "address"
   ],
-  "description": "Add token allowlist entry request body."
+  "description": "Add token control-list entry request body."
 }
 ```
 

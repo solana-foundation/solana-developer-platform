@@ -234,10 +234,10 @@ describe("Counterparties Routes", () => {
     );
   });
 
-  describe("GET /v1/counterparties/metadata", () => {
+  describe("GET /v1/counterparties/field-options", () => {
     it("returns field options (enums + countries)", async () => {
       const res = await app.request(
-        "/v1/counterparties/metadata",
+        "/v1/counterparties/field-options",
         { headers: { Authorization: authHeader } },
         env
       );
@@ -384,7 +384,7 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(404);
     });
   });
-  describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
+  describe("GET /v1/counterparties/:counterpartyId/ramp-requirements", () => {
     afterEach(() => {
       vi.restoreAllMocks();
     });
@@ -393,7 +393,7 @@ describe("Counterparties Routes", () => {
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD`,
+        `/v1/counterparties/${cp.id}/ramp-requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -420,7 +420,7 @@ describe("Counterparties Routes", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
 
       const res = await app.request(
-        `/v1/counterparties/${cp.id}/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        `/v1/counterparties/${cp.id}/ramp-requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
         { headers: { Authorization: authHeader } },
         env
       );
@@ -439,7 +439,7 @@ describe("Counterparties Routes", () => {
         const cp = (await created.json()).data.counterparty;
 
         const res = await app.request(
-          `/v1/counterparties/${cp.id}/requirements`,
+          `/v1/counterparties/${cp.id}/ramp-requirements/check`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: authHeader },

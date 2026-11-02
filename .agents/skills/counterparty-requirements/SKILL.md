@@ -16,8 +16,8 @@ Canonical examples live in `packages/sdp-payments/src/ramps/providers/` — befo
 
 The requirements flow is a set of event streams, each a closed union discriminated on `(provider, status/kind)`. Adding a provider means declaring exactly which events it emits and accepts in each stream:
 
-- **Status events out** (`GET /v1/counterparties/:counterpartyId/requirements`): `validateCounterparty` emits one arm of `CounterpartyRequirements` (`packages/sdp-types/src/ramp-requirements.ts`).
-- **Advance submissions in** (`POST …/requirements`): one `submitCounterpartyRequirementsSchema` arm per provider (nested `discriminatedUnion("direction", …)` when payloads differ per direction). `collectedData` on the submission is the **only PII channel** in the platform.
+- **Status events out** (`GET /v1/counterparties/:counterpartyId/ramp-requirements`): `validateCounterparty` emits one arm of `CounterpartyRequirements` (`packages/sdp-types/src/ramp-requirements.ts`).
+- **Advance submissions in** (`POST …/ramp-requirements/check`): one `submitCounterpartyRequirementsSchema` arm per provider (nested `discriminatedUnion("direction", …)` when payloads differ per direction). `collectedData` on the submission is the **only PII channel** in the platform.
 - **Webhook auto-advance** (optional): providers with async provisioning also move requirement state from typed webhook events — see `integrate-webhook`.
 
 ## Provider state: `counterparty_provider_accounts`
@@ -76,8 +76,8 @@ Simplest first — pick the closest and mirror its decision function:
 
 Both requirement routes must admit the provider before its client can run:
 
-- `GET /v1/counterparties/:counterpartyId/requirements`: update the direction-specific provider lists in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
-- `POST /v1/counterparties/:counterpartyId/requirements`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
+- `GET /v1/counterparties/:counterpartyId/ramp-requirements`: update the direction-specific provider lists in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
+- `POST /v1/counterparties/:counterpartyId/ramp-requirements/check`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 
 The POST handler re-runs `validateCounterparty`, validates submitted `collectedData`, then calls `advanceCounterpartyRequirements` in `apps/sdp-api/src/routes/payments/ramps/shared.ts`, which dispatches to the DB-side `ensure*` helper. The helper's job: provider HTTP with the collected PII, then persist the *result* as a `counterparty_provider_accounts` row.
 

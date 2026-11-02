@@ -72,7 +72,7 @@ describe("custody Config beside a BYOK Connection", () => {
   });
 
   it("lists only the Managed Config and gates the Connection wallet on its own credential", async () => {
-    const configs = await request("/v1/wallets/configs");
+    const configs = await request("/v1/wallets/managed-signing/configurations");
     expect(configs.status).toBe(200);
     expect(await configs.json()).toEqual(configsBody());
 
@@ -111,7 +111,9 @@ describe("custody Config beside a BYOK Connection", () => {
   it("refuses an out-of-channel Connection wallet without touching the Config listing", async () => {
     custodyReleaseChannel.outOfChannelMode = "byok";
 
-    expect(await (await request("/v1/wallets/configs")).json()).toEqual(configsBody());
+    expect(await (await request("/v1/wallets/managed-signing/configurations")).json()).toEqual(
+      configsBody()
+    );
     const publicKey = await request(`/v1/wallets/public-key?walletId=${CONNECTION_WALLET_ID}`);
     expect(publicKey.status).toBe(403);
     expect(await publicKey.json()).toEqual({

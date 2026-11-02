@@ -36,12 +36,16 @@ const CREATES_IN_SCOPE =
 
 // Ramp onboarding (provider KYC requirements, provider-owned accounts) lives here,
 // not under /payments/ramps, so the ramps release channel gate has to cover it too.
-counterparties.use("/:counterpartyId/requirements", requireModule("ramps"));
+counterparties.use("/:counterpartyId/ramp-requirements/*", requireModule("ramps"));
 counterparties.use("/:counterpartyId/provider-accounts/*", requireModule("ramps"));
 counterparties.use("*", unifiedAuthMiddleware());
 counterparties.use("*", projectContextMiddleware());
 
-counterparties.get("/metadata", requireAction("counterparties.read"), getCounterpartyFieldOptions);
+counterparties.get(
+  "/field-options",
+  requireAction("counterparties.read"),
+  getCounterpartyFieldOptions
+);
 counterparties.get(
   "/accounts",
   requireAction("counterparties.read"),
@@ -58,12 +62,12 @@ counterparties.post(
 );
 counterparties.get("/:counterpartyId", requireAction("counterparties.read"), getCounterparty);
 counterparties.get(
-  "/:counterpartyId/requirements",
+  "/:counterpartyId/ramp-requirements",
   requireAction("counterparties.read"),
   getCounterpartyRequirements
 );
 counterparties.post(
-  "/:counterpartyId/requirements",
+  "/:counterpartyId/ramp-requirements/check",
   requireAction("counterparties.execute"),
   validateBody(submitCounterpartyRequirementsSchema),
   submitCounterpartyRequirements

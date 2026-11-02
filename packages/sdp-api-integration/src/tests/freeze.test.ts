@@ -81,7 +81,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
   }, 90000);
 
   it("freezes a token account", { timeout: 60000 }, async () => {
-    const freezeRes = await request(`/v1/issuance/tokens/${deployedTokenId}/freeze`, {
+    const freezeRes = await request(`/v1/issuance/tokens/${deployedTokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -102,7 +102,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
   });
 
   it("unfreezes a frozen account", { timeout: 90000 }, async () => {
-    await request(`/v1/issuance/tokens/${deployedTokenId}/freeze`, {
+    await request(`/v1/issuance/tokens/${deployedTokenId}/freeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -113,7 +113,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Freeze/Unfreeze O
       }),
     });
 
-    const unfreezeRes = await request(`/v1/issuance/tokens/${deployedTokenId}/unfreeze`, {
+    const unfreezeRes = await request(`/v1/issuance/tokens/${deployedTokenId}/unfreeze-account`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

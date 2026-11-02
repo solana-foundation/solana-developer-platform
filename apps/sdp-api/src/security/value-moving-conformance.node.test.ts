@@ -125,7 +125,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/freeze",',
+      section: '"/tokens/:tokenId/freeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "freezeAccount",
     },
@@ -146,7 +146,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/unfreeze",',
+      section: '"/tokens/:tokenId/unfreeze-account",',
       before: 'requireAction("issuance.enforce")',
       after: "unfreezeAccount",
     },
@@ -333,7 +333,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist",',
+      section: '"/tokens/:tokenId/control-list",',
       before: 'requireAction("issuance.enforce")',
       after: "addAllowlistEntry",
     },
@@ -353,7 +353,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/allowlist/:entryId",',
+      section: '"/tokens/:tokenId/control-list/:entryId",',
       before: 'requireAction("issuance.enforce")',
       after: "removeAllowlistEntry",
     },
@@ -373,7 +373,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
-      section: '"/quote",',
+      section: '"/start",',
       before: 'requireAction("onramp.execute")',
       through: "requestGate(",
       after: "\n  createOnrampQuote\n",

@@ -93,7 +93,7 @@ async function runCompletion(connectionId: string): Promise<PrivyByokSubmitResul
   let result: ProviderCredentialCompletionResult;
   try {
     result = await client.fetch<ProviderCredentialCompletionResult>(
-      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/complete`,
+      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/complete-installation`,
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {

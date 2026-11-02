@@ -236,7 +236,7 @@ jobs:
         run: |
           set -euo pipefail
           code="$(curl -sS -o /tmp/wallet.json -w '%{http_code}' \
-            -X POST http://localhost:8787/v1/wallets/initialize \
+            -X POST http://localhost:8787/v1/wallets/managed-signing/initialize-with-wallet \
             -H "Authorization: Bearer $SMOKE_SESSION_TOKEN" \
             -H 'x-project-id: proj_smoke' \
             -H 'content-type: application/json' \

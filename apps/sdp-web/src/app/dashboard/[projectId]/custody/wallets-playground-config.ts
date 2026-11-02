@@ -111,7 +111,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "list-wallet-configs",
       title: t("DashboardCustody.playgroundListWalletConfigs"),
       method: "GET",
-      path: "/v1/wallets/configs",
+      path: "/v1/wallets/managed-signing/configurations",
       pathFields: [],
       bodyFields: [],
       expectedResponse: {
@@ -174,7 +174,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
       id: "aggregate-balances",
       title: t("DashboardCustody.playgroundAggregateBalances"),
       method: "GET",
-      path: "/v1/wallets/aggregate",
+      path: "/v1/wallets/balances/aggregate",
       pathFields: [],
       bodyFields: [],
       expectedResponse: {

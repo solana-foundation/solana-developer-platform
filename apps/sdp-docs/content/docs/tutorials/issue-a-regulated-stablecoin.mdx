@@ -374,7 +374,7 @@ Freezing halts one holder's account without touching any other holder. The freez
 ```javascript title="freeze-account.js"
 const holderFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: holderAddress,
@@ -601,7 +601,7 @@ To demonstrate the on-chain block, freeze the destination's TPUSD account using 
 ```javascript title="freeze-destination.js"
 const transferFreezeKey = idempotencyKey("freeze");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/freeze`,
+  `/v1/issuance/tokens/${tokenId}/freeze-account`,
   {
     signingCustodyWalletId,
     accountAddress: destinationAddress,
@@ -681,7 +681,7 @@ Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance ve
 For a production environment, unfreezing happens only after the underlying compliance review resolves. For sandbox testing, you can unfreeze immediately:
 
 ```javascript title="unfreeze-account.js"
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
+await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze-account`, {
   signingCustodyWalletId,
   accountAddress: destinationAddress,
 });

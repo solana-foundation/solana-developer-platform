@@ -1045,7 +1045,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/freeze`,
+          `/v1/issuance/tokens/${token.id}/freeze-account`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1117,7 +1117,7 @@ describe("Issuance Routes", () => {
 
       try {
         const replay = await app.request(
-          `/v1/issuance/tokens/${token.id}/unfreeze`,
+          `/v1/issuance/tokens/${token.id}/unfreeze-account`,
           { method: "POST", headers: headers(idempotencyKey), body: JSON.stringify(body) },
           env
         );
@@ -1276,7 +1276,7 @@ describe("Issuance Routes", () => {
         method = "PATCH";
         body = { name: "Updated through selected wallet" };
       } else if (operation === "allowlist-add") {
-        path += "/allowlist";
+        path += "/control-list";
         body = { address: TEST_SOLANA_ADDRESSES.wallet1 };
       } else if (operation === "allowlist-remove") {
         const service = new TokenService(getDb(env));
@@ -1286,7 +1286,7 @@ describe("Issuance Routes", () => {
           addedBy: TEST_PROJECT_API_KEY.id,
         });
         method = "DELETE";
-        path += `/allowlist/${entry.id}`;
+        path += `/control-list/${entry.id}`;
       } else {
         path += `/${operation}`;
       }
@@ -4269,11 +4269,11 @@ describe("Issuance Routes", () => {
       tokenId = created.data.token.id;
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/allowlist", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/control-list", () => {
       it("adds address to allowlist", async () => {
         const admitSpy = vi.spyOn(SigningService.prototype, "admitRuntimeExecution");
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4300,7 +4300,7 @@ describe("Issuance Routes", () => {
 
       it("refuses to re-add an address already on the control list", async () => {
         const first = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4314,7 +4314,7 @@ describe("Issuance Routes", () => {
         expect(first.status).toBe(201);
 
         const replay = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4335,7 +4335,7 @@ describe("Issuance Routes", () => {
 
       it("acknowledges removing an already revoked allowlist entry without signing", async () => {
         const createRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4356,7 +4356,7 @@ describe("Issuance Routes", () => {
         signerSpy.mockClear();
 
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4383,7 +4383,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4435,7 +4435,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4479,7 +4479,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4513,7 +4513,7 @@ describe("Issuance Routes", () => {
           expect(audit).not.toBeNull();
 
           const retry = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4557,7 +4557,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4591,7 +4591,7 @@ describe("Issuance Routes", () => {
       it("returns 409 for duplicate address", async () => {
         // Add first entry
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4605,7 +4605,7 @@ describe("Issuance Routes", () => {
 
         // Try to add same address again
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4646,7 +4646,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist`,
+            `/v1/issuance/tokens/${tokenId}/control-list`,
             {
               method: "POST",
               headers: {
@@ -4678,11 +4678,11 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("GET /v1/issuance/tokens/:tokenId/allowlist", () => {
+    describe("GET /v1/issuance/tokens/:tokenId/control-list", () => {
       it("lists allowlist entries", async () => {
         // Add an entry first
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4698,7 +4698,7 @@ describe("Issuance Routes", () => {
         );
 
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4713,12 +4713,12 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("DELETE /v1/issuance/tokens/:tokenId/allowlist/:entryId", () => {
+    describe("DELETE /v1/issuance/tokens/:tokenId/control-list/:entryId", () => {
       it("revokes allowlist entry", async () => {
         const admitSpy = vi.spyOn(SigningService.prototype, "admitRuntimeExecution");
         // Add an entry
         const addRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4734,7 +4734,7 @@ describe("Issuance Routes", () => {
 
         // Delete it
         const res = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+          `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4746,7 +4746,7 @@ describe("Issuance Routes", () => {
 
         // Verify it's revoked
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4760,7 +4760,7 @@ describe("Issuance Routes", () => {
 
       it("syncs control-list removals on-chain when an ABL address is configured", async () => {
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4779,7 +4779,7 @@ describe("Issuance Routes", () => {
           .run();
 
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4796,7 +4796,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4846,7 +4846,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entry.id}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4870,7 +4870,7 @@ describe("Issuance Routes", () => {
 
       it("keeps the database entry active until a retry confirms on-chain removal", async () => {
         await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             method: "POST",
             headers: {
@@ -4889,7 +4889,7 @@ describe("Issuance Routes", () => {
           .run();
 
         const listRes = await app.request(
-          `/v1/issuance/tokens/${tokenId}/allowlist`,
+          `/v1/issuance/tokens/${tokenId}/control-list`,
           {
             headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
           },
@@ -4908,7 +4908,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4925,7 +4925,7 @@ describe("Issuance Routes", () => {
           expect(stillActive?.status).toBe("active");
 
           const retry = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entryId}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entryId}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -4969,7 +4969,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${tokenId}/allowlist/${entry.id}`,
+            `/v1/issuance/tokens/${tokenId}/control-list/${entry.id}`,
             {
               method: "DELETE",
               headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
@@ -5046,7 +5046,7 @@ describe("Issuance Routes", () => {
         slot: 100n,
       });
 
-    describe("POST /v1/issuance/tokens/:tokenId/freeze", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/freeze-account", () => {
       it("freezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
@@ -5054,7 +5054,7 @@ describe("Issuance Routes", () => {
 
         try {
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5094,7 +5094,7 @@ describe("Issuance Routes", () => {
         try {
           // Freeze first
           await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5108,7 +5108,7 @@ describe("Issuance Routes", () => {
 
           // Try to freeze again
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5140,7 +5140,7 @@ describe("Issuance Routes", () => {
         } as Awaited<ReturnType<typeof MosaicSdk.resolveTokenAccount>>);
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
           {
             method: "POST",
             headers: {
@@ -5176,7 +5176,7 @@ describe("Issuance Routes", () => {
         );
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/freeze`,
+          `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
           {
             method: "POST",
             headers: {
@@ -5228,7 +5228,7 @@ describe("Issuance Routes", () => {
 
         try {
           const firstFreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5248,7 +5248,7 @@ describe("Issuance Routes", () => {
           const frozenRecordId = firstFreezeBody.data.frozenAccount.id as string;
 
           const unfreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
             {
               method: "POST",
               headers: {
@@ -5263,7 +5263,7 @@ describe("Issuance Routes", () => {
           expect(unfreezeRes.status).toBe(200);
 
           const secondFreezeRes = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5303,7 +5303,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    describe("POST /v1/issuance/tokens/:tokenId/unfreeze", () => {
+    describe("POST /v1/issuance/tokens/:tokenId/unfreeze-account", () => {
       it("unfreezes an account", async () => {
         const activeTokenId = await seedFreezableToken();
         mockResolvedTokenAccount();
@@ -5316,7 +5316,7 @@ describe("Issuance Routes", () => {
         try {
           // Freeze first
           await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/freeze`,
+            `/v1/issuance/tokens/${activeTokenId}/freeze-account`,
             {
               method: "POST",
               headers: {
@@ -5330,7 +5330,7 @@ describe("Issuance Routes", () => {
 
           // Unfreeze
           const res = await app.request(
-            `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+            `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
             {
               method: "POST",
               headers: {
@@ -5357,7 +5357,7 @@ describe("Issuance Routes", () => {
         mockResolvedTokenAccount();
 
         const res = await app.request(
-          `/v1/issuance/tokens/${activeTokenId}/unfreeze`,
+          `/v1/issuance/tokens/${activeTokenId}/unfreeze-account`,
           {
             method: "POST",
             headers: {
@@ -5386,7 +5386,7 @@ describe("Issuance Routes", () => {
 
     const addBlocklistEntry = async (address: string) => {
       await app.request(
-        `/v1/issuance/tokens/${blocklistTokenId}/allowlist`,
+        `/v1/issuance/tokens/${blocklistTokenId}/control-list`,
         {
           method: "POST",
           headers: {
@@ -5505,7 +5505,7 @@ describe("Issuance Routes", () => {
       try {
         // Add to allowlist first
         await app.request(
-          `/v1/issuance/tokens/${allowlistTokenId}/allowlist`,
+          `/v1/issuance/tokens/${allowlistTokenId}/control-list`,
           {
             method: "POST",
             headers: {

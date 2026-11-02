@@ -82,7 +82,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)(
       const mintResult = (await mintRes.json()) as MintApiResponse;
       expect(mintResult.data.tokenAccount).toBeTruthy();
 
-      const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze`, {
+      const freezeRes = await request(`/v1/issuance/tokens/${tokenId}/freeze-account`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -107,13 +107,13 @@ const WALLET_SCOPE_ROUTES = {
   },
 
   // Ramps: a quote signs nothing, so its money admission is its only scope check.
-  "POST /v1/payments/ramps/onramp/quote": {
+  "POST /v1/payments/ramps/onramp/start": {
     refusedEarly: {
       file: "routes/payments.ramps-money-admission.test.ts",
       test: "refuses a %s quote on a wallet outside the key's scope with wallet_out_of_scope",
     },
   },
-  "POST /v1/payments/ramps/offramp/quote": {
+  "POST /v1/payments/ramps/offramp/start": {
     refusedEarly: {
       file: "routes/payments.ramps-money-admission.test.ts",
       test: "refuses a %s quote on a wallet outside the key's scope with wallet_out_of_scope",
@@ -121,7 +121,7 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/payments/ramps/sandbox/simulate": { exempt: "a provider sandbox event; signs nothing" },
   "POST /v1/payments/ramps/transfers/cancel": { exempt: "a provider-side cancel; signs nothing" },
-  "POST /v1/counterparties/:counterpartyId/requirements": { exempt: SIGNS_NOTHING },
+  "POST /v1/counterparties/:counterpartyId/ramp-requirements/check": { exempt: SIGNS_NOTHING },
 
   // Recurring payments
   "POST /v1/payments/recurring-payments": {
@@ -282,24 +282,29 @@ const WALLET_SCOPE_ROUTES = {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/freeze": {
+  "POST /v1/issuance/tokens/:tokenId/freeze-account": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/unfreeze": {
+  "POST /v1/issuance/tokens/:tokenId/unfreeze-account": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/allowlist": {
+  "POST /v1/issuance/tokens/:tokenId/control-list": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "DELETE /v1/issuance/tokens/:tokenId/allowlist/:entryId": {
+  "DELETE /v1/issuance/tokens/:tokenId/control-list/:entryId": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/holders": { exempt: "enrolls a KYC holder; signs nothing" },
-  "POST /v1/issuance/asset-profiles": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
+  "POST /v1/issuance/tokens/:tokenId/holder-enrollments": {
+    exempt: "enrolls a KYC holder; signs nothing",
+  },
+  "POST /v1/issuance/tokens/create-with-asset-profile": {
+    refusedEarly: ISSUANCE_BURN,
+    via: ISSUANCE_RESOLVER,
+  },
   "PATCH /v1/issuance/asset-profiles/:profileId": { exempt: SIGNS_NOTHING },
   "DELETE /v1/issuance/asset-profiles/:profileId": { exempt: SIGNS_NOTHING },
 
@@ -320,19 +325,19 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/private-channels/channels": { exempt: SIGNS_NOTHING },
   "DELETE /v1/private-channels/channels/:id": { exempt: SIGNS_NOTHING },
-  "DELETE /v1/private-channels/wallets/:pubkey": { exempt: SIGNS_NOTHING },
+  "DELETE /v1/private-channels/verified-wallets/:pubkey": { exempt: SIGNS_NOTHING },
 
   // Helius Rings
-  "POST /v1/helius-rings/wallets": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/wallets/provision-identity": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/sync": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/wallets/:walletId/rekey": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/wallets/:walletId/identity/rekey": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/zones": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/execute": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/resume-execution": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/retry": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/recheck": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/void": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/rings": {
+  "POST /v1/helius-rings/rings/register-and-initialize": {
     gap: "ring bring-up reserves the ring row, then signs with the custody wallet that owns the ring authority; no early scope check",
   },
 } as const satisfies Record<string, Classification>;
@@ -436,7 +441,7 @@ describe("wallet-scope route inventory", () => {
       "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction",
       "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
       "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction",
-      "POST /v1/helius-rings/rings",
+      "POST /v1/helius-rings/rings/register-and-initialize",
     ]);
   });
 });

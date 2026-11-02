@@ -875,7 +875,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/payments/ramps/onramp/currency",
+    path: "/v1/payments/ramps/onramp/supported-pairs",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List on-ramp currency support",
@@ -898,7 +898,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/payments/ramps/offramp/currency",
+    path: "/v1/payments/ramps/offramp/supported-pairs",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List off-ramp currency support",
@@ -921,13 +921,13 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/ramps/onramp/quote",
+    path: "/v1/payments/ramps/onramp/start",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
-    summary: "Create on-ramp quote",
+    summary: "Start on-ramp",
     operationId: "createPaymentOnrampQuote",
     description:
-      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+      "Starts a tracked provider-specific on-ramp flow. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
     security: [{ apiKeyAuth: [] }],
     request: {
       body: {

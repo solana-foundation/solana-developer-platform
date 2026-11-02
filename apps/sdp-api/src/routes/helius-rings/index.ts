@@ -46,14 +46,22 @@ heliusRings.get("/setup-status", requireAction("helius_rings.read"), getRingsSet
 heliusRings.get("/rings", requireAction("helius_rings.read"), listRingsProjectRings);
 // Recording a ring runs bring-up (signed transactions through custody), so it
 // carries execute.
-heliusRings.post("/rings", requireAction("helius_rings.execute"), createRingsProjectRing);
+heliusRings.post(
+  "/rings/register-and-initialize",
+  requireAction("helius_rings.execute"),
+  createRingsProjectRing
+);
 
 heliusRings.get("/wallets", requireAction("helius_rings.read"), listRingsWallets);
-heliusRings.post("/wallets", requireAction("helius_rings.manage"), createRingsWallet);
+heliusRings.post(
+  "/wallets/provision-identity",
+  requireAction("helius_rings.manage"),
+  createRingsWallet
+);
 heliusRings.get("/wallets/:walletId", requireAction("helius_rings.read"), getRingsWallet);
 heliusRings.post("/wallets/:walletId/sync", requireAction("helius_rings.manage"), syncRingsWallet);
 heliusRings.post(
-  "/wallets/:walletId/rekey",
+  "/wallets/:walletId/identity/rekey",
   requireAction("helius_rings.execute"),
   rekeyRingsWallet
 );

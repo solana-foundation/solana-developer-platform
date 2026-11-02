@@ -169,7 +169,7 @@ function registerEarnVaultShareReconciliationPath(
 ) {
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/vault-share-reconciliation",
+    path: "/v1/earn/positions/provider-signed/share-reconciliation-report",
     tags: ["Earn"],
     summary: "Reconcile vault shares against recorded positions",
     operationId: "getEarnVaultShareReconciliation",

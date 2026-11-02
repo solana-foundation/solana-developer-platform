@@ -26,7 +26,7 @@ const providerAccessSchema = z.object({
 
 async function rampsEnabled(on: typeof app, releaseChannel: string) {
   const response = await on.request(
-    `/v1/organizations/${TEST_ORG.id}/provider-access`,
+    `/v1/organizations/${TEST_ORG.id}/provider-availability`,
     { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
     { ...env, SDP_RELEASE_CHANNEL: releaseChannel }
   );
@@ -35,7 +35,7 @@ async function rampsEnabled(on: typeof app, releaseChannel: string) {
   return Object.fromEntries(Object.entries(ramps).map(([id, entry]) => [id, entry.enabled]));
 }
 
-describe("GET /v1/organizations/:orgId/provider-access release channel", () => {
+describe("GET /v1/organizations/:orgId/provider-availability release channel", () => {
   installPaymentsRouteTestHooks();
   beforeEach(async () => {
     await getDb(env)

@@ -16,7 +16,7 @@
         "operationId": "initializeWalletSigning",
         "title": "Initialize wallet signing",
         "method": "POST",
-        "path": "/v1/wallets/initialize",
+        "path": "/v1/wallets/managed-signing/initialize-with-wallet",
         "releaseModule": "custody",
         "shadowedBy": [],
         "pathFields": [],
@@ -225,9 +225,9 @@
       {
         "id": "list-wallet-configs",
         "operationId": "listWalletConfigs",
-        "title": "List wallet signing configs",
+        "title": "List managed signing configurations",
         "method": "GET",
-        "path": "/v1/wallets/configs",
+        "path": "/v1/wallets/managed-signing/configurations",
         "releaseModule": "custody",
         "shadowedBy": [],
         "pathFields": [],
@@ -256,7 +256,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "releaseModule": "custody",
         "shadowedBy": [],
         "pathFields": [
@@ -400,7 +400,7 @@
         "method": "GET",
         "path": "/v1/wallets/{walletId}?includeBalance={includeBalance}",
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"],
+        "shadowedBy": ["/v1/wallets/public-key"],
         "pathFields": [
           {
             "key": "walletId",
@@ -2970,7 +2970,7 @@
         "operationId": "listPaymentOnrampCurrencies",
         "title": "List on-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/onramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "releaseModule": "ramps",
         "shadowedBy": [],
         "pathFields": [
@@ -3207,7 +3207,7 @@
         "operationId": "listPaymentOfframpCurrencies",
         "title": "List off-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/offramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "releaseModule": "ramps",
         "shadowedBy": [],
         "pathFields": [
@@ -3442,9 +3442,9 @@
       {
         "id": "create-payment-onramp-quote",
         "operationId": "createPaymentOnrampQuote",
-        "title": "Create on-ramp quote",
+        "title": "Start on-ramp",
         "method": "POST",
-        "path": "/v1/payments/ramps/onramp/quote",
+        "path": "/v1/payments/ramps/onramp/start",
         "releaseModule": "ramps",
         "shadowedBy": [],
         "pathFields": [],
@@ -3640,7 +3640,7 @@
         "operationId": "getCounterpartyFieldOptions",
         "title": "Get counterparty field options",
         "method": "GET",
-        "path": "/v1/counterparties/metadata",
+        "path": "/v1/counterparties/field-options",
         "releaseModule": "payments",
         "shadowedBy": [],
         "pathFields": [],
@@ -3783,7 +3783,7 @@
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}",
         "releaseModule": "payments",
-        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"],
+        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/field-options"],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -3889,7 +3889,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
+        "path": "/v1/counterparties/{counterpartyId}/ramp-requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "releaseModule": "ramps",
         "shadowedBy": [],
         "pathFields": [
@@ -7598,7 +7598,7 @@
         "operationId": "freezeAccount",
         "title": "Freeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "path": "/v1/issuance/tokens/{tokenId}/freeze-account",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7646,7 +7646,7 @@
         "operationId": "unfreezeAccount",
         "title": "Unfreeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "path": "/v1/issuance/tokens/{tokenId}/unfreeze-account",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7694,7 +7694,7 @@
         "operationId": "listFrozenAccounts",
         "title": "List frozen accounts",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "path": "/v1/issuance/tokens/{tokenId}/frozen-accounts?page={page}&pageSize={pageSize}",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7749,9 +7749,9 @@
       {
         "id": "list-token-allowlist",
         "operationId": "listTokenAllowlist",
-        "title": "List token allowlist",
+        "title": "List token control list",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list?page={page}&pageSize={pageSize}&search={search}&label={label}",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7819,9 +7819,9 @@
       {
         "id": "add-token-allowlist-entry",
         "operationId": "addTokenAllowlistEntry",
-        "title": "Add token allowlist entry",
+        "title": "Add token control-list entry",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7866,9 +7866,9 @@
       {
         "id": "list-token-allowlist-labels",
         "operationId": "listTokenAllowlistLabels",
-        "title": "List token allowlist labels",
+        "title": "List token control-list labels",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/labels",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7895,9 +7895,9 @@
       {
         "id": "remove-token-allowlist-entry",
         "operationId": "removeTokenAllowlistEntry",
-        "title": "Remove token allowlist entry",
+        "title": "Remove token control-list entry",
         "method": "DELETE",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7929,9 +7929,9 @@
       {
         "id": "list-holders",
         "operationId": "listHolders",
-        "title": "List verified holders",
+        "title": "List holder enrollments",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [
@@ -7954,9 +7954,9 @@
       {
         "id": "enroll-holder",
         "operationId": "enrollHolder",
-        "title": "Enroll a verified holder",
+        "title": "Enroll a holder",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
         "releaseModule": "issuance",
         "shadowedBy": [],
         "pathFields": [

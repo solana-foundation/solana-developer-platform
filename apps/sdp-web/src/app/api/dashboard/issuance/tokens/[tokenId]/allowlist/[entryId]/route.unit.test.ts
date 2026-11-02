@@ -18,7 +18,7 @@ describe("allowlist removal proxy", () => {
     expect(proxy).toHaveBeenLastCalledWith({
       request,
       traceSource: "route.dashboard.issuance.token.allowlist.remove",
-      path: `/v1/issuance/tokens/tok_1/allowlist/tal_1${expected}`,
+      path: `/v1/issuance/tokens/tok_1/control-list/tal_1${expected}`,
     });
   });
 });

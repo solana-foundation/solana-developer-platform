@@ -110,7 +110,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/wallets/initialize",
+            "url": "{{baseUrl}}/v1/wallets/managed-signing/initialize-with-wallet",
             "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
             "body": {
               "mode": "raw",
@@ -181,11 +181,11 @@
           }
         },
         {
-          "name": "List wallet signing configs",
+          "name": "List managed signing configurations",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/wallets/configs",
+            "url": "{{baseUrl}}/v1/wallets/managed-signing/configurations",
             "description": "Returns the active Config-owned wallet signing configurations for the requested scope, one per provider."
           }
         },
@@ -194,7 +194,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/wallets/aggregate",
+            "url": "{{baseUrl}}/v1/wallets/balances/aggregate",
             "description": "Aggregates tracked balances for active wallets under the same owner-aware inclusion rules as the wallet list, without exposing one aggregate-level owner or runtime-admission value. Returns 503 if any included wallet balance cannot be read, rather than returning an incomplete total."
           }
         },
@@ -828,7 +828,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/freeze",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/freeze-account",
             "description": "Freezes a token account to prevent transfers.",
             "body": {
               "mode": "raw",
@@ -852,7 +852,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/unfreeze",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/unfreeze-account",
             "description": "Unfreezes a token account so it can be used again.",
             "body": {
               "mode": "raw",
@@ -870,21 +870,21 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/frozen",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/frozen-accounts",
             "description": "Lists frozen accounts for a token."
           }
         },
         {
-          "name": "List token allowlist",
+          "name": "List token control list",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist",
-            "description": "Lists allowlist entries for a token."
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/control-list",
+            "description": "Lists control-list entries for a token, using its configured allowlist or blocklist mode."
           }
         },
         {
-          "name": "Add token allowlist entry",
+          "name": "Add token control-list entry",
           "request": {
             "method": "POST",
             "header": [
@@ -894,8 +894,8 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist",
-            "description": "Adds an allowlist entry for a token.",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/control-list",
+            "description": "Adds a control-list entry for a token, using its configured allowlist or blocklist mode.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"address\": \"So11111111111111111111111111111111111111112\",\n  \"label\": \"Treasury\"\n}",
@@ -908,34 +908,34 @@
           }
         },
         {
-          "name": "List token allowlist labels",
+          "name": "List token control-list labels",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist/labels",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/control-list/labels",
             "description": "Lists the distinct labels used across a token's active control-list entries, for building a label filter."
           }
         },
         {
-          "name": "Remove token allowlist entry",
+          "name": "Remove token control-list entry",
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/allowlist/{{entryId}}",
-            "description": "Removes an allowlist entry from a token."
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/control-list/{{entryId}}",
+            "description": "Removes a control-list entry from a token, using its configured allowlist or blocklist mode."
           }
         },
         {
-          "name": "List verified holders",
+          "name": "List holder enrollments",
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holder-enrollments",
             "description": "Returns the wallets enrolled for this asset (KYC identity + enrollment state)."
           }
         },
         {
-          "name": "Enroll a verified holder",
+          "name": "Enroll a holder",
           "request": {
             "method": "POST",
             "header": [
@@ -945,7 +945,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holders",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/holder-enrollments",
             "description": "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",
             "body": {
               "mode": "raw",
@@ -1468,7 +1468,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/payments/ramps/onramp/currency",
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/supported-pairs",
             "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters."
           }
         },
@@ -1477,12 +1477,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/payments/ramps/offramp/currency",
+            "url": "{{baseUrl}}/v1/payments/ramps/offramp/supported-pairs",
             "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters."
           }
         },
         {
-          "name": "Create on-ramp quote",
+          "name": "Start on-ramp",
           "request": {
             "method": "POST",
             "header": [
@@ -1492,8 +1492,8 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/ramps/onramp/quote",
-            "description": "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+            "url": "{{baseUrl}}/v1/payments/ramps/onramp/start",
+            "description": "Starts a tracked provider-specific on-ramp flow. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
@@ -1601,7 +1601,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/asset-profiles",
+            "url": "{{baseUrl}}/v1/issuance/tokens/create-with-asset-profile",
             "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
             "body": {
               "mode": "raw",

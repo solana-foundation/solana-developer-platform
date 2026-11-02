@@ -116,7 +116,7 @@ async function initializeCustodyWallet(formData: FormData): Promise<void> {
   }
 
   const client = await createSdpApiClient();
-  await client.fetch("/v1/wallets/initialize", {
+  await client.fetch("/v1/wallets/managed-signing/initialize-with-wallet", {
     method: "POST",
     body: JSON.stringify(payload),
     headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),

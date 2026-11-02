@@ -94,7 +94,7 @@ Clerk webhooks need a public HTTPS URL. The local API runs on `http://localhost:
 
 4. Configure the Clerk webhook endpoint:
    - Clerk dashboard → **Webhooks** → **Add Endpoint**.
-   - **Endpoint URL**: `https://<your-subdomain>.ngrok-free.dev/webhooks/clerk/link-orgs`.
+   - **Endpoint URL**: `https://<your-subdomain>.ngrok-free.dev/webhooks/clerk`.
    - **Subscribe to events** (subscribe to all nine — the handler at `routes/webhooks/handlers.ts` processes the full set):
      - `organization.created`
      - `organization.updated`
@@ -117,7 +117,7 @@ Clerk webhooks need a public HTTPS URL. The local API runs on `http://localhost:
 
 The ngrok agent ships a local inspection UI at [http://localhost:4040](http://localhost:4040) that lets you inspect and replay webhook deliveries against your local API while iterating on handler code — useful when debugging the org-link flow.
 
-In production self-hosted deployments, point Clerk directly at the deployment's public URL (e.g. `https://api.example.com/webhooks/clerk/link-orgs`); the tunnel is for dev only.
+In production self-hosted deployments, point Clerk directly at the deployment's public URL (e.g. `https://api.example.com/webhooks/clerk`); the tunnel is for dev only.
 
 ## 5. Verify end-to-end
 
