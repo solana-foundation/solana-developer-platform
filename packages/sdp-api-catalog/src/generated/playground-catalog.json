@@ -40,9 +40,15 @@
           }
         ],
         "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
+          "data": {
+            "configId": "cfg_example",
+            "publicKey": "So11111111111111111111111111111111111111112",
+            "walletId": "privy_wallet_123"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         },
         "releaseModule": "custody",
         "shadowedBy": []
@@ -362,7 +368,13 @@
         ],
         "bodyFields": [],
         "expectedResponse": {
-          "publicKey": "So11111111111111111111111111111111111111112"
+          "data": {
+            "publicKey": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         },
         "releaseModule": "custody",
         "shadowedBy": []
@@ -6971,7 +6983,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"feePayment\": \"sponsored\"\n}",
+            "required": true
+          }
+        ],
         "expectedResponse": {
           "data": {
             "transaction": {
@@ -7112,7 +7134,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"feePayment\": \"sponsored\"\n}",
+            "required": true
+          }
+        ],
         "expectedResponse": {
           "data": {
             "transaction": {
@@ -8203,7 +8235,7 @@
         "operationId": "listHolders",
         "title": "List holder enrollments",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments?page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8211,12 +8243,29 @@
             "description": "Token identifier.",
             "defaultValue": "tok_example",
             "required": true
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "required": false,
+            "valueType": "number"
           }
         ],
         "bodyFields": [],
         "expectedResponse": {
           "data": {
-            "holders": [{}]
+            "holders": [{}],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
           },
           "meta": {}
         },

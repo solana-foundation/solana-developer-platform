@@ -30,18 +30,27 @@ import { registerApiKeyPaths } from "./paths/api-keys";
 import { registerAssetProfilePaths } from "./paths/asset-profiles";
 import { registerCompliancePaths } from "./paths/compliance";
 import { registerCounterpartyPaths } from "./paths/counterparties";
+import { registerInternalCounterpartyPaths } from "./paths/counterparties-internal";
 import { registerCustodyPaths } from "./paths/custody";
+import { registerCustodySetupPaths } from "./paths/custody-setup";
+import { registerDiscoveryPaths } from "./paths/discovery";
 import { registerDvpPaths } from "./paths/dvp";
 import { registerEarnPaths, registerPublicEarnPaths } from "./paths/earn";
 import { registerHealthPaths } from "./paths/health";
+import { registerHeliusRingsPaths } from "./paths/helius-rings";
 import { registerIssuancePaths } from "./paths/issuance";
 import { registerMemberPaths } from "./paths/members";
+import { registerDashboardNetworkPaths } from "./paths/network";
 import { registerOnboardingPaths } from "./paths/onboarding";
 import { registerOrganizationPaths } from "./paths/organizations";
+import { registerPaymentRequestPaths } from "./paths/payment-requests";
 import { registerPaymentsPaths } from "./paths/payments";
+import { registerPlacesPaths } from "./paths/places";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectAdministrationPaths, registerProjectPaths } from "./paths/projects";
+import { registerInternalRampPaths } from "./paths/ramps-internal";
 import { registerTransactionsPaths } from "./paths/transactions";
+import { registerWebhookPaths } from "./paths/webhooks";
 import {
   isValuePublished,
   pruneUnpublishedValues,
@@ -93,6 +102,31 @@ const OPENAPI_TAG = {
   PUBLIC_EARN: {
     name: "Earn",
     description: EARN_TAG_DESCRIPTION,
+  },
+  DISCOVERY: {
+    name: "API Discovery",
+    description: "Existing public document, reference page, AI discovery, and root redirect.",
+  },
+  WEBHOOKS: {
+    name: "Webhook Ingress",
+    description: "Internal signed Clerk and ramp-provider event ingress.",
+  },
+  NETWORK: {
+    name: "Dashboard Network Data",
+    description: "Internal cached Solana network readings and mainnet health.",
+  },
+  CUSTODY_SETUP: {
+    name: "Dashboard Custody Setup",
+    description:
+      "Internal custody installation, credential lifecycle, and dashboard wallet helpers.",
+  },
+  PLACES: {
+    name: "Places & Address Lookup",
+    description: "Internal address autocomplete, place details, and static map lookup.",
+  },
+  HELIUS_RINGS: {
+    name: "Helius Rings",
+    description: "Internal Helius Rings wallets, operations, and connection management.",
   },
   DVP: {
     name: "DvP",
@@ -196,6 +230,12 @@ const OPENAPI_TAGS = [
   OPENAPI_TAG.ASSET_PROFILES,
   OPENAPI_TAG.EARN,
   OPENAPI_TAG.DVP,
+  OPENAPI_TAG.HELIUS_RINGS,
+  OPENAPI_TAG.PLACES,
+  OPENAPI_TAG.CUSTODY_SETUP,
+  OPENAPI_TAG.NETWORK,
+  OPENAPI_TAG.WEBHOOKS,
+  OPENAPI_TAG.DISCOVERY,
   OPENAPI_TAG.ADMIN,
   OPENAPI_TAG.ONBOARDING,
 ];
@@ -245,20 +285,29 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
 
 function registerAllPaths(registry: OpenAPIRegistry) {
   registerHealthPaths(registry);
+  registerDiscoveryPaths(registry);
   registerOrganizationPaths(registry);
   registerApiKeyPaths(registry);
   registerMemberPaths(registry);
   registerCustodyPaths(registry);
+  registerCustodySetupPaths(registry);
+  registerDashboardNetworkPaths(registry);
+  registerWebhookPaths(registry);
   registerEarnPaths(registry);
   registerDvpPaths(registry);
+  registerHeliusRingsPaths(registry);
   registerProjectPaths(registry, true);
   registerProjectAdministrationPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
+  registerPaymentRequestPaths(registry);
+  registerInternalRampPaths(registry);
   registerTransactionsPaths(registry);
   registerPrivateChannelsPaths(registry);
+  registerPlacesPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
+  registerInternalCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
   registerAdminPaths(registry);
   registerOnboardingPaths(registry);

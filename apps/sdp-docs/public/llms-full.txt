@@ -5599,9 +5599,7 @@ Public: this route takes no API key.
 
 - **`200`** Service is ready
 
-  - **`status`** · `string` · required · one of `ready`, `not_ready` · example `ready`
-
-    Readiness status.
+  - **`status`** · `string` · required · always `ready`
 
   - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -5633,7 +5631,35 @@ Public: this route takes no API key.
 
 - **`503`** Service is not ready
 
-  Same fields as `200`.
+  - **`status`** · `string` · required · always `not_ready`
+
+  - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+    Readiness check timestamp.
+
+  - **`revision`** · `string` · required · example `sdp-prod-api-public-00042-abc`
+
+    Cloud Run revision serving the request, or `local` outside Cloud Run.
+
+  - **`commit`** · `string` · required · example `0123456789abcdef0123456789abcdef01234567`
+
+    Git commit the serving image was built from, or `local` when the image carries none.
+
+  - **`checks`** · `object` · required
+
+    Dependency health checks.
+
+    - **`database`** · `string` · required · one of `ok`, `error` · example `ok`
+
+      Database connectivity status.
+
+    - **`redis`** · `string` · required · one of `ok`, `error` · example `ok`
+
+      Redis connectivity status.
+
+    - **`egress`** · `string` · one of `pending`, `ok`, `unverified` · example `ok`
+
+      Outbound internet connectivity of this instance. `pending` (not ready) while a fresh instance waits for working egress, `ok` once an outbound call succeeded, `unverified` when it stopped waiting and serves anyway. Absent where the deployment does not wait for egress.
 
 ## Example request
 
@@ -5816,17 +5842,33 @@ One of:
 
 - **`201`** Wallet signing initialized
 
-  - **`configId`** · `string` · required · example `cfg_example`
+  - **`data`** · `object` · required
 
-    Created wallet signing config ID.
+    Wallet signing initialization result.
 
-  - **`publicKey`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+    - **`configId`** · `string` · required · example `cfg_example`
 
-    Public key of the provisioned root wallet.
+      Created wallet signing config ID.
 
-  - **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+    - **`publicKey`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-    Provider wallet ID of the provisioned root wallet.
+      Public key of the provisioned root wallet.
+
+    - **`walletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+
+      Provider wallet ID of the provisioned root wallet.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
 
 - **`400`** Bad Request
 
@@ -5922,9 +5964,15 @@ r = requests.post("https://api.solana.com/v1/wallets/managed-signing/initialize-
 
 ```json tab="201"
 {
-  "configId": "cfg_example",
-  "publicKey": "So11111111111111111111111111111111111111112",
-  "walletId": "privy_wallet_123"
+  "data": {
+    "configId": "cfg_example",
+    "publicKey": "So11111111111111111111111111111111111111112",
+    "walletId": "privy_wallet_123"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
 }
 ```
 
@@ -7067,9 +7115,25 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 - **`200`** Wallet public key
 
-  - **`publicKey`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+  - **`data`** · `object` · required
 
-    Base58-encoded Solana address.
+    Wallet public key response payload.
+
+    - **`publicKey`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
+
+      Base58-encoded Solana address.
+
+  - **`meta`** · `object` · required
+
+    Response metadata.
+
+    - **`requestId`** · `string` · required · min length 1 · example `req_example`
+
+      Request identifier for tracing.
+
+    - **`timestamp`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
+
+      ISO 8601 timestamp.
 
 - **`400`** Bad Request
 
@@ -7144,7 +7208,13 @@ r = requests.get("https://api.solana.com/v1/wallets/public-key?walletId=privy_wa
 
 ```json tab="200"
 {
-  "publicKey": "So11111111111111111111111111111111111111112"
+  "data": {
+    "publicKey": "So11111111111111111111111111111111111111112"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
 }
 ```
 
@@ -13213,6 +13283,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
   Required for dashboard sessions. API keys use their assigned project.
 
+## Request body
+
+`application/json` · required
+
+- **`signingWalletId`** · `string` · min length 1
+
+- **`feePayment`** · `string` · one of `sponsored`, `wallet` · default `sponsored`
+
 ## Responses
 
 - **`200`** Prepared deploy transaction
@@ -13345,15 +13423,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction' \
-  -H "Authorization: Bearer $SDP_API_KEY"
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "feePayment": "sponsored"
+  }'
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "feePayment": "sponsored"
+  })
 });
 ```
 
@@ -13361,7 +13447,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/build-unsigned-transaction",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "feePayment": "sponsored"
+  })
 ```
 
 ## Example responses
@@ -13904,6 +13993,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
   Required for dashboard sessions. API keys use their assigned project.
 
+## Request body
+
+`application/json` · required
+
+- **`signingWalletId`** · `string` · min length 1
+
+- **`feePayment`** · `string` · one of `sponsored`, `wallet` · default `sponsored`
+
 ## Responses
 
 - **`200`** Prepared metadata-URI follow-up transaction (or no-op)
@@ -14024,15 +14121,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction' \
-  -H "Authorization: Bearer $SDP_API_KEY"
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "feePayment": "sponsored"
+  }'
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "feePayment": "sponsored"
+  })
 });
 ```
 
@@ -14040,7 +14145,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/metadata/build-unsigned-transaction",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
+  json={
+    "feePayment": "sponsored"
+  })
 ```
 
 ## Example responses
@@ -19548,6 +19656,14 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
   Token identifier.
 
+## Query parameters
+
+- **`page`** · `integer` · greater than 0 · example `1`
+
+  Page number (1-based).
+
+- **`pageSize`** · `integer` · min 1 · max 200
+
 ## Headers
 
 - **`x-project-id`** · `string` · min length 1 · example `prj_example`
@@ -19563,6 +19679,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
     - **`holders`** · `object[]` · required
 
       - **`*`** · `any`
+
+    - **`total`** · `integer` · required · min 0
+
+    - **`page`** · `integer` · required · greater than 0
+
+    - **`pageSize`** · `integer` · required · greater than 0
 
   - **`meta`** · `object`
 
@@ -19636,7 +19758,10 @@ r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/holder-e
   "data": {
     "holders": [
       {}
-    ]
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 1
   },
   "meta": {}
 }
@@ -32403,13 +32528,19 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Start on-ramp
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-onramp-quote
 
-> Starts a tracked provider-specific on-ramp flow.
+> Starts a tracked provider-specific on-ramp flow and creates an SDP transfer.
 
 `POST /v1/payments/ramps/onramp/start`
 
-Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.
+Hosted providers return a hosted URL; instruction-based providers return funding instructions. Starting the flow does not confirm settlement. This endpoint does not offer an idempotency key.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp.execute` action.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Required for dashboard sessions. API keys use their assigned project.
 
 ## Request body
 
@@ -32660,11 +32791,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Simulate sandbox transfer
 Source: https://platform.solana.com/docs/reference/api/payments/simulate-sandbox-transfer
 
-> Sandbox-only.
+> Sandbox-only simulation endpoint for an on-ramp transfer awaiting payment.
 
 `POST /v1/payments/ramps/sandbox/simulate`
 
-Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.
+The current handler refuses simulation for all available providers with 400; other environments return 403. The declared success response is empty.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_transfers.manage` action.
 

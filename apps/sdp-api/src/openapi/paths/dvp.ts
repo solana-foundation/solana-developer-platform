@@ -12,11 +12,12 @@
 
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { errorResponseSchema } from "@/openapi/schemas/base";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
   createDvpTradeRequestSchema,
   dvpCloseRefusalErrorResponseSchema,
   dvpLegRefusalErrorResponseSchema,
+  dvpMintInspectionSchema,
   dvpTradeIdParamSchema,
   fundDvpTradeRequestSchema,
   listDvpTradesQuerySchema,
@@ -41,13 +42,38 @@ const tradeIdPathParams = z.object({ tradeId: dvpTradeIdParamSchema });
 
 export function registerDvpPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
+    method: "get",
+    path: "/v1/dvp/mints/{mint}",
+    tags: [DVP_TAG],
+    summary: "Inspect a DvP mint",
+    operationId: "inspectDvpMint",
+    description:
+      "Reads a mint's owning token program, decimals, inline metadata, and DvP eligibility. Unknown decimals remain null; an upstream read failure is an error rather than a negative eligibility result. Invalid addresses or accounts that are not mints return 404. This route has the same authentication, project scope, and feature gates as other DvP reads.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: z.object({ mint: z.string().min(1) }) },
+    responses: {
+      200: {
+        description: "Mint inspection",
+        content: jsonContent(
+          successResponseSchema(
+            z.object({
+              mint: dvpMintInspectionSchema,
+            })
+          )
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/dvp/trades",
     tags: [DVP_TAG],
     summary: "Create a DvP trade",
     operationId: "createDvpTrade",
     description:
-      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Send an Idempotency-Key: a retry after an ambiguous broadcast returns the original trade, because without one the retry draws a fresh nonce and creates a SECOND trade at a different address while the first sits on chain with a published escrow nobody is watching. Only the initiating party's connected wallet signs: the counterparty signs nothing here and needs no integration, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
+      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Send an Idempotency-Key: a retry after an ambiguous broadcast returns the original trade, because without one the retry draws a fresh nonce and creates a SECOND trade at a different address while the first sits on chain with a published escrow nobody is watching. Creation requires no counterparty signature and commits neither leg's funds, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,

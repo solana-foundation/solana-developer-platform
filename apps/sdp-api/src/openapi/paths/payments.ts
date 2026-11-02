@@ -927,9 +927,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Start on-ramp",
     operationId: "createPaymentOnrampQuote",
     description:
-      "Starts a tracked provider-specific on-ramp flow. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+      "Starts a tracked provider-specific on-ramp flow and creates an SDP transfer. Hosted providers return a hosted URL; instruction-based providers return funding instructions. Starting the flow does not confirm settlement. This endpoint does not offer an idempotency key.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(createOnrampQuoteRequestSchema),
@@ -952,7 +953,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:
-      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+      "Sandbox-only simulation endpoint for an on-ramp transfer awaiting payment. The current handler refuses simulation for all available providers with 400; other environments return 403. The declared success response is empty.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

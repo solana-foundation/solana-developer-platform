@@ -1,6 +1,10 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { errorResponseSchema, walletIdParamSchema } from "@/openapi/schemas/base";
+import {
+  errorResponseSchema,
+  successResponseSchema,
+  walletIdParamSchema,
+} from "@/openapi/schemas/base";
 import {
   createCustodyWalletRequestSchema,
   custodyPublicKeyResponseSchema,
@@ -60,7 +64,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       201: {
         description: "Wallet signing initialized",
-        content: jsonContent(initializeSigningResponseSchema),
+        content: jsonContent(successResponseSchema(initializeSigningResponseSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 404, 409, 422, 500]),
       403: {
@@ -220,7 +224,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Wallet public key",
-        content: jsonContent(custodyPublicKeyResponseSchema),
+        content: jsonContent(successResponseSchema(custodyPublicKeyResponseSchema)),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },

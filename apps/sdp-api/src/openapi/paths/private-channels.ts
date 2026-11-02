@@ -22,7 +22,10 @@ import {
   privateChannelInstanceSchema,
   privateChannelInstanceUpdateSchema,
   privateChannelListSchema,
+  privateChannelMembershipSchema,
   privateChannelOverviewSchema,
+  privateChannelPrincipalIdParamSchema,
+  privateChannelPrincipalSchema,
   privateChannelProbeBodySchema,
   privateChannelProbeResultSchema,
   privateChannelSchema,
@@ -42,6 +45,10 @@ import {
   privateChannelWithdrawalSchema,
 } from "@/openapi/schemas/private-channels";
 import {
+  addPrincipalMembershipBodySchema,
+  createPrincipalBodySchema,
+} from "@/routes/private-channels/schemas";
+import {
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -57,6 +64,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Get the active Private Channels instance for the project",
     operationId: "getPrivateChannelInstance",
+    description:
+      "Reads the active instance for the selected project, or null when disconnected. Requires Private Channels to be enabled in the environment.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -78,10 +87,10 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     operationId: "updatePrivateChannelInstance",
     description:
       "Server-probes the proposed gateway, auth service, and escrow deployment before replacing the active instance configuration.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(privateChannelInstanceUpdateSchema) },
+      body: { required: true, content: jsonContent(privateChannelInstanceUpdateSchema) },
     },
     responses: {
       200: {
@@ -102,10 +111,11 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     operationId: "connectPrivateChannelInstance",
     description:
       "Server-probes both the gateway (/health + /ready) and the chain RPC (getVersion) before persisting. Returns 409 with `requiresReactivateConfirmation` if the gateway URL matches a previously-connected inactive row.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
+        required: true,
         content: jsonContent(privateChannelInstanceInputSchema),
       },
     },
@@ -126,6 +136,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Post-connect instance overview (gateway health + chain reads)",
     operationId: "getPrivateChannelOverview",
+    description:
+      "Reads the active instance and a current gateway, managed RPC, escrow deployment, and auth-service snapshot.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -150,7 +162,9 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Disconnect the active Private Channels instance",
     operationId: "disconnectPrivateChannelInstance",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Marks the active instance inactive while retaining its configuration and history. Reconnecting an inactive same-gateway row requires explicit confirmReactivate acknowledgement.",
+    security: [{ clerkBearerAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -170,7 +184,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Delete the active Private Channels instance",
     operationId: "deletePrivateChannelInstance",
     description: "Hard-deletes the active row. Downstream FKs cascade.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -192,7 +206,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(privateChannelProbeBodySchema) },
+      body: { required: true, content: jsonContent(privateChannelProbeBodySchema) },
     },
     responses: {
       200: {
@@ -271,7 +285,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { content: jsonContent(createPrivateChannelDepositBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelDepositBodySchema) },
     },
     responses: {
       200: {
@@ -329,7 +343,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
     },
     responses: {
       200: {
@@ -410,7 +424,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       params: privateChannelTransferChannelIdParamSchema,
-      body: { content: jsonContent(createPrivateChannelTransferBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelTransferBodySchema) },
     },
     responses: {
       200: {
@@ -495,7 +509,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(createPrivateChannelBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelBodySchema) },
     },
     responses: {
       201: {
@@ -512,6 +526,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Get a channel",
     operationId: "getPrivateChannel",
+    description:
+      "Reads one logical channel in the active project instance; a channel from another instance is not found.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelIdParamSchema },
     responses: {
@@ -635,7 +651,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     request: {
       headers: projectScopeHeaders,
       params: privateChannelVerifyWalletParamSchema,
-      body: { content: jsonContent(privateChannelVerifyWalletBodySchema) },
+      body: { required: true, content: jsonContent(privateChannelVerifyWalletBodySchema) },
     },
     responses: {
       200: {
@@ -664,6 +680,116 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(z.object({ deleted: z.boolean() }))),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  // These mounted routes remain internal along with this entire family.
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/principals",
+    tags: [TAG],
+    summary: "List project Private Channels principals",
+    operationId: "listPrivateChannelPrincipals",
+    description:
+      "Lists business participants and their channel memberships on the active instance. May provision the default principal and channel membership if missing. These identities are not SDP users; SPC credentials are never returned.",
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Project principals",
+        content: jsonContent(
+          successResponseSchema(z.object({ principals: z.array(privateChannelPrincipalSchema) }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/private-channels/principals",
+    tags: [TAG],
+    summary: "Create a Private Channels principal",
+    operationId: "createPrivateChannelPrincipal",
+    description:
+      "Provisions a named project-scoped SPC business participant on the active instance. Requires a member session with private_channels.configure; API keys cannot configure principals.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: { required: true, content: jsonContent(createPrincipalBodySchema) },
+    },
+    responses: {
+      200: {
+        description: "Created principal",
+        content: jsonContent(
+          successResponseSchema(z.object({ principal: privateChannelPrincipalSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/private-channels/principals/{principalId}",
+    tags: [TAG],
+    summary: "Disable a Private Channels principal",
+    operationId: "disablePrivateChannelPrincipal",
+    description:
+      "Disables a project principal, revokes its verified wallets, and removes its channel memberships. The default principal cannot be disabled. The row and history are retained.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { headers: projectScopeHeaders, params: privateChannelPrincipalIdParamSchema },
+    responses: {
+      200: {
+        description: "Disabled principal",
+        content: jsonContent(successResponseSchema(z.object({ disabled: z.literal(true) }))),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/private-channels/channels/{channelId}/principal-memberships",
+    tags: [TAG],
+    summary: "Add a principal to a private channel",
+    operationId: "addPrivateChannelPrincipalMembership",
+    description:
+      "Grants an active principal on the project's active instance access to a channel on that instance. Returns the existing persisted membership when already attached. No idempotency header is supported.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelTransferChannelIdParamSchema,
+      body: { required: true, content: jsonContent(addPrincipalMembershipBodySchema) },
+    },
+    responses: {
+      200: {
+        description: "Channel membership",
+        content: jsonContent(
+          successResponseSchema(z.object({ membership: privateChannelMembershipSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/private-channels/channels/{channelId}/principal-memberships/{principalId}",
+    tags: [TAG],
+    summary: "Remove a principal from a private channel",
+    operationId: "removePrivateChannelPrincipalMembership",
+    description:
+      "Removes a project principal's channel membership on the active instance. This does not disable the principal or revoke its verified wallets.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelTransferChannelIdParamSchema.extend(
+        privateChannelPrincipalIdParamSchema.shape
+      ),
+    },
+    responses: {
+      200: {
+        description: "Removed membership",
+        content: jsonContent(successResponseSchema(z.object({ removed: z.literal(true) }))),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

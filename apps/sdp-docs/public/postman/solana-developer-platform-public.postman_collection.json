@@ -491,9 +491,24 @@
           "name": "Prepare token deploy transaction",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/build-unsigned-transaction",
-            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction."
+            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"\",\n  \"feePayment\": \"sponsored\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         },
         {
@@ -524,9 +539,24 @@
           "name": "Prepare metadata-URI follow-up transaction",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/metadata/build-unsigned-transaction",
-            "description": "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches."
+            "description": "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signingWalletId\": \"\",\n  \"feePayment\": \"sponsored\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         },
         {
@@ -1517,7 +1547,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/onramp/start",
-            "description": "Starts a tracked provider-specific on-ramp flow. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+            "description": "Starts a tracked provider-specific on-ramp flow and creates an SDP transfer. Hosted providers return a hosted URL; instruction-based providers return funding instructions. Starting the flow does not confirm settlement. This endpoint does not offer an idempotency key.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"provider\": \"moonpay\",\n  \"counterpartyId\": \"cpty_example\",\n  \"destinationCustodyWalletId\": \"cwlt_example\",\n  \"assetRail\": \"usdc.solana\",\n  \"fiatCurrency\": \"USD\",\n  \"fiatAmount\": \"100.00\"\n}",
@@ -1541,7 +1571,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
-            "description": "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+            "description": "Sandbox-only simulation endpoint for an on-ramp transfer awaiting payment. The current handler refuses simulation for all available providers with 400; other environments return 403. The declared success response is empty.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transferId\": \"xfr_example\"\n}",

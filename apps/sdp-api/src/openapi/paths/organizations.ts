@@ -1,8 +1,13 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
+import {
+  errorResponseSchema,
+  orgIdParamSchema,
+  successResponseSchema,
+} from "@/openapi/schemas/base";
 import {
   createOrganizationRequestSchema,
+  organizationProviderAccessResponseSchema,
   requestMainnetAccessRequestSchema,
   updateOrganizationRequestSchema,
 } from "@/openapi/schemas/organizations";
@@ -52,6 +57,25 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
       200: {
         description: "Organization found",
         content: jsonContent(organizationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/organizations/{orgId}/provider-availability",
+    tags: ["Organizations"],
+    summary: "Get organization provider access",
+    operationId: "getOrganizationProviderAccess",
+    description:
+      "Returns the authenticated organization's tier and provider access. Each provider reports whether the organization is entitled to it, the deployment has configured it, and it is enabled. This internal organization view includes every known provider; project provider availability supplies the project-specific decision.",
+    security: [{ apiKeyAuth: [] }],
+    request: { params: z.object({ orgId: orgIdParamSchema }) },
+    responses: {
+      200: {
+        description: "Organization provider access",
+        content: jsonContent(successResponseSchema(organizationProviderAccessResponseSchema)),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },

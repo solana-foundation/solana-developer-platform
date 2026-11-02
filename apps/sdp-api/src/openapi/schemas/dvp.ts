@@ -25,6 +25,17 @@ import {
   fundDvpTradeSchema as fundDvpTradeSchemaBase,
   listDvpTradesQuerySchema as listDvpTradesQuerySchemaBase,
 } from "@/routes/dvp/schemas";
+import type { DvpMintInspection } from "@/services/dvp/inspect-mint";
+
+export const dvpMintInspectionSchema = z.object({
+  mint: z.string(),
+  tokenProgram: z.string(),
+  decimals: z.number().int().nullable(),
+  name: z.string().nullable(),
+  symbol: z.string().nullable(),
+  eligible: z.boolean(),
+  blockedBy: z.string().nullable(),
+}) satisfies z.ZodType<DvpMintInspection>;
 
 export const dvpTradeIdParamSchema = withOpenApi(dvpTradeIdParamsSchemaBase.shape.tradeId, {
   description: "DvP trade identifier.",

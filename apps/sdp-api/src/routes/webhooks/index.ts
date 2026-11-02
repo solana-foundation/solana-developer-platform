@@ -10,10 +10,7 @@ import { publicRoute } from "@/middleware/require-action";
 import { requireModule, requireRampProviderParam } from "@/middleware/require-module";
 import type { Env } from "@/types/env";
 import { handleClerkWebhook, handleRampProviderWebhook } from "./handlers";
-
-// Provider webhook payloads are a few kilobytes; the handlers buffer the body
-// whole to verify its signature, so the ceiling is what bounds that buffer.
-const MAX_BODY_BYTES = 1024 * 1024;
+import { MAX_WEBHOOK_BODY_BYTES } from "./schemas";
 
 // These routes are deliberately outside the KV-backed limiter — a provider's
 // delivery has to survive KV being down — which left them with no limit at
@@ -37,7 +34,7 @@ webhooks.use(
 webhooks.use(
   "*",
   bodyLimit({
-    maxSize: MAX_BODY_BYTES,
+    maxSize: MAX_WEBHOOK_BODY_BYTES,
     onError: () => {
       throw payloadTooLarge();
     },

@@ -3,6 +3,7 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPES,
+  type PrivateChannelPrincipalDto,
 } from "@sdp/types/private-channels";
 import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
@@ -628,4 +629,28 @@ export const privateChannelEventsQuerySchema = z.object({
       param: { name: "before", in: "query" },
       description: "Opaque pagination cursor from a previous response's nextCursor.",
     }),
+});
+
+/** Existing internal project identities; never SDP members or SPC credentials. */
+export const privateChannelPrincipalSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isDefault: z.boolean(),
+  status: z.enum(["active", "disabled"]),
+  verifiedWalletCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  channels: z.array(z.object({ id: z.string(), name: z.string(), isDefault: z.boolean() })),
+}) satisfies z.ZodType<PrivateChannelPrincipalDto>;
+
+export const privateChannelPrincipalIdParamSchema = z.object({
+  principalId: z.string().min(1),
+});
+
+/** The current membership handler returns its persisted, snake-case row. */
+export const privateChannelMembershipSchema = z.object({
+  id: z.string(),
+  channel_id: z.string(),
+  private_channel_user_id: z.string(),
+  added_by: z.string().nullable(),
+  added_at: z.string(),
 });

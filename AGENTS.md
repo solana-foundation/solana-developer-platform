@@ -7,6 +7,7 @@ This file is the canonical agent guide for this repository.
 - `apps/sdp-api`: Node.js API deployed to Cloud Run, OpenAPI source, route handlers, Postgres/Redis integrations
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
+- `apps/sdp-cli`: `sdp` command-line client; projects, organizations, members, invitations, API keys, wallets, counterparties, accounts, transfers, transfer batches, payment requests, payment links, recurring payments, subscription plans, subscriptions, on-ramps, off-ramps, transaction history, Earn, DvP, issuance, asset profiles, Private Channels, Helius Rings, compliance, Places and Address Lookup, dashboard custody setup, dashboard network data, webhook ingress, health, API discovery, and onboarding status commands and shared API transport (see its README)
 - `packages/sdp-types`: shared runtime types and shared product constants
 - `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
@@ -25,6 +26,7 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 - OpenAPI JSON: `pnpm -C apps/sdp-api openapi:generate`
 - Route actions inventory (`apps/sdp-api/src/openapi/route-actions.generated.json`): `pnpm -C apps/sdp-api route-actions:generate`
 - API playground catalog: `pnpm generate:api-playground`
+- CLI contract (`apps/sdp-cli/src/contract.generated.json`): `pnpm generate:cli`
 - API reference docs: `pnpm -C apps/sdp-docs generate:api`
 - AI discovery resources and the docs skill (both `SKILL.md` copies): `pnpm -C apps/sdp-docs generate:ai`
 

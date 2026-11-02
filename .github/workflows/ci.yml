@@ -543,6 +543,76 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm check:value-movement
 
+  cli:
+    name: CLI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check CLI contract
+        run: pnpm check:cli
+
+      - name: Test CLI
+        run: pnpm --filter @sdp/cli test
+
+      - name: Build CLI
+        run: pnpm --filter @sdp/cli build
+
+      - name: Smoke test bundled CLI
+        run: |
+          node apps/sdp-cli/dist/cli.js projects --help
+          node apps/sdp-cli/dist/cli.js organizations --help
+          node apps/sdp-cli/dist/cli.js members --help
+          node apps/sdp-cli/dist/cli.js invitations --help
+          node apps/sdp-cli/dist/cli.js api-keys --help
+          node apps/sdp-cli/dist/cli.js wallets --help
+          node apps/sdp-cli/dist/cli.js counterparties --help
+          node apps/sdp-cli/dist/cli.js counterparties accounts --help
+          node apps/sdp-cli/dist/cli.js transfers --help
+          node apps/sdp-cli/dist/cli.js transfer-batches --help
+          node apps/sdp-cli/dist/cli.js payment-requests --help
+          node apps/sdp-cli/dist/cli.js payment-links --help
+          node apps/sdp-cli/dist/cli.js recurring-payments --help
+          node apps/sdp-cli/dist/cli.js subscription-plans --help
+          node apps/sdp-cli/dist/cli.js subscriptions --help
+          node apps/sdp-cli/dist/cli.js onramps --help
+          node apps/sdp-cli/dist/cli.js offramps --help
+          node apps/sdp-cli/dist/cli.js ramps --help
+          node apps/sdp-cli/dist/cli.js transactions --help
+          node apps/sdp-cli/dist/cli.js earn --help
+          node apps/sdp-cli/dist/cli.js earn external-wallet --help
+          node apps/sdp-cli/dist/cli.js dvp --help
+          node apps/sdp-cli/dist/cli.js dvp trades --help
+          node apps/sdp-cli/dist/cli.js issuance --help
+          node apps/sdp-cli/dist/cli.js asset-profiles --help
+          node apps/sdp-cli/dist/cli.js private-channels --help
+          node apps/sdp-cli/dist/cli.js helius-rings --help
+          node apps/sdp-cli/dist/cli.js helius-rings connections --help
+          node apps/sdp-cli/dist/cli.js compliance --help
+          node apps/sdp-cli/dist/cli.js places --help
+          node apps/sdp-cli/dist/cli.js custody --help
+          node apps/sdp-cli/dist/cli.js network snapshot get --help
+          node apps/sdp-cli/dist/cli.js webhooks --help
+          node apps/sdp-cli/dist/cli.js health --help
+          node apps/sdp-cli/dist/cli.js api --help
+          node apps/sdp-cli/dist/cli.js wallets balances get --help
+          node apps/sdp-cli/dist/cli.js onboarding status get --help
+
   build_api:
     name: Build API
     runs-on: ubuntu-latest

@@ -53,7 +53,7 @@ export function registerEarnTreasuryPaths(
       body?: z.ZodType;
       query?: Query;
       params?: Query;
-      idempotency?: "required" | "either";
+      idempotency?: "required" | "either" | "optional";
       signs?: true;
       created?: boolean;
       description?: string;
@@ -62,7 +62,7 @@ export function registerEarnTreasuryPaths(
     const headers =
       options.idempotency === "required"
         ? projectScopeWithRequiredIdempotencyHeaders
-        : options.idempotency === "either"
+        : options.idempotency === "either" || options.idempotency === "optional"
           ? projectScopeWithIdempotencyHeaders
           : projectScopeHeaders;
     registry.registerPath({
@@ -73,14 +73,15 @@ export function registerEarnTreasuryPaths(
       tags: ["Earn"],
       security,
       description:
-        (options.description ??
-          `Tenant-scoped Treasury operation. Requires earn:${method === "get" || path.endsWith("preview") || path.includes("previews") || path.endsWith("options") ? "read" : "write"}.`) +
+        (options.description ?? "Tenant-scoped Earn treasury operation.") +
         (options.idempotency
           ? " A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload."
           : "") +
         (options.idempotency === "either"
           ? " Supply exactly one UUIDv4 key, through Idempotency-Key or body requestId."
-          : ""),
+          : options.idempotency === "optional"
+            ? " An optional UUIDv4 key may be supplied through Idempotency-Key or body requestId, never both."
+            : ""),
       request: {
         headers,
         ...(options.params ? { params: options.params } : {}),
@@ -296,7 +297,11 @@ export function registerEarnTreasuryPaths(
     "retargetEarnProgram",
     "Change a portfolio account's allocation",
     program,
-    { params: requests.earnProgramParamsSchema, body: requests.earnProgramRetargetSchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      body: requests.earnProgramRetargetSchema,
+      idempotency: "optional",
+    }
   );
   route(
     "get",

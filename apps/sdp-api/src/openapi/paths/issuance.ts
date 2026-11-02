@@ -30,6 +30,7 @@ import {
   updateAuthorityRequestSchema,
   updateTokenRequestSchema,
 } from "@/openapi/schemas/issuance";
+import { legacyDeployTokenSchema } from "@/routes/issuance/schemas";
 import {
   DOCS_GROUP,
   errorResponses,
@@ -296,6 +297,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Get public token metadata JSON",
     operationId: "getTokenMetadataJson",
+    security: [],
     description:
       "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / " +
       "Metaplex fungible-compatible metadata JSON for a deployed token. This is " +
@@ -481,6 +483,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      body: { required: true, content: jsonContent(legacyDeployTokenSchema) },
     },
     responses: {
       200: {
@@ -535,6 +538,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      body: { required: true, content: jsonContent(legacyDeployTokenSchema) },
     },
     responses: {
       200: {
@@ -1095,7 +1099,12 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   const envelope = (inner: z.ZodTypeAny, name: string) =>
     z.object({ data: inner, meta: z.record(z.string(), z.unknown()).optional() }).openapi(name);
   const holdersResponse = envelope(
-    z.object({ holders: z.array(z.record(z.string(), z.unknown())) }),
+    z.object({
+      holders: z.array(z.record(z.string(), z.unknown())),
+      total: z.number().int().nonnegative(),
+      page: z.number().int().positive(),
+      pageSize: z.number().int().positive(),
+    }),
     "HoldersResponse"
   );
   const holderResponse = envelope(
@@ -1112,7 +1121,14 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     operationId: "listHolders",
     description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
     security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      query: z.object({
+        page: pageQuerySchema.optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      }),
+    },
     responses: {
       200: { description: "Enrolled holders", content: jsonContent(holdersResponse) },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),

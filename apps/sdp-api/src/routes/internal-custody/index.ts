@@ -44,9 +44,8 @@ import {
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
+import { connectionParamsSchema, credentialParamsSchema } from "./schemas";
 
-const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
-const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();
 const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
