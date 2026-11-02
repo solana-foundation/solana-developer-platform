@@ -28,6 +28,14 @@ export const onboardingApplicationSchema = z
 
 export const EARN_ONBOARDING_MAX_FILE_BYTES = 20 * 1024 * 1024;
 export const EARN_ONBOARDING_MAX_BODY_BYTES = 28 * 1024 * 1024;
+// Standard padded base64, checked without a repeated group: a quantified
+// `(?:…)*` group recurses once per four characters on V8 and overflows the
+// call stack on 20 MiB uploads. Character-class quantifiers loop in place,
+// and the length rule pins any padding to one trailing 4-character group.
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+export function isStandardBase64(value: string): boolean {
+  return value.length % 4 === 0 && BASE64_PATTERN.test(value);
+}
 export const onboardingUploadSchema = z
   .object({
     documentType: z.string().min(1).max(256),
@@ -37,7 +45,7 @@ export const onboardingUploadSchema = z
       .string()
       .min(4)
       .max(4 * Math.ceil(EARN_ONBOARDING_MAX_FILE_BYTES / 3))
-      .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+      .refine(isStandardBase64),
   })
   .strict();
 export const onboardingCorrectionBodySchema = wisdomTreeCorrectionFieldsSchema

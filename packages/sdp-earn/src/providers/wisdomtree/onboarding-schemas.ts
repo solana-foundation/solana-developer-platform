@@ -1,3 +1,4 @@
+import { WISDOM_TREE_BUSINESS_APPLICATION_STATUSES } from "@sdp/types/earn-onboarding";
 import { z } from "zod";
 
 // The current form owns conditional CDD fields, choices, document keys and
@@ -60,7 +61,7 @@ export const wisdomTreePersonSubmissionSchema = z
 export const wisdomTreeBusinessFieldsSchema = z.object({
   entity_type: z.literal("organization"),
   // Explicit intent: omission at Connect submits immediately.
-  status: z.enum(["draft", "submit"]),
+  status: z.enum(WISDOM_TREE_BUSINESS_APPLICATION_STATUSES),
   org_guid: wisdomTreeGuidSchema.optional(),
   parent_org_guid: wisdomTreeGuidSchema.optional(),
   org_details: jsonObject.optional(),

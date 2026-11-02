@@ -26,7 +26,7 @@ const application = {
   },
 };
 const db = getDb(env);
-function post(path: string, body: object, key: string) {
+function post(path: string, body: Record<string, unknown>, key: string) {
   return app.request(
     `${base}/${path}`,
     {
