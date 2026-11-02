@@ -46,7 +46,7 @@ function newWebTraceId(): string {
 
 /**
  * Acquires the sdp-api bearer token: the Clerk session token, whose custom
- * claims (org_id, org_role, org_slug, email) come from the instance's
+ * claims (org_id, org_slug, email) come from the instance's
  * session-token customization. Takes `getToken` as a parameter because server
  * contexts get it from `auth()` while the proxy middleware gets it from its
  * `clerkMiddleware` callback.
