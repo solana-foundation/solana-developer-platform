@@ -2,6 +2,7 @@ import { hashString } from "@sdp/payments/hash";
 import type { Action } from "@sdp/types/actions";
 import { getDb } from "@/db/client";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
@@ -47,16 +48,12 @@ export async function seedEarnAuthzTenant(
     },
   };
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', '{}')"
-      )
-      .bind(tenant.org.id, tenant.org.name, tenant.org.slug),
-    db
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(tenant.user.id, tenant.user.email),
-  ]);
+  await seedOrganization(db, {
+    ...tenant.org,
+    status: "active",
+    creator: tenant.user,
+    settings: "{}",
+  });
   await seedDefaultProjects(db, {
     organizationId: tenant.org.id,
     createdBy: tenant.user.id,

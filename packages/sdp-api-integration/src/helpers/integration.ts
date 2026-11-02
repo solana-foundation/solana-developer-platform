@@ -34,6 +34,7 @@ const {
   hashString,
   KoraAdapter,
   runAsMoneyPrincipal,
+  seedOrganization,
   seedTestDatabase,
   signTestClerkJwt,
   TEST_ORG,
@@ -178,12 +179,15 @@ async function resetIntegrationApiState(apiKeyHash: string): Promise<void> {
     .run()
     .catch(() => {});
 
-  await db
-    .prepare(
-      "INSERT OR REPLACE INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, 'active', ?)"
-    )
-    .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, getOrganizationSettingsForIntegration())
-    .run();
+  await seedOrganization(db, {
+    id: TEST_ORG.id,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: "active",
+    creator: TEST_USER,
+    settings: getOrganizationSettingsForIntegration(),
+    onConflict: "update",
+  });
 
   await db
     .prepare(

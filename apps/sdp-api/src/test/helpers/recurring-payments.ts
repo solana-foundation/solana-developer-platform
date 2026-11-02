@@ -23,6 +23,7 @@ import {
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import {
   createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
@@ -463,18 +464,14 @@ export async function seedRecurringDatabaseTenant(options: {
   publicKey: string;
 }): Promise<void> {
   const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, status) VALUES (?, ?, ?, 'active') ON CONFLICT (id) DO NOTHING"
-      )
-      .bind(options.organizationId, options.organizationName, options.organizationSlug),
-    db
-      .prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active') ON CONFLICT (id) DO NOTHING"
-      )
-      .bind(options.userId, options.userEmail),
-  ]);
+  await seedOrganization(db, {
+    id: options.organizationId,
+    name: options.organizationName,
+    slug: options.organizationSlug,
+    status: "active",
+    creator: { id: options.userId, email: options.userEmail },
+    onConflict: "do-nothing",
+  });
   await seedDefaultProjects(db, {
     organizationId: options.organizationId,
     createdBy: options.userId,

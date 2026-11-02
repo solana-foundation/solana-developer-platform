@@ -9,6 +9,7 @@ import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations"
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -18,17 +19,15 @@ const ORGANIZATION_ID = TEST_SEEDED_API_KEY.organizationId;
 
 const PROJECT_ID = "prj_access_settings";
 
-async function seedOrganization(settings: OrganizationSettings | null): Promise<void> {
-  await getDb(env)
-    .prepare("INSERT INTO organizations (id, name, slug, status, settings) VALUES (?, ?, ?, ?, ?)")
-    .bind(
-      ORGANIZATION_ID,
-      TEST_ORG.name,
-      TEST_ORG.slug,
-      TEST_ORG.status,
-      settings === null ? null : JSON.stringify(settings)
-    )
-    .run();
+async function seedOrganizationWithKey(settings: OrganizationSettings | null): Promise<void> {
+  await seedOrganization(getDb(env), {
+    id: ORGANIZATION_ID,
+    name: TEST_ORG.name,
+    slug: TEST_ORG.slug,
+    status: TEST_ORG.status,
+    creator: TEST_USER,
+    settings: settings === null ? null : JSON.stringify(settings),
+  });
   await seedApiKeyRow(env, await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER), {
     ...TEST_SEEDED_API_KEY,
     projectId: PROJECT_ID,
@@ -55,10 +54,6 @@ async function readSettings(): Promise<OrganizationSettings | null> {
 }
 
 async function seedMemberWithProject(): Promise<void> {
-  await getDb(env)
-    .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, ?)")
-    .bind(TEST_USER.id, TEST_USER.email, TEST_USER.status)
-    .run();
   await getDb(env)
     .prepare(
       "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
@@ -116,7 +111,7 @@ describe("Organization access settings", () => {
   });
   describe("writing settings.allowedIpAddresses", () => {
     beforeEach(async () => {
-      await seedOrganization(null);
+      await seedOrganizationWithKey(null);
       await signInAdmin();
     });
     it("rejects an entry that is not an address or CIDR range", async () => {
@@ -197,7 +192,7 @@ describe("Organization access settings", () => {
   });
   describe("concurrent settings updates", () => {
     beforeEach(async () => {
-      await seedOrganization({ enableProductionProject: true });
+      await seedOrganizationWithKey({ enableProductionProject: true });
       await signInAdmin();
     });
     it("keeps the restriction when a rename lands at the same moment", async () => {
@@ -224,7 +219,7 @@ describe("Organization access settings", () => {
   });
   describe("enforcing settings.allowedIpAddresses", () => {
     it("rejects an API key request from outside the organization's range", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
@@ -240,7 +235,7 @@ describe("Organization access settings", () => {
       expect(body.error.message).toContain("organization");
     });
     it("accepts an API key request from inside the organization's range", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "203.0.113.42",
@@ -248,7 +243,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(200);
     });
     it("does not let an IPv6 client past an IPv4-only allowlist", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "2001:db8::42",
@@ -256,7 +251,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(403);
     });
     it("does not let an IPv4 client past an IPv6-only allowlist", async () => {
-      await seedOrganization({ allowedIpAddresses: ["2001:db8::/48"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["2001:db8::/48"] });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "203.0.113.42",
@@ -264,7 +259,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(403);
     });
     it("enforces an IPv6 range against an IPv6 client", async () => {
-      await seedOrganization({ allowedIpAddresses: ["2001:db8::/48"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["2001:db8::/48"] });
       expect(
         (
           await get({
@@ -283,7 +278,7 @@ describe("Organization access settings", () => {
       ).toBe(403);
     });
     it("treats an IPv4-mapped client as the IPv4 address it is", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       expect(
         (
           await get({
@@ -302,12 +297,12 @@ describe("Organization access settings", () => {
       ).toBe(403);
     });
     it("rejects a restricted request with no trusted client IP", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       const res = await get({ Authorization: `Bearer ${TEST_API_KEY.raw}` });
       expect(res.status).toBe(403);
     });
     it("leaves an organization with no restriction unrestricted", async () => {
-      await seedOrganization({ enableProductionProject: true });
+      await seedOrganizationWithKey({ enableProductionProject: true });
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
@@ -315,7 +310,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(200);
     });
     it("fails loudly with a 500 on settings that will not parse", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       await writeRawSettings("{not json");
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -324,7 +319,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(500);
     });
     it("fails closed on a restriction stored in a shape it does not understand", async () => {
-      await seedOrganization(null);
+      await seedOrganizationWithKey(null);
       await writeRawSettings(JSON.stringify({ allowedIpAddresses: "203.0.113.0/24" }));
       const res = await get({
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -333,7 +328,7 @@ describe("Organization access settings", () => {
       expect(res.status).toBe(403);
     });
     it("never filters a signed-in member, only API keys", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       await seedMemberWithProject();
       const token = await signSeededClerkMember(env, getDb(env), TEST_USER.id, ORGANIZATION_ID);
       const outside = await app.request(
@@ -364,7 +359,7 @@ describe("Organization access settings", () => {
     // A key is admitted against the highest tier before its rows are read, so
     // a flood is refused there; its own tier is judged after the read.
     it("dies at the rate limiter before the organization row is read", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       const headers = {
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
         "x-forwarded-for": "198.51.100.42",
@@ -386,7 +381,7 @@ describe("Organization access settings", () => {
       }
     });
     it("intersects with the API key's own allowlist rather than replacing it", async () => {
-      await seedOrganization({ allowedIpAddresses: ["203.0.113.0/24"] });
+      await seedOrganizationWithKey({ allowedIpAddresses: ["203.0.113.0/24"] });
       await clearKVStores(env);
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_SEEDED_API_KEY,
