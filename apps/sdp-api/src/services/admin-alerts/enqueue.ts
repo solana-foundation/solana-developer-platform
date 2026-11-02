@@ -415,15 +415,14 @@ async function configAlertRecipients(
   alert: ConfigAlert,
   context: { admins: readonly Recipient[]; alertEmailsOff: boolean }
 ): Promise<Recipient[]> {
-  const recipients =
-    context.alertEmailsOff && alert.kind !== "alert_emails_changed" ? [] : [...context.admins];
-  if (alert.affectedUserId && alert.affectedUserId !== row.user_id) {
-    const affected = await affectedRecipient(tx, alert.affectedUserId);
-    if (affected && !recipients.some((admin) => admin.user_id === affected.user_id)) {
-      recipients.push(affected);
-    }
-  }
-  return recipients;
+  const admins =
+    context.alertEmailsOff && alert.kind !== "alert_emails_changed" ? [] : context.admins;
+  if (!alert.affectedUserId || alert.affectedUserId === row.user_id) return [...admins];
+  const affected = await affectedRecipient(tx, alert.affectedUserId);
+  if (!affected) return [...admins];
+  // Someone made admin again before this run is an admin too; their copy stays `affected`, so
+  // turning alerts off later cannot suppress it.
+  return [...admins.filter((admin) => admin.user_id !== affected.user_id), affected];
 }
 
 /**

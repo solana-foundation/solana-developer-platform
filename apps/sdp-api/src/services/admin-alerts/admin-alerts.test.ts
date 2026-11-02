@@ -469,6 +469,24 @@ describe("admin alert emails (HOO-2299)", () => {
         ]);
       });
 
+      it("keeps a re-promoted admin's copy when alerts are turned off before it is sent", async () => {
+        await audit({
+          action: "update",
+          resourceType: "member",
+          metadata: { userId: OTHER_ADMIN.id, previousRole: "admin", role: "member" },
+        });
+        // Their membership is still admin: made admin again before the Worker read the demotion.
+        await asWorker(() => enqueueConfigAlerts(env));
+        await asWorker(() =>
+          getDb(env).execute("UPDATE organizations SET settings = ? WHERE id = ?", [
+            JSON.stringify({ enableProductionProject: true, alertEmails: false }),
+            ORGANIZATION_ID,
+          ])
+        );
+        await asWorker(() => deliverAdminAlerts(env));
+        expect(sentEmails().map((email) => email.to)).toEqual([OTHER_ADMIN.email]);
+      });
+
       it("does not email a member whose role change kept or never gave admin access", async () => {
         await audit({
           action: "update",
