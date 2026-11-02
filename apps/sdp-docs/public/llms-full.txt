@@ -106,7 +106,7 @@ use the sidebar's top workspace switcher to select your production project
 Production uses `mainnet-beta`. Wallets, provider connections, and API keys are
 separate from Sandbox and must be set up again.
 
-## 3. Connect your Privy account
+## 3. Connect your custody provider account
 
 Production requires **Bring your own credentials**. In Production, open
 **Wallets**, click **Create wallet**, select **Privy**, then **Continue**.
