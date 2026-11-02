@@ -480,7 +480,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         {
           externalId: "payroll_row_001",
           counterpartyId: "cpty_example",
-          counterpartyAccountId: "cpa_example",
+          counterpartyAccountId: "cpacct_example",
           amount: "25.00",
         },
       ],
@@ -560,7 +560,7 @@ const transferBatchRecipientSchema = z
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
-      example: "cpa_example",
+      example: "cpacct_example",
     }),
     destination: solanaAddressSchema.openapi({
       description: "Resolved Solana destination address.",
@@ -788,7 +788,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty crypto_wallet account. It must contain Solana wallet details.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
@@ -838,7 +838,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       {
         description:
           "Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
@@ -906,7 +906,7 @@ const paymentRecurringPaymentSchema = z
       .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
     counterpartyAccountId: z
       .string()
-      .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
+      .openapi({ description: "Counterparty account ID.", example: "cpacct_example" }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Counterparty wallet owner address.",
     }),
