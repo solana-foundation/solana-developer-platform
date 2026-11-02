@@ -1,7 +1,4 @@
-import {
-  ORGANIZATION_CONTROL_SOURCE_STATUSES,
-  ORGANIZATION_STATUSES,
-} from "@sdp/types/organizations";
+import type { OrganizationStatus } from "@sdp/types/organizations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -103,11 +100,7 @@ describe("organization incident control", () => {
     await expect(status()).resolves.toMatchObject({ status: "suspended" });
   });
 
-  it.each(
-    ORGANIZATION_STATUSES.filter(
-      (value) => !ORGANIZATION_CONTROL_SOURCE_STATUSES.suspend.some((allowed) => allowed === value)
-    )
-  )("cannot suspend or reactivate a %s organization", async (organizationStatus) => {
+  async function expectProtectedStatus(organizationStatus: OrganizationStatus): Promise<void> {
     await getDb(env)
       .prepare("UPDATE organizations SET status = ? WHERE id = ?")
       .bind(organizationStatus, TEST_ORG.id)
@@ -115,7 +108,12 @@ describe("organization incident control", () => {
     await expect(suspend()).rejects.toThrow();
     await expect(resume(0)).rejects.toThrow();
     await expect(status()).resolves.toMatchObject({ status: organizationStatus, version: 0 });
-  });
+  }
+
+  it("cannot suspend or reactivate a provisioning organization", () =>
+    expectProtectedStatus("provisioning"));
+
+  it("cannot suspend or reactivate a deleted organization", () => expectProtectedStatus("deleted"));
 
   it("refuses to resume an active organization", async () => {
     await expect(resume(0)).rejects.toThrow("Cannot resume");
