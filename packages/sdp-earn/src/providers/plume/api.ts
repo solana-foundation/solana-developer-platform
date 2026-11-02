@@ -13,16 +13,22 @@ export const plumeVaultInfoSchema = z.object({
     oftStoreAddress: z.string().min(1),
     decimals: z.number().int().min(0).max(18),
   }),
+  // Legacy V1 composers (redeem path) predate Plume's chain metadata: the live
+  // nOPAL listing omits `chainId`/`cctpDepositEnabled` on them. Only a selected
+  // V2 composer's fields are load-bearing, and the client validates those
+  // strictly at selection time.
   nestComposers: z.array(
     z.object({
       composerAddress: z.string().min(1),
-      chainId: z.number().int(),
+      chainId: z.number().int().optional(),
       complianceVersion: z.enum(["v1", "v2"]),
-      cctpDepositEnabled: z.boolean(),
+      cctpDepositEnabled: z.boolean().optional(),
     })
   ),
-  targetApy: decimal.optional(),
-  tvl: decimal.optional(),
+  // Reported metadata is nullable upstream; a null figure is absence, not a
+  // malformed body.
+  targetApy: decimal.nullish(),
+  tvl: decimal.nullish(),
 });
 export const plumePriceSchema = z.object({ price: z.number().finite().positive() });
 export const plumeTransactionSchema = z.object({ txBase64: z.string().min(1) });

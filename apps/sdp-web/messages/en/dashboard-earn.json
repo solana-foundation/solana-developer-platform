@@ -1016,6 +1016,8 @@
       "cancel": "Cancel pending redemption",
       "confirmCancel": "Confirm cancellation",
       "cancelWarning": "This asks Plume to cancel all pending standard redemption shares for this wallet and vault. USDC already delivered cannot be recalled. Returned shares remain invested.",
+      "cancelWallet": "Wallet {wallet}",
+      "cancelTarget": "Wallet {wallet} · vault {vault}",
       "checking": "Cancellation pending. Shares remain in transit until their return is verified.",
       "cancelled": "Redemption cancelled",
       "cancelledBody": "The returned shares are back in your wallet. No USDC payout was recorded.",

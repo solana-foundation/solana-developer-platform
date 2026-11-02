@@ -142,6 +142,7 @@ describe("provider-order settlement watches", () => {
     positionId: "earn_position_1",
     provider: "wisdomtree",
     providerReference: "WTGXX",
+    ownerAddress: null,
     status: "finalized",
     signature: "signature",
     shares: "1",

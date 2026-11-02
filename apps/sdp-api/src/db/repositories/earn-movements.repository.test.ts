@@ -241,6 +241,22 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(results.filter((result) => result.owned)).toHaveLength(1);
       expect(results[0].row.id).toBe(results[1].row.id);
     });
+    it("reclaims an abandoned cancellation claim under an expired lease", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      const { row: first } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      // A live lease still reports the abandoned claim without ownership.
+      expect((await repo.claim(actionClaim(movement.id, "cancel-2"))).owned).toBe(false);
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", first.id)
+        .run();
+      // The creator crashed or refused holding the parent's unique slot: a new
+      // key takes the claim over instead of being blocked forever.
+      const reclaimed = await repo.claim(actionClaim(movement.id, "cancel-3"));
+      expect(reclaimed.owned).toBe(true);
+      expect(reclaimed.row.id).toBe(first.id);
+    });
     it("records a cancelled redemption as returned shares with zero payout", async () => {
       const { position } = await ledger.createSignedVaultDepositIntent(
         intent({ provider: "plume" })

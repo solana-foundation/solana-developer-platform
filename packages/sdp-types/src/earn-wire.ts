@@ -52,6 +52,7 @@ export const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.objec
   positionId: z.string(),
   provider: z.string(),
   providerReference: z.string(),
+  ownerAddress: z.string().nullable(),
   status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
   signature: z.string(),
   shares: z.string(),
