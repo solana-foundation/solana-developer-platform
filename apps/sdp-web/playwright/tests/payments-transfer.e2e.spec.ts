@@ -111,8 +111,9 @@ test.describe
         new RegExp(`${projectHref(bootstrapProjectId, "/dashboard/payments")}(?:\\?.*)?$`)
       );
 
-      const shortenedDestination = `${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-4)}`;
-      const transferRow = app.getByRole("link").filter({ hasText: shortenedDestination }).first();
+      // Pay names the contact's account, so the payment is tied to the contact and its row
+      // reads the contact's name rather than the destination address.
+      const transferRow = app.getByRole("link").filter({ hasText: counterpartyName }).first();
       await expect(transferRow).toBeVisible({ timeout: 120_000 });
       await expect(transferRow).toContainText("0.01");
     });
