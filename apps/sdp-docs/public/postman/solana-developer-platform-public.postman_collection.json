@@ -1610,7 +1610,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/counterparties/metadata",
+            "url": "{{baseUrl}}/v1/counterparties/field-options",
             "description": "Returns the enum option sets and country list needed to build a counterparty form."
           }
         },
@@ -1694,7 +1694,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/requirements",
+            "url": "{{baseUrl}}/v1/counterparties/{{counterpartyId}}/ramp-requirements",
             "description": "Evaluates whether a counterparty is ready to create a quote with the selected ramp provider and returns any fields or provider-hosted actions still required."
           }
         },

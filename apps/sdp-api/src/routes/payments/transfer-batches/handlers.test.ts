@@ -797,7 +797,7 @@ describe("payment transfer batches", () => {
       const recipients = await seedRentRecipients();
       const idempotencyKey = crypto.randomUUID();
 
-      const refused = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+      const refused = await postBatch("/v1/payments/transfer-batches/execute", recipients, idempotencyKey);
 
       expect(refused.status).toBe(409);
       expect(await refused.json()).toMatchObject({
@@ -827,7 +827,7 @@ describe("payment transfer batches", () => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-      const accepted = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+      const accepted = await postBatch("/v1/payments/transfer-batches/execute", recipients, idempotencyKey);
       expect(accepted.status).toBe(200);
     });
 
@@ -885,7 +885,7 @@ describe("payment transfer batches", () => {
       ]);
 
       const refused = await postBatch(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         recipients,
         crypto.randomUUID()
       );
@@ -910,7 +910,7 @@ describe("payment transfer batches", () => {
         addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_500_000n))
       );
       const res = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -964,7 +964,7 @@ describe("payment transfer batches", () => {
       .bind(["payments.transfer_batch"], TEST_PROJECT.id)
       .run();
 
-    const stopped = await app.request("/v1/payments/transfer-batches", request, env);
+    const stopped = await app.request("/v1/payments/transfer-batches/execute", request, env);
     expect(stopped.status).toBe(403);
     expect(await stopped.json()).toMatchObject({
       error: { code: "FORBIDDEN", details: { reason: "movement_disabled" } },
@@ -982,7 +982,7 @@ describe("payment transfer batches", () => {
       .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
       .bind(TEST_PROJECT.id)
       .run();
-    const retried = await app.request("/v1/payments/transfer-batches", request, env);
+    const retried = await app.request("/v1/payments/transfer-batches/execute", request, env);
     expect(retried.status).toBe(200);
     expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
     expect(await count()).toEqual({ count: 1 });
@@ -1026,7 +1026,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -1111,7 +1111,7 @@ describe("payment transfer batches", () => {
       const key = crypto.randomUUID();
       const post = () =>
         app.request(
-          "/v1/payments/transfer-batches",
+          "/v1/payments/transfer-batches/execute",
           {
             method: "POST",
             headers: {
@@ -1761,7 +1761,7 @@ describe("payment transfer batches", () => {
         walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
       });
       const response = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {
@@ -2701,7 +2701,7 @@ describe("payment transfer batches", () => {
         { amount, apiKey }: { amount: string; apiKey: string }
       ) =>
         app.request(
-          "/v1/payments/transfer-batches",
+          "/v1/payments/transfer-batches/execute",
           {
             method: "POST",
             headers: {
@@ -3016,7 +3016,7 @@ describe("payment transfer batches", () => {
         TEST_SOLANA_ADDRESSES.wallet3,
       ]);
       const created = await app.request(
-        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/execute",
         {
           method: "POST",
           headers: {

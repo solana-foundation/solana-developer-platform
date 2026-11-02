@@ -7,7 +7,7 @@ import { type Key, makeFig } from "@/components/homepage/payments/figures/make-f
 import type { SceneInput } from "@/components/homepage/payments/figures/scene-input";
 
 /* the prototype's demo counterparties, with amounts */
-const WHO = ["Marcus Reid", "Lena Fischer", "Ana Souza"];
+const WHO = ["Marcus Reid", "Lena Novak", "Ana Souza"];
 const AM = [120, 84.5, 310];
 
 export function batchScene({ fonts, label, copy }: SceneInput): string {

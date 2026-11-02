@@ -469,7 +469,7 @@ describe("external-wallet position reads", () => {
     );
 
     const response = await get(
-      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+      "/v1/earn/positions/caller-signed/project-summary?includeOwnerAddresses=true&includePositions=true"
     );
     expect(response.status).toBe(200);
     // SAFETY: the summary route's success envelope; the assertions below check every field read.
@@ -817,8 +817,8 @@ describe("external-wallet position reads", () => {
       tokenMint: USDC,
       label: "Retired",
     });
-    expect((await get(`/v1/earn/external-wallet/positions/${OWNER_A}`)).status).toBe(404);
-    expect((await get(`/v1/earn/external-wallet/earnings/${OWNER_A}`)).status).toBe(404);
+    expect((await get(`/v1/earn/positions/caller-signed/${OWNER_A}`)).status).toBe(404);
+    expect((await get(`/v1/earn/earnings/caller-signed/${OWNER_A}`)).status).toBe(404);
     // The query-addressed replacements answer for the same owner, so the 404s
     // above assert the SHAPE is gone rather than the data.
     expect((await get(`/v1/earn/positions/caller-signed?ownerAddress=${OWNER_A}`)).status).toBe(

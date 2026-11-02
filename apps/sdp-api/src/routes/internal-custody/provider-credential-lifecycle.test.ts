@@ -482,7 +482,7 @@ describe("provider credential lifecycle", () => {
       expect(rotated.status).toBe(200);
       const current = credentialResponseSchema.parse(await rotated.json()).data.providerCredential
         .id;
-      const rollback = await lifecycleRequest(`/provider-credentials/${current}/rollback`, {
+      const rollback = await lifecycleRequest(`/provider-credentials/${current}/rollback-rotation`, {
         method: "POST",
       });
       expect(rollback.status).toBe(200);
@@ -555,7 +555,7 @@ describe("provider credential lifecycle", () => {
           )
         ).skipped
       ).toBeGreaterThan(0);
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
       const candidateId = z
         .object({ data: z.object({ rotationCandidate: z.object({ id: z.string() }) }) })
         .parse(await read.json()).data.rotationCandidate.id;
@@ -764,7 +764,7 @@ describe("provider credential lifecycle", () => {
     expect(await parent.json()).toMatchObject({
       data: { providerCredential: { id: CREDENTIAL_ID, status: "deactivated" } },
     });
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
       data: {
@@ -781,7 +781,7 @@ describe("provider credential lifecycle", () => {
       data: { providerCredential: { id: childId, status: "deactivated" } },
     });
     expect(
-      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
+      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`)).json()
     ).toMatchObject({
       data: {
         providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
@@ -1191,7 +1191,7 @@ describe("provider credential lifecycle", () => {
       )
     ).toEqual({ status: "deactivated", secret_retention_expires_at: null });
     expect(
-      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).json()
+      await (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`)).json()
     ).toMatchObject({
       data: {
         providerCredential: { id: CREDENTIAL_ID, status: "deactivated" },
@@ -1222,7 +1222,7 @@ describe("provider credential lifecycle", () => {
       expect(response.headers.get("Retry-After")).not.toBeNull();
       expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       expect(providerFetch).not.toHaveBeenCalled();
-      const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
       expect(state.status).toBe(200);
       expect(await state.json()).toMatchObject({
         data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
@@ -1246,7 +1246,7 @@ describe("provider credential lifecycle", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
     expect(providerFetch).not.toHaveBeenCalled();
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
       data: { providerCredential: { id: CREDENTIAL_ID }, rotationCandidate: null },
@@ -1274,14 +1274,14 @@ describe("provider credential lifecycle", () => {
       });
       expect(rotated.status).toBe(200);
       const { data } = await rotated.json();
-      const statePath = `/connections/${CONNECTION_A_ID}/provider-credential`;
+      const statePath = `/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`;
       const before = await (await lifecycleRequest(statePath)).json();
       const quota = action === "complete-rotation" ? "credential-rotation" : "credential-recovery";
       await seedRateLimit(env, `metered:${quota}:org:${ORGANIZATION_ID}`, 20);
       providerFetch.mockClear();
 
       const response = await lifecycleRequest(
-        `/provider-credentials/${data.providerCredential.id}/${action}`,
+        `/provider-credentials/${data.providerCredential.id}/${action === "rollback" ? "rollback-rotation" : action}`,
         { method: "POST" }
       );
 
@@ -1294,7 +1294,7 @@ describe("provider credential lifecycle", () => {
   );
 
   it("returns the exact credential and complete authorized impact", async () => {
-    const response = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const response = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: Record<string, unknown> };
@@ -1599,7 +1599,7 @@ describe("provider credential lifecycle", () => {
     const rotation = lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request);
     try {
       await started.promise;
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
       expect(read.status).toBe(200);
       const body = z
         .object({
@@ -1777,7 +1777,7 @@ describe("provider credential lifecycle", () => {
     let candidateId: string | undefined;
     try {
       await started.promise;
-      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+      const read = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
       candidateId = z
         .object({ data: z.object({ rotationCandidate: z.object({ id: z.string() }) }) })
         .parse(await read.json()).data.rotationCandidate.id;
@@ -2293,7 +2293,7 @@ describe("provider credential lifecycle", () => {
     },
     {
       operation: "rollback",
-      command: "rollback",
+      command: "rollback-rotation",
       event: "provider_credential_rolled_back",
       action: "rollback",
     },
@@ -2493,7 +2493,7 @@ describe("provider credential lifecycle", () => {
         CHECK (action <> '${action}') NOT VALID`);
       try {
         const response = await lifecycleRequest(
-          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback" : "rotate"}`,
+          `/provider-credentials/${currentId}/${action === "rollback" ? "rollback-rotation" : "rotate"}`,
           action === "rollback" ? { method: "POST" } : request
         );
         expect(response.status).toBe(200);
@@ -2541,7 +2541,7 @@ describe("provider credential lifecycle", () => {
       CHECK (action <> 'maintenance') NOT VALID`);
     try {
       expect(
-        (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`)).status
+        (await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`)).status
       ).toBe(200);
       expect(
         (await lifecycleRequest(`/provider-credentials/${CREDENTIAL_ID}/rotate`, request)).status
@@ -2794,7 +2794,7 @@ describe("provider credential lifecycle", () => {
     await seedRateLimit(env, `metered:credential-rotation:org:${ORGANIZATION_ID}`, 20);
 
     const rollback = await lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
 
@@ -2871,7 +2871,7 @@ describe("provider credential lifecycle", () => {
     const third = credentialResponseSchema.parse(await thirdResponse.json()).data
       .providerCredential;
     expect(
-      await lifecycleRequest(`/provider-credentials/${third.id}/rollback`, { method: "POST" })
+      await lifecycleRequest(`/provider-credentials/${third.id}/rollback-rotation`, { method: "POST" })
     ).toMatchObject({ status: 200 });
     expect(
       await lifecycleRequest(`/provider-credentials/${second.id}/rotate`, {
@@ -2928,7 +2928,7 @@ describe("provider credential lifecycle", () => {
     });
 
     const rollback = lifecycleRequest(
-      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotatedBody.data.providerCredential.id}/rollback-rotation`,
       { method: "POST" }
     );
     await secretLookupStarted;
@@ -3240,13 +3240,13 @@ describe("provider credential lifecycle", () => {
     });
     const candidateId = pendingBody.data.providerCredential.id;
 
-    const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
+    const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback-rotation`, {
       method: "POST",
     });
 
     expect(response.status).toBe(409);
     expect(providerFetch).toHaveBeenCalledTimes(2);
-    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential`);
+    const state = await lifecycleRequest(`/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`);
     expect(state.status).toBe(200);
     expect(await state.json()).toMatchObject({
       data: {
@@ -3278,7 +3278,7 @@ describe("provider credential lifecycle", () => {
       )
     ).toEqual({ status: "deactivated", encrypted_secret_payload: null });
     const afterCancellation = await lifecycleRequest(
-      `/connections/${CONNECTION_A_ID}/provider-credential`
+      `/connections/${CONNECTION_A_ID}/provider-credential/lifecycle`
     );
     expect(afterCancellation.status).toBe(200);
     expect(await afterCancellation.json()).toMatchObject({
@@ -3325,7 +3325,7 @@ describe("provider credential lifecycle", () => {
       }
       const before = await db.queryMany("SELECT * FROM provider_credentials ORDER BY id");
 
-      const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback`, {
+      const response = await lifecycleRequest(`/provider-credentials/${currentId}/rollback-rotation`, {
         method: "POST",
       });
 

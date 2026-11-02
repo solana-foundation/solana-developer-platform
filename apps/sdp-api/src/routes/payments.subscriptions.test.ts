@@ -348,7 +348,7 @@ describe("Payments routes — subscriptions", () => {
       .run();
 
     const authorizeRes = await app.request(
-      `/v1/payments/subscriptions/${legacyId}/prepare-authorization`,
+      `/v1/payments/subscriptions/${legacyId}/authorize/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
@@ -373,7 +373,7 @@ describe("Payments routes — subscriptions", () => {
       .bind(legacyId)
       .run();
     const collectRes = await app.request(
-      `/v1/payments/subscriptions/${legacyId}/prepare-collection`,
+      `/v1/payments/subscriptions/${legacyId}/collect/build-unsigned-transaction`,
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,

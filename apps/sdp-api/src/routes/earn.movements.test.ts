@@ -608,13 +608,13 @@ describe("GET /v1/earn/treasury/movements", () => {
   });
 
   it("has no :id detail route — the feed is collection-only (EARN-016)", async () => {
-    // Per-movement detail lives on the family reads (/vault-deposits/:id,
-    // /vault-withdrawals/:id, /external-wallet/movements/:id), never here. A
+    // Per-movement detail lives on the family reads (/deposits/provider-signed/:id,
+    // /withdrawals/provider-signed/:id, /movements/caller-signed/:id), never here. A
     // guessed id must fall through to a Hono no-match 404, not resolve against
     // the feed handler.
     const mine = await seedVaultDeposit();
     const res = await app.request(
-      `/v1/earn/movements/${mine.movement.id}`,
+      `/v1/earn/treasury/movements/${mine.movement.id}`,
       { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
       env
     );
