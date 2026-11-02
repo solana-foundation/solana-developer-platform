@@ -28,7 +28,7 @@ describe("dashboard queued-withdrawal request proxy", () => {
     expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.earn.vault_withdrawal_requests.create",
-      path: "/v1/earn/vault-withdrawal-requests",
+      path: "/v1/earn/withdrawal-requests/execute",
     });
   });
 

@@ -43,7 +43,7 @@ describe("queued withdrawal route auth", () => {
     expect(discovery.status).toBe(401);
 
     const requestBuild = await app.request(
-      "/v1/earn/external-wallet/withdrawal-request-transactions",
+      "/v1/earn/withdrawal-requests/build-unsigned-transaction",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -59,7 +59,7 @@ describe("queued withdrawal route auth", () => {
     expect(requestBuild.status).toBe(401);
 
     const cancelBuild = await app.request(
-      "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
       {
         method: "POST",
         headers: { "content-type": "application/json" },

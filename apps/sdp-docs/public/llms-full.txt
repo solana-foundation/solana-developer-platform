@@ -135,7 +135,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
 </Tab>
 <Tab value="Batch Transfers">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: payroll-2026-06-30" \
   -H "Content-Type: application/json" \
@@ -237,7 +237,7 @@ Source: https://platform.solana.com/docs/developing-with-sdp/idempotency
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
@@ -248,8 +248,8 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Required.** These routes move money. A request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`, and nothing runs.
 
-- `POST /v1/payments/transfers`
-- `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfers/execute`
+- `POST /v1/payments/transfer-batches/execute`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
 - `POST /v1/payments/recurring-payments/{id}/activate`
@@ -264,7 +264,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
 
-**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription and subscription-plan `build-unsigned-transaction` routes return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
 Modules with their own key handling say so on their pages.
 
@@ -285,7 +285,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
   for (let attempt = 1; attempt <= 8; attempt++) {
     let response: Response;
     try {
-      response = await fetch("https://api.solana.com/v1/payments/transfers", {
+      response = await fetch("https://api.solana.com/v1/payments/transfers/execute", {
         method: "POST",
         headers: {
           Authorization: "Bearer sf_...",
@@ -892,13 +892,13 @@ Each step links to its own guide with UI and API instructions:
 | --- | --- | --- |
 | `GET` | `/v1/issuance/templates` | List available token templates |
 | `POST` | `/v1/issuance/tokens` | Create a token definition |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy to Solana |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Mint new supply |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Reduce supply |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/execute` | Deploy to Solana |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/execute` | Mint new supply |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/execute` | Reduce supply |
 | `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | Add a Token Access Control entry |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze an account |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause all transfers |
-| `POST` | `/v1/payments/transfers` | Transfer tokens |
+| `POST` | `/v1/payments/transfers/execute` | Transfer tokens |
 
 See the full schema in the [Issuance API reference](/docs/reference/api/issuance) and [Payments API reference](/docs/reference/api/payments).
 
@@ -1207,7 +1207,7 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: deploy-acme-001" \
@@ -1216,7 +1216,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
 
 ```typescript title="deploy-token.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy/execute",
   {
     method: "POST",
     headers: {
@@ -1318,9 +1318,9 @@ The **Fund management** panel shows the current supply with two primary actions:
 All supply operations share this URL pattern:
 
 ```text title="Endpoints"
-POST /v1/issuance/tokens/{tokenId}/mint
-POST /v1/issuance/tokens/{tokenId}/burn
-POST /v1/issuance/tokens/{tokenId}/force-burn
+POST /v1/issuance/tokens/{tokenId}/mint/execute
+POST /v1/issuance/tokens/{tokenId}/burn/execute
+POST /v1/issuance/tokens/{tokenId}/force-burn/execute
 ```
 
 The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
@@ -1365,7 +1365,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
@@ -1381,7 +1381,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
 
 ```typescript title="mint-tokens.ts"
 const res = await fetch(
-  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint",
+  "https://api.solana.com/v1/issuance/tokens/tok_abc123/mint/execute",
   {
     method: "POST",
     headers: {
@@ -1445,7 +1445,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 **Burn from a controlled account:**
 
 ```typescript title="burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -1462,7 +1462,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 **Force-burn from any holder** (requires `tokens:admin`):
 
 ```typescript title="force-burn-tokens.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn/execute", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -1920,7 +1920,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \
@@ -2034,7 +2034,7 @@ On the token detail page, go to **Permissions**. Click **Edit** next to the auth
 SDP signs the authority rotation:
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority/update/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
@@ -2282,13 +2282,13 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers/execute` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
 ## Transfer execution
 
-Outbound wallet transfers are server-executed through `POST /v1/payments/transfers`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
+Outbound wallet transfers are server-executed through `POST /v1/payments/transfers/execute`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
 
 The rest of this section assumes transfers are submitted by SDP from a custody wallet you control.
 
@@ -2343,7 +2343,7 @@ Transfers are available through the Payments dashboard and the API.
 
 - A token balance in the source wallet
 - A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
-- An API key holding the `transfers.execute` grant whose [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the source wallet. `POST /v1/payments/transfers` requires the action at the route, and SDP checks the key, its grant and the source wallet again when it signs.
+- An API key holding the `transfers.execute` grant whose [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the source wallet. `POST /v1/payments/transfers/execute` requires the action at the route, and SDP checks the key, its grant and the source wallet again when it signs.
 
 ## How it works
 
@@ -2420,7 +2420,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
@@ -2436,7 +2436,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript title="execute-transfer.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers/execute",
   {
     method: "POST",
     headers: {
@@ -2460,7 +2460,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
@@ -2522,7 +2522,7 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 ## Deduplication
 
-`POST /v1/payments/transfers` requires an `Idempotency-Key`: a request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. Send one stable key per logical payment and reuse it for every retry. A retry with the same key and request returns the original transfer instead of sending a second one; reusing the key with a different payload, wallet or credential returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A transfer that fails after it was recorded (such as `400 TRANSACTION_FAILED`) answers every same-key retry with the same error; send a new key to try again. A replay is a snapshot, so read the transfer with `GET` to see whether it has finalized. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
+`POST /v1/payments/transfers/execute` requires an `Idempotency-Key`: a request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. Send one stable key per logical payment and reuse it for every retry. A retry with the same key and request returns the original transfer instead of sending a second one; reusing the key with a different payload, wallet or credential returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A transfer that fails after it was recorded (such as `400 TRANSACTION_FAILED`) answers every same-key retry with the same error; send a new key to try again. A replay is a snapshot, so read the transfer with `GET` to see whether it has finalized. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
@@ -2541,7 +2541,7 @@ Source: https://platform.solana.com/docs/payments/send-payment-with-memo
 
 > Attach an order ID, invoice number, or customer reference to an SDP transfer.
 
-The `memo` field on `POST /v1/payments/transfers` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
+The `memo` field on `POST /v1/payments/transfers/execute` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
 
 ## When to use a memo
 
@@ -2558,7 +2558,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: order-2026-05-14-4837" \
   -H "Content-Type: application/json" \
@@ -2574,7 +2574,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 <Tab value="TypeScript">
 ```typescript title="send-payment-with-memo.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/transfers",
+  "https://api.solana.com/v1/payments/transfers/execute",
   {
     method: "POST",
     headers: {
@@ -2597,7 +2597,7 @@ const { data } = await response.json();
 <Tab value="Java">
 ```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Idempotency-Key", "order-2026-05-14-4837")
     .header("Content-Type", "application/json")
@@ -2653,14 +2653,14 @@ Source: https://platform.solana.com/docs/payments/send-payouts
 
 > Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches/execute` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers/execute` once per recipient and reconcile the returned transfer IDs.
 
 ## Native transfer batches
 
 One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
 
 ```bash
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payroll-2026-05-14" \
@@ -2689,7 +2689,7 @@ A typical pattern:
 
 1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
 2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
+3. **Iterate** — for each recipient, call `POST /v1/payments/transfers/execute` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
 4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
 5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
 
@@ -2699,7 +2699,7 @@ Send transfers sequentially or in modest concurrency (4–8 in flight); high con
 
 Two layers protect you against double-spends if a worker dies mid-run:
 
-1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
+1. **Idempotency keys** — `POST /v1/payments/transfers/execute` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
 
 The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
@@ -2709,7 +2709,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
@@ -2728,7 +2728,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
   const response = await fetch(
-    "https://api.solana.com/v1/payments/transfers",
+    "https://api.solana.com/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: {
@@ -2756,7 +2756,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 <Tab value="Java">
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)
@@ -2897,7 +2897,7 @@ When a payment lands on a wallet you control, the inbound transfer moves through
 
 ## Status lifecycle
 
-The `status` field on a wallet transfer (`POST /v1/payments/transfers`, and inbound transfers discovered on-chain) takes one of these values:
+The `status` field on a wallet transfer (`POST /v1/payments/transfers/execute`, and inbound transfers discovered on-chain) takes one of these values:
 
 | Status | Meaning |
 | --- | --- |
@@ -3672,7 +3672,7 @@ A regulated stablecoin has four on-chain authorities, each a distinct role on th
 
 A fifth, the **pause authority**, lives on the `pausable` extension configuration. SDP defaults it to the `mint` authority if you don't set it explicitly.
 
-You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}/authority`. Default-everything-to-custody is the institutional baseline.
+You can delegate or revoke any of these later via `POST /v1/issuance/tokens/{id}/authority/update/execute`. Default-everything-to-custody is the institutional baseline.
 
 ### 4. Capture the design as a config
 
@@ -3777,7 +3777,7 @@ The deploy call submits a Token-2022 mint creation transaction to Solana via the
 ```javascript title="deploy-token.js"
 const deployKey = idempotencyKey("deploy");
 const deployed = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/deploy`,
+  `/v1/issuance/tokens/${tokenId}/deploy/execute`,
   { signingCustodyWalletId },
   { idempotencyKey: deployKey }
 );
@@ -3896,7 +3896,7 @@ Seize moves tokens out of a holder's account without their signature, via the **
 ```javascript title="seize-tokens.js"
 const seizeKey = idempotencyKey("seize");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/seize`,
+  `/v1/issuance/tokens/${tokenId}/seize/execute`,
   {
     signingCustodyWalletId,
     seize: {
@@ -3919,7 +3919,7 @@ Force-burn destroys tokens at a holder's account. Same authority as seize, diffe
 ```javascript title="force-burn.js"
 const forceBurnKey = idempotencyKey("force-burn");
 await sdpAdmin.post(
-  `/v1/issuance/tokens/${tokenId}/force-burn`,
+  `/v1/issuance/tokens/${tokenId}/force-burn/execute`,
   {
     signingCustodyWalletId,
     forceBurn: {
@@ -3952,7 +3952,7 @@ Minting requires the `issuance.execute` grant, so the key (`sdp`) must hold it:
 ```javascript title="mint-tokens.js"
 const mintKey = idempotencyKey("mint");
 const minted = await sdp.post(
-  `/v1/issuance/tokens/${tokenId}/mint`,
+  `/v1/issuance/tokens/${tokenId}/mint/execute`,
   {
     signingCustodyWalletId,
     mint: {
@@ -4050,7 +4050,7 @@ for (const provider of screening.data.screening.providers) {
 }
 
 const transfer = await sdp.post(
-  "/v1/payments/transfers",
+  "/v1/payments/transfers/execute",
   {
     sourceCustodyWalletId,
     destination: destinationAddress,
@@ -4119,7 +4119,7 @@ Run the same transfer call. This time it fails:
 ```javascript title="transfer-blocked.js"
 try {
   await sdp.post(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     {
       sourceCustodyWalletId,
       destination: destinationAddress,
@@ -5246,26 +5246,26 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Remove token allowlist entry |
 | `GET` | `/v1/issuance/tokens/{tokenId}/allowlist/labels` | List token allowlist labels |
 | `GET` | `/v1/issuance/tokens/{tokenId}/audit` | Get asset audit history |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | Execute authority update |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | Prepare authority update |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
-| `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm a caller-signed deployment |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | Prepare metadata-URI follow-up transaction |
-| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
-| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | Prepare force burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction` | Prepare authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/update/execute` | Execute authority update |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction` | Prepare burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/execute` | Execute burn |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction` | Prepare token deploy transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction` | Confirm a caller-signed deployment |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/execute` | Deploy token |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction` | Prepare metadata-URI follow-up transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction` | Prepare force burn transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/execute` | Execute force burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | Freeze account |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | List frozen accounts |
 | `GET` | `/v1/issuance/tokens/{tokenId}/holders` | List verified holders |
 | `POST` | `/v1/issuance/tokens/{tokenId}/holders` | Enroll a verified holder |
 | `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | Get public token metadata JSON |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | Execute mint |
-| `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | Prepare mint transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction` | Prepare mint transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/execute` | Execute mint |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | Pause token transfers |
-| `POST` | `/v1/issuance/tokens/{tokenId}/seize` | Execute seize |
-| `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | Prepare seize transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction` | Prepare seize transaction |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/execute` | Execute seize |
 | `POST` | `/v1/issuance/tokens/{tokenId}/supply/refresh` | Refresh cached token supply |
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | List token transactions |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | Unfreeze account |
@@ -5298,22 +5298,22 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |
 | `PATCH` | `/v1/payments/subscription-plans/{planId}` | Update subscription plan |
-| `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | Prepare subscription plan creation |
+| `POST` | `/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` | Prepare subscription plan creation |
 | `GET` | `/v1/payments/subscriptions` | List subscriptions |
 | `POST` | `/v1/payments/subscriptions` | Create subscription |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | Get subscription |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` | Prepare subscription authorization |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` | Prepare subscription cancellation |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` | Prepare subscription collection |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | List subscription collection attempts |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Prepare subscription authorization |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Prepare subscription cancellation |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Prepare subscription collection |
-| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | Prepare subscription resume |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` | Prepare subscription resume |
 | `GET` | `/v1/payments/transfer-batches` | List transfer batches |
-| `POST` | `/v1/payments/transfer-batches` | Create transfer batch |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |
 | `POST` | `/v1/payments/transfer-batches/estimate` | Estimate transfer batch |
+| `POST` | `/v1/payments/transfer-batches/execute` | Create transfer batch |
 | `GET` | `/v1/payments/transfers` | List transfers |
-| `POST` | `/v1/payments/transfers` | Execute a provider-signed transfer |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
+| `POST` | `/v1/payments/transfers/execute` | Execute a provider-signed transfer |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/transactions` | List transactions |
 

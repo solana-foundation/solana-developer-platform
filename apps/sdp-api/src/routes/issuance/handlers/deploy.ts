@@ -816,7 +816,7 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
   // uri afterward (the client owns the update authority). When the inline uri
   // pushes the create tx over the packet limit (heavy template + long hosted
   // URL), re-prepare the create tx with an empty uri and signal that the client
-  // must set the real uri in a follow-up tx (POST .../deploy/prepare-metadata)
+  // must set the real uri in a follow-up tx (POST .../deploy/metadata/build-unsigned-transaction)
   // after the create tx confirms. Lighter templates / short URIs keep the
   // single-tx fast path.
   let metadataUriFollowUp: { required: true; uri: string } | undefined;
@@ -892,7 +892,7 @@ const findMintInitialization = (
  *
  * This is the step that records `mintAddress` for the non-custodial path — both
  * the single-tx case and the overflow case. It is also what unblocks the
- * `deploy/prepare-metadata` follow-up, whose `mintAddress` guard would otherwise
+ * `deploy/metadata/build-unsigned-transaction` follow-up, whose `mintAddress` guard would otherwise
  * reject every non-custodial caller.
  *
  * Authority fields are recomputed from the signing wallet (never trusted from
@@ -1093,7 +1093,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
  *
  * Two-tx contract: when `prepareDeploy` returns `metadataUriFollowUp.required`,
  * the client signs+sends the create tx, confirms it, records the mint via
- * `deploy/confirm` (without which the `mintAddress` guard below rejects the
+ * `deploy/confirm-submitted-transaction` (without which the `mintAddress` guard below rejects the
  * call), then calls THIS endpoint to fetch an unsigned metadata field-update tx
  * (set with a fresh blockhash — the mint's metadata account only exists once
  * the create tx confirms), signs it with its update authority, and submits it.
@@ -1121,7 +1121,7 @@ export const prepareDeployMetadata = async (
     throw new AppError("BAD_REQUEST", "Token has not been deployed yet");
   }
 
-  // Use the signing wallet pinned at deploy/prepare (never the request body),
+  // Use the signing wallet pinned at deploy/build-unsigned-transaction (never the request body),
   // matching confirmDeploy. The follow-up tx is signed by the mint's metadata
   // update authority; a body override would resolve a different wallet and
   // produce a tx that can never succeed against the on-chain authority.

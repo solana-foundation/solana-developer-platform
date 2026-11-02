@@ -69,7 +69,7 @@ export async function postRawTransfer(
     headers["Idempotency-Key"] = idempotencyKey;
   }
   return app.request(
-    "/v1/payments/transfers",
+    "/v1/payments/transfers/execute",
     { method: "POST", headers, body: JSON.stringify(body) },
     options.releaseChannel === undefined
       ? env

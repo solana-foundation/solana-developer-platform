@@ -24,27 +24,33 @@ const EARN_POST_ROUTES: readonly { path: RegExp; movement: MovementOf<"earn"> | 
   { path: /^\/external-wallet\/withdrawal-options$/, movement: "read" },
   { path: /^\/external-wallet\/queued-withdrawal-previews$/, movement: "read" },
   {
-    path: /^\/external-wallet\/withdrawal-request-transactions$/,
+    path: /^\/withdrawal-requests\/build-unsigned-transaction$/,
     movement: "earn.queued_withdraw_request",
   },
   {
-    path: /^\/external-wallet\/withdrawal-request-cancel-transactions$/,
+    path: /^\/withdrawal-requests\/cancel\/build-unsigned-transaction$/,
     movement: "earn.queued_withdraw_cancel",
   },
   { path: /^\/withdrawals\/submit-signed-transaction$/, movement: "earn.withdraw" },
-  { path: /^\/external-wallet\/withdrawal-requests$/, movement: "earn.queued_withdraw_request" },
   {
-    path: /^\/external-wallet\/withdrawal-request-cancellations$/,
+    path: /^\/withdrawal-requests\/submit-signed-transaction$/,
+    movement: "earn.queued_withdraw_request",
+  },
+  {
+    path: /^\/withdrawal-requests\/cancel\/submit-signed-transaction$/,
     movement: "earn.queued_withdraw_cancel",
   },
   { path: /^\/withdrawals\/execute$/, movement: "earn.withdraw" },
   { path: /^\/vault-withdrawal-previews$/, movement: "read" },
   { path: /^\/vault-withdrawal-options$/, movement: "read" },
   { path: /^\/vault-queued-withdrawal-previews$/, movement: "read" },
-  { path: /^\/vault-withdrawal-requests$/, movement: "earn.queued_withdraw_request" },
-  { path: /^\/vault-withdrawal-requests\/[^/]+\/cancel$/, movement: "earn.queued_withdraw_cancel" },
+  { path: /^\/withdrawal-requests\/execute$/, movement: "earn.queued_withdraw_request" },
+  {
+    path: /^\/withdrawal-requests\/[^/]+\/cancel\/execute$/,
+    movement: "earn.queued_withdraw_cancel",
+  },
   { path: /^\/programs\/[^/]+\/withdrawal-preview$/, movement: "read" },
-  { path: /^\/programs\/[^/]+\/withdrawals$/, movement: "earn.withdraw" },
+  { path: /^\/programs\/[^/]+\/withdrawals\/execute$/, movement: "earn.withdraw" },
 ];
 
 /**

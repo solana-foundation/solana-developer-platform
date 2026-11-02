@@ -437,7 +437,7 @@ describe("ApiPlaygroundShell", () => {
       ...endpoint,
       id: "post-transfer",
       method: "POST",
-      path: "/v1/payments/transfers",
+      path: "/v1/payments/transfers/execute",
     };
     const view = render(
       <I18nProvider locale="en" messages={getMessages("en")}>

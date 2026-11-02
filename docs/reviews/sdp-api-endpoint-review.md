@@ -1,6 +1,526 @@
 # SDP API — endpoint review
 
-Internal working document · October 27, 2026 · source commit `d735d383e`
+Internal working document · October 27, 2026 · original source commit `d735d383e` · route names synchronized November 2, 2026
+
+<!-- API-NAMING-PROPOSALS:START -->
+## Proposed API naming changes
+
+Naming review · November 2, 2026 · reviewed all **289 endpoints** in this file against the current route inventory, with source checks for ambiguous behavior. **32 proposals cover 110 endpoints.** **30 route names are updated: 29 proposal mappings are complete, plus the execution suffix in N13.** The remaining naming decisions await your review. The other 179 have no path-only rename recommended in this pass.
+
+**Implementation status · November 2, 2026.** N01, N02, N07, N08, and N09 are implemented. N13 is partially implemented: its withdrawal execution suffix is applied under the existing `/programs` family. All other proposals remain for your review. Endpoint verdicts and review notes are unchanged. Proposal numbers (`N01`–`N32`) are separate from endpoint IDs (`E001`–`E289`); you can approve or reject a proposal as a group, or select individual rows.
+
+The goal is to make the route tell the caller what happens: execute through a connected provider, build an unsigned transaction, submit already-signed bytes, read a record, or start a provider-hosted flow. I would keep ordinary resource CRUD and already-clear action verbs; every POST does not need an `/execute` suffix.
+
+The tables show the **same HTTP method** on both sides. Proposed path-only changes retain existing bodies, selectors, response schemas, permissions, idempotency, signing, publication boundaries, and runtime behavior. A new URL still requires updating clients; “name-only” does not mean backward compatible. Body/query IDs are not silently moved into paths.
+
+**Remaining priorities:** **N03–N06 and N10** are the unimplemented priority-1 decisions. **N11–N24** improve resource and flow clarity; N13 is partial. **N25–N32** are lower-priority consistency improvements.
+
+| Proposal | Priority | Decision | Affected endpoints | Status |
+| --- | --- | --- | ---: | --- |
+| [N01](#n01-issuance-distinguish-execution-unsigned-builds-and-confirmation) | 1 | Issuance: distinguish execution, unsigned builds, and confirmation | 14 | Implemented |
+| [N02](#n02-subscriptions-say-that-prepare-returns-an-unsigned-transaction) | 1 | Subscriptions: say that prepare returns an unsigned transaction | 5 | Implemented |
+| [N03](#n03-issuance-an-allowlist-can-actually-be-a-blocklist) | 1 | Issuance: an allowlist can actually be a blocklist | 4 | Pending |
+| [N04](#n04-issuance-holder-enrollment-is-different-from-an-on-chain-holder-list) | 1 | Issuance: holder enrollment is different from an on-chain holder list | 2 | Pending |
+| [N05](#n05-issuance-disclose-that-creating-an-asset-profile-also-creates-a-token) | 1 | Issuance: disclose that creating an asset profile also creates a token | 1 | Pending |
+| [N06](#n06-ramps-quote-starts-a-tracked-provider-flow) | 1 | Ramps: quote starts a tracked provider flow | 2 | Pending |
+| [N07](#n07-payments-make-immediate-transfer-execution-explicit) | 1 | Payments: make immediate transfer execution explicit | 2 | Implemented |
+| [N08](#n08-rings-distinguish-starting-execution-from-recovering-an-existing-operation) | 1 | Rings: distinguish starting execution from recovering an existing operation | 2 | Implemented |
+| [N09](#n09-earn-extend-the-explicit-names-to-queued-withdrawal-transactions) | 1 | Earn: extend the explicit names to queued withdrawal transactions | 6 | Implemented |
+| [N10](#n10-fireblocks-setup-vault-discovery-does-not-create-a-vault) | 1 | Fireblocks setup: vault discovery does not create a vault | 1 | Pending |
+| [N11](#n11-earn-reads-replace-external-wallet-and-vault-prefixes-with-explicit-flow-families) | 2 | Earn reads: replace external-wallet and vault prefixes with explicit flow families | 15 | Pending |
+| [N12](#n12-earn-quotes-place-previews-and-options-beside-the-relevant-action) | 2 | Earn quotes: place previews and options beside the relevant action | 7 | Pending |
+| [N13](#n13-earn-programs-name-the-provider-portfolio-account-and-its-allocation) | 2 | Earn programs: name the provider portfolio account and its allocation | 9 | Partial: execution suffix |
+| [N14](#n14-earn-reconciliation-say-that-the-endpoint-returns-a-report) | 2 | Earn reconciliation: say that the endpoint returns a report | 1 | Pending |
+| [N15](#n15-issuance-distinguish-account-freezing-from-token-wide-pausing) | 2 | Issuance: distinguish account freezing from token-wide pausing | 3 | Pending |
+| [N16](#n16-private-channels-connect-to-an-instance-rather-than-imply-remote-deployment-or-destruction) | 2 | Private Channels: connect to an instance, rather than imply remote deployment or destruction | 5 | Pending |
+| [N17](#n17-private-channels-make-pre-connection-diagnostics-explicit) | 2 | Private Channels: make pre-connection diagnostics explicit | 2 | Pending |
+| [N18](#n18-private-channels-distinguish-verified-wallets-from-the-general-wallet-registry) | 2 | Private Channels: distinguish verified wallets from the general wallet registry | 2 | Pending |
+| [N19](#n19-private-channels-channel-membership-is-different-from-principal-creation-or-deletion) | 2 | Private Channels: channel membership is different from principal creation or deletion | 2 | Pending |
+| [N20](#n20-private-channels-name-eligibility-results-and-event-labels) | 2 | Private Channels: name eligibility results and event labels | 2 | Pending |
+| [N21](#n21-rings-make-the-identity-scope-of-rekey-explicit) | 2 | Rings: make the identity scope of rekey explicit | 1 | Pending |
+| [N22](#n22-rings-setup-distinguish-registration-and-identity-provisioning-from-wallet-creation) | 2 | Rings setup: distinguish registration and identity provisioning from wallet creation | 2 | Pending |
+| [N23](#n23-wallets-name-the-balance-aggregate-and-the-managed-signing-setup) | 2 | Wallets: name the balance aggregate and the managed signing setup | 3 | Pending |
+| [N24](#n24-counterparties-name-form-options-and-ramp-requirement-checks-accurately) | 2 | Counterparties: name form options and ramp requirement checks accurately | 3 | Pending |
+| [N25](#n25-ramps-currency-lists-actually-describe-supported-pairs) | 3 | Ramps: currency lists actually describe supported pairs | 2 | Pending |
+| [N26](#n26-payment-requests-the-link-endpoint-returns-a-link-token) | 3 | Payment requests: the link endpoint returns a link token | 1 | Pending |
+| [N27](#n27-organizations-use-the-same-provider-availability-term-as-projects) | 3 | Organizations: use the same provider-availability term as projects | 1 | Pending |
+| [N28](#n28-members-keep-invitation-creation-beside-invitation-revocation) | 3 | Members: keep invitation creation beside invitation revocation | 1 | Pending |
+| [N29](#n29-admin-qualify-the-onboarding-allowlist) | 3 | Admin: qualify the onboarding allowlist | 3 | Pending |
+| [N30](#n30-dashboard-provider-setup-name-installation-rotation-recovery-and-lifecycle-status) | 3 | Dashboard provider setup: name installation, rotation recovery, and lifecycle status | 4 | Pending |
+| [N31](#n31-dashboard-fireblocks-name-the-destination-eligibility-check) | 3 | Dashboard Fireblocks: name the destination eligibility check | 1 | Pending |
+| [N32](#n32-clerk-webhook-the-handler-synchronizes-more-than-organization-links) | 3 | Clerk webhook: the handler synchronizes more than organization links | 1 | Pending |
+
+### Naming vocabulary used below
+
+- **`execute`**: start the existing signing/provider execution path. Completion can still be asynchronous.
+- **`build-unsigned-transaction`**: return bytes the caller must sign. Existing build records and other preparation side effects remain.
+- **`submit-signed-transaction`**: verify and broadcast the caller-signed bytes using the existing submission flow.
+- **`confirm-submitted-transaction`**: verify a transaction that was already broadcast and record its result.
+- **`preview` / `options`**: planning reads, including existing POSTs whose inputs live in a body.
+- **`start`**: create the existing tracked ramp/provider flow, which may return a hosted URL or funding instructions.
+
+### N01: Issuance: distinguish execution, unsigned builds, and confirmation
+
+**Status: Implemented — path names only.**
+
+The same token action currently appears as a bare verb when the connected provider signs and submits, and as `/prepare` when the caller receives an unsigned transaction. Use the explicit distinction we agreed on for Earn. The deploy confirmation step observes an already-submitted transaction.
+
+| Endpoint | Previous route | Implemented route |
+| --- | --- | --- |
+| [E115](#e115-execute-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority` | `POST /v1/issuance/tokens/{tokenId}/authority/update/execute` |
+| [E116](#e116-prepare-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/prepare` | `POST /v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction` |
+| [E117](#e117-execute-burn) | `POST /v1/issuance/tokens/{tokenId}/burn` | `POST /v1/issuance/tokens/{tokenId}/burn/execute` |
+| [E118](#e118-prepare-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/burn/prepare` | `POST /v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction` |
+| [E119](#e119-deploy-token) | `POST /v1/issuance/tokens/{tokenId}/deploy` | `POST /v1/issuance/tokens/{tokenId}/deploy/execute` |
+| [E120](#e120-confirm-non-custodial-deploy) | `POST /v1/issuance/tokens/{tokenId}/deploy/confirm` | `POST /v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction` |
+| [E121](#e121-prepare-token-deploy-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/prepare` | `POST /v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction` |
+| [E122](#e122-prepare-metadata-uri-follow-up-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | `POST /v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction` |
+| [E123](#e123-execute-force-burn) | `POST /v1/issuance/tokens/{tokenId}/force-burn` | `POST /v1/issuance/tokens/{tokenId}/force-burn/execute` |
+| [E124](#e124-prepare-force-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/force-burn/prepare` | `POST /v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction` |
+| [E130](#e130-execute-mint) | `POST /v1/issuance/tokens/{tokenId}/mint` | `POST /v1/issuance/tokens/{tokenId}/mint/execute` |
+| [E131](#e131-prepare-mint-transaction) | `POST /v1/issuance/tokens/{tokenId}/mint/prepare` | `POST /v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction` |
+| [E133](#e133-execute-seize) | `POST /v1/issuance/tokens/{tokenId}/seize` | `POST /v1/issuance/tokens/{tokenId}/seize/execute` |
+| [E134](#e134-prepare-seize-transaction) | `POST /v1/issuance/tokens/{tokenId}/seize/prepare` | `POST /v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction` |
+
+Keep the existing contracts: `confirm-submitted-transaction` verifies and records; it does not broadcast. The metadata builder remains the conditional follow-up and can return no transaction when no update is needed. This proposal adds no signed-transaction submission endpoint.
+
+### N02: Subscriptions: say that prepare returns an unsigned transaction
+
+**Status: Implemented — path names only.**
+
+`prepare-create`, `prepare-authorization`, and the other prepare verbs hide the most useful fact: the caller still has to sign and submit. Make both the action and the returned artifact explicit.
+
+| Endpoint | Previous route | Implemented route |
+| --- | --- | --- |
+| [E078](#e078-prepare-subscription-plan-creation) | `POST /v1/payments/subscription-plans/{planId}/prepare-create` | `POST /v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` |
+| [E083](#e083-prepare-subscription-authorization) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | `POST /v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` |
+| [E084](#e084-prepare-subscription-cancellation) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | `POST /v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` |
+| [E085](#e085-prepare-subscription-collection) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection` | `POST /v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` |
+| [E086](#e086-prepare-subscription-resume) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume` | `POST /v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` |
+
+Preserve the current preparation side effects, including storing the plan PDA. These are transaction builders, not necessarily stateless reads. No new execute or submit route is implied.
+
+### N03: Issuance: an allowlist can actually be a blocklist
+
+The token control-list implementation supports allowlist mode and blocklist mode. Calling both `/allowlist` can reverse a reader’s understanding of what adding an address does. Use the neutral resource name `/control-list`.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E110](#e110-list-token-allowlist) | `GET /v1/issuance/tokens/{tokenId}/allowlist` | `GET /v1/issuance/tokens/{tokenId}/control-list` |
+| [E111](#e111-add-token-allowlist-entry) | `POST /v1/issuance/tokens/{tokenId}/allowlist` | `POST /v1/issuance/tokens/{tokenId}/control-list` |
+| [E112](#e112-list-token-allowlist-labels) | `GET /v1/issuance/tokens/{tokenId}/allowlist/labels` | `GET /v1/issuance/tokens/{tokenId}/control-list/labels` |
+| [E113](#e113-remove-token-allowlist-entry) | `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | `DELETE /v1/issuance/tokens/{tokenId}/control-list/{entryId}` |
+
+The token’s existing mode still determines whether membership permits or blocks transfers. Existing request fields, response fields, signing, and on-chain synchronization stay as they are; a path rename does not rename the schemas.
+
+### N04: Issuance: holder enrollment is different from an on-chain holder list
+
+These endpoints list or register asset enrollments and KYC identities. `/holders` sounds like an index of everyone who currently owns the token, which this endpoint does not provide.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E127](#e127-list-verified-holders) | `GET /v1/issuance/tokens/{tokenId}/holders` | `GET /v1/issuance/tokens/{tokenId}/holder-enrollments` |
+| [E128](#e128-enroll-a-verified-holder) | `POST /v1/issuance/tokens/{tokenId}/holders` | `POST /v1/issuance/tokens/{tokenId}/holder-enrollments` |
+
+### N05: Issuance: disclose that creating an asset profile also creates a token
+
+This POST atomically creates a token record and its asset profile. Its current collection name only advertises half of that operation.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E097](#e097-create-token-with-asset-profile) | `POST /v1/issuance/asset-profiles` | `POST /v1/issuance/tokens/create-with-asset-profile` |
+
+The token is a stored record at this step; the name must not imply deployment to Solana. Leave the profile list, read, edit, and archive routes under `/asset-profiles`.
+
+### N06: Ramps: quote starts a tracked provider flow
+
+These routes call a provider and persist a payment transfer, returning a hosted flow or funding instructions. `/quote` understates that commitment. `/start` distinguishes them from the read-only price estimates without promising immediate settlement.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E089](#e089-create-offramp-quote) | `POST /v1/payments/ramps/offramp/quote` | `POST /v1/payments/ramps/offramp/start` |
+| [E092](#e092-create-on-ramp-quote) | `POST /v1/payments/ramps/onramp/quote` | `POST /v1/payments/ramps/onramp/start` |
+
+Keep `/estimate` for the existing estimate routes. Do not call these `/execute`: starting a provider session or issuing funding instructions does not itself mean the transfer has paid out.
+
+### N07: Payments: make immediate transfer execution explicit
+
+**Status: Implemented — path names only.**
+
+Both POSTs request provider signing and submit actual value-moving transactions. `/execute` makes that explicit beside the batch estimate and the read-only history routes.
+
+| Endpoint | Previous route | Implemented route |
+| --- | --- | --- |
+| [E052](#e052-create-transfer-batch) | `POST /v1/payments/transfer-batches` | `POST /v1/payments/transfer-batches/execute` |
+| [E056](#e056-execute-transfer-custody) | `POST /v1/payments/transfers` | `POST /v1/payments/transfers/execute` |
+
+This follows Earn’s execution vocabulary where confusion would be costly. Ordinary record-creation POSTs can remain collection POSTs.
+
+### N08: Rings: distinguish starting execution from recovering an existing operation
+
+**Status: Implemented — path names only.**
+
+The create-operation handler reserves an intent and runs the pipeline, which can build, sign, and submit. The existing `/{operationId}/execute` advances a persisted operation after interruption or while waiting. The names should expose those different entry points.
+
+| Endpoint | Previous route | Implemented route |
+| --- | --- | --- |
+| [E232](#e232-prepare-rings-operation) | `POST /v1/helius-rings/operations` | `POST /v1/helius-rings/operations/execute` |
+| [E234](#e234-execute-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/execute` | `POST /v1/helius-rings/operations/{operationId}/resume-execution` |
+
+This is source-checked through `prepareOperation` and `runPipeline`. Do not rename the creation route `/prepare` or `/build-unsigned-transaction`; neither describes its current behavior. `/retry` can remain: it creates a linked new attempt and runs the full path again.
+
+### N09: Earn: extend the explicit names to queued withdrawal transactions
+
+**Status: Implemented — path names only.**
+
+The remaining queued-withdrawal paths still hide whether they build bytes, submit caller-signed bytes, or ask the connected provider to sign. Apply the same distinction as the six routes already renamed.
+
+| Endpoint | Previous route | Implemented route |
+| --- | --- | --- |
+| [E152](#e152-build-an-unsigned-asynchronous-withdrawal-request) | `POST /v1/earn/external-wallet/withdrawal-request-transactions` | `POST /v1/earn/withdrawal-requests/build-unsigned-transaction` |
+| [E154](#e154-submit-a-signed-asynchronous-withdrawal-request) | `POST /v1/earn/external-wallet/withdrawal-requests` | `POST /v1/earn/withdrawal-requests/submit-signed-transaction` |
+| [E180](#e180-request-a-queued-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-requests` | `POST /v1/earn/withdrawal-requests/execute` |
+| [E150](#e150-build-an-unsigned-asynchronous-withdrawal-cancellation) | `POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions` | `POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` |
+| [E151](#e151-submit-a-signed-asynchronous-withdrawal-cancellation) | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` | `POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction` |
+| [E182](#e182-recover-a-cancelable-withdrawal-request) | `POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel` | `POST /v1/earn/withdrawal-requests/{withdrawalRequestId}/cancel/execute` |
+
+Creating a queued request starts escrow or an intermediate-token conversion; it does not immediately pay the customer. Preserve the existing body selectors on caller-signed cancellation and the path selector on provider-signed cancellation. No new flow or behavior is proposed.
+
+### N10: Fireblocks setup: vault discovery does not create a vault
+
+`POST .../vaults` looks like resource creation. The handler discovers existing vaults using the supplied setup credentials.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E262](#e262-discover-vaults) | `POST /internal/dashboard/custody/fireblocks/vaults` | `POST /internal/dashboard/custody/fireblocks/vaults/discover` |
+
+Keep POST and the request body. Switching to GET would be a separate contract change, particularly because the body is credential-bearing.
+
+### N11: Earn reads: replace external-wallet and vault prefixes with explicit flow families
+
+After the transaction-path renames, the read paths still mix `/external-wallet`, `/vault-*`, and an unqualified `/movements`. I would group them under the thing being read and identify the signing flow. This is the largest vocabulary decision in this list.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E142](#e142-get-one-external-wallets-balance-and-earnings) | `GET /v1/earn/external-wallet/earnings` | `GET /v1/earn/earnings/caller-signed` |
+| [E143](#e143-list-one-external-wallets-activity) | `GET /v1/earn/external-wallet/movements` | `GET /v1/earn/movements/caller-signed` |
+| [E144](#e144-get-one-external-wallet-movement) | `GET /v1/earn/external-wallet/movements/{movementId}` | `GET /v1/earn/movements/caller-signed/{movementId}` |
+| [E145](#e145-list-one-external-wallets-positions) | `GET /v1/earn/external-wallet/positions` | `GET /v1/earn/positions/caller-signed` |
+| [E146](#e146-get-external-wallet-position-totals) | `GET /v1/earn/external-wallet/positions/summary` | `GET /v1/earn/positions/caller-signed/project-summary` |
+| [E153](#e153-list-an-external-wallets-asynchronous-withdrawals) | `GET /v1/earn/external-wallet/withdrawal-requests` | `GET /v1/earn/withdrawal-requests/caller-signed` |
+| [E155](#e155-get-one-asynchronous-withdrawal-request) | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | `GET /v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}` |
+| [E171](#e171-list-custody-deposits) | `GET /v1/earn/vault-deposits` | `GET /v1/earn/deposits/provider-signed` |
+| [E173](#e173-read-one-custody-deposit) | `GET /v1/earn/vault-deposits/{movementId}` | `GET /v1/earn/deposits/provider-signed/{movementId}` |
+| [E174](#e174-list-live-custody-positions) | `GET /v1/earn/vault-positions` | `GET /v1/earn/positions/provider-signed` |
+| [E179](#e179-list-custody-withdrawal-requests) | `GET /v1/earn/vault-withdrawal-requests` | `GET /v1/earn/withdrawal-requests/provider-signed` |
+| [E181](#e181-read-a-custody-withdrawal-request) | `GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}` | `GET /v1/earn/withdrawal-requests/provider-signed/{withdrawalRequestId}` |
+| [E183](#e183-list-custody-withdrawals) | `GET /v1/earn/vault-withdrawals` | `GET /v1/earn/withdrawals/provider-signed` |
+| [E185](#e185-read-one-custody-withdrawal) | `GET /v1/earn/vault-withdrawals/{movementId}` | `GET /v1/earn/withdrawals/provider-signed/{movementId}` |
+| [E158](#e158-list-all-scoped-earn-movements) | `GET /v1/earn/movements` | `GET /v1/earn/treasury/movements` |
+
+Keep each endpoint’s exact visibility, filters, and response shape. The caller-signed summary remains project-wide across customer wallets; it is not a single-wallet summary. The Treasury feed remains its current union of connected-wallet and provider-portfolio movements, rather than becoming a global feed that also includes caller-signed movements. The signing labels identify the flow family; they do not claim that every share in a live wallet balance was acquired through SDP. Do not merge these endpoints as part of a naming change.
+
+### N12: Earn quotes: place previews and options beside the relevant action
+
+`vault-deposit-previews`, `vault-withdrawal-previews`, and `external-wallet/...` use several different naming styles for read-only planning. Use a consistent preview/options suffix while preserving the distinct caller-signed and provider-signed request shapes.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E170](#e170-preview-a-direct-vault-deposit) | `POST /v1/earn/vault-deposit-previews` | `POST /v1/earn/deposits/preview` |
+| [E147](#e147-preview-an-asynchronous-external-wallet-withdrawal) | `POST /v1/earn/external-wallet/queued-withdrawal-previews` | `POST /v1/earn/withdrawal-requests/caller-signed/preview` |
+| [E148](#e148-discover-external-wallet-withdrawal-routes) | `POST /v1/earn/external-wallet/withdrawal-options` | `POST /v1/earn/withdrawals/caller-signed/options` |
+| [E149](#e149-preview-an-external-wallet-exit) | `POST /v1/earn/external-wallet/withdrawal-previews` | `POST /v1/earn/withdrawals/caller-signed/preview` |
+| [E175](#e175-preview-a-queued-custody-withdrawal) | `POST /v1/earn/vault-queued-withdrawal-previews` | `POST /v1/earn/withdrawal-requests/provider-signed/preview` |
+| [E177](#e177-discover-custody-withdrawal-routes) | `POST /v1/earn/vault-withdrawal-options` | `POST /v1/earn/withdrawals/provider-signed/options` |
+| [E178](#e178-preview-a-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-previews` | `POST /v1/earn/withdrawals/provider-signed/preview` |
+
+These remain POSTs with their existing bodies. A preview or options request stays a read-only operation; it does not execute an exit. The deposit preview keeps its existing shared vault-deposit scope. Coordinate the flow labels with N11.
+
+### N13: Earn programs: name the provider portfolio account and its allocation
+
+**Status: Partially implemented.** E166 now uses `POST /v1/earn/programs/{programId}/withdrawals/execute`. The `portfolio-accounts` family rename, allocation path, and preview path remain pending.
+
+An Earn “program” is a provider-managed portfolio wallet/account, not a Solana program. The PUT retargets its allocation rather than replacing an entire program. `/portfolio-accounts` and `/allocation` expose both facts.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E159](#e159-list-provider-managed-programs) | `GET /v1/earn/programs` | `GET /v1/earn/portfolio-accounts` |
+| [E160](#e160-create-a-provider-managed-program) | `POST /v1/earn/programs` | `POST /v1/earn/portfolio-accounts` |
+| [E161](#e161-read-a-provider-managed-program) | `GET /v1/earn/programs/{programId}` | `GET /v1/earn/portfolio-accounts/{programId}` |
+| [E162](#e162-change-a-programs-allocation) | `PUT /v1/earn/programs/{programId}` | `PUT /v1/earn/portfolio-accounts/{programId}/allocation` |
+| [E163](#e163-list-program-deposits) | `GET /v1/earn/programs/{programId}/deposits` | `GET /v1/earn/portfolio-accounts/{programId}/deposits` |
+| [E164](#e164-preview-a-program-withdrawal-or-read-liquidity) | `POST /v1/earn/programs/{programId}/withdrawal-preview` | `POST /v1/earn/portfolio-accounts/{programId}/withdrawals/preview` |
+| [E165](#e165-list-recorded-program-withdrawals) | `GET /v1/earn/programs/{programId}/withdrawals` | `GET /v1/earn/portfolio-accounts/{programId}/withdrawals` |
+| [E166](#e166-withdraw-from-a-provider-managed-program) | `POST /v1/earn/programs/{programId}/withdrawals/execute` | `POST /v1/earn/portfolio-accounts/{programId}/withdrawals/execute` |
+| [E167](#e167-read-a-program-withdrawal) | `GET /v1/earn/programs/{programId}/withdrawals/{withdrawalRef}` | `GET /v1/earn/portfolio-accounts/{programId}/withdrawals/{withdrawalRef}` |
+
+Keep PUT, the existing IDs, parameter names, and payload fields for a name-only change; `{programId}` is deliberately retained in these templates. The account’s current single-vault allocation model does not change. A later schema terminology cleanup would be a separate decision.
+
+### N14: Earn reconciliation: say that the endpoint returns a report
+
+The current GET compares scoped connected-wallet share balances with recorded positions and writes nothing. “Reconciliation” alone can sound like it repairs or imports records.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E176](#e176-reconcile-custody-vault-shares-against-recorded-positions) | `GET /v1/earn/vault-share-reconciliation` | `GET /v1/earn/positions/provider-signed/share-reconciliation-report` |
+
+Use the same flow label chosen in N11. Keep this report read-only; the proposed name adds no import or repair behavior.
+
+### N15: Issuance: distinguish account freezing from token-wide pausing
+
+`/freeze` and `/frozen` under a token can read like freezing the entire token. These routes operate on token accounts; `/pause` and `/unpause` are the token-wide operations.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E125](#e125-freeze-account) | `POST /v1/issuance/tokens/{tokenId}/freeze` | `POST /v1/issuance/tokens/{tokenId}/freeze-account` |
+| [E126](#e126-list-frozen-accounts) | `GET /v1/issuance/tokens/{tokenId}/frozen` | `GET /v1/issuance/tokens/{tokenId}/frozen-accounts` |
+| [E137](#e137-unfreeze-account) | `POST /v1/issuance/tokens/{tokenId}/unfreeze` | `POST /v1/issuance/tokens/{tokenId}/unfreeze-account` |
+
+Keep the target account in its existing input field. This proposal does not add an account path parameter or change the pause routes.
+
+### N16: Private Channels: connect to an instance, rather than imply remote deployment or destruction
+
+These routes manage the project’s persisted connection to an existing gateway/deployment. The POST probes and connects; DELETE hard-deletes the local connection row and cascades its dependent records; disconnect is a separate lifecycle action.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E211](#e211-get-the-active-private-channels-instance-for-the-project) | `GET /v1/private-channels/instance` | `GET /v1/private-channels/instance-connection` |
+| [E212](#e212-connect-a-private-channels-instance) | `POST /v1/private-channels/instance` | `POST /v1/private-channels/instance-connection/connect` |
+| [E213](#e213-update-the-active-private-channels-instance) | `PATCH /v1/private-channels/instance` | `PATCH /v1/private-channels/instance-connection` |
+| [E214](#e214-delete-the-active-private-channels-instance) | `DELETE /v1/private-channels/instance` | `DELETE /v1/private-channels/instance-connection` |
+| [E215](#e215-disconnect-the-active-private-channels-instance) | `POST /v1/private-channels/instance/disconnect` | `POST /v1/private-channels/instance-connection/disconnect` |
+
+The GET overview can remain at `/instance/overview`: it describes the connected remote instance. Preserve the current delete-versus-disconnect distinction and side effects. Renaming DELETE does not make its cascading deletion harmless.
+
+### N17: Private Channels: make pre-connection diagnostics explicit
+
+`/health` checks a caller-supplied candidate gateway, and `/probe` checks candidate connection settings more fully. Neither is the API service’s own health endpoint.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E210](#e210-probe-a-candidate-gateways-health) | `GET /v1/private-channels/health` | `GET /v1/private-channels/instance-connection/check-gateway-health` |
+| [E220](#e220-probe-a-candidate-spc-configuration) | `POST /v1/private-channels/probe` | `POST /v1/private-channels/instance-connection/probe` |
+
+Preserve GET with query inputs for the gateway check and POST with a body for the full probe. These names pair with N16’s connection resource.
+
+### N18: Private Channels: distinguish verified wallets from the general wallet registry
+
+The GET lists only wallets with an SPC verification, and DELETE revokes that verification rather than deleting the underlying wallet.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E224](#e224-list-the-projects-verified-wallets) | `GET /v1/private-channels/wallets` | `GET /v1/private-channels/verified-wallets` |
+| [E225](#e225-revoke-a-verified-wallet) | `DELETE /v1/private-channels/wallets/{pubkey}` | `DELETE /v1/private-channels/verified-wallets/{pubkey}` |
+
+Keep `{pubkey}` as a public-key selector. The existing `POST /wallets/{walletId}/verify` already names its action clearly and can stay.
+
+### N19: Private Channels: channel membership is different from principal creation or deletion
+
+These routes add or remove an existing principal’s membership in one channel. The separate `/principals` routes manage principals themselves.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E198](#e198-add-principal-channel-membership) | `POST /v1/private-channels/channels/{channelId}/principals` | `POST /v1/private-channels/channels/{channelId}/principal-memberships` |
+| [E199](#e199-remove-principal-channel-membership) | `DELETE /v1/private-channels/channels/{channelId}/principals/{principalId}` | `DELETE /v1/private-channels/channels/{channelId}/principal-memberships/{principalId}` |
+
+The deletion selector remains a principal ID, as it is today; it is not a newly introduced membership ID.
+
+### N20: Private Channels: name eligibility results and event labels
+
+These are specialized read models rather than a general token list or a list of event references.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E221](#e221-list-token-eligibility-for-the-active-instance) | `GET /v1/private-channels/tokens` | `GET /v1/private-channels/token-eligibility` |
+| [E209](#e209-list-display-name-references-for-events) | `GET /v1/private-channels/events/references` | `GET /v1/private-channels/events/reference-labels` |
+
+Token eligibility can include negative results, so I would not call this `/eligible-tokens`. The labels endpoint remains the same ID-to-display-name dictionary.
+
+### N21: Rings: make the identity scope of rekey explicit
+
+`/wallets/{walletId}/rekey` can sound like rotating the connected wallet’s provider signing key. It rotates the Rings identity, with the current foreign-identity checks and typed confirmation.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E245](#e245-rekey-rings-wallet) | `POST /v1/helius-rings/wallets/{walletId}/rekey` | `POST /v1/helius-rings/wallets/{walletId}/identity/rekey` |
+
+Preserve the existing consequences for balances associated with the old Rings identity and the confirmation requirement. This is not a provider credential rotation.
+
+### N22: Rings setup: distinguish registration and identity provisioning from wallet creation
+
+The ring POST records an existing custom program ID and performs bring-up. The wallet POST binds an existing SDP wallet and provisions its Rings identity. More specific verbs make those setup steps clearer.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E239](#e239-create-rings-project-ring) | `POST /v1/helius-rings/rings` | `POST /v1/helius-rings/rings/register-and-initialize` |
+| [E242](#e242-create-rings-wallet) | `POST /v1/helius-rings/wallets` | `POST /v1/helius-rings/wallets/provision-identity` |
+
+No Solana program deployment or creation of an underlying provider wallet is implied. Both keep their existing request bodies and execution behavior.
+
+### N23: Wallets: name the balance aggregate and the managed signing setup
+
+`aggregate`, `configs`, and `initialize` omit what is aggregated, configured, or initialized. Initialization also creates the first wallet, which is useful to surface.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E029](#e029-aggregate-wallet-balances) | `GET /v1/wallets/aggregate` | `GET /v1/wallets/balances/aggregate` |
+| [E030](#e030-list-wallet-signing-configs) | `GET /v1/wallets/configs` | `GET /v1/wallets/managed-signing/configurations` |
+| [E031](#e031-initialize-wallet-signing) | `POST /v1/wallets/initialize` | `POST /v1/wallets/managed-signing/initialize-with-wallet` |
+
+The configuration list retains its current Config-owned scope; it does not expand to connection-owned provider credentials. Existing environment restrictions on initialization remain.
+
+### N24: Counterparties: name form options and ramp requirement checks accurately
+
+`metadata` returns form field choices. `requirements` concerns ramp providers. The POST currently validates the existing counterparty/provider data and returns requirements; despite its handler name, it does not persist submitted documents or fulfill onboarding actions.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E039](#e039-get-counterparty-field-options) | `GET /v1/counterparties/metadata` | `GET /v1/counterparties/field-options` |
+| [E049](#e049-get-counterparty-ramp-requirements) | `GET /v1/counterparties/{counterpartyId}/requirements` | `GET /v1/counterparties/{counterpartyId}/ramp-requirements` |
+| [E050](#e050-submit-counterparty-requirements) | `POST /v1/counterparties/{counterpartyId}/requirements` | `POST /v1/counterparties/{counterpartyId}/ramp-requirements/check` |
+
+The GET and POST retain their current, different inputs. Calling the POST `/submit` or `/complete` would overstate what the handler actually does.
+
+### N25: Ramps: currency lists actually describe supported pairs
+
+These responses include source/destination pairs and providers, not just a single currency or a flat currency catalog.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E087](#e087-list-off-ramp-currency-support) | `GET /v1/payments/ramps/offramp/currency` | `GET /v1/payments/ramps/offramp/supported-pairs` |
+| [E090](#e090-list-on-ramp-currency-support) | `GET /v1/payments/ramps/onramp/currency` | `GET /v1/payments/ramps/onramp/supported-pairs` |
+
+### N26: Payment requests: the link endpoint returns a link token
+
+The response is `{ id, publicToken }`, not a complete link URL. Name the artifact the caller receives.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E065](#e065-get-payment-request-link) | `GET /v1/payments/requests/{paymentRequestId}/link` | `GET /v1/payments/requests/{paymentRequestId}/link-token` |
+
+Keep the existing manage-level permission. Making the response return a full URL would be a separate payload change.
+
+### N27: Organizations: use the same provider-availability term as projects
+
+The organization helper returns provider availability, while the project route already calls the concept `provider-availability`. “Access” can sound like a separate permission object.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E012](#e012-get-organization-provider-access) | `GET /v1/organizations/{orgId}/provider-access` | `GET /v1/organizations/{orgId}/provider-availability` |
+
+Only align the term. Organization-level availability keeps its current scope and is not replaced with project-level runtime readiness.
+
+### N28: Members: keep invitation creation beside invitation revocation
+
+The existing DELETE already uses `/members/invitations/{invitationId}`. A collection POST is easier to discover beside it than `/members/invite`.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E015](#e015-invite-member) | `POST /v1/members/invite` | `POST /v1/members/invitations` |
+
+### N29: Admin: qualify the onboarding allowlist
+
+The unqualified admin allowlist controls onboarding by email or domain. Qualifying it avoids confusion with token control lists or provider destination lists.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E281](#e281-list-allowlist-entries) | `GET /admin/allowlist` | `GET /admin/onboarding-allowlist` |
+| [E282](#e282-add-allowlist-entry) | `POST /admin/allowlist` | `POST /admin/onboarding-allowlist` |
+| [E283](#e283-remove-allowlist-entry) | `DELETE /admin/allowlist/{id}` | `DELETE /admin/onboarding-allowlist/{id}` |
+
+### N30: Dashboard provider setup: name installation, rotation recovery, and lifecycle status
+
+Generic connection “complete” or “cancel” actions are installation steps. The credential GET returns safe lifecycle information, and rollback restores the predecessor credential after rotation.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E255](#e255-post-cancel) | `POST /internal/dashboard/custody/connections/{connectionId}/cancel` | `POST /internal/dashboard/custody/connections/{connectionId}/cancel-installation` |
+| [E256](#e256-post-complete) | `POST /internal/dashboard/custody/connections/{connectionId}/complete` | `POST /internal/dashboard/custody/connections/{connectionId}/complete-installation` |
+| [E258](#e258-get-provider-credential) | `GET /internal/dashboard/custody/connections/{connectionId}/provider-credential` | `GET /internal/dashboard/custody/connections/{connectionId}/provider-credential/lifecycle` |
+| [E266](#e266-post-rollback) | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback` | `POST /internal/dashboard/custody/provider-credentials/{credentialId}/rollback-rotation` |
+
+Leave `/rotate` as an action: it can submit and complete a rotation immediately, so `/prepare-rotation` would be inaccurate. Keep the existing `/complete-rotation` recovery route. The lifecycle GET does not become a secret-retrieval route.
+
+### N31: Dashboard Fireblocks: name the destination eligibility check
+
+This GET checks a contact destination against the Fireblocks address book and returns a state and asset ID. It does not return a wallet’s receive address.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E269](#e269-get-destination) | `GET /internal/dashboard/fireblocks/destination` | `GET /internal/dashboard/fireblocks/destination-eligibility` |
+
+### N32: Clerk webhook: the handler synchronizes more than organization links
+
+The signed webhook handles organization and user lifecycle events as well as membership deletion. `/link-orgs` describes only part of its work.
+
+| Endpoint | Current route | Suggested route |
+| --- | --- | --- |
+| [E278](#e278-handle-clerk-webhook) | `POST /webhooks/clerk/link-orgs` | `POST /webhooks/clerk` |
+
+A future rollout must also update Clerk’s configured delivery URL. This proposal does not change webhook authentication or accepted event handling.
+
+### Items that need a contract decision, rather than a path-only rename
+
+I would discuss these during the endpoint review, rather than include them in the name-only proposals above:
+
+| Endpoint | Tempting name | Why it is not included as a name-only proposal |
+| --- | --- | --- |
+| [E028](#e028-delete-wallet) · `DELETE /v1/wallets` | `DELETE /v1/wallets/{walletId}` | The current selector is a provider wallet ID in the body; the existing detail path uses an SDP wallet-record ID. Moving the input and reconciling the ID meaning is a contract decision. |
+| [E032](#e032-get-wallet-public-key) · `GET /v1/wallets/public-key` | `GET /v1/wallets/{walletId}/public-key` | The current `walletId` query resolves a provider wallet ID. Reusing the detail path’s record-ID parameter would silently change which identifier a client supplies. |
+| [E094](#e094-cancel-ramp-transfer) · `POST /v1/payments/ramps/transfers/cancel` | `POST /v1/payments/ramps/transfers/{transferId}/cancel` | This would move an existing body selector into the URL. Reasonable to consider, but it is more than changing a static path name. |
+| [E069](#e069-update-recurring-payment) · `PATCH /v1/payments/recurring-payments/{id}` | Separate record edits from replacement execution | Some active-term edits sign and broadcast a replacement subscription; other edits only update stored fields. A single new name cannot express both. Splitting the endpoint would change the contract. |
+| [E109](#e109-update-token) · `PATCH /v1/issuance/tokens/{tokenId}` | Separate stored fields from on-chain metadata updates | The current PATCH can update stored fields and also write deployed-token metadata on-chain. A transaction-specific rename would misdescribe ordinary record edits. |
+
+These five endpoints are included in the 289-endpoint audit, but not in the proposed-rename count.
+
+### Routes I would deliberately keep
+
+- The six Earn deposit/withdrawal execution, build, and submission routes already renamed ([E140](#e140-build-an-unsigned-external-wallet-deposit-transaction), [E141](#e141-submit-a-signed-external-wallet-deposit), [E156](#e156-build-an-unsigned-external-wallet-exit-transaction), [E157](#e157-submit-a-signed-external-wallet-withdrawal), [E172](#e172-deposit-from-a-connected-wallet), [E184](#e184-withdraw-from-a-custody-position)). They are the model for the proposals above.
+- Solana Pay’s paired `GET` and `POST /pay/{token}/tx` ([E060](#e060-get-transaction-metadata), [E061](#e061-create-sponsored-transaction)). They serve the transaction-request protocol; splitting the pair to mimic the general API vocabulary would complicate the integration.
+- The hosted token metadata URL ending in `metadata.json` ([E129](#e129-get-public-token-metadata-json)), the ramp webhook environment/provider paths, and standard health/discovery paths. The names communicate their purpose and may be configured or embedded elsewhere.
+- The recurring-payment record/activation split ([E067](#e067-create-recurring-payment), [E070](#e070-activate-recurring-payment)), subscription-plan and subscription record creation ([E075](#e075-create-subscription-plan), [E080](#e080-create-subscription)), and draft token creation ([E106](#e106-create-token)). Ordinary collection creation is reasonable when there is an explicit subsequent activation or deployment step.
+- DvP trade creation and its fund, reclaim, cancel, and settle actions. They already name distinct operations. The read-only mint inspection and inbound-trade routes are understandable in that module’s context.
+- Clear resource lists/details, archives, key rotation, compliance screenings, Places helpers, and the dashboard Rings connection lifecycle. I would not rename these just to make every family look identical.
+
+### Coverage of the full endpoint inventory
+
+Every endpoint in each section was considered. Of the 110 candidates, 29 mappings are fully implemented, one has its execution suffix implemented, and 80 are untouched. “No path-only proposal” means no naming change is recommended here; it is not a Good verdict or approval of the endpoint’s behavior.
+
+| Review section | Endpoints considered | Candidates identified | No path-only proposal |
+| --- | ---: | ---: | ---: |
+| [Projects](#projects) | 7 | 0 | 7 |
+| [Organizations](#organizations) | 5 | 1 | 4 |
+| [Members and invitations](#members) | 7 | 1 | 6 |
+| [API keys](#api-keys) | 6 | 0 | 6 |
+| [Wallets](#wallets) | 10 | 3 | 7 |
+| [Counterparties and accounts](#counterparties) | 15 | 3 | 12 |
+| [Transfers and batches](#transfers) | 8 | 2 | 6 |
+| [Payment requests and payment links](#payment-requests) | 7 | 1 | 6 |
+| [Recurring payments and subscriptions](#recurring) | 21 | 5 | 16 |
+| [On-ramps and off-ramps](#ramps) | 8 | 4 | 4 |
+| [Transaction history](#transactions) | 1 | 0 | 1 |
+| [Issuance and asset profiles](#issuance) | 44 | 24 | 20 |
+| [Earn](#earn) | 46 | 38 | 8 |
+| [Delivery versus payment](#dvp) | 9 | 0 | 9 |
+| [Private Channels](#private-channels) | 35 | 13 | 22 |
+| [Helius Rings](#helius-rings) | 19 | 5 | 14 |
+| [Compliance](#compliance) | 1 | 0 | 1 |
+| [Places and address lookup](#places) | 3 | 0 | 3 |
+| [Dashboard custody setup](#dashboard-custody) | 18 | 6 | 12 |
+| [Dashboard Rings setup](#dashboard-rings) | 5 | 0 | 5 |
+| [Dashboard network data](#dashboard-network) | 1 | 0 | 1 |
+| [Onboarding](#onboarding) | 1 | 0 | 1 |
+| [Webhook ingress](#webhooks) | 3 | 1 | 2 |
+| [Platform administration](#admin) | 3 | 3 | 0 |
+| [Health and API discovery](#service) | 6 | 0 | 6 |
+| **Total** | **289** | **110** | **179** |
+
+**Source checks behind the less obvious proposals:** [token control-list modes](../../apps/sdp-api/src/routes/issuance/handlers/access-control.ts), [Rings execution pipeline](../../apps/sdp-api/src/services/helius-rings/service.ts), [off-ramp flow](../../apps/sdp-api/src/routes/payments/ramps/offramp/handlers.ts), [on-ramp flow](../../apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts), [counterparty checks](../../apps/sdp-api/src/routes/counterparties/handlers.ts), [Earn portfolio accounts](../../apps/sdp-api/src/routes/earn/handlers/program.ts), [Treasury movement scope](../../apps/sdp-api/src/routes/earn/handlers/movements.ts), [provider rotation lifecycle](../../apps/sdp-api/src/services/provider-credential-lifecycle.service.ts), [Fireblocks destination check](../../apps/sdp-api/src/services/custody/fireblocks-address-book.service.ts), and [Clerk webhook dispatch](../../apps/sdp-api/src/routes/webhooks/handlers.ts). Each mapping also links to its existing endpoint entry and source links.
+
+[Continue the endpoint-by-endpoint review](#review-map).
+<!-- API-NAMING-PROPOSALS:END -->
+
+---
 
 **289 endpoints · 0 good · 0 needs work · 289 pending**
 
@@ -3676,11 +4196,11 @@ Wallet balances, one-off transfers, and batch transfers.
 | ID | Endpoint | Visibility | Verdict |
 | --- | --- | --- | --- |
 | [E051](#e051-list-transfer-batches) | `GET /v1/payments/transfer-batches` | Public — stable, beta, experimental | Pending |
-| [E052](#e052-create-transfer-batch) | `POST /v1/payments/transfer-batches` | Public — stable, beta, experimental | Pending |
+| [E052](#e052-create-transfer-batch) | `POST /v1/payments/transfer-batches/execute` | Public — stable, beta, experimental | Pending |
 | [E053](#e053-estimate-transfer-batch) | `POST /v1/payments/transfer-batches/estimate` | Public — stable, beta, experimental | Pending |
 | [E054](#e054-get-transfer-batch) | `GET /v1/payments/transfer-batches/{batchId}` | Public — stable, beta, experimental | Pending |
 | [E055](#e055-list-transfers) | `GET /v1/payments/transfers` | Public — stable, beta, experimental | Pending |
-| [E056](#e056-execute-transfer-custody) | `POST /v1/payments/transfers` | Public — stable, beta, experimental | Pending |
+| [E056](#e056-execute-transfer-custody) | `POST /v1/payments/transfers/execute` | Public — stable, beta, experimental | Pending |
 | [E057](#e057-get-transfer) | `GET /v1/payments/transfers/{transferId}` | Public — stable, beta, experimental | Pending |
 | [E058](#e058-get-wallet-balances) | `GET /v1/payments/wallets/{walletId}/balances` | Public — stable, beta, experimental | Pending |
 
@@ -3766,7 +4286,7 @@ Lists transfer batches for the authenticated organization or project scope.
 
 ### E052: Create transfer batch
 
-`POST /v1/payments/transfer-batches`
+`POST /v1/payments/transfer-batches/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -4256,7 +4776,7 @@ Lists persisted payment transfers for the authenticated scope. Set custodyWallet
 
 ### E056: Execute a provider-signed transfer
 
-`POST /v1/payments/transfers`
+`POST /v1/payments/transfers/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -5203,15 +5723,15 @@ Recurring schedules, subscription plans, subscriptions, and collections.
 | [E075](#e075-create-subscription-plan) | `POST /v1/payments/subscription-plans` | Public — stable, beta, experimental | Pending |
 | [E076](#e076-get-subscription-plan) | `GET /v1/payments/subscription-plans/{planId}` | Public — stable, beta, experimental | Pending |
 | [E077](#e077-update-subscription-plan) | `PATCH /v1/payments/subscription-plans/{planId}` | Public — stable, beta, experimental | Pending |
-| [E078](#e078-prepare-subscription-plan-creation) | `POST /v1/payments/subscription-plans/{planId}/prepare-create` | Public — stable, beta, experimental | Pending |
+| [E078](#e078-prepare-subscription-plan-creation) | `POST /v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction` | Public — stable, beta, experimental | Pending |
 | [E079](#e079-list-subscriptions) | `GET /v1/payments/subscriptions` | Public — stable, beta, experimental | Pending |
 | [E080](#e080-create-subscription) | `POST /v1/payments/subscriptions` | Public — stable, beta, experimental | Pending |
 | [E081](#e081-get-subscription) | `GET /v1/payments/subscriptions/{subscriptionId}` | Public — stable, beta, experimental | Pending |
 | [E082](#e082-list-subscription-collection-attempts) | `GET /v1/payments/subscriptions/{subscriptionId}/collection-attempts` | Public — stable, beta, experimental | Pending |
-| [E083](#e083-prepare-subscription-authorization) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | Public — stable, beta, experimental | Pending |
-| [E084](#e084-prepare-subscription-cancellation) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | Public — stable, beta, experimental | Pending |
-| [E085](#e085-prepare-subscription-collection) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection` | Public — stable, beta, experimental | Pending |
-| [E086](#e086-prepare-subscription-resume) | `POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume` | Public — stable, beta, experimental | Pending |
+| [E083](#e083-prepare-subscription-authorization) | `POST /v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction` | Public — stable, beta, experimental | Pending |
+| [E084](#e084-prepare-subscription-cancellation) | `POST /v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction` | Public — stable, beta, experimental | Pending |
+| [E085](#e085-prepare-subscription-collection) | `POST /v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction` | Public — stable, beta, experimental | Pending |
+| [E086](#e086-prepare-subscription-resume) | `POST /v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction` | Public — stable, beta, experimental | Pending |
 
 ### E066: List recurring payments
 
@@ -6342,7 +6862,7 @@ Updates mutable subscription plan fields and on-chain identifiers.
 
 ### E078: Prepare subscription plan creation
 
-`POST /v1/payments/subscription-plans/{planId}/prepare-create`
+`POST /v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -6756,7 +7276,7 @@ Lists collection attempts for a recurring-payment subscription.
 
 ### E083: Prepare subscription authorization
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-authorization`
+`POST /v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -6847,7 +7367,7 @@ Prepares the subscriber-signed Solana transaction that initializes the subscript
 
 ### E084: Prepare subscription cancellation
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-cancel`
+`POST /v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -6932,7 +7452,7 @@ Schema: object.
 
 ### E085: Prepare subscription collection
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection`
+`POST /v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -7035,7 +7555,7 @@ Prepares the collector-signed Solana subscriptions transfer transaction for an a
 
 ### E086: Prepare subscription resume
 
-`POST /v1/payments/subscriptions/{subscriptionId}/prepare-resume`
+`POST /v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -8050,26 +8570,26 @@ Templates, token creation and operations, allowlists, and asset metadata.
 | [E112](#e112-list-token-allowlist-labels) | `GET /v1/issuance/tokens/{tokenId}/allowlist/labels` | Public — experimental | Pending |
 | [E113](#e113-remove-token-allowlist-entry) | `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | Public — experimental | Pending |
 | [E114](#e114-get-asset-audit-history) | `GET /v1/issuance/tokens/{tokenId}/audit` | Public — experimental | Pending |
-| [E115](#e115-execute-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority` | Public — experimental | Pending |
-| [E116](#e116-prepare-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/prepare` | Public — experimental | Pending |
-| [E117](#e117-execute-burn) | `POST /v1/issuance/tokens/{tokenId}/burn` | Public — experimental | Pending |
-| [E118](#e118-prepare-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/burn/prepare` | Public — experimental | Pending |
-| [E119](#e119-deploy-token) | `POST /v1/issuance/tokens/{tokenId}/deploy` | Public — experimental | Pending |
-| [E120](#e120-confirm-non-custodial-deploy) | `POST /v1/issuance/tokens/{tokenId}/deploy/confirm` | Public — experimental | Pending |
-| [E121](#e121-prepare-token-deploy-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/prepare` | Public — experimental | Pending |
-| [E122](#e122-prepare-metadata-uri-follow-up-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | Public — experimental | Pending |
-| [E123](#e123-execute-force-burn) | `POST /v1/issuance/tokens/{tokenId}/force-burn` | Public — experimental | Pending |
-| [E124](#e124-prepare-force-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/force-burn/prepare` | Public — experimental | Pending |
+| [E115](#e115-execute-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/update/execute` | Public — experimental | Pending |
+| [E116](#e116-prepare-authority-update) | `POST /v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction` | Public — experimental | Pending |
+| [E117](#e117-execute-burn) | `POST /v1/issuance/tokens/{tokenId}/burn/execute` | Public — experimental | Pending |
+| [E118](#e118-prepare-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction` | Public — experimental | Pending |
+| [E119](#e119-deploy-token) | `POST /v1/issuance/tokens/{tokenId}/deploy/execute` | Public — experimental | Pending |
+| [E120](#e120-confirm-non-custodial-deploy) | `POST /v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction` | Public — experimental | Pending |
+| [E121](#e121-prepare-token-deploy-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction` | Public — experimental | Pending |
+| [E122](#e122-prepare-metadata-uri-follow-up-transaction) | `POST /v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction` | Public — experimental | Pending |
+| [E123](#e123-execute-force-burn) | `POST /v1/issuance/tokens/{tokenId}/force-burn/execute` | Public — experimental | Pending |
+| [E124](#e124-prepare-force-burn-transaction) | `POST /v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction` | Public — experimental | Pending |
 | [E125](#e125-freeze-account) | `POST /v1/issuance/tokens/{tokenId}/freeze` | Public — experimental | Pending |
 | [E126](#e126-list-frozen-accounts) | `GET /v1/issuance/tokens/{tokenId}/frozen` | Public — experimental | Pending |
 | [E127](#e127-list-verified-holders) | `GET /v1/issuance/tokens/{tokenId}/holders` | Public — experimental | Pending |
 | [E128](#e128-enroll-a-verified-holder) | `POST /v1/issuance/tokens/{tokenId}/holders` | Public — experimental | Pending |
 | [E129](#e129-get-public-token-metadata-json) | `GET /v1/issuance/tokens/{tokenId}/metadata.json` | Public — experimental | Pending |
-| [E130](#e130-execute-mint) | `POST /v1/issuance/tokens/{tokenId}/mint` | Public — experimental | Pending |
-| [E131](#e131-prepare-mint-transaction) | `POST /v1/issuance/tokens/{tokenId}/mint/prepare` | Public — experimental | Pending |
+| [E130](#e130-execute-mint) | `POST /v1/issuance/tokens/{tokenId}/mint/execute` | Public — experimental | Pending |
+| [E131](#e131-prepare-mint-transaction) | `POST /v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction` | Public — experimental | Pending |
 | [E132](#e132-pause-token-transfers) | `POST /v1/issuance/tokens/{tokenId}/pause` | Public — experimental | Pending |
-| [E133](#e133-execute-seize) | `POST /v1/issuance/tokens/{tokenId}/seize` | Public — experimental | Pending |
-| [E134](#e134-prepare-seize-transaction) | `POST /v1/issuance/tokens/{tokenId}/seize/prepare` | Public — experimental | Pending |
+| [E133](#e133-execute-seize) | `POST /v1/issuance/tokens/{tokenId}/seize/execute` | Public — experimental | Pending |
+| [E134](#e134-prepare-seize-transaction) | `POST /v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction` | Public — experimental | Pending |
 | [E135](#e135-refresh-cached-token-supply) | `POST /v1/issuance/tokens/{tokenId}/supply/refresh` | Public — experimental | Pending |
 | [E136](#e136-list-token-transactions) | `GET /v1/issuance/tokens/{tokenId}/transactions` | Public — experimental | Pending |
 | [E137](#e137-unfreeze-account) | `POST /v1/issuance/tokens/{tokenId}/unfreeze` | Public — experimental | Pending |
@@ -9567,7 +10087,7 @@ Returns the aggregated audit history for an issued token: events logged against 
 
 ### E115: Execute authority update
 
-`POST /v1/issuance/tokens/{tokenId}/authority`
+`POST /v1/issuance/tokens/{tokenId}/authority/update/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -9658,7 +10178,7 @@ Updates token authorities using the connected provider for signing.
 
 ### E116: Prepare authority update
 
-`POST /v1/issuance/tokens/{tokenId}/authority/prepare`
+`POST /v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -9756,7 +10276,7 @@ Builds an unsigned authority update transaction for client-side signing.
 
 ### E117: Execute burn
 
-`POST /v1/issuance/tokens/{tokenId}/burn`
+`POST /v1/issuance/tokens/{tokenId}/burn/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -9847,7 +10367,7 @@ Burns tokens by requesting a signature from the connected provider, then submitt
 
 ### E118: Prepare burn transaction
 
-`POST /v1/issuance/tokens/{tokenId}/burn/prepare`
+`POST /v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -9945,7 +10465,7 @@ Builds an unsigned burn transaction for client-side signing. The authority walle
 
 ### E119: Deploy token
 
-`POST /v1/issuance/tokens/{tokenId}/deploy`
+`POST /v1/issuance/tokens/{tokenId}/deploy/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -10051,7 +10571,7 @@ Deploys the token to Solana using the connected provider for signing.
 
 ### E120: Confirm a caller-signed deployment
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/confirm`
+`POST /v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -10087,9 +10607,9 @@ Records the mint after the client signs and submits a prepared deploy transactio
 | Field | Type | Required within parent | Description and constraints |
 | --- | --- | --- | --- |
 | `signature` | string | Yes | Signature of the confirmed create transaction the client submitted. example: `"5x...signature"` |
-| `mint` | string | Yes | Mint address returned by deploy/prepare and created by the submitted tx. example: `"So11111111111111111111111111111111111111112"` |
+| `mint` | string | Yes | Mint address returned by deploy/build-unsigned-transaction and created by the submitted tx. example: `"So11111111111111111111111111111111111111112"` |
 | `listAddress` | string | No | Accepted for backward compatibility but ignored: the server re-derives the ABL list-config PDA deterministically from the mint authority and mint. minLength: `32` maxLength: `44` example: `"So11111111111111111111111111111111111111112"` |
-| `signingWalletId` | string | No | Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time. minLength: `1` example: `"privy_wallet_123"` |
+| `signingWalletId` | string | No | Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/build-unsigned-transaction, so the authority can't be changed at confirm time. minLength: `1` example: `"privy_wallet_123"` |
 
 **Responses**
 
@@ -10152,14 +10672,14 @@ Records the mint after the client signs and submits a prepared deploy transactio
 
 ### E121: Prepare token deploy transaction
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/prepare`
+`POST /v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.
+Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction.
 
 | Property | Value |
 | --- | --- |
@@ -10207,7 +10727,7 @@ Builds an unsigned deploy transaction for client-side signing. A signing wallet 
 | `data.transaction.lastValidBlockHeight` | string | Yes | Last valid block height. example: `"123456"` |
 | `data.mint` | string | Yes | Mint address that will be created. minLength: `32` maxLength: `44` example: `"So11111111111111111111111111111111111111112"` |
 | `data.listAddress` | string | No | On-chain ABL list-config address, present only for allowlist/blocklist tokens with on-chain access control enabled. minLength: `32` maxLength: `44` example: `"So11111111111111111111111111111111111111112"` |
-| `data.metadataUriFollowUp` | object | No | Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain. |
+| `data.metadataUriFollowUp` | object | No | Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/metadata/build-unsigned-transaction and submit the returned follow-up transaction to set this URI on-chain. |
 | `data.metadataUriFollowUp.required` | boolean; True | Yes |  |
 | `data.metadataUriFollowUp.uri` | string (uri) | Yes |  |
 | `data.simulation` | object | No | Optional transaction simulation results. |
@@ -10225,14 +10745,14 @@ Builds an unsigned deploy transaction for client-side signing. A signing wallet 
 
 ### E122: Prepare metadata-URI follow-up transaction
 
-`POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata`
+`POST /v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.
+Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.
 
 | Property | Value |
 | --- | --- |
@@ -10294,7 +10814,7 @@ Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `me
 
 ### E123: Execute force burn
 
-`POST /v1/issuance/tokens/{tokenId}/force-burn`
+`POST /v1/issuance/tokens/{tokenId}/force-burn/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -10386,7 +10906,7 @@ Burns tokens using permanent delegate authority.
 
 ### E124: Prepare force burn transaction
 
-`POST /v1/issuance/tokens/{tokenId}/force-burn/prepare`
+`POST /v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -10788,7 +11308,7 @@ Schema: TokenMetadataJson.
 
 ### E130: Execute mint
 
-`POST /v1/issuance/tokens/{tokenId}/mint`
+`POST /v1/issuance/tokens/{tokenId}/mint/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -10880,7 +11400,7 @@ Mints tokens by requesting a signature from the connected provider, then submitt
 
 ### E131: Prepare mint transaction
 
-`POST /v1/issuance/tokens/{tokenId}/mint/prepare`
+`POST /v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -11066,7 +11586,7 @@ Pauses transfers for a token using the pause authority.
 
 ### E133: Execute seize
 
-`POST /v1/issuance/tokens/{tokenId}/seize`
+`POST /v1/issuance/tokens/{tokenId}/seize/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -11159,7 +11679,7 @@ Forces a transfer using permanent delegate authority.
 
 ### E134: Prepare seize transaction
 
-`POST /v1/issuance/tokens/{tokenId}/seize/prepare`
+`POST /v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -11700,11 +12220,11 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E147](#e147-preview-an-asynchronous-external-wallet-withdrawal) | `POST /v1/earn/external-wallet/queued-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
 | [E148](#e148-discover-external-wallet-withdrawal-routes) | `POST /v1/earn/external-wallet/withdrawal-options` | Unpublished — Earn launch hold | Pending |
 | [E149](#e149-preview-an-external-wallet-exit) | `POST /v1/earn/external-wallet/withdrawal-previews` | Unpublished — Earn launch hold | Pending |
-| [E150](#e150-build-an-unsigned-asynchronous-withdrawal-cancellation) | `POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions` | Unpublished — Earn launch hold | Pending |
-| [E151](#e151-submit-a-signed-asynchronous-withdrawal-cancellation) | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` | Unpublished — Earn launch hold | Pending |
-| [E152](#e152-build-an-unsigned-asynchronous-withdrawal-request) | `POST /v1/earn/external-wallet/withdrawal-request-transactions` | Unpublished — Earn launch hold | Pending |
+| [E150](#e150-build-an-unsigned-asynchronous-withdrawal-cancellation) | `POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
+| [E151](#e151-submit-a-signed-asynchronous-withdrawal-cancellation) | `POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
+| [E152](#e152-build-an-unsigned-asynchronous-withdrawal-request) | `POST /v1/earn/withdrawal-requests/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
 | [E153](#e153-list-an-external-wallets-asynchronous-withdrawals) | `GET /v1/earn/external-wallet/withdrawal-requests` | Unpublished — Earn launch hold | Pending |
-| [E154](#e154-submit-a-signed-asynchronous-withdrawal-request) | `POST /v1/earn/external-wallet/withdrawal-requests` | Unpublished — Earn launch hold | Pending |
+| [E154](#e154-submit-a-signed-asynchronous-withdrawal-request) | `POST /v1/earn/withdrawal-requests/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
 | [E155](#e155-get-one-asynchronous-withdrawal-request) | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
 | [E156](#e156-build-an-unsigned-external-wallet-exit-transaction) | `POST /v1/earn/withdrawals/build-unsigned-transaction` | Unpublished — Earn launch hold | Pending |
 | [E157](#e157-submit-a-signed-external-wallet-withdrawal) | `POST /v1/earn/withdrawals/submit-signed-transaction` | Unpublished — Earn launch hold | Pending |
@@ -11716,7 +12236,7 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E163](#e163-list-program-deposits) | `GET /v1/earn/programs/{programId}/deposits` | Unpublished — Earn launch hold | Pending |
 | [E164](#e164-preview-a-program-withdrawal-or-read-liquidity) | `POST /v1/earn/programs/{programId}/withdrawal-preview` | Unpublished — Earn launch hold | Pending |
 | [E165](#e165-list-recorded-program-withdrawals) | `GET /v1/earn/programs/{programId}/withdrawals` | Unpublished — Earn launch hold | Pending |
-| [E166](#e166-withdraw-from-a-provider-managed-program) | `POST /v1/earn/programs/{programId}/withdrawals` | Unpublished — Earn launch hold | Pending |
+| [E166](#e166-withdraw-from-a-provider-managed-program) | `POST /v1/earn/programs/{programId}/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
 | [E167](#e167-read-a-program-withdrawal) | `GET /v1/earn/programs/{programId}/withdrawals/{withdrawalRef}` | Unpublished — Earn launch hold | Pending |
 | [E168](#e168-list-yield-strategies) | `GET /v1/earn/strategies` | Unpublished — Earn launch hold | Pending |
 | [E169](#e169-get-one-yield-strategy) | `GET /v1/earn/strategies/{strategyId}` | Unpublished — Earn launch hold | Pending |
@@ -11730,9 +12250,9 @@ Strategies, vaults, programs, external-wallet flows, and withdrawal tracking. He
 | [E177](#e177-discover-custody-withdrawal-routes) | `POST /v1/earn/vault-withdrawal-options` | Unpublished — Earn launch hold | Pending |
 | [E178](#e178-preview-a-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-previews` | Unpublished — Earn launch hold | Pending |
 | [E179](#e179-list-custody-withdrawal-requests) | `GET /v1/earn/vault-withdrawal-requests` | Unpublished — Earn launch hold | Pending |
-| [E180](#e180-request-a-queued-custody-withdrawal) | `POST /v1/earn/vault-withdrawal-requests` | Unpublished — Earn launch hold | Pending |
+| [E180](#e180-request-a-queued-custody-withdrawal) | `POST /v1/earn/withdrawal-requests/execute` | Unpublished — Earn launch hold | Pending |
 | [E181](#e181-read-a-custody-withdrawal-request) | `GET /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}` | Unpublished — Earn launch hold | Pending |
-| [E182](#e182-recover-a-cancelable-withdrawal-request) | `POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel` | Unpublished — Earn launch hold | Pending |
+| [E182](#e182-recover-a-cancelable-withdrawal-request) | `POST /v1/earn/withdrawal-requests/{withdrawalRequestId}/cancel/execute` | Unpublished — Earn launch hold | Pending |
 | [E183](#e183-list-custody-withdrawals) | `GET /v1/earn/vault-withdrawals` | Unpublished — Earn launch hold | Pending |
 | [E184](#e184-withdraw-from-a-custody-position) | `POST /v1/earn/withdrawals/execute` | Unpublished — Earn launch hold | Pending |
 | [E185](#e185-read-one-custody-withdrawal) | `GET /v1/earn/vault-withdrawals/{movementId}` | Unpublished — Earn launch hold | Pending |
@@ -12490,7 +13010,7 @@ Quotes what redeeming the shares would pay right now, from the vault's live acco
 
 ### E150: Build an unsigned asynchronous-withdrawal cancellation
 
-`POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions`
+`POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -12558,7 +13078,7 @@ Builds the owner-signed recovery transaction. A solver request becomes cancellab
 
 ### E151: Submit a signed asynchronous-withdrawal cancellation
 
-`POST /v1/earn/external-wallet/withdrawal-request-cancellations`
+`POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -12627,7 +13147,7 @@ Verifies the signed recovery transaction, records it before broadcast and return
 
 ### E152: Build an unsigned asynchronous-withdrawal request
 
-`POST /v1/earn/external-wallet/withdrawal-request-transactions`
+`POST /v1/earn/withdrawal-requests/build-unsigned-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -12757,7 +13277,7 @@ Returns one strict keyset page for the required ownerAddress in the active proje
 
 ### E154: Submit a signed asynchronous-withdrawal request
 
-`POST /v1/earn/external-wallet/withdrawal-requests`
+`POST /v1/earn/withdrawal-requests/submit-signed-transaction`
 
 - [ ] Good
 - [ ] Needs work
@@ -13701,7 +14221,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ### E166: Withdraw from a provider-managed program
 
-`POST /v1/earn/programs/{programId}/withdrawals`
+`POST /v1/earn/programs/{programId}/withdrawals/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -14842,7 +15362,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ### E180: Request a queued wallet withdrawal
 
-`POST /v1/earn/vault-withdrawal-requests`
+`POST /v1/earn/withdrawal-requests/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -14972,7 +15492,7 @@ Tenant-scoped Treasury operation. Requires earn:read.
 
 ### E182: Recover a cancelable withdrawal request
 
-`POST /v1/earn/vault-withdrawal-requests/{withdrawalRequestId}/cancel`
+`POST /v1/earn/withdrawal-requests/{withdrawalRequestId}/cancel/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -18520,9 +19040,9 @@ Rings, wallet identities, zones, and operation lifecycle.
 | --- | --- | --- | --- |
 | [E230](#e230-get-rings-health) | `GET /v1/helius-rings/health` | Outside public OpenAPI | Pending |
 | [E231](#e231-list-rings-operations) | `GET /v1/helius-rings/operations` | Outside public OpenAPI | Pending |
-| [E232](#e232-prepare-rings-operation) | `POST /v1/helius-rings/operations` | Outside public OpenAPI | Pending |
+| [E232](#e232-prepare-rings-operation) | `POST /v1/helius-rings/operations/execute` | Outside public OpenAPI | Pending |
 | [E233](#e233-get-rings-operation) | `GET /v1/helius-rings/operations/{operationId}` | Outside public OpenAPI | Pending |
-| [E234](#e234-execute-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/execute` | Outside public OpenAPI | Pending |
+| [E234](#e234-execute-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/resume-execution` | Outside public OpenAPI | Pending |
 | [E235](#e235-recheck-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/recheck` | Outside public OpenAPI | Pending |
 | [E236](#e236-retry-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/retry` | Outside public OpenAPI | Pending |
 | [E237](#e237-void-rings-operation) | `POST /v1/helius-rings/operations/{operationId}/void` | Outside public OpenAPI | Pending |
@@ -18671,7 +19191,7 @@ export async function listRingsOperations(c: AppContext) {
 
 ### E232: Prepare Rings Operation
 
-`POST /v1/helius-rings/operations`
+`POST /v1/helius-rings/operations/execute`
 
 - [ ] Good
 - [ ] Needs work
@@ -18770,7 +19290,7 @@ prepareRingsOperationSchema = z
 <summary>Exact route registration</summary>
 
 ```typescript
-heliusRings.post("/operations", requireAction("helius_rings.execute"), prepareRingsOperation)
+heliusRings.post("/operations/execute", requireAction("helius_rings.execute"), prepareRingsOperation)
 ```
 
 </details>
@@ -18781,7 +19301,7 @@ heliusRings.post("/operations", requireAction("helius_rings.execute"), prepareRi
 ```typescript
 // --- operations ---------------------------------------------------------------
 
-/** POST /operations — reserve the intent and run it. */
+/** POST /operations/execute — reserve the intent and run it. */
 export async function prepareRingsOperation(c: AppContext) {
   const parsed = prepareRingsOperationSchema.safeParse(await c.req.json());
   if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "invalid body");
@@ -18821,7 +19341,7 @@ GET /operations/:operationId — full detail with the event timeline.
 | Idempotency | Read endpoint; no route-level idempotency step |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L71) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L371)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L75) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L371)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -18860,14 +19380,14 @@ export async function getRingsOperation(c: AppContext) {
 
 ### E234: Execute Rings Operation
 
-`POST /v1/helius-rings/operations/{operationId}/execute`
+`POST /v1/helius-rings/operations/{operationId}/resume-execution`
 
 - [ ] Good
 - [ ] Needs work
 
 **Review notes:** _Add your notes here._
 
-POST /operations/:operationId/execute — advance an operation a crash left mid-pipeline. The request carries no body worth trusting.
+POST /operations/:operationId/resume-execution — advance an operation a crash left mid-pipeline. The request carries no body worth trusting.
 
 | Property | Value |
 | --- | --- |
@@ -18879,7 +19399,7 @@ POST /operations/:operationId/execute — advance an operation a crash left mid-
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L72) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L385)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L76) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L385)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -18890,7 +19410,7 @@ POST /operations/:operationId/execute — advance an operation a crash left mid-
 
 ```typescript
 heliusRings.post(
-  "/operations/:operationId/execute",
+  "/operations/:operationId/resume-execution",
   requireAction("helius_rings.execute"),
   executeRingsOperation
 )
@@ -18903,7 +19423,7 @@ heliusRings.post(
 
 ```typescript
 /**
- * POST /operations/:operationId/execute — advance an operation a crash left
+ * POST /operations/:operationId/resume-execution — advance an operation a crash left
  * mid-pipeline. The request carries no body worth trusting.
  */
 export async function executeRingsOperation(c: AppContext) {
@@ -18944,7 +19464,7 @@ POST /operations/:operationId/recheck — ask the indexer about a signed failure
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L84) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L302)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L88) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L302)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19014,7 +19534,7 @@ POST /operations/:operationId/retry — file a linked retry of a failed op. The 
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L77) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L399)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L81) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L399)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -19105,7 +19625,7 @@ POST /operations/:operationId/void — operator confirms a signed failure never 
 | Idempotency | No shared route-level idempotency marker; inspect the implementation for its retry contract |
 | Contract coverage | Runtime registration and source; no OpenAPI operation |
 
-**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L89) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L276)
+**Source:** [route registration](../../apps/sdp-api/src/routes/helius-rings/index.ts#L93) · [handler](../../apps/sdp-api/src/routes/helius-rings/handlers.ts#L276)
 
 **Path parameters:** `operationId`. Constraints come from the validators and handler below.
 
@@ -44726,7 +45246,7 @@ References such as `#/components/schemas/Name` use the following component defin
     },
     "mint": {
       "type": "string",
-      "description": "Mint address returned by deploy/prepare and created by the submitted tx.",
+      "description": "Mint address returned by deploy/build-unsigned-transaction and created by the submitted tx.",
       "example": "So11111111111111111111111111111111111111112"
     },
     "listAddress": {
@@ -44739,7 +45259,7 @@ References such as `#/components/schemas/Name` use the following component defin
     "signingWalletId": {
       "type": "string",
       "minLength": 1,
-      "description": "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/prepare, so the authority can't be changed at confirm time.",
+      "description": "Accepted for backward compatibility but ignored: the server uses the signing wallet pinned during deploy/build-unsigned-transaction, so the authority can't be changed at confirm time.",
       "example": "privy_wallet_123"
     }
   },
@@ -44826,7 +45346,7 @@ References such as `#/components/schemas/Name` use the following component defin
             "required",
             "uri"
           ],
-          "description": "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/prepare-metadata and submit the returned follow-up transaction to set this URI on-chain."
+          "description": "Present when the inline metadata URI overflowed the create transaction's packet limit. The create tx was prepared with an empty URI; after confirming the deploy, the client must call POST /deploy/metadata/build-unsigned-transaction and submit the returned follow-up transaction to set this URI on-chain."
         },
         "simulation": {
           "type": "object",

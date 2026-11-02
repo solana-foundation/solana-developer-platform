@@ -51,7 +51,7 @@ export async function createAndDeployStablecoin(
   signingCustodyWalletId: string
 ): Promise<string> {
   const tokenId = await createStablecoin(request, name, symbol, signingCustodyWalletId);
-  const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+  const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -74,7 +74,7 @@ export async function mintToWallet(
   amount: string,
   signingCustodyWalletId: string
 ): Promise<string> {
-  const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+  const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint/execute`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

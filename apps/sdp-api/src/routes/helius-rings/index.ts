@@ -67,10 +67,14 @@ heliusRings.get("/wallets/:walletId/zones", requireAction("helius_rings.read"), 
 heliusRings.post("/wallets/:walletId/zones", requireAction("helius_rings.manage"), createRingsZone);
 
 heliusRings.get("/operations", requireAction("helius_rings.read"), listRingsOperations);
-heliusRings.post("/operations", requireAction("helius_rings.execute"), prepareRingsOperation);
+heliusRings.post(
+  "/operations/execute",
+  requireAction("helius_rings.execute"),
+  prepareRingsOperation
+);
 heliusRings.get("/operations/:operationId", requireAction("helius_rings.read"), getRingsOperation);
 heliusRings.post(
-  "/operations/:operationId/execute",
+  "/operations/:operationId/resume-execution",
   requireAction("helius_rings.execute"),
   executeRingsOperation
 );

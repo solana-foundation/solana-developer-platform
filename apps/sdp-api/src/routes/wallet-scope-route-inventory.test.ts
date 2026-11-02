@@ -75,13 +75,13 @@ const WALLET_SCOPE_ROUTES = {
   },
 
   // Payments
-  "POST /v1/payments/transfers": {
+  "POST /v1/payments/transfers/execute": {
     refusedEarly: {
       file: TRANSFERS,
       test: "refuses a transfer from a wallet outside the key's scope before writing anything",
     },
   },
-  "POST /v1/payments/transfer-batches": {
+  "POST /v1/payments/transfer-batches/execute": {
     refusedEarly: {
       file: "routes/payments/transfer-batches/handlers.test.ts",
       test: "refuses a batch from a wallet outside the key's scope before writing anything",
@@ -147,14 +147,22 @@ const WALLET_SCOPE_ROUTES = {
   },
   "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
   "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": {
+  "POST /v1/payments/subscription-plans/:planId/create/build-unsigned-transaction": {
     exempt: SPONSOR_ONLY,
   },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": { exempt: SPONSOR_ONLY },
+  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
+  "POST /v1/payments/subscriptions/:subscriptionId/authorize/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/cancel/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/collect/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
+  "POST /v1/payments/subscriptions/:subscriptionId/resume/build-unsigned-transaction": {
+    exempt: SPONSOR_ONLY,
+  },
 
   // DvP
   "POST /v1/dvp/trades": {
@@ -186,19 +194,19 @@ const WALLET_SCOPE_ROUTES = {
       test: "refuses a withdrawal with wallet_out_of_scope before recording a movement",
     },
   },
-  "POST /v1/earn/vault-withdrawal-requests": {
+  "POST /v1/earn/withdrawal-requests/execute": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses a withdrawal request with wallet_out_of_scope before recording it",
     },
   },
-  "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel": {
+  "POST /v1/earn/withdrawal-requests/:withdrawalRequestId/cancel/execute": {
     refusedEarly: {
       file: EARN_EXITS,
       test: "refuses a withdrawal request cancellation with wallet_out_of_scope, leaving the request unchanged",
     },
   },
-  "POST /v1/earn/programs/:programId/withdrawals": {
+  "POST /v1/earn/programs/:programId/withdrawals/execute": {
     refusedEarly: {
       file: "routes/earn-program.test.ts",
       test: "refuses a wallet-scoped key on the payout, before the provider is driven",
@@ -210,54 +218,59 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/earn/deposits/submit-signed-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/withdrawals/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
   "POST /v1/earn/withdrawals/submit-signed-transaction": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-request-transactions": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-requests": { exempt: SPONSOR_ONLY },
-  "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions": {
+  "POST /v1/earn/withdrawal-requests/build-unsigned-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/submit-signed-transaction": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction": {
     exempt: SPONSOR_ONLY,
   },
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations": { exempt: SPONSOR_ONLY },
+  "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction": { exempt: SPONSOR_ONLY },
 
   // Issuance
-  "POST /v1/issuance/tokens/:tokenId/burn": { refusedEarly: ISSUANCE_BURN },
+  "POST /v1/issuance/tokens/:tokenId/burn/execute": { refusedEarly: ISSUANCE_BURN },
   "POST /v1/issuance/tokens": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
   "PATCH /v1/issuance/tokens/:tokenId": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
-  "POST /v1/issuance/tokens/:tokenId/deploy": {
+  "POST /v1/issuance/tokens/:tokenId/deploy/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/deploy/prepare": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/deploy/confirm": { gap: LEGACY_DEPLOY },
-  "POST /v1/issuance/tokens/:tokenId/mint": { refusedEarly: ISSUANCE_BURN, via: ISSUANCE_RESOLVER },
-  "POST /v1/issuance/tokens/:tokenId/mint/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction": { gap: LEGACY_DEPLOY },
+  "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction": {
+    gap: LEGACY_DEPLOY,
+  },
+  "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction": { gap: LEGACY_DEPLOY },
+  "POST /v1/issuance/tokens/:tokenId/mint/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/burn/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/mint/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/seize": {
+  "POST /v1/issuance/tokens/:tokenId/burn/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/seize/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/seize/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/force-burn": {
+  "POST /v1/issuance/tokens/:tokenId/seize/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/force-burn/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/force-burn/execute": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/authority": {
+  "POST /v1/issuance/tokens/:tokenId/force-burn/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
-  "POST /v1/issuance/tokens/:tokenId/authority/prepare": {
+  "POST /v1/issuance/tokens/:tokenId/authority/update/execute": {
+    refusedEarly: ISSUANCE_BURN,
+    via: ISSUANCE_RESOLVER,
+  },
+  "POST /v1/issuance/tokens/:tokenId/authority/update/build-unsigned-transaction": {
     refusedEarly: ISSUANCE_BURN,
     via: ISSUANCE_RESOLVER,
   },
@@ -314,8 +327,8 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/helius-rings/wallets/:walletId/sync": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/rekey": { refusedEarly: RINGS },
   "POST /v1/helius-rings/wallets/:walletId/zones": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/operations": { refusedEarly: RINGS },
-  "POST /v1/helius-rings/operations/:operationId/execute": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/operations/execute": { refusedEarly: RINGS },
+  "POST /v1/helius-rings/operations/:operationId/resume-execution": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/retry": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/recheck": { refusedEarly: RINGS },
   "POST /v1/helius-rings/operations/:operationId/void": { refusedEarly: RINGS },
@@ -420,9 +433,9 @@ describe("wallet-scope route inventory", () => {
         .filter(([, classification]) => "gap" in classification)
         .map(([route]) => route)
     ).toEqual([
-      "POST /v1/issuance/tokens/:tokenId/deploy/prepare",
-      "POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata",
-      "POST /v1/issuance/tokens/:tokenId/deploy/confirm",
+      "POST /v1/issuance/tokens/:tokenId/deploy/build-unsigned-transaction",
+      "POST /v1/issuance/tokens/:tokenId/deploy/metadata/build-unsigned-transaction",
+      "POST /v1/issuance/tokens/:tokenId/deploy/confirm-submitted-transaction",
       "POST /v1/helius-rings/rings",
     ]);
   });

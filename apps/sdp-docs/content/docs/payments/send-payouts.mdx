@@ -3,14 +3,14 @@ title: Payouts and disbursements
 description: Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 ---
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches/execute` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers/execute` once per recipient and reconcile the returned transfer IDs.
 
 ## Native transfer batches
 
 One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
 
 ```bash
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: 3f0c9e7a-5b1d-4c2e-9a8f-6d4b2e1c0a97" \
@@ -117,7 +117,7 @@ For destinations that are not registered counterparty accounts, a run can send o
 
 1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
 2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
+3. **Iterate** — for each recipient, call `POST /v1/payments/transfers/execute` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
 4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
 5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
 
@@ -129,7 +129,7 @@ To tie a single transfer to a registered counterparty account, pass `counterpart
 
 Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
 
-1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
+1. **Idempotency keys** — `POST /v1/payments/transfers/execute` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
 
 The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
@@ -139,7 +139,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
@@ -158,7 +158,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
   if (row.transferId) return row.transferId; // already submitted
 
   const response = await fetch(
-    "https://api.solana.com/v1/payments/transfers",
+    "https://api.solana.com/v1/payments/transfers/execute",
     {
       method: "POST",
       headers: {
@@ -186,7 +186,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 <Tab value="Java">
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
+    .uri(URI.create("https://api.solana.com/v1/payments/transfers/execute"))
     .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)

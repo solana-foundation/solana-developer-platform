@@ -255,12 +255,12 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/withdrawals/submit-signed-transaction",
         "POST /v1/earn/external-wallet/withdrawal-options",
         "POST /v1/earn/external-wallet/queued-withdrawal-previews",
-        "POST /v1/earn/external-wallet/withdrawal-request-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-requests",
+        "POST /v1/earn/withdrawal-requests/build-unsigned-transaction",
+        "POST /v1/earn/withdrawal-requests/submit-signed-transaction",
         "GET /v1/earn/external-wallet/withdrawal-requests",
         "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
+        "POST /v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+        "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ].sort()
     );
     expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
@@ -358,11 +358,12 @@ describe("OpenAPI spec", () => {
       expect.arrayContaining([
         "/v1/earn/external-wallet/withdrawal-options",
         "/v1/earn/external-wallet/queued-withdrawal-previews",
-        "/v1/earn/external-wallet/withdrawal-request-transactions",
+        "/v1/earn/withdrawal-requests/build-unsigned-transaction",
+        "/v1/earn/withdrawal-requests/submit-signed-transaction",
         "/v1/earn/external-wallet/withdrawal-requests",
         "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+        "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
+        "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
       ])
     );
     for (const path of referencedPaths) {
@@ -372,7 +373,7 @@ describe("OpenAPI spec", () => {
 
   it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
     const doc = createPublicOpenApiDocument(PUBLISHABLE_EARN);
-    const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
+    const requestPath = doc.paths?.["/v1/earn/withdrawal-requests/build-unsigned-transaction"];
 
     const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
     expect(buildRequest.anyOf).toHaveLength(3);
@@ -571,8 +572,8 @@ describe("OpenAPI spec", () => {
     const sponsored = [
       ["/v1/earn/deposits/submit-signed-transaction", "post"],
       ["/v1/earn/withdrawals/submit-signed-transaction", "post"],
-      ["/v1/payments/transfers", "post"],
-      ["/v1/issuance/tokens/{tokenId}/mint", "post"],
+      ["/v1/payments/transfers/execute", "post"],
+      ["/v1/issuance/tokens/{tokenId}/mint/execute", "post"],
       ["/v1/dvp/trades/{tradeId}/settle", "post"],
     ] as const;
     for (const [path, method] of sponsored) {
@@ -714,7 +715,7 @@ describe("OpenAPI spec", () => {
 
     expect(doc.paths?.["/health"]?.get).toBeDefined();
     expect(doc.paths?.["/v1/wallets"]?.get).toBeDefined();
-    expect(doc.paths?.["/v1/payments/transfers"]?.post).toBeDefined();
+    expect(doc.paths?.["/v1/payments/transfers/execute"]?.post).toBeDefined();
   });
 
   // A deployment refuses every module outside its release channel with 403, so

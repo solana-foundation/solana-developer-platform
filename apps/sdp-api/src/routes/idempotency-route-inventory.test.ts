@@ -54,11 +54,11 @@ const EXEMPT = {
   "POST /pay/:token/tx":
     "public and unauthenticated (no organization to scope a key to); the payment request token is the unit of retry",
   "POST /v1/payments/transfer-batches/estimate": "read-only estimate; moves and stores nothing",
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": PREPARE,
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": PREPARE,
+  "POST /v1/payments/subscription-plans/:planId/create/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/authorize/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/cancel/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/collect/build-unsigned-transaction": PREPARE,
+  "POST /v1/payments/subscriptions/:subscriptionId/resume/build-unsigned-transaction": PREPARE,
 } as const satisfies Record<string, string>;
 
 /**

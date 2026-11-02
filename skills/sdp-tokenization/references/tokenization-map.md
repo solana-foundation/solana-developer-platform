@@ -96,10 +96,10 @@ Use this file as the quick reference for answering tokenization questions on top
 - Issuance:
   - `GET /v1/issuance/templates`
   - `POST /v1/issuance/tokens`
-  - `POST /v1/issuance/tokens/{tokenId}/deploy`
-  - `POST /v1/issuance/tokens/{tokenId}/mint`
-  - `POST /v1/issuance/tokens/{tokenId}/burn`
-  - `POST /v1/issuance/tokens/{tokenId}/authority`
+  - `POST /v1/issuance/tokens/{tokenId}/deploy/execute`
+  - `POST /v1/issuance/tokens/{tokenId}/mint/execute`
+  - `POST /v1/issuance/tokens/{tokenId}/burn/execute`
+  - `POST /v1/issuance/tokens/{tokenId}/authority/update/execute`
   - `POST /v1/issuance/tokens/{tokenId}/freeze`
   - `POST /v1/issuance/tokens/{tokenId}/unfreeze`
   - `POST /v1/issuance/tokens/{tokenId}/pause`
@@ -111,7 +111,7 @@ Use this file as the quick reference for answering tokenization questions on top
   - `POST /v1/issuance/tokens/{tokenId}/allowlist`
   - `DELETE /v1/issuance/tokens/{tokenId}/allowlist/{entryId}`
 - Payments and movement:
-  - `POST /v1/payments/transfers`
+  - `POST /v1/payments/transfers/execute`
   - `GET /v1/payments/transfers`
   - `GET /v1/payments/wallets/{walletId}/balances`
 

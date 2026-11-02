@@ -545,7 +545,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+    path: "/v1/earn/withdrawal-requests/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
@@ -573,7 +573,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-requests",
+    path: "/v1/earn/withdrawal-requests/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequest",
@@ -646,7 +646,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    path: "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
@@ -674,7 +674,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    path: "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancellation",

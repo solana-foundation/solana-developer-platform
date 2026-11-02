@@ -75,7 +75,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
     const created = (await createRes.json()) as TokenApiResponse;
     const tokenId = created.data.token.id;
 
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -101,7 +101,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Token ACL"
    * Helper to mint tokens to a destination address
    */
   async function mintToDestination(tokenId: string, destination: string, amount: string) {
-    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint`, {
+    const mintRes = await request(`/v1/issuance/tokens/${tokenId}/mint/execute`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

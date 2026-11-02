@@ -29,7 +29,7 @@ import {
 /**
  * Browser-side durability for the transfer-batch IDEMPOTENCY KEY.
  *
- * `POST /v1/payments/transfer-batches` replays by Idempotency-Key + payload
+ * `POST /v1/payments/transfer-batches/execute` replays by Idempotency-Key + payload
  * fingerprint, but only when the caller carries a key at all: an unkeyed retry
  * is a brand-new batch that moves the whole amount again. Storage and
  * the retire rule are the shared key store's (`lib/idempotency-key-store.ts`),

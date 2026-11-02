@@ -81,8 +81,8 @@ export function setTabShowsDemo(on: boolean): void {
  * shared list fails this build until it is mapped here.
  */
 const DASHBOARD_REQUIRED_ROUTES = {
-  "POST /v1/payments/transfers": "POST /api/dashboard/payments/transfers",
-  "POST /v1/payments/transfer-batches": "POST /api/dashboard/payments/transfers/batch",
+  "POST /v1/payments/transfers/execute": "POST /api/dashboard/payments/transfers",
+  "POST /v1/payments/transfer-batches/execute": "POST /api/dashboard/payments/transfers/batch",
   "POST /v1/payments/transfer-batches/:batchId/retry":
     "POST /api/dashboard/payments/transfers/batch/:batchId/retry",
   "POST /v1/payments/recurring-payments": "POST /api/dashboard/payments/recurring-payments",

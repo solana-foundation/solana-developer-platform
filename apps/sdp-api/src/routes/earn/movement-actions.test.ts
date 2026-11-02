@@ -16,7 +16,7 @@ import { earnPostRouteMovement } from "./exits";
 
 /** Routes whose action their start does not name, harmless only while SDP never signs there. */
 const PINNED_MISMATCHES = {
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations":
+  "POST /v1/earn/withdrawal-requests/cancel/submit-signed-transaction":
     "the owner signs; SDP neither signs nor sponsors it (PRO-1744), so no waist reads its action",
 } as const satisfies Record<string, string>;
 
@@ -63,7 +63,7 @@ describe("Earn routes declare an action their movement admits (HOO-2099)", () =>
     expect(routes.map(({ route }) => route)).toEqual(
       expect.arrayContaining([
         "POST /v1/earn/deposits/execute",
-        "POST /v1/earn/vault-withdrawal-requests/:withdrawalRequestId/cancel",
+        "POST /v1/earn/withdrawal-requests/:withdrawalRequestId/cancel/execute",
       ])
     );
   });

@@ -6,7 +6,7 @@ description: Retry mutations safely with Idempotency-Key, especially when moving
 Clients time out, connections drop and workers die mid-run. Send an `Idempotency-Key` header so a retry returns the first attempt's answer instead of doing the work twice.
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfers \
+curl -X POST https://api.solana.com/v1/payments/transfers/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
@@ -17,8 +17,8 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 **Required.** These routes move money. A request without a key returns `400 IDEMPOTENCY_KEY_REQUIRED`, and nothing runs.
 
-- `POST /v1/payments/transfers`
-- `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfers/execute`
+- `POST /v1/payments/transfer-batches/execute`
 - `POST /v1/payments/transfer-batches/{batchId}/retry`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
@@ -34,7 +34,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
 
-**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription and subscription-plan `build-unsigned-transaction` routes return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
 Modules with their own key handling say so on their pages.
 
@@ -55,7 +55,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
   for (let attempt = 1; attempt <= 8; attempt++) {
     let response: Response;
     try {
-      response = await fetch("https://api.solana.com/v1/payments/transfers", {
+      response = await fetch("https://api.solana.com/v1/payments/transfers/execute", {
         method: "POST",
         headers: {
           Authorization: "Bearer sf_...",

@@ -223,13 +223,13 @@ earn.get(
   getEarnExternalWalletEarnings
 );
 earn.post(
-  "/external-wallet/withdrawal-request-transactions",
+  "/withdrawal-requests/build-unsigned-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
   createEarnExternalWalletWithdrawalRequestTransaction
 );
 earn.post(
-  "/external-wallet/withdrawal-request-cancel-transactions",
+  "/withdrawal-requests/cancel/build-unsigned-transaction",
   requireAction("earn.manage"),
   validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
   createEarnExternalWalletWithdrawalRequestCancelTransaction
@@ -338,7 +338,7 @@ earn.post(
   createEarnVaultQueuedWithdrawalPreview
 );
 earn.post(
-  "/vault-withdrawal-requests",
+  "/withdrawal-requests/execute",
   requireAction("earn.execute"),
   validateBody(earnVaultWithdrawalRequestSchema),
   requestGate({
@@ -360,7 +360,7 @@ earn.get(
 // (`earn.queued_withdraw_cancel`) needs at the signer, so a key without it is
 // refused here rather than after sponsorship, a build and a simulation.
 earn.post(
-  "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
+  "/withdrawal-requests/:withdrawalRequestId/cancel/execute",
   requireAction("earn.manage"),
   validateBody(earnVaultWithdrawalRequestCancelSchema),
   cancelEarnVaultWithdrawalRequest
@@ -438,13 +438,13 @@ earn.post(
   createEarnExternalWalletWithdrawal
 );
 earn.post(
-  "/external-wallet/withdrawal-requests",
+  "/withdrawal-requests/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequest
 );
 earn.post(
-  "/external-wallet/withdrawal-request-cancellations",
+  "/withdrawal-requests/cancel/submit-signed-transaction",
   requireAction("earn.execute"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
@@ -508,7 +508,7 @@ earn.post(
 // so the extractor refuses a wallet-scoped key, which has no wallet here to be
 // bound against. Retries are resolved by the handler over the movement ledger.
 earn.post(
-  "/programs/:programId/withdrawals",
+  "/programs/:programId/withdrawals/execute",
   requireAction("earn.execute"),
   validateBody(earnProgramWithdrawalCreateSchema),
   requestGate({

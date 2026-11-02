@@ -216,7 +216,7 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "vault-withdrawal-requests",
+    "withdrawal-requests/execute",
     "createEarnVaultWithdrawalRequest",
     "Request a queued wallet withdrawal",
     earnExternalWalletWithdrawalRequestResponse,
@@ -251,7 +251,7 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "vault-withdrawal-requests/{withdrawalRequestId}/cancel",
+    "withdrawal-requests/{withdrawalRequestId}/cancel/execute",
     "cancelEarnVaultWithdrawalRequest",
     "Recover a cancelable withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
@@ -312,7 +312,7 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "programs/{programId}/withdrawals",
+    "programs/{programId}/withdrawals/execute",
     "createEarnProgramWithdrawal",
     "Withdraw from a provider-managed program",
     programWithdrawal,

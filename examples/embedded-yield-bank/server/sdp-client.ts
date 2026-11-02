@@ -254,7 +254,7 @@ export class EmbeddedYieldClient {
     feePayer?: string;
   }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
     const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-request-transactions",
+      "/v1/earn/withdrawal-requests/build-unsigned-transaction",
       { method: "POST", body: input }
     );
     return data.transaction;
@@ -267,7 +267,7 @@ export class EmbeddedYieldClient {
   ): Promise<YieldWithdrawalRequest> {
     const data = await this.request<{
       withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/external-wallet/withdrawal-requests", {
+    }>("/v1/earn/withdrawal-requests/submit-signed-transaction", {
       method: "POST",
       body: { transactionId, signedTransaction },
       idempotencyKey,
@@ -295,7 +295,7 @@ export class EmbeddedYieldClient {
     feePayer?: string;
   }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
     const data = await this.request<QueuedWithdrawalBuildResult>(
-      "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
       { method: "POST", body: input }
     );
     return data.transaction;
@@ -308,7 +308,7 @@ export class EmbeddedYieldClient {
   ): Promise<YieldWithdrawalRequest> {
     const data = await this.request<{
       withdrawalRequest: YieldWithdrawalRequest;
-    }>("/v1/earn/external-wallet/withdrawal-request-cancellations", {
+    }>("/v1/earn/withdrawal-requests/cancel/submit-signed-transaction", {
       method: "POST",
       body: { transactionId, signedTransaction },
       idempotencyKey,

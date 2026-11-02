@@ -602,7 +602,7 @@ export async function buildEarnQueuedWithdrawalRequest({
       preview.blockingIssues.map((issue: { message: string }) => issue.message).join("; ")
     );
   }
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -631,7 +631,7 @@ export async function buildEarnParRedemptionRequest({
   shares: string;
   feePayer?: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/build-unsigned-transaction", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({
@@ -651,7 +651,7 @@ export async function submitEarnWithdrawalRequest(input: {
   signedTransaction: string;
   idempotencyKey: string;
 }) {
-  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-requests", {
+  const data = await sdpFetch("/v1/earn/withdrawal-requests/submit-signed-transaction", {
     method: "POST",
     headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),
     body: JSON.stringify({
@@ -735,7 +735,7 @@ export async function buildEarnWithdrawalRequestCancellation({
   feePayer?: string;
 }) {
   const data = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
     {
       method: "POST",
       headers: sdpHeaders(),
@@ -755,7 +755,7 @@ export async function submitEarnWithdrawalRequestCancellation(input: {
   idempotencyKey: string;
 }) {
   const data = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
     {
       method: "POST",
       headers: sdpHeaders({ "Idempotency-Key": input.idempotencyKey }),

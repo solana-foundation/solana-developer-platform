@@ -8,6 +8,6 @@ export async function POST(
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.helius-rings.execute",
-    path: `/v1/helius-rings/operations/${encodeURIComponent(operationId)}/execute`,
+    path: `/v1/helius-rings/operations/${encodeURIComponent(operationId)}/resume-execution`,
   });
 }

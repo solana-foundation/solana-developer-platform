@@ -39,12 +39,12 @@ describe("POST /api/dashboard/issuance/tokens/[tokenId]/[action]", () => {
   );
 
   it.each([
-    ["deploy", "deploy"],
-    ["mint", "mint"],
-    ["burn", "burn"],
-    ["seize", "seize"],
-    ["force-burn", "force-burn"],
-    ["authority", "authority"],
+    ["deploy", "deploy/execute"],
+    ["mint", "mint/execute"],
+    ["burn", "burn/execute"],
+    ["seize", "seize/execute"],
+    ["force-burn", "force-burn/execute"],
+    ["authority", "authority/update/execute"],
     ["freeze", "freeze"],
     ["unfreeze", "unfreeze"],
     ["pause", "pause"],

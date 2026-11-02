@@ -2,19 +2,9 @@
   "_generated": {
     "source": "apps/sdp-api/src/openapi/**",
     "command": "pnpm -C apps/sdp-api playground:generate",
-    "families": {
-      "Health": 2,
-      "Wallets": 10,
-      "Projects": 4,
-      "Issuance": 37,
-      "Payments": 36,
-      "Compliance": 1,
-      "Counterparties": 13,
-      "Asset Profiles": 7
-    },
     "modules": {
       "wallets": 10,
-      "payments": 36,
+      "payments": 34,
       "counterparties": 13,
       "issuance": 37
     }
@@ -27,6 +17,8 @@
         "title": "Initialize wallet signing",
         "method": "POST",
         "path": "/v1/wallets/initialize",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -43,9 +35,7 @@
           "configId": "cfg_example",
           "publicKey": "So11111111111111111111111111111111111111112",
           "walletId": "privy_wallet_123"
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-wallet",
@@ -53,6 +43,8 @@
         "title": "Create wallet",
         "method": "POST",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -84,9 +76,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "delete-wallet",
@@ -94,6 +84,8 @@
         "title": "Delete wallet",
         "method": "DELETE",
         "path": "/v1/wallets",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -115,9 +107,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-wallets",
@@ -125,6 +115,8 @@
         "title": "List wallets",
         "method": "GET",
         "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "provider",
@@ -228,9 +220,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-wallet-configs",
@@ -238,6 +228,8 @@
         "title": "List wallet signing configs",
         "method": "GET",
         "path": "/v1/wallets/configs",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -257,9 +249,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "aggregate-wallet-balances",
@@ -267,6 +257,8 @@
         "title": "Aggregate wallet balances",
         "method": "GET",
         "path": "/v1/wallets/aggregate?provider={provider}",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "provider",
@@ -341,9 +333,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-wallet-public-key",
@@ -351,6 +341,8 @@
         "title": "Get wallet public key",
         "method": "GET",
         "path": "/v1/wallets/public-key?walletId={walletId}",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -363,9 +355,7 @@
         "bodyFields": [],
         "expectedResponse": {
           "publicKey": "So11111111111111111111111111111111111111112"
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "check-wallet-signer",
@@ -373,6 +363,8 @@
         "title": "Check signer via simulated memo transaction",
         "method": "POST",
         "path": "/v1/wallets/signer-check",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -399,9 +391,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-wallet-by-id",
@@ -409,6 +399,8 @@
         "title": "Get wallet by ID",
         "method": "GET",
         "path": "/v1/wallets/{walletId}?includeBalance={includeBalance}",
+        "releaseModule": "custody",
+        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"],
         "pathFields": [
           {
             "key": "walletId",
@@ -456,9 +448,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
+        }
       },
       {
         "id": "update-wallet",
@@ -466,6 +456,8 @@
         "title": "Update wallet",
         "method": "PATCH",
         "path": "/v1/wallets/{walletId}",
+        "releaseModule": "custody",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -505,9 +497,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "custody",
-        "shadowedBy": []
+        }
       }
     ],
     "payments": [
@@ -517,6 +507,8 @@
         "title": "Get wallet balances",
         "method": "GET",
         "path": "/v1/payments/wallets/{walletId}/balances?minimumSlot={minimumSlot}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "walletId",
@@ -558,16 +550,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
         "title": "Execute a provider-signed transfer",
         "method": "POST",
-        "path": "/v1/payments/transfers",
+        "path": "/v1/payments/transfers/execute",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -660,9 +652,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-transfers",
@@ -670,6 +660,8 @@
         "title": "List transfers",
         "method": "GET",
         "path": "/v1/payments/transfers?custodyWalletId={custodyWalletId}&search={search}&token={token}&direction={direction}&status={status}&category={category}&type={type}&counterpartyId={counterpartyId}&provider={provider}&providerReference={providerReference}&from={from}&to={to}&includeObserved={includeObserved}&sortBy={sortBy}&sortDirection={sortDirection}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -951,9 +943,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-payment-transfer",
@@ -961,6 +951,8 @@
         "title": "Get transfer",
         "method": "GET",
         "path": "/v1/payments/transfers/{transferId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "transferId",
@@ -1051,9 +1043,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "estimate-payment-transfer-batch",
@@ -1061,6 +1051,8 @@
         "title": "Estimate transfer batch",
         "method": "POST",
         "path": "/v1/payments/transfer-batches/estimate",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1069,7 +1061,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -1083,31 +1075,23 @@
                 "priorityFeeLamports": "0",
                 "tokenAccountRentLamports": "0",
                 "sponsored": true
-              },
-              "warnings": [
-                {
-                  "code": "AMOUNT_BELOW_RENT_MINIMUM",
-                  "recipientIndex": 1,
-                  "minimumAmount": "example",
-                  "message": "example"
-                }
-              ]
+              }
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-transfer-batch",
         "operationId": "createPaymentTransferBatch",
         "title": "Create transfer batch",
         "method": "POST",
-        "path": "/v1/payments/transfer-batches",
+        "path": "/v1/payments/transfer-batches/execute",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1116,7 +1100,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpacct_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  },\n  \"externalId\": \"payroll_2026_06_30\"\n}",
+            "defaultValue": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
             "required": true
           }
         ],
@@ -1145,7 +1129,7 @@
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpacct_example",
+                "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
                 "status": "pending",
@@ -1234,9 +1218,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-transfer-batches",
@@ -1244,6 +1226,8 @@
         "title": "List transfer batches",
         "method": "GET",
         "path": "/v1/payments/transfer-batches?sourceCustodyWalletId={sourceCustodyWalletId}&token={token}&status={status}&externalId={externalId}&page={page}&pageSize={pageSize}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "sourceCustodyWalletId",
@@ -1344,143 +1328,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
-      },
-      {
-        "id": "retry-payment-transfer-batch",
-        "operationId": "retryPaymentTransferBatch",
-        "title": "Retry a transfer batch's failed recipients",
-        "method": "POST",
-        "path": "/v1/payments/transfer-batches/{batchId}/retry",
-        "pathFields": [
-          {
-            "key": "batchId",
-            "label": "{batchId}",
-            "description": "Transfer batch identifier.",
-            "defaultValue": "xbatch_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "batch": {
-              "id": "xbatch_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "externalId": "payroll_2026_06_30",
-              "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
-              "sourceAddress": "So11111111111111111111111111111111111111112",
-              "token": "SOL",
-              "status": "processing",
-              "totalAmount": "1000.00",
-              "recipientCount": 20,
-              "transactionCount": 1,
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "recipients": [
-              {
-                "id": "_example",
-                "batchId": "batch_example",
-                "transferId": "xfr_example",
-                "externalId": "payroll_row_001",
-                "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpacct_example",
-                "destination": "So11111111111111111111111111111111111111112",
-                "amount": "100.00",
-                "status": "pending",
-                "error": "example",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "updatedAt": "2025-01-01T00:00:00.000Z"
-              }
-            ],
-            "transfers": [
-              {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
-                "id": "xfr_example",
-                "organizationId": "org_example",
-                "custodyWalletId": "cwlt_example",
-                "providerWalletId": "privy_wallet_123",
-                "projectId": "prj_example",
-                "type": "transfer",
-                "kind": "pay",
-                "direction": "outbound",
-                "status": "confirmed",
-                "signature": "sig_example",
-                "serializedTx": "base64_tx_example",
-                "slot": 123456,
-                "blockTime": "2025-01-01T00:00:00.000Z",
-                "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
-                "error": "Signature failed",
-                "initiatedBy": {
-                  "type": "api_key"
-                },
-                "source": "So11111111111111111111111111111111111111112",
-                "destination": "So11111111111111111111111111111111111111112",
-                "rampsMemo": {
-                  "invoice": "INV-123",
-                  "po": "PO-9"
-                },
-                "amount": "100.00",
-                "provider": "moonpay",
-                "counterpartyId": "cpty_example",
-                "counterpartyDisplayName": "Acme Studio",
-                "providerReference": "ramp_quote_example",
-                "deliveryMode": "session_widget",
-                "fiatCurrency": "USD",
-                "fiatAmount": "100.00",
-                "settlement": {
-                  "provider": "moonpay",
-                  "status": "completed",
-                  "transactionId": "transaction_example",
-                  "baseCurrencyCode": "example",
-                  "baseCurrencyAmount": 1,
-                  "quoteCurrencyCode": "example",
-                  "quoteCurrencyAmount": 1,
-                  "feeAmount": 1,
-                  "extraFeeAmount": 1,
-                  "networkFeeAmount": 1,
-                  "areFeesIncluded": false,
-                  "usdRate": 1
-                },
-                "fiatPayout": {
-                  "amount": "20.82",
-                  "currency": "USD",
-                  "reportedAt": "2025-01-02T00:00:00.000Z"
-                },
-                "deliveryMismatch": {
-                  "reason": "amount_mismatch",
-                  "checkedAt": "2025-01-02T00:00:00.000Z",
-                  "reportedAmount": "20",
-                  "observedAmount": "0.5"
-                },
-                "risk": {
-                  "provider": "trm",
-                  "score": "0.12",
-                  "level": "low",
-                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                },
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "updatedAt": "2025-01-02T00:00:00.000Z"
-              }
-            ]
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-payment-transfer-batch",
@@ -1488,6 +1336,8 @@
         "title": "Get transfer batch",
         "method": "GET",
         "path": "/v1/payments/transfer-batches/{batchId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "batchId",
@@ -1523,7 +1373,7 @@
                 "transferId": "xfr_example",
                 "externalId": "payroll_row_001",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpacct_example",
+                "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
                 "amount": "100.00",
                 "status": "pending",
@@ -1612,9 +1462,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-recurring-payment",
@@ -1622,6 +1470,8 @@
         "title": "Create recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -1630,7 +1480,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpacct_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -1644,7 +1494,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1661,30 +1511,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-recurring-payments",
@@ -1692,6 +1529,8 @@
         "title": "List recurring payments",
         "method": "GET",
         "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -1773,7 +1612,7 @@
                 "sourceProviderWalletId": "privy_wallet_123",
                 "sourceAddress": "So11111111111111111111111111111111111111112",
                 "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpacct_example",
+                "counterpartyAccountId": "cpa_example",
                 "destinationAddress": "So11111111111111111111111111111111111111112",
                 "destinationTokenAccount": "So11111111111111111111111111111111111111112",
                 "token": "example",
@@ -1790,7 +1629,6 @@
                 "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
                 "authorizationSignature": "example",
                 "status": "active",
-                "pausedReason": null,
                 "metadataUri": "example",
                 "createdBy": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1805,9 +1643,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "update-payment-recurring-payment",
@@ -1815,6 +1651,8 @@
         "title": "Update recurring payment",
         "method": "PATCH",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1831,7 +1669,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpacct_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
+            "defaultValue": "{\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"counterpartyId\": \"cpty_example\",\n  \"counterpartyAccountId\": \"cpa_example\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n  \"nextCollectionDueAt\": \"2099-02-01T00:00:00.000Z\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
             "required": true
           }
         ],
@@ -1845,7 +1683,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1862,30 +1700,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-payment-recurring-payment",
@@ -1893,6 +1718,8 @@
         "title": "Get recurring payment",
         "method": "GET",
         "path": "/v1/payments/recurring-payments/{id}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1913,7 +1740,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1930,30 +1757,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "activate-payment-recurring-payment",
@@ -1961,6 +1775,8 @@
         "title": "Activate recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/activate",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -1981,7 +1797,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -1998,30 +1814,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "cancel-payment-recurring-payment",
@@ -2029,6 +1832,8 @@
         "title": "Cancel recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/cancel",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -2049,7 +1854,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -2066,82 +1871,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
-      },
-      {
-        "id": "cancel-payment-request",
-        "operationId": "cancelPaymentRequest",
-        "title": "Cancel payment request",
-        "method": "POST",
-        "path": "/v1/payments/requests/{paymentRequestId}/cancel",
-        "pathFields": [
-          {
-            "key": "paymentRequestId",
-            "label": "{paymentRequestId}",
-            "description": "SDP payment request ID.",
-            "defaultValue": "preq_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "id": "preq_example",
-            "organizationId": "organization_example",
-            "projectId": "project_example",
-            "walletId": "wallet_example",
-            "destinationAddress": "So11111111111111111111111111111111111111112",
-            "token": "example",
-            "amount": "100.00",
-            "reference": "So11111111111111111111111111111111111111112",
-            "status": "canceled",
-            "expiresAt": "2025-01-01T00:00:00.000Z",
-            "fulfilledByTransferId": "fulfilledbytransfer_example",
-            "paidLate": false,
-            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
-            "canceledByApiKeyId": "canceledbyapikey_example",
-            "canceledByUserId": "canceledbyuser_example",
-            "canceledAt": "2025-01-01T00:00:00.000Z",
-            "lifecycle": [
-              {
-                "status": "canceled",
-                "at": "2025-01-01T00:00:00.000Z"
-              }
-            ],
-            "createdBy": "example",
-            "createdAt": "2025-01-01T00:00:00.000Z",
-            "updatedAt": "2025-01-01T00:00:00.000Z"
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "collect-payment-recurring-payment",
@@ -2149,6 +1889,8 @@
         "title": "Collect recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/collect",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -2169,7 +1911,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -2186,7 +1928,6 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -2291,9 +2032,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "resume-payment-recurring-payment",
@@ -2301,6 +2040,8 @@
         "title": "Resume recurring payment",
         "method": "POST",
         "path": "/v1/payments/recurring-payments/{id}/resume",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "id",
@@ -2321,7 +2062,7 @@
               "sourceProviderWalletId": "privy_wallet_123",
               "sourceAddress": "So11111111111111111111111111111111111111112",
               "counterpartyId": "cpty_example",
-              "counterpartyAccountId": "cpacct_example",
+              "counterpartyAccountId": "cpa_example",
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
@@ -2338,30 +2079,17 @@
               "subscriptionAuthorityAddress": "So11111111111111111111111111111111111111112",
               "authorizationSignature": "example",
               "status": "active",
-              "pausedReason": null,
               "metadataUri": "example",
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "tokenApproval": {
-              "status": "kept",
-              "delegate": "So11111111111111111111111111111111111111112",
-              "sharedWith": [
-                {
-                  "id": "prp_example",
-                  "status": "active"
-                }
-              ]
             }
           },
           "meta": {
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-subscription-plan",
@@ -2369,6 +2097,8 @@
         "title": "Create subscription plan",
         "method": "POST",
         "path": "/v1/payments/subscription-plans",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -2408,9 +2138,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-subscription-plans",
@@ -2418,6 +2146,8 @@
         "title": "List subscription plans",
         "method": "GET",
         "path": "/v1/payments/subscription-plans?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "status",
@@ -2489,16 +2219,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-payment-subscription-plan-create",
         "operationId": "preparePaymentSubscriptionPlanCreate",
         "title": "Prepare subscription plan creation",
         "method": "POST",
-        "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
+        "path": "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2553,9 +2283,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-payment-subscription-plan",
@@ -2563,6 +2291,8 @@
         "title": "Get subscription plan",
         "method": "GET",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2600,9 +2330,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "update-payment-subscription-plan",
@@ -2610,6 +2338,8 @@
         "title": "Update subscription plan",
         "method": "PATCH",
         "path": "/v1/payments/subscription-plans/{planId}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2657,9 +2387,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-subscription",
@@ -2667,6 +2395,8 @@
         "title": "Create subscription",
         "method": "POST",
         "path": "/v1/payments/subscriptions",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -2706,9 +2436,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-subscriptions",
@@ -2716,6 +2444,8 @@
         "title": "List subscriptions",
         "method": "GET",
         "path": "/v1/payments/subscriptions?planId={planId}&counterpartyId={counterpartyId}&status={status}&dueBefore={dueBefore}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "planId",
@@ -2814,16 +2544,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-payment-subscription-authorization",
         "operationId": "preparePaymentSubscriptionAuthorization",
         "title": "Prepare subscription authorization",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2879,16 +2609,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-payment-subscription-cancel",
         "operationId": "preparePaymentSubscriptionCancel",
         "title": "Prepare subscription cancellation",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2942,16 +2672,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-payment-subscription-resume",
         "operationId": "preparePaymentSubscriptionResume",
         "title": "Prepare subscription resume",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3005,16 +2735,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-payment-subscription-collection",
         "operationId": "preparePaymentSubscriptionCollection",
         "title": "Prepare subscription collection",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3089,9 +2819,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-payment-subscription",
@@ -3099,6 +2827,8 @@
         "title": "Get subscription",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3136,9 +2866,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-subscription-collection-attempts",
@@ -3146,6 +2874,8 @@
         "title": "List subscription collection attempts",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3233,9 +2963,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "recurring_payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-onramp-currencies",
@@ -3243,6 +2971,8 @@
         "title": "List on-ramp currency support",
         "method": "GET",
         "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "source",
@@ -3470,9 +3200,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-payment-offramp-currencies",
@@ -3480,6 +3208,8 @@
         "title": "List off-ramp currency support",
         "method": "GET",
         "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "source",
@@ -3707,9 +3437,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-payment-onramp-quote",
@@ -3717,6 +3445,8 @@
         "title": "Create on-ramp quote",
         "method": "POST",
         "path": "/v1/payments/ramps/onramp/quote",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -3743,9 +3473,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        }
       },
       {
         "id": "simulate-sandbox-transfer",
@@ -3753,6 +3481,8 @@
         "title": "Simulate sandbox transfer",
         "method": "POST",
         "path": "/v1/payments/ramps/sandbox/simulate",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -3765,9 +3495,7 @@
             "required": true
           }
         ],
-        "expectedResponse": {},
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        "expectedResponse": {}
       },
       {
         "id": "list-unified-transactions",
@@ -3775,6 +3503,8 @@
         "title": "List transactions",
         "method": "GET",
         "path": "/v1/transactions?module={module}&kind={kind}&status={status}&custodyWalletId={custodyWalletId}&counterpartyId={counterpartyId}&token={token}&search={search}&createdAtFrom={createdAtFrom}&createdAtTo={createdAtTo}&cursor={cursor}&limit={limit}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "module",
@@ -3901,9 +3631,7 @@
             ],
             "nextCursor": "example"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       }
     ],
     "counterparties": [
@@ -3913,6 +3641,8 @@
         "title": "Get counterparty field options",
         "method": "GET",
         "path": "/v1/counterparties/metadata",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -3931,9 +3661,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-counterparties",
@@ -3941,6 +3669,8 @@
         "title": "List counterparties",
         "method": "GET",
         "path": "/v1/counterparties?page={page}&pageSize={pageSize}&includeArchived={includeArchived}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "page",
@@ -4003,9 +3733,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-counterparty",
@@ -4013,6 +3741,8 @@
         "title": "Create counterparty",
         "method": "POST",
         "path": "/v1/counterparties",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -4044,9 +3774,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-counterparty",
@@ -4054,6 +3782,8 @@
         "title": "Get counterparty",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
+        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4083,9 +3813,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"]
+        }
       },
       {
         "id": "update-counterparty",
@@ -4093,6 +3821,8 @@
         "title": "Update counterparty",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4132,9 +3862,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "archive-counterparty",
@@ -4142,6 +3870,8 @@
         "title": "Archive counterparty",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4152,9 +3882,7 @@
           }
         ],
         "bodyFields": [],
-        "expectedResponse": {},
-        "releaseModule": "payments",
-        "shadowedBy": []
+        "expectedResponse": {}
       },
       {
         "id": "get-counterparty-requirements",
@@ -4162,6 +3890,8 @@
         "title": "Get counterparty ramp requirements",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4386,9 +4116,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-counterparty-accounts",
@@ -4396,6 +4124,8 @@
         "title": "List counterparty accounts",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts?page={page}&pageSize={pageSize}&includeArchived={includeArchived}&accountKind={accountKind}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4459,7 +4189,7 @@
           "data": {
             "accounts": [
               {
-                "id": "cpacct_example",
+                "id": "cpa_example",
                 "organizationId": "org_example",
                 "projectId": "prj_example",
                 "counterpartyId": "cpty_example",
@@ -4483,9 +4213,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-counterparty-account",
@@ -4493,6 +4221,8 @@
         "title": "Create counterparty account",
         "method": "POST",
         "path": "/v1/counterparties/{counterpartyId}/accounts",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4516,7 +4246,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpacct_example",
+              "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -4536,9 +4266,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-counterparty-provider-accounts",
@@ -4546,6 +4274,8 @@
         "title": "List counterparty provider accounts",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/provider-accounts?provider={provider}&fiatCurrency={fiatCurrency}&destinationCountry={destinationCountry}",
+        "releaseModule": "ramps",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5621,9 +5351,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "ramps",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-counterparty-account",
@@ -5631,6 +5359,8 @@
         "title": "Get counterparty account",
         "method": "GET",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5643,7 +5373,7 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpacct_example",
+            "defaultValue": "cpa_example",
             "required": true
           }
         ],
@@ -5651,7 +5381,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpacct_example",
+              "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -5671,9 +5401,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "update-counterparty-account",
@@ -5681,6 +5409,8 @@
         "title": "Update counterparty account",
         "method": "PATCH",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5693,7 +5423,7 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpacct_example",
+            "defaultValue": "cpa_example",
             "required": true
           }
         ],
@@ -5711,7 +5441,7 @@
         "expectedResponse": {
           "data": {
             "account": {
-              "id": "cpacct_example",
+              "id": "cpa_example",
               "organizationId": "org_example",
               "projectId": "prj_example",
               "counterpartyId": "cpty_example",
@@ -5731,9 +5461,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
+        }
       },
       {
         "id": "archive-counterparty-account",
@@ -5741,6 +5469,8 @@
         "title": "Archive counterparty account",
         "method": "DELETE",
         "path": "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
+        "releaseModule": "payments",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -5753,14 +5483,12 @@
             "key": "counterpartyAccountId",
             "label": "{counterpartyAccountId}",
             "description": "Counterparty account identifier.",
-            "defaultValue": "cpacct_example",
+            "defaultValue": "cpa_example",
             "required": true
           }
         ],
         "bodyFields": [],
-        "expectedResponse": {},
-        "releaseModule": "payments",
-        "shadowedBy": []
+        "expectedResponse": {}
       }
     ],
     "issuance": [
@@ -5770,6 +5498,8 @@
         "title": "List token templates",
         "method": "GET",
         "path": "/v1/issuance/templates",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -5795,9 +5525,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-token-template",
@@ -5805,6 +5533,8 @@
         "title": "Get token template",
         "method": "GET",
         "path": "/v1/issuance/templates/{templateId}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "templateId",
@@ -5836,9 +5566,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "create-token",
@@ -5846,6 +5574,8 @@
         "title": "Create token",
         "method": "POST",
         "path": "/v1/issuance/tokens",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
           {
@@ -5925,9 +5655,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-tokens",
@@ -5935,6 +5663,8 @@
         "title": "List tokens",
         "method": "GET",
         "path": "/v1/issuance/tokens?page={page}&pageSize={pageSize}&search={search}&status={status}&deploymentStatus={deploymentStatus}&template={template}&createdAfter={createdAfter}&createdBefore={createdBefore}&sortBy={sortBy}&sortDirection={sortDirection}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "page",
@@ -6132,9 +5862,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-token-facets",
@@ -6142,6 +5870,8 @@
         "title": "List token filter facets",
         "method": "GET",
         "path": "/v1/issuance/tokens/facets",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -6163,9 +5893,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-issuance-transactions",
@@ -6173,6 +5901,8 @@
         "title": "List issuance transactions",
         "method": "GET",
         "path": "/v1/issuance/transactions?custodyWalletId={custodyWalletId}&walletId={walletId}&type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "custodyWalletId",
@@ -6281,9 +6011,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-token",
@@ -6291,6 +6019,8 @@
         "title": "Get token",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
+        "releaseModule": "issuance",
+        "shadowedBy": ["/v1/issuance/tokens/facets"],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6440,9 +6170,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": ["/v1/issuance/tokens/facets"]
+        }
       },
       {
         "id": "update-token",
@@ -6450,6 +6178,8 @@
         "title": "Update token",
         "method": "PATCH",
         "path": "/v1/issuance/tokens/{tokenId}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6537,9 +6267,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-token-metadata-json",
@@ -6547,6 +6275,8 @@
         "title": "Get public token metadata JSON",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/metadata.json",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6560,9 +6290,7 @@
         "expectedResponse": {
           "name": "example",
           "symbol": "example"
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "refresh-token-supply",
@@ -6570,6 +6298,8 @@
         "title": "Refresh cached token supply",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/supply/refresh",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6647,9 +6377,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-token-transactions",
@@ -6657,6 +6385,8 @@
         "title": "List token transactions",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/transactions?type={type}&status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6792,9 +6522,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "get-asset-audit-history",
@@ -6802,6 +6530,8 @@
         "title": "Get asset audit history",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/audit?action={action}&page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6855,16 +6585,16 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "deploy-token",
         "operationId": "deployToken",
         "title": "Deploy token",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6952,16 +6682,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-deploy-token",
         "operationId": "prepareDeployToken",
         "title": "Prepare token deploy transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -6996,16 +6726,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "confirm-deploy",
         "operationId": "confirmDeploy",
         "title": "Confirm a caller-signed deployment",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7093,16 +6823,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-deploy-metadata",
         "operationId": "prepareDeployMetadata",
         "title": "Prepare metadata-URI follow-up transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7132,16 +6862,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-mint",
         "operationId": "prepareMint",
         "title": "Prepare mint transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7200,16 +6930,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "execute-mint",
         "operationId": "executeMint",
         "title": "Execute mint",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7257,16 +6987,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-burn",
         "operationId": "prepareBurn",
         "title": "Prepare burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7324,16 +7054,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "execute-burn",
         "operationId": "executeBurn",
         "title": "Execute burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7380,16 +7110,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-seize",
         "operationId": "prepareSeize",
         "title": "Prepare seize transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7447,16 +7177,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "execute-seize",
         "operationId": "executeSeize",
         "title": "Execute seize",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7503,16 +7233,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-force-burn",
         "operationId": "prepareForceBurn",
         "title": "Prepare force burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7570,16 +7300,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "execute-force-burn",
         "operationId": "executeForceBurn",
         "title": "Execute force burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7626,16 +7356,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "prepare-update-authority",
         "operationId": "prepareUpdateAuthority",
         "title": "Prepare authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7693,16 +7423,16 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "execute-update-authority",
         "operationId": "executeUpdateAuthority",
         "title": "Execute authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/execute",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7749,9 +7479,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "pause-token",
@@ -7759,6 +7487,8 @@
         "title": "Pause token transfers",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/pause",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7775,7 +7505,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -7805,9 +7535,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "unpause-token",
@@ -7815,6 +7543,8 @@
         "title": "Unpause token transfers",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unpause",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7831,7 +7561,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
+            "defaultValue": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
             "required": true
           }
         ],
@@ -7861,9 +7591,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "freeze-account",
@@ -7871,6 +7599,8 @@
         "title": "Freeze account",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7909,9 +7639,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "unfreeze-account",
@@ -7919,6 +7647,8 @@
         "title": "Unfreeze account",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -7957,9 +7687,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-frozen-accounts",
@@ -7967,6 +7695,8 @@
         "title": "List frozen accounts",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8014,9 +7744,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-token-allowlist",
@@ -8024,6 +7752,8 @@
         "title": "List token allowlist",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8084,9 +7814,7 @@
             "hasMore": false,
             "requestId": "req_example"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "add-token-allowlist-entry",
@@ -8094,6 +7822,8 @@
         "title": "Add token allowlist entry",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8131,9 +7861,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "list-token-allowlist-labels",
@@ -8141,6 +7869,8 @@
         "title": "List token allowlist labels",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8160,9 +7890,7 @@
             "requestId": "req_example",
             "timestamp": "2025-01-01T00:00:00.000Z"
           }
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "remove-token-allowlist-entry",
@@ -8170,6 +7898,8 @@
         "title": "Remove token allowlist entry",
         "method": "DELETE",
         "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8194,9 +7924,7 @@
           }
         ],
         "bodyFields": [],
-        "expectedResponse": {},
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        "expectedResponse": {}
       },
       {
         "id": "list-holders",
@@ -8204,6 +7932,8 @@
         "title": "List verified holders",
         "method": "GET",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8219,9 +7949,7 @@
             "holders": [{}]
           },
           "meta": {}
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       },
       {
         "id": "enroll-holder",
@@ -8229,6 +7957,8 @@
         "title": "Enroll a verified holder",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "releaseModule": "issuance",
+        "shadowedBy": [],
         "pathFields": [
           {
             "key": "tokenId",
@@ -8254,9 +7984,7 @@
             "enrollment": {}
           },
           "meta": {}
-        },
-        "releaseModule": "issuance",
-        "shadowedBy": []
+        }
       }
     ]
   },
@@ -8444,15 +8172,6 @@
     "deploy": {
       "module": "issuance"
     },
-    "custody": {
-      "module": "custody"
-    },
-    "compliance": {
-      "module": "compliance"
-    },
-    "ramps": {
-      "module": "ramps"
-    },
     "onramp": {
       "module": "ramps"
     },
@@ -8460,6 +8179,9 @@
       "module": "ramps"
     },
     "offramp_channel": {
+      "module": "ramps"
+    },
+    "ramps": {
       "module": "ramps"
     },
     "ramp": {

@@ -43,41 +43,47 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
   });
 
   const prepareMint = async (tokenId: string) => {
-    const mintPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/mint/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        mint: {
-          destination: TEST_WALLETS.wallet1,
-          amount: "1",
+    const mintPrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/mint/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-        options: {
-          simulate: true,
-        },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          mint: {
+            destination: TEST_WALLETS.wallet1,
+            amount: "1",
+          },
+          options: {
+            simulate: true,
+          },
+        }),
+      }
+    );
     expect(mintPrepareRes.status).toBe(200);
 
     return (await mintPrepareRes.json()) as PreparedTransactionApiResponse;
   };
 
   const prepareAuthorityUpdate = async (tokenId: string) => {
-    const authorityPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/authority/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        authority: {
-          role: "mint",
-          newAuthority: TEST_WALLETS.wallet2,
+    const authorityPrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/authority/update/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          authority: {
+            role: "mint",
+            newAuthority: TEST_WALLETS.wallet2,
+          },
+        }),
+      }
+    );
     expect(authorityPrepareRes.status).toBe(200);
 
     return (await authorityPrepareRes.json()) as PreparedTransactionApiResponse;
@@ -93,9 +99,12 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
       custodyWalletId
     );
 
-    const deployPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/prepare`, {
-      method: "POST",
-    });
+    const deployPrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/deploy/build-unsigned-transaction`,
+      {
+        method: "POST",
+      }
+    );
     expect(deployPrepareRes.status).toBe(200);
     const deployPrepared = (await deployPrepareRes.json()) as DeployPrepareApiResponse;
     expect(deployPrepared.data.transaction.serialized).toBeTruthy();
@@ -143,56 +152,65 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Issuance Prepare 
     );
     await mintToWallet(request, tokenId, custodyAddress, "1", custodyWalletId);
 
-    const burnPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/burn/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        burn: {
-          source: custodyAddress,
-          amount: "1",
+    const burnPrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/burn/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          burn: {
+            source: custodyAddress,
+            amount: "1",
+          },
+        }),
+      }
+    );
     expect(burnPrepareRes.status).toBe(200);
     const burnPrepared = (await burnPrepareRes.json()) as PreparedTransactionApiResponse;
     expect(burnPrepared.data.transaction.type).toBe("burn");
     expect(burnPrepared.data.preparedTransaction.serialized).toBeTruthy();
 
-    const seizePrepareRes = await request(`/v1/issuance/tokens/${tokenId}/seize/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        seize: {
-          source: sourceTokenAccount,
-          destination: destinationTokenAccount,
-          amount: "1",
+    const seizePrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/seize/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          seize: {
+            source: sourceTokenAccount,
+            destination: destinationTokenAccount,
+            amount: "1",
+          },
+        }),
+      }
+    );
     expect(seizePrepareRes.status).toBe(200);
     const seizePrepared = (await seizePrepareRes.json()) as PreparedTransactionApiResponse;
     expect(seizePrepared.data.transaction.type).toBe("seize");
     expect(seizePrepared.data.preparedTransaction.serialized).toBeTruthy();
 
-    const forceBurnPrepareRes = await request(`/v1/issuance/tokens/${tokenId}/force-burn/prepare`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        signingCustodyWalletId: custodyWalletId,
-        forceBurn: {
-          source: destinationTokenAccount,
-          amount: "1",
+    const forceBurnPrepareRes = await request(
+      `/v1/issuance/tokens/${tokenId}/force-burn/build-unsigned-transaction`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      }),
-    });
+        body: JSON.stringify({
+          signingCustodyWalletId: custodyWalletId,
+          forceBurn: {
+            source: destinationTokenAccount,
+            amount: "1",
+          },
+        }),
+      }
+    );
     expect(forceBurnPrepareRes.status).toBe(200);
     const forceBurnPrepared = (await forceBurnPrepareRes.json()) as PreparedTransactionApiResponse;
     expect(forceBurnPrepared.data.transaction.type).toBe("force_burn");

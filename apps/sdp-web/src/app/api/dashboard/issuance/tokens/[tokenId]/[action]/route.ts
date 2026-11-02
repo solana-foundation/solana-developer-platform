@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 const TOKEN_POST_ACTIONS = {
-  deploy: "deploy",
-  mint: "mint",
-  burn: "burn",
-  seize: "seize",
-  "force-burn": "force-burn",
-  authority: "authority",
+  deploy: "deploy/execute",
+  mint: "mint/execute",
+  burn: "burn/execute",
+  seize: "seize/execute",
+  "force-burn": "force-burn/execute",
+  authority: "authority/update/execute",
   freeze: "freeze",
   unfreeze: "unfreeze",
   pause: "pause",

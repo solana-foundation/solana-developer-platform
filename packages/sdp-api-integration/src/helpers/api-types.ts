@@ -16,7 +16,7 @@ export interface DeployPrepareApiResponse
     /**
      * Present when the create tx had to be prepared with an empty metadata uri
      * to stay under the packet limit. The client must set the real uri in a
-     * follow-up tx (POST .../deploy/prepare-metadata) after the create tx
+     * follow-up tx (POST .../deploy/metadata/build-unsigned-transaction) after the create tx
      * confirms. Absent on the single-tx fast path.
      */
     metadataUriFollowUp?: { required: true; uri: string };
@@ -30,7 +30,7 @@ export interface DeployPrepareMetadataApiResponse
   }> {}
 
 /**
- * Response of POST .../deploy/confirm — the step that records the mint after a
+ * Response of POST .../deploy/confirm-submitted-transaction — the step that records the mint after a
  * client signs and submits a prepared (non-custodial) deploy tx. Returns the
  * now-deployed token.
  */

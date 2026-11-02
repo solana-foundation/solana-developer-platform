@@ -223,8 +223,8 @@ describe("EarnIntegrationGuide", () => {
     expect(code).not.toContain("/v1/earn/external-wallet/positions/");
     expect(code).toContain("/v1/earn/withdrawals/build-unsigned-transaction");
     expect(code).toContain("/v1/earn/withdrawals/submit-signed-transaction");
-    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
-    expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
+    expect(code).toContain("/v1/earn/withdrawal-requests/build-unsigned-transaction");
+    expect(code).toContain("/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction");
     expect(code).toContain("previewEarnParRedemption");
     expect(code).toContain("buildEarnParRedemptionRequest");
     expect(code).toContain('mechanism: "operatorRedemption"');

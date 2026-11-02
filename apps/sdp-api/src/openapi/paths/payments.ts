@@ -146,7 +146,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/transfers",
+    path: "/v1/payments/transfers/execute",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Execute a provider-signed transfer",
@@ -243,7 +243,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/transfer-batches",
+    path: "/v1/payments/transfer-batches/execute",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Create transfer batch",
@@ -599,7 +599,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/subscription-plans/{planId}/prepare-create",
+    path: "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Prepare subscription plan creation",
@@ -722,7 +722,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+    path: "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription authorization",
@@ -749,7 +749,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+    path: "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription cancellation",
@@ -776,7 +776,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+    path: "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription resume",
@@ -803,7 +803,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+    path: "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
     tags: ["Payments"],
     [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription collection",

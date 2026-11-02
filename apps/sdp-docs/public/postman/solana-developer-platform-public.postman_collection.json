@@ -474,7 +474,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/execute",
             "description": "Deploys the token to Solana using the connected provider for signing.",
             "body": {
               "mode": "raw",
@@ -492,8 +492,8 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare",
-            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata."
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/build-unsigned-transaction",
+            "description": "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction."
           }
         },
         {
@@ -507,7 +507,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/confirm",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/confirm-submitted-transaction",
             "description": "Records the mint after the client signs and submits a prepared deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
             "body": {
               "mode": "raw",
@@ -525,8 +525,8 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/prepare-metadata",
-            "description": "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches."
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/deploy/metadata/build-unsigned-transaction",
+            "description": "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches."
           }
         },
         {
@@ -540,7 +540,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint/prepare",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint/build-unsigned-transaction",
             "description": "Builds an unsigned mint transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee and the rent for a new destination token account; SDP does not sponsor prepared transactions.",
             "body": {
               "mode": "raw",
@@ -564,7 +564,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint/execute",
             "description": "Mints tokens by requesting a signature from the connected provider, then submitting the transaction.",
             "body": {
               "mode": "raw",
@@ -588,7 +588,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn/prepare",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn/build-unsigned-transaction",
             "description": "Builds an unsigned burn transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee; SDP does not sponsor prepared transactions.",
             "body": {
               "mode": "raw",
@@ -612,7 +612,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn/execute",
             "description": "Burns tokens by requesting a signature from the connected provider, then submitting the transaction.",
             "body": {
               "mode": "raw",
@@ -636,7 +636,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize/prepare",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize/build-unsigned-transaction",
             "description": "Builds an unsigned force transfer transaction for client-side signing.",
             "body": {
               "mode": "raw",
@@ -660,7 +660,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/seize/execute",
             "description": "Forces a transfer using permanent delegate authority.",
             "body": {
               "mode": "raw",
@@ -684,7 +684,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn/prepare",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn/build-unsigned-transaction",
             "description": "Builds an unsigned force burn transaction for client-side signing.",
             "body": {
               "mode": "raw",
@@ -708,7 +708,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/force-burn/execute",
             "description": "Burns tokens using permanent delegate authority.",
             "body": {
               "mode": "raw",
@@ -732,7 +732,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority/prepare",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority/update/build-unsigned-transaction",
             "description": "Builds an unsigned authority update transaction for client-side signing.",
             "body": {
               "mode": "raw",
@@ -756,7 +756,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority",
+            "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/authority/update/execute",
             "description": "Updates token authorities using the connected provider for signing.",
             "body": {
               "mode": "raw",
@@ -973,15 +973,6 @@
           }
         },
         {
-          "name": "List transfers",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/transfers",
-            "description": "Lists persisted payment transfers for the authenticated scope. Set custodyWalletId to select one exact SDP wallet; observed address history is opt-in with includeObserved=true."
-          }
-        },
-        {
           "name": "Execute a provider-signed transfer",
           "request": {
             "method": "POST",
@@ -997,7 +988,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/transfers",
+            "url": "{{baseUrl}}/v1/payments/transfers/execute",
             "description": "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side signing through the connected provider. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
             "body": {
               "mode": "raw",
@@ -1008,6 +999,15 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "List transfers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfers",
+            "description": "Lists persisted payment transfers for the authenticated scope. Set custodyWalletId to select one exact SDP wallet; observed address history is opt-in with includeObserved=true."
           }
         },
         {
@@ -1044,15 +1044,6 @@
           }
         },
         {
-          "name": "List transfer batches",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Lists transfer batches for the authenticated organization or project scope."
-          }
-        },
-        {
           "name": "Create transfer batch",
           "request": {
             "method": "POST",
@@ -1068,7 +1059,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/execute",
             "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
             "body": {
               "mode": "raw",
@@ -1079,6 +1070,15 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "List transfer batches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches",
+            "description": "Lists transfer batches for the authenticated organization or project scope."
           }
         },
         {
@@ -1270,7 +1270,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/prepare-create",
+            "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/create/build-unsigned-transaction",
             "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
             "body": {
               "mode": "raw",
@@ -1360,7 +1360,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-authorization",
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/authorize/build-unsigned-transaction",
             "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
             "body": {
               "mode": "raw",
@@ -1384,7 +1384,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-cancel",
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/cancel/build-unsigned-transaction",
             "description": "Prepares the subscriber-signed Solana transaction that cancels a subscription. The transaction must still be signed and submitted by the client.",
             "body": {
               "mode": "raw",
@@ -1408,7 +1408,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-resume",
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/resume/build-unsigned-transaction",
             "description": "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
             "body": {
               "mode": "raw",
@@ -1432,7 +1432,7 @@
                 "type": "text"
               }
             ],
-            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
+            "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/collect/build-unsigned-transaction",
             "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
             "body": {
               "mode": "raw",

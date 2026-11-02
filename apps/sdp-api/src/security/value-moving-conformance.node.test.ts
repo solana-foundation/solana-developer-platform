@@ -50,7 +50,7 @@ const contracts: ValueMovingContract[] = [
     // Access before the key, the row replay before admission (ADR 0009).
     authorization: {
       file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
-      section: 'transferBatches.post(\n  "/",',
+      section: 'transferBatches.post(\n  "/execute",',
       before:
         'requireAction("transfer_batches.execute"),\n  validateBody(createTransferBatchSchema),\n  authorize(authorizeTransferBatch)',
       through:
@@ -104,7 +104,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/authority",',
+      section: '"/tokens/:tokenId/authority/update/execute",',
       before: 'requireAction("issuance.authority")',
       through: "requestGate(",
       after: "executeUpdateAuthority",
@@ -206,7 +206,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/seize",',
+      section: '"/tokens/:tokenId/seize/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeSeize",
     },
@@ -226,7 +226,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/force-burn",',
+      section: '"/tokens/:tokenId/force-burn/execute",',
       before: 'requireAction("issuance.enforce")',
       after: "executeForceBurn",
     },
@@ -246,7 +246,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/burn",',
+      section: '"/tokens/:tokenId/burn/execute",',
       before: 'requireAction("issuance.execute")',
       after: "executeBurn",
     },
@@ -313,7 +313,7 @@ const contracts: ValueMovingContract[] = [
     },
     authorization: {
       file: "apps/sdp-api/src/routes/issuance/index.ts",
-      section: '"/tokens/:tokenId/deploy",',
+      section: '"/tokens/:tokenId/deploy/execute",',
       before: 'requireAction("issuance.execute")',
       after: "  deployToken",
     },
