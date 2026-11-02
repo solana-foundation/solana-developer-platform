@@ -18,12 +18,15 @@ How Doppler is used for local development, secret-aware CI, and Vercel configura
 
 Read this when setting up local development, configuring CI, rotating secrets, or investigating environment drift.
 
+### [Email](./email.md)
+
+How SDP sends email through Iterable, where each environment's settings live, how to get SDP email locally, and what to check when an email doesn't arrive.
+
 ## Common Tasks
 
 ### Deploy a change to dev
 
 Merging to `main` deploys stage, not dev. Two paths reach dev:
-
 1. **From a pull request:** add the `deploy-dev` label. `deploy-dev-on-label.yml` deploys the PR head and redeploys on every later push while the label stays on; remove the label when you are done so the next PR can take dev.
 2. **From `main`:** run the `Deploy sdp-api to Cloud Run (dev)` workflow by hand (`gh workflow run deploy-sdp-api-gcp.yml --ref main`).
 

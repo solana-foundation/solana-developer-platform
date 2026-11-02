@@ -6,14 +6,7 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
-
-const onboardingOrganizationSchema = z.object({
-  linked: z.boolean(),
-  organization: z
-    .object({ id: z.string().min(1) })
-    .nullable()
-    .optional(),
-});
+import { resolveOrganizationId } from "./organization-id";
 
 /** The organization read; an absent allowlist is an unrestricted one. */
 const organizationAllowlistSchema = z.object({
@@ -31,19 +24,6 @@ export type OrganizationIpAllowlist =
 export type SaveOrganizationIpAllowlistResult =
   | { ok: true; allowedIps: string[] }
   | { ok: false; error: string };
-
-/** The signed-in organization's SDP id, from the onboarding status. */
-async function resolveOrganizationId(
-  client: Awaited<ReturnType<typeof createOrgSdpApiClient>>
-): Promise<string> {
-  const onboarding = onboardingOrganizationSchema.parse(
-    await client.fetch<unknown>("/v1/onboarding/status")
-  );
-  if (!onboarding.linked || !onboarding.organization) {
-    throw new Error("Organization is not linked yet");
-  }
-  return onboarding.organization.id;
-}
 
 /** The organization-wide API-key IP allowlist; empty when unrestricted. */
 export async function loadOrganizationIpAllowlist(): Promise<OrganizationIpAllowlist> {
