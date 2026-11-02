@@ -271,5 +271,6 @@ export function projectOrganizationSettings(settings: OrganizationSettings): Org
     allowedIpAddresses: settings.allowedIpAddresses,
     providerOverrides: settings.providerOverrides,
     enableProductionProject: settings.enableProductionProject,
+    alertEmails: settings.alertEmails,
   };
 }

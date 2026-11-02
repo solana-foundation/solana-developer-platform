@@ -189,7 +189,11 @@ export async function mirrorClerkMembershipDeletion(
     userId: string;
     heldInClerk: (tx: DatabaseExecutor) => Promise<boolean>;
   }
-): Promise<{ removedMemberId: string | null; revokedInvitations: number }> {
+): Promise<{
+  removedMemberId: string | null;
+  removedRole: OrganizationRole | null;
+  revokedInvitations: number;
+}> {
   const { organizationId, userId } = params;
 
   const targetRow = await tx
@@ -200,7 +204,7 @@ export async function mirrorClerkMembershipDeletion(
     .first<Record<string, unknown>>();
   const target = targetRow ? membershipTargetSchema.parse(targetRow) : null;
   if (target !== null && target.status === "removed") {
-    return { removedMemberId: null, revokedInvitations: 0 };
+    return { removedMemberId: null, removedRole: null, revokedInvitations: 0 };
   }
 
   // Invitations lock before memberships, the order admission takes them. The
@@ -209,19 +213,19 @@ export async function mirrorClerkMembershipDeletion(
   const revokedInvitations = await revokePendingInvitations(tx, organizationId, userId);
   const lockedRow = await tx
     .prepare(
-      "SELECT id, user_id, status FROM organization_members WHERE organization_id = ? AND user_id = ? FOR UPDATE"
+      "SELECT id, user_id, role, status FROM organization_members WHERE organization_id = ? AND user_id = ? FOR UPDATE"
     )
     .bind(organizationId, userId)
     .first<Record<string, unknown>>();
   if (!lockedRow) {
-    return { removedMemberId: null, revokedInvitations };
+    return { removedMemberId: null, removedRole: null, revokedInvitations };
   }
-  const member = membershipTargetSchema.parse(lockedRow);
+  const member = lockedMemberSchema.parse(lockedRow);
   if (member.status === "removed" || (await params.heldInClerk(tx))) {
-    return { removedMemberId: null, revokedInvitations };
+    return { removedMemberId: null, removedRole: null, revokedInvitations };
   }
   await removeMembership(tx, organizationId, member);
-  return { removedMemberId: member.id, revokedInvitations };
+  return { removedMemberId: member.id, removedRole: member.role, revokedInvitations };
 }
 
 const pendingInvitationSchema = z.object({

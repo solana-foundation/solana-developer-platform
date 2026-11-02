@@ -194,6 +194,11 @@
       "import": "./src/release-channels.ts",
       "default": "./src/release-channels.ts"
     },
+    "./admin-alerts": {
+      "types": "./src/admin-alerts.ts",
+      "import": "./src/admin-alerts.ts",
+      "default": "./src/admin-alerts.ts"
+    },
     "./roles": {
       "types": "./src/roles.ts",
       "import": "./src/roles.ts",
@@ -248,6 +253,11 @@
       "types": "./src/fireblocks.ts",
       "import": "./src/fireblocks.ts",
       "default": "./src/fireblocks.ts"
+    },
+    "./mainnet-access": {
+      "types": "./src/mainnet-access.ts",
+      "import": "./src/mainnet-access.ts",
+      "default": "./src/mainnet-access.ts"
     }
   },
   "scripts": {

@@ -1,3 +1,5 @@
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { MAINNET_ACCESS_STATES } from "@sdp/types/mainnet-access";
 import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
@@ -5,6 +7,7 @@ import {
   inviteSchema as inviteSchemaBase,
   updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
+import { requestMainnetAccessSchema as requestMainnetAccessSchemaBase } from "@/routes/organization-mainnet-access/schemas";
 import {
   createOrganizationSchema as createOrganizationSchemaBase,
   updateOrgSchema as updateOrgSchemaBase,
@@ -28,6 +31,11 @@ const organizationSettingsSchema = z
           "IPv4/IPv6 addresses and CIDR ranges the organization's API keys may be used from. It applies to every API-key request, intersected with each key's own `allowedIps`, and never to signed-in members. An empty or absent list places no restriction. Entries are stored in canonical form, so a range with host bits set is returned as the network it selects.",
         example: ["203.0.113.0/24"],
       }),
+    alertEmails: z.boolean().optional().openapi({
+      description:
+        "Whether organization admins are emailed when money moves in a mainnet project or the organization's members, API keys, custody or mainnet access change. Unset means true. Turning it off is itself emailed to the admins.",
+      example: true,
+    }),
   })
   .strict()
   .openapi({ description: "Organization-level settings." });
@@ -242,3 +250,40 @@ export const inviteMemberRequestSchema = inviteSchemaBase
     }),
   })
   .openapi({ description: "Invite member request body." });
+
+export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.openapi(
+  "RequestMainnetAccessRequest",
+  {
+    description:
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
+    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+  }
+);
+
+export const mainnetAccessSchema = z
+  .object({
+    state: z.enum(MAINNET_ACCESS_STATES).openapi({
+      description:
+        "`approved` once an operator enables production for the organization; `pending` after a request; otherwise `not_requested`.",
+    }),
+    available: z.boolean().openapi({
+      description:
+        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
+    }),
+    countryCode: z.enum(COUNTRY_CODES).nullable(),
+    request: z
+      .object({
+        requestedAt: isoDateTimeSchema,
+        requestedByUserId: userIdSchema,
+        termsVersion: z.string().openapi({
+          description:
+            "The SDP Terms and Conditions version the requester accepted with the request.",
+        }),
+        notified: z.boolean().openapi({
+          description: "False until the SDP alias received the request; `POST …/notify` sends it.",
+        }),
+      })
+      .nullable(),
+    contactEmail: z.string().nullable(),
+  })
+  .openapi("MainnetAccess", { description: "The organization's mainnet access request." });
