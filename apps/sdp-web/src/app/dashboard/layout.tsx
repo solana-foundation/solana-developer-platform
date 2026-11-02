@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
+import { AuthPageShell } from "@/components/auth-page-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { requestMemberRole, SdpApiResponseError } from "@/lib/sdp-api";
@@ -33,11 +34,19 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   if (!orgId) {
-    return <SelectExistingOrganizationPanel noAccess={false} />;
+    return (
+      <AuthPageShell action={null}>
+        <SelectExistingOrganizationPanel noAccess={false} />
+      </AuthPageShell>
+    );
   }
 
   if (!(await sdpAdmitsSession())) {
-    return <SelectExistingOrganizationPanel noAccess />;
+    return (
+      <AuthPageShell action={null}>
+        <SelectExistingOrganizationPanel noAccess />
+      </AuthPageShell>
+    );
   }
 
   return children;
