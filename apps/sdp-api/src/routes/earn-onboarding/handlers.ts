@@ -13,6 +13,7 @@ import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/valida
 import type { AppContext } from "@/routes/earn/context";
 import { earnRuntime } from "@/services/earn/runtime";
 import { WisdomTreeOnboardingService } from "@/services/earn/wisdomtree-onboarding.service";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import {
   EARN_ONBOARDING_MAX_FILE_BYTES,
   type onboardingApplicationSchema,
@@ -41,7 +42,8 @@ function service(c: AppContext) {
       encrypt: (aad, plaintext) => createEarnOnboardingCipher(c.env).encrypt(aad, plaintext),
       decrypt: (aad, ciphertext) => createEarnOnboardingCipher(c.env).decrypt(aad, ciphertext),
     },
-    earnRuntime(c.env)
+    earnRuntime(c.env),
+    new CustodyConfigStore(getDb(c.env), c.env)
   );
 }
 export async function authorizeOnboardingCustomer(c: AppContext, input: AuthorizeInput) {

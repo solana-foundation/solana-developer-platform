@@ -43,9 +43,12 @@ describe("wallet registration schema", () => {
     signature: "1".repeat(87),
   };
 
-  it("requires a signature next to the owner address", () => {
+  it("lets an external wallet prove control with a signature", () => {
     expect(onboardingWalletSchema.safeParse(wallet).success).toBe(true);
-    expect(onboardingWalletSchema.safeParse({ owner: wallet.owner }).success).toBe(false);
+  });
+
+  it("lets an SDP custody wallet omit the signature its project binding replaces", () => {
+    expect(onboardingWalletSchema.safeParse({ owner: wallet.owner }).success).toBe(true);
   });
 
   it("bounds the signature to the base58 encoding of 64 signature bytes", () => {

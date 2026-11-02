@@ -128,7 +128,7 @@ export function registerEarnOnboardingPaths(registry: OpenAPIRegistry) {
     "post",
     "{counterpartyId}/wallets",
     "registerEarnWisdomTreeCustomerWallet",
-    "Register a Solana wallet for an active assigned child organization; `signature` is the wallet's base58 Ed25519 signature over the scope-bound registration message proving control of `owner`",
+    "Register a Solana wallet for an active assigned child organization. Proof of control of `owner`: a base58 Ed25519 `signature` over the scope-bound registration message, or the authorized binding of `owner` as an active SDP custody wallet of the same project (custody wallets cannot sign arbitrary messages)",
     onboardingParamsSchema,
     z.object({ counterpartyId: z.string(), owner: z.string(), registered: z.boolean() }),
     onboardingWalletSchema

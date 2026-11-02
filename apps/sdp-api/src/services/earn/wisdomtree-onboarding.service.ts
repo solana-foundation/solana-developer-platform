@@ -25,6 +25,7 @@ import type {
 import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import type { OnboardingApplication } from "@/routes/earn-onboarding/schemas";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
+import type { CustodyConfigStore } from "@/services/stores/custody-config.store";
 
 type Provider = Pick<
   WisdomTreeOnboardingClient,
@@ -39,6 +40,9 @@ type Provider = Pick<
   | "answerCorrection"
   | "registerSolanaWallet"
 >;
+
+/** The project's custody wallets, whose keys SDP holds and signs with. */
+type CustodyWallets = Pick<CustodyConfigStore, "findActiveWalletByPublicKey">;
 
 /**
  * WisdomTree processed and refused the registration (any 4xx), or the write
@@ -111,8 +115,39 @@ export class WisdomTreeOnboardingService {
     private readonly repository: EarnOnboardingRepository,
     private readonly provider: Provider,
     private readonly cipher: CustodyCipher,
-    private readonly runtime: EarnRuntimeContext
+    private readonly runtime: EarnRuntimeContext,
+    private readonly custodyWallets: CustodyWallets
   ) {}
+
+  /**
+   * Proof of control before anything is claimed or written. External wallets
+   * sign the scope-bound registration message with the wallet's own Ed25519
+   * key. An SDP-managed custody wallet has no private key or arbitrary-message
+   * signing endpoint to expose, so its authorized project binding — an active
+   * wallet under this organization's and project's active custody config — is
+   * the alternative proof: the keys are generated and held by SDP, and only a
+   * project-authorized caller can reach this registration at all. A custody
+   * binding of any other project or organization proves nothing.
+   */
+  private async assertControlProven(
+    scope: EarnOnboardingScope,
+    owner: string,
+    signature?: string
+  ): Promise<void> {
+    if (signature === undefined) {
+      const bound = await this.custodyWallets.findActiveWalletByPublicKey(
+        scope.organizationId,
+        scope.projectId,
+        owner
+      );
+      if (bound !== null) return;
+      throw badRequest(
+        "Provide the wallet's base58 signature over the registration message, or register an SDP custody wallet of this project"
+      );
+    }
+    if (!(await provesWalletOwnership(scope, owner, signature)))
+      throw badRequest("The wallet signature does not prove control of the address");
+  }
 
   async form(entityType: CounterpartyEntityType) {
     await this.provider.getModerator(this.runtime);
@@ -276,7 +311,7 @@ export class WisdomTreeOnboardingService {
     };
   }
 
-  async registerWallet(scope: EarnOnboardingScope, owner: string, signature: string) {
+  async registerWallet(scope: EarnOnboardingScope, owner: string, signature?: string) {
     const { row, moderator } = await this.customer(scope);
     if (row.status !== "linked" || row.organization_guid === null)
       throw conflict("A linked business customer is required");
@@ -284,8 +319,7 @@ export class WisdomTreeOnboardingService {
     // written. The claim is globally unique per environment and moderator
     // registrations are accepted immediately, so an unproven caller could
     // block the address's real owner forever.
-    if (!(await provesWalletOwnership(scope, owner, signature)))
-      throw badRequest("The wallet signature does not prove control of the address");
+    await this.assertControlProven(scope, owner, signature);
     if (!moderator.client_organizations.some((child) => child.guid === row.organization_guid)) {
       throw conflict("WisdomTree customer is not assigned to the configured moderator");
     }
