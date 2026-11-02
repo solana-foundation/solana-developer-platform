@@ -12,6 +12,8 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardAccess: { capabilities: { canUseWalletSignerCheck: false } },
+    // Stable: no Issuance, no Ramps.
+    flags: { issuance: false, ramps: false },
     sandboxProject: null,
   }),
 }));
@@ -63,5 +65,16 @@ describe("WalletSettingsTab label", () => {
     expect(first?.slice(0, 2)).toEqual(["wal_settings_test", "Settlement"]);
     expect(first?.[2]).toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
     expect(retry?.[2]).toBe(first?.[2]);
+  });
+
+  // The hint listed Issuance on stable, where no Issuance page exists to show the label.
+  it("names only the modules that run where the label shows", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletSettingsTab wallet={WALLET} />
+      </I18nProvider>
+    );
+    expect(screen.getByText(/here, in Payments, and in API responses/)).toBeTruthy();
+    expect(screen.queryByText(/Issuance/)).toBeNull();
   });
 });

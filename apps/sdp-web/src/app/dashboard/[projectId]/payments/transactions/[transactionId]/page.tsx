@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import { fetchIssuedTokensByMint } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchTransactionDetail } from "@/app/dashboard/[projectId]/payments/transactions/transaction-detail.data";
 import { TransactionDetailWorkspace } from "@/app/dashboard/[projectId]/payments/transactions/transaction-detail-workspace";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -33,7 +33,9 @@ export default async function TransactionDetailRoute({
         trace.step("fetch_transaction_detail", () =>
           fetchTransactionDetail(apiClient, transactionId)
         ),
-        trace.step("fetch_issued_tokens", () => fetchIssuedTokensByMint(apiClient.request)),
+        trace.step("fetch_issued_tokens", () =>
+          fetchIssuedTokensByMintWhenIssuanceEnabled(apiClient.request)
+        ),
       ]);
       // The ledger row carries the contact's id; its name comes from the contact itself, so an
       // older or archived contact still names the page. A missing contact keeps the id.

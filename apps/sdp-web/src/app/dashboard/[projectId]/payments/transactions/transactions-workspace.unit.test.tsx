@@ -10,6 +10,7 @@ import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { enabledPaymentTransactionKinds } from "./transaction-modules";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
@@ -87,6 +88,7 @@ function renderWorkspace(
           wallets={[{ id: "cwlt_1", label: "Treasury", publicKey: "Pub111" }]}
           counterparties={[{ id: "cpty_42", name: "Acme Treasury" }]}
           modules={modules}
+          paymentKinds={enabledPaymentTransactionKinds({ ramps: true })}
         />
       </I18nProvider>
     </SWRConfig>

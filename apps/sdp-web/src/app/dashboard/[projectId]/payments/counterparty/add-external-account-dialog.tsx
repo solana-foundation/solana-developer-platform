@@ -4,12 +4,28 @@ import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import { Modal } from "@sdp/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { CryptoAccountForm } from "./crypto-account-form";
+import { useAddressScreeningEnabled } from "./use-address-screening";
 
 interface AddExternalAccountDialogProps {
   isOpen: boolean;
   counterpartyId: string;
   onAdded: (account: CounterpartyAccount) => void;
   onClose: () => void;
+}
+
+/** What adding does. The address is screened first only where the channel runs Compliance. */
+function AddExternalAccountDescription() {
+  const t = useTranslations();
+  const screeningEnabled = useAddressScreeningEnabled();
+  return (
+    <p className="text-sm text-secondary">
+      {t(
+        screeningEnabled
+          ? "DashboardPayments.counterparty.addExternalAccountDescription"
+          : "DashboardPayments.counterparty.addExternalAccountDescriptionUnscreened"
+      )}
+    </p>
+  );
 }
 
 export function AddExternalAccountDialog({
@@ -32,9 +48,7 @@ export function AddExternalAccountDialog({
           <h2 className="text-lg font-medium tracking-tight text-primary">
             {t("DashboardPayments.counterparty.addExternalAccount")}
           </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardPayments.counterparty.addExternalAccountDescription")}
-          </p>
+          <AddExternalAccountDescription />
         </div>
         <CryptoAccountForm
           counterpartyId={counterpartyId}

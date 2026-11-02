@@ -10,6 +10,7 @@ import * as providerAvailability from "@/lib/provider-availability";
 import * as depositAddressPanel from "./components/deposit-address-panel";
 import * as onrampRail from "./onramp-rail";
 import { PaymentsActionPage } from "./ramp-action-page";
+import * as rampsOffered from "./use-ramps-offered";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -41,6 +42,7 @@ function arrange({ canWrite, tab }: { canWrite: boolean; tab: string | null }) {
 beforeEach(() => {
   // A provider is configured, so the only thing between a viewer and the on-ramp is the role.
   vi.spyOn(providerAvailability, "hasEnabledRampProvider").mockReturnValue(true);
+  vi.spyOn(rampsOffered, "useRampsOffered").mockReturnValue(true);
   // The page picks a rail; each rail has its own suite, so this one only names which it chose.
   vi.spyOn(depositAddressPanel, "DepositAddressPanel").mockImplementation(() => (
     <div>address panel</div>
@@ -65,5 +67,17 @@ describe("deposit for a read-only member", () => {
     renderWith(<PaymentsActionPage {...PROPS} />);
     expect(screen.getByText("address panel")).toBeTruthy();
     expect(screen.queryByText("onramp")).toBeNull();
+  });
+});
+
+describe("deposit where the channel runs no Ramps", () => {
+  // A provider's own settings never bring the on-ramp back where the API refuses it.
+  it("opens the address on a stale provider tab, with no provider notice", () => {
+    vi.spyOn(rampsOffered, "useRampsOffered").mockReturnValue(false);
+    arrange({ canWrite: true, tab: "provider" });
+    renderWith(<PaymentsActionPage {...PROPS} />);
+    expect(screen.getByText("address panel")).toBeTruthy();
+    expect(screen.queryByText("onramp")).toBeNull();
+    expect(screen.queryByText(/card or bank provider/i)).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type PaymentTransactionKind,
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_STATUSES,
   type UnifiedTransactionModule,
@@ -96,6 +97,7 @@ export function TransactionsWorkspace({
   wallets,
   counterparties,
   modules,
+  paymentKinds,
 }: {
   initialFilters: TransactionFilters;
   initialResult: TransactionsPageResult;
@@ -104,6 +106,8 @@ export function TransactionsWorkspace({
   counterparties: readonly TransactionCounterpartyOption[];
   /** The modules the dashboard shows (`enabledTransactionModules`); the Type filter offers only these. */
   modules: readonly UnifiedTransactionModule[];
+  /** The Payments kinds this deployment can record (`enabledPaymentTransactionKinds`). */
+  paymentKinds: readonly PaymentTransactionKind[];
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
@@ -164,7 +168,10 @@ export function TransactionsWorkspace({
     t(`DashboardPayments.transactions.modules.${module}` as MessageKey);
   const typeOptions = modules.flatMap((module) => [
     { value: `${module}:`, label: moduleLabel(module) },
-    ...UNIFIED_TRANSACTION_MODULE_CONTRACTS[module].kinds.map((kind) => ({
+    ...(module === "payments"
+      ? paymentKinds
+      : UNIFIED_TRANSACTION_MODULE_CONTRACTS[module].kinds
+    ).map((kind) => ({
       value: `${module}:${kind}`,
       label: `${moduleLabel(module)} · ${t(
         `DashboardPayments.transactions.kinds.${module}.${kind}` as MessageKey
