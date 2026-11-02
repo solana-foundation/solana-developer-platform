@@ -16,6 +16,7 @@ import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fi
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
@@ -73,12 +74,15 @@ function audit(entry: Omit<SystemAuditLogEntry, "organizationId">) {
   );
 }
 
-async function seedOrganization(): Promise<void> {
+async function seedAdminAlertsOrganization(): Promise<void> {
   const db = getDb(env);
-  await db
-    .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-    .bind(ORGANIZATION_ID, "Acme Pay", TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-    .run();
+  await seedOrganization(db, {
+    id: ORGANIZATION_ID,
+    name: "Acme Pay",
+    slug: TEST_ORG.slug,
+    status: TEST_ORG.status,
+    creator: organizationCreator(ORGANIZATION_ID),
+  });
   for (const [user, role, name] of [
     [{ id: TEST_USER.id, email: TEST_USER.email }, "admin", "Ada Admin"],
     [OTHER_ADMIN, "admin", null],
@@ -294,7 +298,7 @@ describe("admin alert emails (HOO-2299)", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await seedOrganization();
+    await seedAdminAlertsOrganization();
     await resetCursors(windowStart);
     env.ITERABLE_API_URL = "https://api.iterable.com";
     env.ITERABLE_API_KEY = "0123456789abcdef0123456789abcdef";
