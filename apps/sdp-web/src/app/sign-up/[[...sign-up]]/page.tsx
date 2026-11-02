@@ -1,13 +1,17 @@
 import { SignUp } from "@clerk/nextjs";
-import { AuthTermsNotice } from "@/components/auth-terms-notice";
+import { authAppearance } from "@/components/auth-appearance";
+import { AuthPageShell } from "@/components/auth-page-shell";
+import { getTranslations } from "@/i18n/server";
+import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 
-export default function SignUpPage() {
+export default async function SignUpPage() {
+  const t = await getTranslations();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-surface to-surface-sunken px-6 py-10">
-      <div className="flex flex-col items-center gap-4">
-        <SignUp routing="path" path="/sign-up" />
-        <AuthTermsNotice />
-      </div>
-    </div>
+    <AuthPageShell
+      action={{ href: AUTH_ENTRY_PATH, label: t("Homepage.cta.signIn"), external: false }}
+    >
+      <SignUp routing="path" path="/sign-up" appearance={authAppearance} />
+    </AuthPageShell>
   );
 }

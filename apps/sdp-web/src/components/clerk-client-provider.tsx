@@ -16,11 +16,18 @@ export function ClerkClientProvider({ children }: { children: ReactNode }) {
   return (
     <ClerkProvider
       appearance={{
+        cssLayerName: "clerk",
         elements: {
           socialButtonsProviderIcon__github: {
             filter: "var(--sdp-clerk-provider-icon-filter)",
           },
         },
+      }}
+      localization={{
+        formFieldInputPlaceholder__emailAddress: "jane@acme.com",
+        formFieldInputPlaceholder__password: "",
+        formFieldInputPlaceholder__signUpPassword: "",
+        signIn: { forgotPasswordAlternativeMethods: { title: "Forgot your password?" } },
       }}
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
