@@ -47,34 +47,13 @@ describe("TokenService", () => {
     db = getDb(env);
     tokenService = new TokenService(db);
 
-    await db
-      .prepare("DELETE FROM frozen_accounts")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM issued_tokens")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM project_members")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM projects")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM organizations")
-      .run()
-      .catch(() => {});
-    await db
-      .prepare("DELETE FROM users")
-      .run()
-      .catch(() => {});
+    await db.prepare("DELETE FROM frozen_accounts").run();
+    await db.prepare("DELETE FROM issued_tokens").run();
+    await db.prepare("DELETE FROM project_members").run();
+    await db.prepare("DELETE FROM api_keys WHERE project_id IS NOT NULL").run();
+    await db.prepare("DELETE FROM projects").run();
+    await db.prepare("DELETE FROM organizations").run();
+    await db.prepare("DELETE FROM users").run();
 
     await seedOrganization(db, {
       id: TEST_ORG.id,
