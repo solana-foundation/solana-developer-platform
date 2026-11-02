@@ -70,7 +70,6 @@ jobs:
           fi
           echo "prod=$prod" >> "$GITHUB_OUTPUT"
 
-
   notify-start:
     needs: changes
     if: needs.changes.outputs.api == 'true' && vars.STAGE_DEPLOY_WIF_PROVIDER != '' && vars.STAGE_DEPLOY_SA != ''

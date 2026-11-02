@@ -255,7 +255,7 @@ export const counterpartyAccountPathParamsSchema = counterpartyAccountParamsSche
       counterpartyAccountParamsSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty account identifier.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
   })
@@ -279,7 +279,7 @@ const counterpartyAccountSchema = withOpenApi(
   z.object({
     id: withOpenApi(z.string(), {
       description: "Counterparty account identifier.",
-      example: "cpa_example",
+      example: "cpacct_example",
     }),
     organizationId: orgIdParamSchema,
     projectId: projectIdParamSchema,

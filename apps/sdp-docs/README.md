@@ -30,11 +30,13 @@ SDP Docs is the comprehensive external-facing documentation for the SDP platform
 ### Setup
 
 1. **Install dependencies:**
+
    ```bash
    pnpm install
    ```
 
 2. **Start the dev server:**
+
    ```bash
    # Whole platform (API, web, docs) from the repo root
    pnpm dev
@@ -106,7 +108,7 @@ This is a success message.
 ```
 
 **API reference (if applicable):**
-```markdown
+````markdown
 ## POST /v1/wallets
 
 Creates a new blockchain wallet.
@@ -124,8 +126,8 @@ Creates a new blockchain wallet.
   "organization_id": "org_...",
   "address": "..."
 }
-```
-```
+````
+````
 
 ### Content Guidelines
 
@@ -146,7 +148,7 @@ Already served by `pnpm dev:docs`
 
 ```bash
 pnpm --filter sdp-docs build
-```
+````
 
 Output goes to `apps/sdp-docs/.next/`
 
@@ -165,16 +167,19 @@ The API reference is auto-generated from the SDP API's OpenAPI spec.
 ### To update:
 
 1. Ensure the SDP API is running:
+
    ```bash
    pnpm dev
    ```
 
 2. The OpenAPI spec is available at:
+
    ```
    GET http://localhost:8787/openapi.json
    ```
 
 3. To regenerate docs from the spec:
+
    ```bash
    pnpm -C apps/sdp-docs generate:api
    ```
@@ -200,16 +205,19 @@ Verifies the documentation builds without errors.
 ## Troubleshooting
 
 ### Port 3001 already in use
+
 ```bash
 # Use a different port
 PORT=3002 pnpm dev:docs
 ```
 
 ### Changes not showing up
+
 - Clear `.next/` cache: `rm -rf apps/sdp-docs/.next`
 - Restart dev server: `Ctrl+C` and `pnpm dev:docs` again
 
 ### Markdown not rendering correctly
+
 - Check file is in `content/` directory
 - Verify frontmatter is valid YAML
 - Ensure markdown syntax is correct (code blocks closed, etc.)

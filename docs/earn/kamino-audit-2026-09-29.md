@@ -121,18 +121,18 @@ state. Earn remains excluded from the public OpenAPI surface.
 
 ## Validation
 
-| Check | Final result |
-| --- | --- |
-| Full API suite with coverage | 431 suites passed; 6,709 tests passed, 5 skipped |
-| API coverage | Statements 81.36%, branches 71.79%, functions 87.51%, lines 82.09%; all required thresholds passed |
-| Kamino offline suite | 154 passed; 2 opt-in fork tests skipped by default |
-| API and Kamino typechecks | Passed |
-| Changed TypeScript lint and formatting | Passed |
-| Migration compatibility, including working-tree files | Passed |
-| Module, Kamino dependency and pinned-dependency boundaries | Passed |
-| Generated transaction-view drift and API playground drift | Passed |
-| OpenAPI and module-map regeneration | Passed; public Earn surface remains hidden |
-| Diff whitespace | Passed |
+| Check                                                      | Final result                                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Full API suite with coverage                               | 431 suites passed; 6,709 tests passed, 5 skipped                                                   |
+| API coverage                                               | Statements 81.36%, branches 71.79%, functions 87.51%, lines 82.09%; all required thresholds passed |
+| Kamino offline suite                                       | 154 passed; 2 opt-in fork tests skipped by default                                                 |
+| API and Kamino typechecks                                  | Passed                                                                                             |
+| Changed TypeScript lint and formatting                     | Passed                                                                                             |
+| Migration compatibility, including working-tree files      | Passed                                                                                             |
+| Module, Kamino dependency and pinned-dependency boundaries | Passed                                                                                             |
+| Generated transaction-view drift and API playground drift  | Passed                                                                                             |
+| OpenAPI and module-map regeneration                        | Passed; public Earn surface remains hidden                                                         |
+| Diff whitespace                                            | Passed                                                                                             |
 
 Earlier in this audit, the Earn package suite (197 tests), dashboard withdrawal
 amount/modal/slippage checks (25 tests) and production dependency audit also

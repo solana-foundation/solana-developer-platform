@@ -21924,7 +21924,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -21952,7 +21952,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -21979,7 +21979,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22199,7 +22199,7 @@ Create a custody-executed outbound transfer batch.
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -22572,7 +22572,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22601,7 +22601,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22628,7 +22628,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22669,7 +22669,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -23146,7 +23146,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -23557,7 +23557,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_ex
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -23781,7 +23781,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -24178,7 +24178,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -24326,7 +24326,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
   Counterparty receiving the recurring payment.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty crypto_wallet account. It must contain Solana wallet details.
 
@@ -24390,7 +24390,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -24572,7 +24572,7 @@ curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24592,7 +24592,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments",
   body: JSON.stringify({
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24610,7 +24610,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24632,7 +24632,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -24759,7 +24759,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -24938,7 +24938,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments",
         "sourceProviderWalletId": "privy_wallet_123",
         "sourceAddress": "So11111111111111111111111111111111111111112",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destinationAddress": "So11111111111111111111111111111111111111112",
         "destinationTokenAccount": "So11111111111111111111111111111111111111112",
         "token": "example",
@@ -25033,7 +25033,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
   Optional replacement counterparty. When provided, counterpartyAccountId is also required.
 
-- **`counterpartyAccountId`** · `string` · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
 
   Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.
 
@@ -25101,7 +25101,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -25283,7 +25283,7 @@ curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25304,7 +25304,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
   body: JSON.stringify({
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25323,7 +25323,7 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25346,7 +25346,7 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -25467,7 +25467,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -25663,7 +25663,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -25790,7 +25790,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -26000,7 +26000,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -26127,7 +26127,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -26337,7 +26337,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -26464,7 +26464,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -27028,7 +27028,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -27239,7 +27239,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -27449,7 +27449,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -34341,7 +34341,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
       Counterparty accounts.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -34485,7 +34485,7 @@ r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts
   "data": {
     "accounts": [
       {
-        "id": "cpa_example",
+        "id": "cpacct_example",
         "organizationId": "org_example",
         "projectId": "prj_example",
         "counterpartyId": "cpty_example",
@@ -34596,7 +34596,7 @@ Create counterparty account request body.
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -34766,7 +34766,7 @@ r = requests.post("https://api.solana.com/v1/counterparties/cpty_example/account
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35100,7 +35100,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35122,7 +35122,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -35223,12 +35223,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -35239,7 +35239,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -35249,7 +35249,7 @@ r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35308,7 +35308,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35356,7 +35356,7 @@ Update counterparty account request body. At least one field must be provided.
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -35469,7 +35469,7 @@ Update counterparty account request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
-curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -35484,7 +35484,7 @@ curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cp
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -35505,7 +35505,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "label": "Primary USDC wallet",
@@ -35523,7 +35523,7 @@ r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accoun
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35582,7 +35582,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35653,13 +35653,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -35671,7 +35671,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
 ```
 

@@ -49,7 +49,7 @@
     "route-actions:check": "tsx scripts/generate-route-actions.ts --check"
   },
   "dependencies": {
-    "@clerk/backend": "3.26.1",
+    "@clerk/backend": "3.26.2",
     "@hono/node-server": "2.1.5",
     "@sdp/api-catalog": "workspace:*",
     "@sdp/custody": "workspace:*",
@@ -87,7 +87,7 @@
     "@solana/subscriptions": "0.5.0",
     "@solana/sysvars": "catalog:",
     "@solana/token-acl-sdk": "catalog:",
-    "hono": "4.13.13",
+    "hono": "4.13.14",
     "ioredis": "6.0.0",
     "jose": "6.2.13",
     "nanoid": "6.0.2",

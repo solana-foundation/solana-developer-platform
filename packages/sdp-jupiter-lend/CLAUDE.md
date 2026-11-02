@@ -67,9 +67,9 @@ rules.
 
 ## Request budget (pinned in `sdk-coupling.test.ts`)
 
-| Operation | Before | Now |
-|---|---|---|
-| Holder read | 13 RPC + 1 REST | 7 RPC + 1 REST |
-| Three holders read together | 39 + 3 | 9 + 1 |
-| Deposit quote, withdrawal quote | 10, 10 + 1 | 6, 6 + 1 |
-| Deposit build, withdrawal build | 3 each | 1 each |
+| Operation                       | Before          | Now            |
+| ------------------------------- | --------------- | -------------- |
+| Holder read                     | 13 RPC + 1 REST | 7 RPC + 1 REST |
+| Three holders read together     | 39 + 3          | 9 + 1          |
+| Deposit quote, withdrawal quote | 10, 10 + 1      | 6, 6 + 1       |
+| Deposit build, withdrawal build | 3 each          | 1 each         |

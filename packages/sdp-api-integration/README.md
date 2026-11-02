@@ -52,11 +52,11 @@ pnpm test:integration -- --verbose
 
 The default SDP CI split is local-first. New token, issuance, Mosaic, access, and browser tests should use the Surfpool-backed harness unless the behavior specifically depends on the hosted Kora provider or a live custody provider.
 
-| Lane | CI job names | Owns | Local command |
-|---|---|---|---|
-| Surfpool/local | `Surfpool / Issuance`, `Surfpool / Mosaic`, `Surfpool / Token Flows`, `Surfpool / Access` | Deterministic API integration shards for token deploy/mint/burn/freeze, issuance endpoints, Mosaic flows, API-key/access scope, and local custody execution. | `pnpm kora:surfpool:integration -- <test-files...>` |
-| Surfpool/local browser | `Dashboard E2E (Surfpool Local)`, `Issuance E2E (Surfpool Shards)` | Dashboard issuance, payments, wallet activity, and other browser flows that can run against the local API plus Surfpool. | `pnpm kora:surfpool:run -- pnpm --filter sdp-web run test:e2e:dashboard` or `pnpm kora:surfpool:e2e:issuance` |
-| Kora/devnet smoke | `Kora / Live Smoke` | Hosted Kora client/adapter checks and a signed signer-check simulation against live devnet. | `pnpm kora:devnet:test` |
+| Lane                   | CI job names                                                                              | Owns                                                                                                                                                         | Local command                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Surfpool/local         | `Surfpool / Issuance`, `Surfpool / Mosaic`, `Surfpool / Token Flows`, `Surfpool / Access` | Deterministic API integration shards for token deploy/mint/burn/freeze, issuance endpoints, Mosaic flows, API-key/access scope, and local custody execution. | `pnpm kora:surfpool:integration -- <test-files...>`                                                           |
+| Surfpool/local browser | `Dashboard E2E (Surfpool Local)`, `Issuance E2E (Surfpool Shards)`                        | Dashboard issuance, payments, wallet activity, and other browser flows that can run against the local API plus Surfpool.                                     | `pnpm kora:surfpool:run -- pnpm --filter sdp-web run test:e2e:dashboard` or `pnpm kora:surfpool:e2e:issuance` |
+| Kora/devnet smoke      | `Kora / Live Smoke`                                                                       | Hosted Kora client/adapter checks and a signed signer-check simulation against live devnet.                                                                  | `pnpm kora:devnet:test`                                                                                       |
 
 Keep the Kora/devnet smoke suite intentionally small. It proves that SDP can still talk to hosted Kora, obtain real signatures, and simulate a signer-check memo without broadcasting; token lifecycle behavior and dashboard activity rendering are already covered more deterministically in the Surfpool lanes.
 
@@ -157,24 +157,26 @@ describe("Example", () => {
 
 ## Custody Provider Test Coverage
 
-| Provider | Status | Notes |
-|---|---|---|
-| **Privy** | ✅ Full | Fully tested, default signer |
-| **Coinbase CDP** | ✅ Full | Requires business account |
-| **Turnkey** | ✅ Partial | Requires API key |
-| **Fireblocks** | ⚠️ Partial | Requires business account |
-| **Para** | ⚠️ Partial | Requires API key |
-| **Kora** | ✅ Full | Local devnet fee-payer |
+| Provider         | Status     | Notes                        |
+| ---------------- | ---------- | ---------------------------- |
+| **Privy**        | ✅ Full    | Fully tested, default signer |
+| **Coinbase CDP** | ✅ Full    | Requires business account    |
+| **Turnkey**      | ✅ Partial | Requires API key             |
+| **Fireblocks**   | ⚠️ Partial | Requires business account    |
+| **Para**         | ⚠️ Partial | Requires API key             |
+| **Kora**         | ✅ Full    | Local devnet fee-payer       |
 
 ## Troubleshooting
 
 ### "PRIVY_APP_ID not set"
+
 ```bash
 export PRIVY_APP_ID=your_app_id
 export PRIVY_APP_SECRET=your_secret
 ```
 
 ### "Kora is not responding"
+
 ```bash
 # Ensure Kora is running
 pnpm kora:local:up
@@ -232,12 +234,15 @@ under Doppler, the harness ignores Doppler's hosted `KORA_DEVNET_URL` / `KORA_MA
 - If Clerk auth fails before any Solana transaction runs, debug the browser E2E secret setup rather than the Surfpool harness.
 
 ### "Devnet airdrop failed"
+
 - Airdrop limit is ~2 SOL per request
 - Wait a few seconds between airdrop requests
 - Use a fresh keypair if rate limited
 
 ### "Transaction timed out"
+
 - Devnet can be slow; increase test timeout:
+
   ```typescript
   it("test", { timeout: 30000 }, async () => {
     // ...

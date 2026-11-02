@@ -16,8 +16,8 @@ from memory**: this integration has already cost one durable wrong premise (see
 ## The trap this package exists to contain
 
 `new KaminoVault(rpc, addr, state, programId)` applies `programId` to **account
-reads only**. Its constructor then builds its own `KaminoVaultClient` *without
-forwarding it*, and instruction building goes through that client — which
+reads only**. Its constructor then builds its own `KaminoVaultClient` _without
+forwarding it_, and instruction building goes through that client — which
 defaults to **mainnet**. On devnet the result is a vault that reads `devkRng…`
 state and emits instructions addressed to `KvauGM…`, with no error at any layer.
 
@@ -58,7 +58,7 @@ physical copies degrade to NaN rather than to a type error — which is why the 
 
 All in `@sdp/types/kamino-programs` (there, not here, because `@sdp/earn` needs the
 devnet kvault id too and an edge between the two packages would be a workspace
-cycle *and* would drag a 13MB SDK into the hourly catalogue cron).
+cycle _and_ would drag a 13MB SDK into the hourly catalogue cron).
 
 - **`KAMINO_SLOT_DURATION_MS`** — required by `KaminoVaultClient` and with no safe
   default. It scales every accrual the SDK computes (exchange rate, APY, farm

@@ -91,7 +91,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
 
       assert(row);
-      expect(row.id).toMatch(/^counterparty_account_/);
+      expect(row.id).toMatch(/^cpacct_/);
       expect(row.counterparty_id).toBe(counterparty.id);
       expect(row.account_kind).toBe("crypto_wallet");
       expect(row.label).toBe("Alice's Solana");

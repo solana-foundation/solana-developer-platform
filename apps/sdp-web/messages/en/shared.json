@@ -86,6 +86,12 @@
     "prefix": "By using the app, you agree to the",
     "link": "Solana Foundation Terms of Service"
   },
+  "authShell": {
+    "productName": "Developer Platform",
+    "requestAccess": "Request access",
+    "emailPlaceholder": "jane@acme.com",
+    "forgotPasswordTitle": "Forgot your password?"
+  },
   "allowlist": {
     "comingSoon": "Coming soon",
     "description": "Allowlist management will be available in a future update."

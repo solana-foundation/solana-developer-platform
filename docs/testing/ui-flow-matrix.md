@@ -11,20 +11,20 @@ longer exists, or when a row names a section that was removed. Adding a new
 dashboard section therefore requires adding a row here — either with its spec
 or with an explicit `GAP`.
 
-| Section | Critical flows | Spec |
-| --- | --- | --- |
-| allowlist | manage the address allowlist | GAP |
-| api-keys | create, reveal, and revoke API keys | api-keys.e2e.spec.ts |
-| custody | custody overview and operations | GAP |
-| helius-rings | ring configuration | GAP |
-| integrations | connect and manage integrations | GAP |
-| issuance | issue a token end to end | issuance.e2e.spec.ts |
-| markets | market listings and detail | GAP |
-| members | invite members and manage roles | GAP |
-| payments | transfer, recurring payments, command center | payments-transfer.e2e.spec.ts, payments-recurring.e2e.spec.ts, payments-command-center.e2e.spec.ts |
-| settings | workspace settings | GAP |
-| tokens | token management | GAP |
-| wallets | create and manage wallets | wallets.e2e.spec.ts |
+| Section      | Critical flows                               | Spec                                                                                               |
+| ------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| allowlist    | manage the address allowlist                 | GAP                                                                                                |
+| api-keys     | create, reveal, and revoke API keys          | api-keys.e2e.spec.ts                                                                               |
+| custody      | custody overview and operations              | GAP                                                                                                |
+| helius-rings | ring configuration                           | GAP                                                                                                |
+| integrations | connect and manage integrations              | GAP                                                                                                |
+| issuance     | issue a token end to end                     | issuance.e2e.spec.ts                                                                               |
+| markets      | market listings and detail                   | GAP                                                                                                |
+| members      | invite members and manage roles              | GAP                                                                                                |
+| payments     | transfer, recurring payments, command center | payments-transfer.e2e.spec.ts, payments-recurring.e2e.spec.ts, payments-command-center.e2e.spec.ts |
+| settings     | workspace settings                           | GAP                                                                                                |
+| tokens       | token management                             | GAP                                                                                                |
+| wallets      | create and manage wallets                    | wallets.e2e.spec.ts                                                                                |
 
 Non-dashboard flows with dedicated specs: sign-in/sign-up entry
 (`auth-entry.e2e.spec.ts`), theming (`theme.e2e.spec.ts`), private channels

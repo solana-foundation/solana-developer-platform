@@ -4,16 +4,16 @@
 
 ## Deployment Model
 
-| Event | Target | Result |
-| --- | --- | --- |
-| Push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke |
-| Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
-| `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push |
-| Push to `main` | Production web | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic |
-| Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
-| Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations. Holds merge and approval deploys afterwards unless `clear_hold` is checked |
-| Manual dispatch of `Roll back sdp-api prod to the previous build` | Production API | Moves traffic and the worker back to the revision that served before the last promotion, then holds production |
-| Vercel dashboard redeploy, instant rollback, or force promote | Production web | Redeploys, restores, or releases an sdp-web production deployment |
+| Event                                                             | Target              | Result                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Push to `main`                                                    | Stage               | Builds a SHA-tagged image, runs migrations, updates the stage service and worker, then runs the stage smoke                                                                                                                                                                                                          |
+| Push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true`   | Production API      | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
+| `chore(main): release X.Y.Z` commit on `main`                     | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows. Deploys nothing itself: the commit reaches production through the per-merge pipeline like any other push                                                                                                      |
+| Push to `main`                                                    | Production web      | Vercel's git integration builds sdp-web from that commit and holds it until the `sdp-web production gate` commit status passes, which the production API deploy of that same commit posts once it serves traffic                                                                                                     |
+| Manual dev workflow dispatch                                      | Dev                 | Rebuilds and deploys the selected workflow revision                                                                                                                                                                                                                                                                  |
+| Manual production workflow dispatch from `main`                   | Production API      | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations. Holds merge and approval deploys afterwards unless `clear_hold` is checked                                                                                                                        |
+| Manual dispatch of `Roll back sdp-api prod to the previous build` | Production API      | Moves traffic and the worker back to the revision that served before the last promotion, then holds production                                                                                                                                                                                                       |
+| Vercel dashboard redeploy, instant rollback, or force promote     | Production web      | Redeploys, restores, or releases an sdp-web production deployment                                                                                                                                                                                                                                                    |
 
 Vercel's git integration builds previews for pull-request branches and a production build for every merge to `main`. The sdp-web project requires the `sdp-web production gate` status under Settings → Deployment Checks, so each production build waits. Every push to `main` runs the stage and production pipeline, and the `release-web` job in [`deploy-sdp-api-gcp-prod.yml`](../../.github/workflows/deploy-sdp-api-gcp-prod.yml) posts the status for the deployed commit after a per-merge or approved-migration deploy succeeds, on the run's first attempt only. Web therefore goes live only for a commit whose API production already serves, seconds after it. No GitHub workflow deploys sdp-web, and no Vercel token is involved.
 
@@ -80,10 +80,10 @@ The release GitHub App needs `contents: write` and `pull_requests: write`, and i
 
 ### Cloud Run resources
 
-| Environment | Project | Artifact repository | Service | Migration job | Worker service |
-| --- | --- | --- | --- | --- | --- |
-| Dev | `solana-developer-platform-dev` | `sdp-dev` | `sdp-dev-api-public` | `sdp-dev-api-public-migrate` | `sdp-dev-worker` |
-| Production | `solana-developer-platform` | `sdp-prod` | `sdp-prod-api-public` | `sdp-prod-api-public-migrate` | `sdp-prod-worker` |
+| Environment | Project                         | Artifact repository | Service               | Migration job                 | Worker service    |
+| ----------- | ------------------------------- | ------------------- | --------------------- | ----------------------------- | ----------------- |
+| Dev         | `solana-developer-platform-dev` | `sdp-dev`           | `sdp-dev-api-public`  | `sdp-dev-api-public-migrate`  | `sdp-dev-worker`  |
+| Production  | `solana-developer-platform`     | `sdp-prod`          | `sdp-prod-api-public` | `sdp-prod-api-public-migrate` | `sdp-prod-worker` |
 
 All resources currently use `us-central1`.
 
@@ -91,10 +91,10 @@ The workflows update images only. Runtime environment variables, Secret Manager 
 
 Configure `PUBLIC_API_ORIGIN` directly on each API service before deployment:
 
-| Environment | Required value |
-| --- | --- |
-| Dev | `https://api-dev.solana.com` |
-| Production | `https://api.solana.com` |
+| Environment | Required value               |
+| ----------- | ---------------------------- |
+| Dev         | `https://api-dev.solana.com` |
+| Production  | `https://api.solana.com`     |
 
 This value is mandatory for hosted services because token deployment embeds metadata URLs permanently on-chain. Do not rely solely on request-derived proxy headers for those URLs. The image-only workflows preserve this service configuration and do not create or update it.
 
@@ -169,12 +169,12 @@ The job queues a key when it is missing from a locale **or** when the value alre
 
 Every run posts or updates one comment, so a missing comment means the job never ran, not that it passed.
 
-| Status | Meaning |
-| --- | --- |
-| `no-op` | Nothing to translate; catalogs validated clean. |
-| `generated` | Every batch succeeded and was committed to the release branch. |
-| `partial` | Some batches failed and are deferred to the next run; the batches that succeeded are still committed. Only drift this run *introduced* blocks the commit. |
-| `failed` | The run threw before it could finish, most often because a source key changed shape in a way `applyTranslations` cannot write. The comment carries the error and a link to the run. Nothing is lost; the next push to `main` retries. |
+| Status      | Meaning                                                                                                                                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `no-op`     | Nothing to translate; catalogs validated clean.                                                                                                                                                                                       |
+| `generated` | Every batch succeeded and was committed to the release branch.                                                                                                                                                                        |
+| `partial`   | Some batches failed and are deferred to the next run; the batches that succeeded are still committed. Only drift this run _introduced_ blocks the commit.                                                                             |
+| `failed`    | The run threw before it could finish, most often because a source key changed shape in a way `applyTranslations` cannot write. The comment carries the error and a link to the run. Nothing is lost; the next push to `main` retries. |
 
 ### 3. Deploy and publish production
 

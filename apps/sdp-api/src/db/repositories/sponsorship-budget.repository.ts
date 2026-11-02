@@ -195,6 +195,13 @@ export class SponsorshipBudgetRepository {
     dailyLamports: number;
     operator: string;
     reason: string;
+    /**
+     * Compare-and-swap on the policy's version (0 = the policy must not exist
+     * yet). A concurrent write — an operator kill, a breaker trip — bumps the
+     * version, so a write approved against an older `status` read loses here
+     * instead of silently undoing the newer change.
+     */
+    expectedVersion?: number;
   }): Promise<SponsorshipBudgetPolicy> {
     return this.db.transaction(async (tx) => {
       const existing = await tx.queryOne<PolicyRow>(
@@ -203,8 +210,15 @@ export class SponsorshipBudgetRepository {
          FOR UPDATE`,
         [input.network, input.scopeType, input.scopeId]
       );
+      const currentVersion = existing?.version ?? 0;
+      if (input.expectedVersion !== undefined && input.expectedVersion !== currentVersion) {
+        throw new Error(
+          `Policy version is ${currentVersion}, not ${input.expectedVersion}: it changed after ` +
+            "the version was read. Re-run status and re-dispatch against the current version."
+        );
+      }
       const id = existing?.id ?? `sbp_${randomUUID()}`;
-      const version = (existing?.version ?? 0) + 1;
+      const version = currentVersion + 1;
       const row = await tx.queryOne<PolicyRow>(
         `INSERT INTO sponsorship_budget_policies (
            id, network, scope_type, scope_id, enabled, per_transaction_lamports,
@@ -336,6 +350,13 @@ export class SponsorshipBudgetRepository {
     operator: string;
     reason: string;
     overwriteDisabledProvenance?: boolean;
+    /**
+     * Compare-and-swap on the policy's version. A kill that lands after this
+     * write's version was read from `status` bumps the version, so the stale
+     * write matches zero rows instead of undoing the newer stop. The caller
+     * tells a mismatch from a no-op by re-reading the row.
+     */
+    expectedVersion?: number;
   }): Promise<SponsorshipBudgetPolicy | null> {
     const overwriteDisabledProvenance = input.overwriteDisabledProvenance ?? true;
     return this.db.transaction(async (tx) => {
@@ -350,6 +371,7 @@ export class SponsorshipBudgetRepository {
         `UPDATE sponsorship_budget_policies
            SET enabled = ?, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
          WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
+           AND (?::int IS NULL OR version = ?)
            AND (enabled <> ?
                 OR (? = TRUE AND ? = FALSE AND (updated_by <> ? OR update_reason <> ?)))
          RETURNING *`,
@@ -360,6 +382,8 @@ export class SponsorshipBudgetRepository {
           input.network,
           input.scopeType,
           input.scopeId,
+          input.expectedVersion ?? null,
+          input.expectedVersion ?? null,
           input.enabled,
           overwriteDisabledProvenance,
           input.enabled,
