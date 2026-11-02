@@ -8,8 +8,8 @@ describe("0084 Provider Credential container scans", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await getDb(env).execute(
-      `INSERT INTO organizations (id, name, slug, tier, status)
-       VALUES ('org_scans', 'Scans', 'scans', 'enterprise', 'active')`
+      `INSERT INTO organizations (id, name, slug, status)
+       VALUES ('org_scans', 'Scans', 'scans', 'active')`
     );
     await getDb(env).execute(
       "INSERT INTO users (id, email) VALUES ('usr_scans', 'scans@example.test')"
