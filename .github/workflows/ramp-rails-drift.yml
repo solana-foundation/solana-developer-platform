@@ -4,24 +4,24 @@ name: Ramp Rails Drift
 on:
   pull_request:
     paths:
-      - 'apps/sdp-api/scripts/ramp-support.ts'
-      - 'packages/sdp-payments/src/ramps/**'
-      - 'apps/sdp-api/.ramp-support/**'
-      - 'packages/sdp-types/src/generated/ramp.generated.ts'
-      - 'packages/sdp-types/src/payment-rails.ts'
-      - 'packages/sdp-types/src/provider-access.ts'
-      - '.github/workflows/ramp-rails-drift.yml'
+      - "apps/sdp-api/scripts/ramp-support.ts"
+      - "packages/sdp-payments/src/ramps/**"
+      - "apps/sdp-api/.ramp-support/**"
+      - "packages/sdp-types/src/generated/ramp.generated.ts"
+      - "packages/sdp-types/src/payment-rails.ts"
+      - "packages/sdp-types/src/provider-access.ts"
+      - ".github/workflows/ramp-rails-drift.yml"
   push:
     branches:
       - main
     paths:
-      - 'apps/sdp-api/scripts/ramp-support.ts'
-      - 'packages/sdp-payments/src/ramps/**'
-      - 'apps/sdp-api/.ramp-support/**'
-      - 'packages/sdp-types/src/generated/ramp.generated.ts'
-      - 'packages/sdp-types/src/payment-rails.ts'
-      - 'packages/sdp-types/src/provider-access.ts'
-      - '.github/workflows/ramp-rails-drift.yml'
+      - "apps/sdp-api/scripts/ramp-support.ts"
+      - "packages/sdp-payments/src/ramps/**"
+      - "apps/sdp-api/.ramp-support/**"
+      - "packages/sdp-types/src/generated/ramp.generated.ts"
+      - "packages/sdp-types/src/payment-rails.ts"
+      - "packages/sdp-types/src/provider-access.ts"
+      - ".github/workflows/ramp-rails-drift.yml"
 
 permissions:
   contents: read

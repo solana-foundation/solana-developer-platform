@@ -14,11 +14,11 @@ Every statement the API executes is stamped with a transaction-local session
 identity by the database client (`apps/sdp-api/src/db/identity.ts` +
 `src/db/client.ts`):
 
-| GUC | Meaning |
-| --- | --- |
-| `app.tenant_isolation_identity` | `tenant`, `system`, or `operator` |
+| GUC                                    | Meaning                                           |
+| -------------------------------------- | ------------------------------------------------- |
+| `app.tenant_isolation_identity`        | `tenant`, `system`, or `operator`                 |
 | `app.tenant_isolation_organization_id` | the organization a `tenant` identity is pinned to |
-| `app.tenant_isolation_actor` | system component name / operator actor |
+| `app.tenant_isolation_actor`           | system component name / operator actor            |
 
 The policies (`sdp_tenant_isolation` on each table) admit:
 
@@ -76,7 +76,7 @@ by design and never constrained.
 The migration pre-checks for active counterparties that already share an
 effective reference (one row claiming it in the denormalized column, another
 only in `provider_data` JSON, a state the historical indexes permitted) and
-stops with the conflicting ids. Those rows were *already* broken: the
+stops with the conflicting ids. Those rows were _already_ broken: the
 webhook lookup failed closed on the ambiguity. Which row legitimately owns
 the provider relationship is a business decision, so the migration never
 picks a winner. Confirm ownership with the provider,

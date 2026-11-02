@@ -354,7 +354,6 @@ jobs:
           cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
           echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
 
-
       - name: Resolve immutable deploy image
         run: |
           set -euo pipefail

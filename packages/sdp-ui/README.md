@@ -14,12 +14,12 @@ subpath export: `@sdp/ui/button`, `@sdp/ui/modal`, `@sdp/ui/date-picker`, and so
 The primitives import nothing from an app. What they need from one comes in through a provider
 or a prop:
 
-| Need | How it arrives |
-| -- | -- |
+| Need                                                                 | How it arrives                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Built-in labels (close, pagination, picker footers, combobox states) | `UiI18nProvider` from `@sdp/ui/i18n`, with a `locale` and a `translate(key, values)`. The keys (`UiMessageKey`) are sdp-web's `Shared.SharedComponents.*` catalog keys, so the package carries no copy. Without a provider a label renders as its key and dates format in English. |
-| Theme scope for portaled content | `ThemeScopeProvider` from `@sdp/ui/theme-scope-provider`; popovers, menus and modals read it through `useThemeScopeAttributes` (`@sdp/ui/theme-scope`). |
-| Router links | `ActionTile` takes a `linkComponent` (an anchor by default). |
-| Class merging | `cn` from `@sdp/ui/cn`, tailwind-merge extended with the token scales. |
+| Theme scope for portaled content                                     | `ThemeScopeProvider` from `@sdp/ui/theme-scope-provider`; popovers, menus and modals read it through `useThemeScopeAttributes` (`@sdp/ui/theme-scope`).                                                                                                                            |
+| Router links                                                         | `ActionTile` takes a `linkComponent` (an anchor by default).                                                                                                                                                                                                                       |
+| Class merging                                                        | `cn` from `@sdp/ui/cn`, tailwind-merge extended with the token scales.                                                                                                                                                                                                             |
 
 ## How sdp-web wires it
 

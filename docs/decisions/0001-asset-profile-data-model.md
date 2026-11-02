@@ -8,8 +8,8 @@
 
 ## Context
 
-SDP can deploy Token-2022 tokens but has no SDP-owned model for *what an issued
-token represents as an asset* (a stablecoin, a tokenized security, etc.). The
+SDP can deploy Token-2022 tokens but has no SDP-owned model for _what an issued
+token represents as an asset_ (a stablecoin, a tokenized security, etc.). The
 Issuance Asset PRD introduces the **Asset Profile**: a record that groups a token
 into an Asset Category, identifies its Asset Type, holds canonical Issuance
 Metadata, and serves a safe public subset through the token metadata URI.
@@ -89,7 +89,7 @@ token has a profile" an invariant established at creation rather than a
 follow-up call a client might skip, and removes the standalone-create
 concurrency window (a fresh, globally unique `token_id` is minted per request,
 so two concurrent creates can never contend for the same token's active-profile
-slot). The profile still conceptually *extends* a token (Section 1); it is just
+slot). The profile still conceptually _extends_ a token (Section 1); it is just
 never born separately. The asset-profile resource lives under the issuance
 namespace (`/v1/issuance/asset-profiles`, a sibling of `/v1/issuance/tokens`);
 reads, updates, and archival are its `GET`/`PATCH`/`DELETE` operations.
@@ -103,7 +103,7 @@ reads, updates, and archival are its `GET`/`PATCH`/`DELETE` operations.
 - **Allow profile history (multiple versions per token).** Would mean dropping
   the unique index and adding a version/supersedes chain. Rejected for v1 — we
   keep the 1:1 constraint now and can relax it later if versioned profiles are
-  needed. `asset_type_version` already lets the *registry shape* evolve without
+  needed. `asset_type_version` already lets the _registry shape_ evolve without
   needing row history.
 - **Separate `asset_categories` / `asset_types` tables.** This is the
   DB-managed configuration product the PRD puts out of scope. Rejected; the

@@ -7,12 +7,14 @@ The Solana Developer Platform dashboard and landing site. A Next.js application 
 SDP Web is a Next.js application with two main surfaces:
 
 ### Public Surface
+
 - **Landing page** (`/`) — Product overview and marketing
 - **Sign-up / Sign-in** (`/sign-up`, `/sign-in`) — Clerk authentication
 - **Allowlist form** (`/allowlist`) — Request access form
 - **Member invite** (`/members`) — Token-gated invite acceptance
 
 ### Internal Surface (Authenticated Dashboard)
+
 - **Dashboard** (`/dashboard/*`) — Requires Clerk authentication
   - API key management
   - Wallet creation and management
@@ -32,6 +34,7 @@ SDP Web is a Next.js application with two main surfaces:
 ### Setup
 
 1. **Install dependencies:**
+
    ```bash
    pnpm install
    ```
@@ -39,12 +42,14 @@ SDP Web is a Next.js application with two main surfaces:
 2. **Configure environment variables:**
 
    **Option A: Using Doppler (team members)**
+
    ```bash
    doppler login
    pnpm dev
    ```
 
    **Option B: Using local `.env.local` (external contributors)**
+
    ```bash
    cp apps/sdp-web/.env.local.example apps/sdp-web/.env.local
    # Edit .env.local with your values (see below)
@@ -52,6 +57,7 @@ SDP Web is a Next.js application with two main surfaces:
    ```
 
 3. **Start the dev server:**
+
    ```bash
    # From repo root (uses Turborepo)
    pnpm dev
@@ -94,6 +100,7 @@ See `apps/sdp-web/.env.local.example` for all available options.
 ## Architecture
 
 ### Tech Stack
+
 - **Next.js 16** — React framework (App Router)
 - **TypeScript** — Type safety
 - **Clerk** — Authentication & organization management
@@ -202,15 +209,18 @@ Requires environment variables set in Vercel project settings:
 ## Troubleshooting
 
 ### "Clerk is not initialized"
+
 - Ensure `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is set in `.env.local`
 - Restart the dev server after changing env vars
 
 ### Dashboard returns 401/403
+
 - Verify Clerk session is active (check Network tab for auth token)
 - Check that `CLERK_SECRET_KEY` is valid
 - Verify SDP API is running and reachable
 
 ### API calls return 502/503
+
 - Ensure SDP API is running (`pnpm dev` from repo root)
 - Check `NEXT_PUBLIC_SDP_API_BASE_URL` points to correct API instance
 - Check SDP API logs for errors
