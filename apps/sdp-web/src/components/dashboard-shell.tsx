@@ -815,11 +815,7 @@ export function DashboardShell({
                   data-dashboard-page-frame=""
                   className={[
                     "min-w-0 w-full",
-                    shouldLockViewportScroll
-                      ? "flex min-h-0 flex-1 flex-col"
-                      : pageConfig.hideTitleOnMobile
-                        ? "space-y-4 sm:space-y-6"
-                        : "space-y-6",
+                    shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
@@ -857,13 +853,9 @@ export function DashboardShell({
                         <DashboardTopBar
                           setMobileSidebarOpen={setMobileSidebarOpen}
                           titleVisibility={
-                            titleAlwaysVisible
-                              ? "visible"
-                              : pageConfig.hideTitle
-                                ? "screen-reader-only"
-                                : pageConfig.hideTitleOnMobile
-                                  ? "desktop-only"
-                                  : "visible"
+                            pageConfig.hideTitle && !titleAlwaysVisible
+                              ? "screen-reader-only"
+                              : "visible"
                           }
                           title={pageTitle}
                           titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}

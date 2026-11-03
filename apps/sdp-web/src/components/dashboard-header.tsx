@@ -59,7 +59,6 @@ type DashboardPageConfig = {
    * padding only on a phone, where it holds the menu button.
    */
   flushTopOnDesktop?: boolean;
-  hideTitleOnMobile?: boolean;
   backAction?: {
     href: string;
     label: string;
