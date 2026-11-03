@@ -17,10 +17,14 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
+import type { Env } from "@/types/env";
 
 const WEBHOOK_SECRET = `whsec_${Buffer.from("test_clerk_webhook_secret_1234567890").toString("base64")}`;
 
-async function simulateClerkWebhook(event: { type: string; data: Record<string, unknown> }) {
+async function simulateClerkWebhook(
+  event: { type: string; data: Record<string, unknown> },
+  requestEnv: Env = env
+) {
   const payload = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000);
   const messageId = `msg_${crypto.randomUUID()}`;
@@ -41,7 +45,7 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
       },
       body: payload,
     },
-    env
+    requestEnv
   );
 }
 
@@ -180,6 +184,70 @@ describe("Clerk webhooks", () => {
       { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
     ]);
     expect(await knownOrganizationState()).toEqual(before);
+  });
+  it.each([
+    {
+      type: "organization.deleted",
+      data: { id: "org_clerk_webhook_unknown", object: "organization", deleted: true },
+    },
+    {
+      type: "organizationMembership.deleted",
+      data: {
+        id: "orgmem_webhook_unknown",
+        organization: { id: "org_clerk_webhook_unknown", name: "Stranger Org" },
+        role: "org:admin",
+        public_user_data: { user_id: OLD_CLERK_USER_ID },
+      },
+    },
+    {
+      type: "user.deleted",
+      data: { id: "user_clerk_webhook_unknown", object: "user", deleted: true },
+    },
+  ])(
+    "$type naming an organization or user this deployment does not know changes nothing and asks Clerk nothing",
+    async ({ type, data }) => {
+      await seedKnownOrganization();
+      const clerk = stubClerkBackend(env);
+      const organizations = () =>
+        getDb(env).queryMany("SELECT id, status FROM organizations ORDER BY id");
+      const before = {
+        organizations: await organizations(),
+        memberships: await knownOrganizationMemberships(),
+      };
+
+      const response = await simulateClerkWebhook({ type, data });
+
+      expect(response.status).toBe(200);
+      expect(clerk.requests).toEqual([]);
+      expect({
+        organizations: await organizations(),
+        memberships: await knownOrganizationMemberships(),
+      }).toEqual(before);
+    }
+  );
+  it("does not store a production entitlement Clerk grants on a deployment that admits no production project", async () => {
+    await seedKnownOrganization();
+    const clerk = stubClerkBackend(env);
+    clerk.answer({
+      status: 200,
+      body: {
+        id: KNOWN_CLERK_ORG_ID,
+        name: "Org",
+        slug: "org",
+        private_metadata: { sdp: { enableProductionProject: true } },
+      },
+    });
+
+    const response = await simulateClerkWebhook(
+      { type: "organization.updated", data: STALE_ORGANIZATION_EVENT },
+      { ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await knownOrganizationState()).toMatchObject({ settings: null });
+    expect(
+      await readAuditActions(getDb(env), { type: "organization", id: KNOWN_ORGANIZATION.id })
+    ).toEqual([]);
   });
   it.each(["organizationMembership.created", "organizationMembership.updated"])(
     "%s writes no membership",

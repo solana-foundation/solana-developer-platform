@@ -50,6 +50,8 @@ health.get("/ready", publicRoute("readiness check"), async (c) => {
     revision: c.env.K_REVISION ?? "local",
     // The prod deploy orders breaking migrations against the commit prod serves.
     commit: c.env.SDP_BUILD_SHA?.trim() || "local",
+    // Lets a deploy confirm the new revision serves the release channel it expects.
+    releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
     checks,
   };
 

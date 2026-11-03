@@ -20,6 +20,7 @@ import { assertClerkConfigured, warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
 import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
+import { extraAllowedOrigins } from "@/middleware/cors";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
 import { createNodeHttpApp } from "@/runtime/http-node";
@@ -145,6 +146,7 @@ async function main(): Promise<void> {
   const shutdownTimeoutMs = resolveShutdownTimeoutMs();
   const fatalOnUnhandledRejection = shouldShutdownOnUnhandledRejection();
   assertCronConfig(env);
+  extraAllowedOrigins(env.CORS_EXTRA_ORIGIN);
 
   // Clerk's signing keys are the probe: the auth path needs them first, and
   // fetching them proves this instance can reach the internet.

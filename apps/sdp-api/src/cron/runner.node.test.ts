@@ -19,6 +19,7 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import { deferred } from "@/test/helpers/deferred";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
+import type { Env } from "@/types/env";
 import { earnCatalogueSyncCron } from "./earn-catalogue-sync";
 import { pendingTransfersCron } from "./pending-transfers";
 import { CRON_RUN_EVENT, type CronRegistration } from "./run-event";
@@ -109,9 +110,9 @@ function registrationKey(cron: string, environment: SdpEnvironment | null): stri
   return JSON.stringify([cron, environment]);
 }
 
-async function startWorker(): Promise<Worker> {
+async function startWorker(workerEnv: Env = env): Promise<Worker> {
   const { bg, runs } = recordingBackgroundRunner();
-  const handle = required(startCron({ env, bg }));
+  const handle = required(startCron({ env: workerEnv, bg }));
   await bg.awaitAll();
   const registrations = new Map<string, ScheduledFake>();
   const discovered: DiscoveredRegistration[] = [];
@@ -215,6 +216,21 @@ describe("startCron", () => {
     }));
     expect(registered).toHaveLength(expected.length);
     expect(registered).toEqual(expect.arrayContaining(expected));
+  });
+
+  it("registers no production work on a deployment that admits no production project", async () => {
+    const worker = await startWorker({ ...env, SDP_ALLOW_PRODUCTION_PROJECTS: "false" });
+
+    const environments = worker.discovered.map((registration) => registration.environment);
+    expect(environments).not.toContain("production");
+    expect(environments).toContain("sandbox");
+    expect(worker.discovered).toHaveLength(
+      CRON_DEFINITIONS.reduce(
+        (count, definition) =>
+          count + (definition.scope === "cluster" ? SDP_ENVIRONMENTS.length - 1 : 1),
+        0
+      )
+    );
   });
 
   it("runs every slot under the system database identity named for its definition", async () => {
@@ -434,6 +450,12 @@ describe("DISABLE_CRON", () => {
     expect(() => assertCronConfig(cloudRunEnv)).not.toThrow();
     expect(startCron({ env: cloudRunEnv, bg: recordingBackgroundRunner().bg })).not.toBeNull();
     expect(scheduler.tasks).not.toEqual([]);
+  });
+
+  it("refuses an SDP_ALLOW_PRODUCTION_PROJECTS that is neither true nor false", () => {
+    expect(() => assertCronConfig({ SDP_ALLOW_PRODUCTION_PROJECTS: "no" })).toThrow(
+      'Invalid SDP_ALLOW_PRODUCTION_PROJECTS: "no"'
+    );
   });
 
   it.each(["treu", "yes", "   "])("refuses DISABLE_CRON %j before scheduling anything", (value) => {

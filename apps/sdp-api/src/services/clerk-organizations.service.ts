@@ -1,5 +1,6 @@
+import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 import { z } from "zod";
-import { AppError } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { describeClerkFailure } from "./clerk-error";
@@ -36,14 +37,59 @@ const clerkOrganizationSchema = z.object({
  */
 const CLERK_REQUEST_TIMEOUT_MS = 10_000;
 
+/** Creation attempts before a Clerk slug conflict is refused: the first without a slug, then suffixed. */
+const CLERK_SLUG_ATTEMPTS = 3;
+
+const clerkFailureBodySchema = z.object({
+  errors: z.array(
+    z.object({
+      code: z.string().optional(),
+      meta: z.object({ param_name: z.string().optional() }).optional(),
+    })
+  ),
+});
+
+/**
+ * Whether Clerk refused a write because the organization slug is taken.
+ * Slugs are unique per Clerk instance, and deployments that share an
+ * instance each pick slugs unique only in their own database.
+ *
+ * @param error - What the Backend API call threw.
+ * @returns True for Clerk's slug-uniqueness refusal.
+ */
+function isClerkSlugConflict(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+  const { status, body } = error.details ?? {};
+  if ((status !== 400 && status !== 422) || typeof body !== "string") {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  const failure = clerkFailureBodySchema.safeParse(parsed);
+  return (
+    failure.success &&
+    failure.data.errors.some(
+      (entry) => entry.meta?.param_name === "slug" || entry.code?.includes("slug") === true
+    )
+  );
+}
+
 export class ClerkOrganizationsService {
   private apiBase: string;
   private secretKey: string;
+  private env: Env;
 
   constructor(env: Env) {
     if (!env.CLERK_SECRET_KEY) {
       throw new AppError("INTERNAL_ERROR", "CLERK_SECRET_KEY is required");
     }
+    this.env = env;
     this.secretKey = env.CLERK_SECRET_KEY;
     this.apiBase = env.CLERK_API_URL?.replace(/\/$/, "") || "https://api.clerk.com/v1";
   }
@@ -206,22 +252,51 @@ export class ClerkOrganizationsService {
 
   /**
    * Creates a Clerk organization naming no creator (ADR 0012): Clerk would
-   * otherwise make that person its `org:admin`. The SDP organization id rides
-   * in private metadata so an operator can trace an orphan back.
+   * otherwise make that person its `org:admin`. The SDP organization id and
+   * the creating deployment ride in private metadata so an operator can trace
+   * an orphan back and tell deployments sharing a Clerk instance apart; the
+   * deployment marker is informational and nothing reads it to authorize.
+   *
+   * Clerk derives the slug from the name and slugs are unique per instance,
+   * so a slug another deployment on the same instance holds is retried with a
+   * suffixed slug of SDP's own, then refused as a conflict a retry of the
+   * request can finish.
    *
    * @param params.name - The organization's name.
+   * @param params.slug - SDP's slug for it, the base of a retried Clerk slug.
    * @param params.sdpOrganizationId - The SDP organization it stands for.
    * @returns The Clerk organization id.
    */
-  async createOrganization(params: { name: string; sdpOrganizationId: string }): Promise<string> {
-    const created = await this.request<unknown>("/organizations", {
-      method: "POST",
-      body: JSON.stringify({
-        name: params.name,
-        private_metadata: { sdpOrganizationId: params.sdpOrganizationId },
-      }),
-    });
-    return z.object({ id: z.string() }).parse(created).id;
+  async createOrganization(params: {
+    name: string;
+    slug: string;
+    sdpOrganizationId: string;
+  }): Promise<string> {
+    const privateMetadata = {
+      sdpOrganizationId: params.sdpOrganizationId,
+      sdpDeployment: {
+        releaseChannel: resolveSdpReleaseChannel(this.env.SDP_RELEASE_CHANNEL),
+        service: this.env.K_SERVICE ?? "local",
+      },
+    };
+    for (let attempt = 1; ; attempt += 1) {
+      // Undefined on the first attempt, so the body names no slug and Clerk derives one.
+      const slug = attempt === 1 ? undefined : `${params.slug}-${crypto.randomUUID().slice(0, 6)}`;
+      try {
+        const created = await this.request<unknown>("/organizations", {
+          method: "POST",
+          body: JSON.stringify({ name: params.name, slug, private_metadata: privateMetadata }),
+        });
+        return z.object({ id: z.string() }).parse(created).id;
+      } catch (error) {
+        if (!isClerkSlugConflict(error)) {
+          throw error;
+        }
+        if (attempt === CLERK_SLUG_ATTEMPTS) {
+          throw conflict("Could not reserve an organization slug in Clerk. Try again.");
+        }
+      }
+    }
   }
 
   /**

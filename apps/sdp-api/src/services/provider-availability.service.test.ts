@@ -382,6 +382,7 @@ describe("provider-availability.service", () => {
 
   it("treats local custody as override-only and configurable only in a self-hosted deployment", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_provider_availability_local_test",
@@ -441,6 +442,7 @@ describe("provider-availability.service", () => {
 
   it("syncs normalized Clerk tier and provider overrides into the organization row", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_provider_availability_test",
@@ -577,6 +579,7 @@ describe("provider-availability.service", () => {
       .run();
 
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_provider_availability_default_test",
@@ -638,6 +641,7 @@ describe("provider-availability.service", () => {
       .run();
 
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_strip_test",
@@ -661,6 +665,7 @@ describe("provider-availability.service", () => {
       .run();
 
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_collapse_test",
@@ -677,6 +682,7 @@ describe("provider-availability.service", () => {
 
   it("syncs enableProductionProject true alongside provider overrides", async () => {
     await syncProviderAccessFromClerk(getDb(env), {
+      productionProjectsAllowed: true,
       organizationId: TEST_ORG_ID,
       clerkOrganization: {
         id: "org_clerk_combined_test",

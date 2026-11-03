@@ -7,6 +7,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { notFound } from "@/lib/errors";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { updateProjectSchema } from "@/routes/projects/schemas";
@@ -16,6 +17,23 @@ import { getOrganizationTierState } from "@/services/provider-availability.servi
 import type { Env } from "@/types/env";
 
 type AppContext = Context<{ Bindings: Env }>;
+
+/**
+ * Whether the project is the caller organization's and this deployment admits
+ * its environment: a deployment that refuses production projects answers one
+ * as missing.
+ */
+function isReadableProject(
+  c: AppContext,
+  project: ProjectResponse["project"] | null,
+  organizationId: string
+): project is ProjectResponse["project"] {
+  return (
+    project !== null &&
+    project.organizationId === organizationId &&
+    (project.environment !== "production" || productionProjectsAllowed(c.env))
+  );
+}
 
 export const listProjects = async (c: AppContext) => {
   const auth = getAuth(c);
@@ -41,7 +59,8 @@ export const listProjects = async (c: AppContext) => {
   }
 
   const orgState = await getOrganizationTierState(db, auth.organizationId);
-  const productionEnabled = orgState.settings?.enableProductionProject === true;
+  const productionEnabled =
+    productionProjectsAllowed(c.env) && orgState.settings?.enableProductionProject === true;
   const projects = productionEnabled
     ? projectList
     : projectList.filter((project) => project.environment !== "production");
@@ -57,7 +76,7 @@ export const getProject = async (c: AppContext) => {
   const projectService = new ProjectService(getDb(c.env));
   const project = await projectService.getProject(projectId);
 
-  if (!project || project.organizationId !== auth.organizationId) {
+  if (!isReadableProject(c, project, auth.organizationId)) {
     throw notFound("Project");
   }
 
@@ -75,7 +94,7 @@ export const updateProject = async (c: ValidatedBodyContext<typeof updateProject
 
   // Verify ownership
   const existing = await projectService.getProject(projectId);
-  if (!existing || existing.organizationId !== auth.organizationId) {
+  if (!isReadableProject(c, existing, auth.organizationId)) {
     throw notFound("Project");
   }
 

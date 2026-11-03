@@ -443,7 +443,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // CORS (environment-aware)
   app.use("*", async (c, next) => {
-    const cors = corsMiddleware(c.env.ENVIRONMENT);
+    const cors = corsMiddleware(c.env.ENVIRONMENT, c.env.CORS_EXTRA_ORIGIN);
     return cors(c, next);
   });
 

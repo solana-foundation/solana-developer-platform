@@ -37,6 +37,10 @@ export const healthReadyResponseSchema = z
         "Git commit the serving image was built from, or `local` when the image carries none.",
       example: "0123456789abcdef0123456789abcdef01234567",
     }),
+    releaseChannel: z.enum(SDP_RELEASE_CHANNEL_NAMES).openapi({
+      description: "Release channel: which modules this deployment runs.",
+      example: "stable",
+    }),
     checks: z
       .object({
         database: z.enum(["ok", "error"]).openapi({

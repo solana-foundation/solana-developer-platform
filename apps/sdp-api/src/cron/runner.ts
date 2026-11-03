@@ -31,6 +31,7 @@ import { secretRetirementsCron } from "@/cron/secret-retirements";
 import { sponsorshipBudgetsCron } from "@/cron/sponsorship-budgets";
 import { subscriptionAuthoritiesCron } from "@/cron/subscription-authorities";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { productionProjectsAllowed } from "@/lib/production-entitlement";
 import type { BackgroundRunner } from "@/runtime/background";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { Env } from "@/types/env";
@@ -120,22 +121,35 @@ function isCronDisabled(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): boolean {
   );
 }
 
-/** Throws on an invalid DISABLE_CRON, so the entrypoint fails before it opens sockets. */
-export function assertCronConfig(env: Pick<Env, "DISABLE_CRON" | "K_SERVICE">): void {
+/**
+ * Throws on an invalid DISABLE_CRON or SDP_ALLOW_PRODUCTION_PROJECTS, so the entrypoint fails
+ * before it opens sockets.
+ */
+export function assertCronConfig(
+  env: Pick<Env, "DISABLE_CRON" | "K_SERVICE" | "SDP_ALLOW_PRODUCTION_PROJECTS">
+): void {
   isCronDisabled(env);
+  productionProjectsAllowed(env);
 }
 
 /**
  * The Environments a definition is registered for: one per Environment for `cluster`, a single
- * environment-less registration for `global`.
+ * environment-less registration for `global`. A deployment that admits no production project
+ * registers no production work.
  *
  * @param definition - The definition to register.
+ * @param env - Process environment naming whether production projects are admitted.
  * @returns One entry per registration.
  */
-function registrationEnvironments(definition: CronDefinition): readonly (SdpEnvironment | null)[] {
+function registrationEnvironments(
+  definition: CronDefinition,
+  env: Pick<Env, "SDP_ALLOW_PRODUCTION_PROJECTS">
+): readonly (SdpEnvironment | null)[] {
   switch (definition.scope) {
     case "cluster":
-      return SDP_ENVIRONMENTS;
+      return productionProjectsAllowed(env)
+        ? SDP_ENVIRONMENTS
+        : SDP_ENVIRONMENTS.filter((environment) => environment !== "production");
     case "global":
       return [null];
     default: {
@@ -199,7 +213,7 @@ export function startCron(deps: CronDeps): CronHandle | null {
 
   for (const definition of CRON_DEFINITIONS) {
     const enabled = definition.enabled(deps.env);
-    for (const environment of registrationEnvironments(definition)) {
+    for (const environment of registrationEnvironments(definition, deps.env)) {
       const registration: CronRegistration = { cron: definition.name, environment };
       // The in-flight run's own token, so a run abandoned at the deadline that settles later
       // cannot free the registration from under its successor.

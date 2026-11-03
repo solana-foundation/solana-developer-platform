@@ -66,6 +66,15 @@ export interface Env extends ManagedRpcEnv {
   // release channels). Required: a missing or unknown name fails at boot.
   SDP_RELEASE_CHANNEL?: string;
 
+  // Whether this deployment may admit a production project. Unset allows;
+  // "false" refuses every production project whatever an organization's Clerk
+  // entitlement says (a devnet-only deployment on the production Clerk instance).
+  SDP_ALLOW_PRODUCTION_PROJECTS?: string;
+
+  // One extra origin the CORS allowlist admits, as an exact https origin, for a
+  // deployment whose docs site is not the canonical one.
+  CORS_EXTRA_ORIGIN?: string;
+
   // Credential secret store selection for BYO custody credentials.
   // Managed SDP should use GCP Secret Manager. Self-hosted deployments default
   // to encrypted DB storage.

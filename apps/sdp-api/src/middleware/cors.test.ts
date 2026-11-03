@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { corsMiddleware, createOriginMatcher } from "./cors";
+import { corsMiddleware, createOriginMatcher, extraAllowedOrigins } from "./cors";
 
 describe("createOriginMatcher", () => {
   it("allows an exact origin", () => {
@@ -35,9 +35,9 @@ describe("createOriginMatcher", () => {
 });
 
 describe("corsMiddleware", () => {
-  function buildApp(environment: "production" | "development") {
+  function buildApp(environment: "production" | "development", extraOrigin?: string) {
     const app = new Hono();
-    app.use("*", corsMiddleware(environment));
+    app.use("*", corsMiddleware(environment, extraOrigin));
     app.all("*", (c) => c.json({ ok: true }));
     return app;
   }
@@ -53,6 +53,23 @@ describe("corsMiddleware", () => {
     const res = await app.request("/x", { headers: { Origin: "https://evil.com" } });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
+
+  it("echoes the deployment's extra origin in production, and only that origin", async () => {
+    const app = buildApp("production", "https://docs-beta.example.test");
+    const extra = await app.request("/x", {
+      headers: { Origin: "https://docs-beta.example.test" },
+    });
+    const other = await app.request("/x", { headers: { Origin: "https://evil.com" } });
+    expect(extra.headers.get("access-control-allow-origin")).toBe("https://docs-beta.example.test");
+    expect(other.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it.each(["http://docs-beta.example.test", "https://docs-beta.example.test/path", "*", ""])(
+    "refuses an extra origin of %j rather than serving without it",
+    (extraOrigin) => {
+      expect(() => extraAllowedOrigins(extraOrigin)).toThrow("Invalid CORS_EXTRA_ORIGIN");
+    }
+  );
 
   it("rejects a wildcard look-alike origin in production", async () => {
     const app = buildApp("production");
