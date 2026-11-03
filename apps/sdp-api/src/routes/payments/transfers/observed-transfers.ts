@@ -607,6 +607,7 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        audit_intent_id: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -697,6 +698,7 @@ function buildObservedTransferRows(
         idempotency_fingerprint: null,
         confirmed_at: null,
         finalization_last_polled_at: null,
+        audit_intent_id: null,
         created_at: timestamp,
         updated_at: timestamp,
       });
@@ -796,6 +798,7 @@ function buildObservedTransferRows(
       idempotency_fingerprint: null,
       confirmed_at: null,
       finalization_last_polled_at: null,
+      audit_intent_id: null,
       created_at: timestamp,
       updated_at: timestamp,
     });

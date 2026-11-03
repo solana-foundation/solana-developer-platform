@@ -46,6 +46,7 @@ import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import { loadPaymentMint } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -700,8 +701,18 @@ export async function activateRecurringPayment(input: {
   const recoveringStaleActivation = isActivatingRecurringPaymentStatus(
     input.recurringPayment.status
   );
-  if (!recoveringStaleActivation) {
+  const admitActivation = async () => {
+    await resolveSolanaCounterpartyAccount({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: input.recurringPayment.counterparty_id,
+      counterpartyAccountId: input.recurringPayment.counterparty_account_id,
+    });
     await input.admitStart();
+  };
+  if (!recoveringStaleActivation) {
+    await admitActivation();
   }
   const activatedBy = currentMandateActivator();
   const claimResult = await getDb(input.env).transaction(async (tx) => {
@@ -784,7 +795,7 @@ export async function activateRecurringPayment(input: {
   const signerForNewSend = async (): Promise<TransactionSigner> => {
     if (sourceSigner !== null) return sourceSigner;
     if (recoveringStaleActivation) {
-      await input.admitStart();
+      await admitActivation();
     }
     const signer = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,

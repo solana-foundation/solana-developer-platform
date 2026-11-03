@@ -163,7 +163,9 @@ function footerActionIds(
     case "active":
       return dueNow ? ["collect", "cancel"] : ["cancel"];
     case "paused":
-      return ["resume", "cancel"];
+      return recurringPayment.pausedReason === "destination_unavailable"
+        ? ["cancel"]
+        : ["resume", "cancel"];
     default:
       return [];
   }
@@ -298,6 +300,8 @@ function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): s
   switch (reason) {
     case "custody_policy_refused":
       return t("DashboardPayments.recurring.statePausedPolicyRefusedBody");
+    case "destination_unavailable":
+      return t("DashboardPayments.recurring.statePausedDestinationUnavailableBody");
     case "failed_attempts":
       return t("DashboardPayments.recurring.statePausedFailedAttemptsBody", {
         count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,

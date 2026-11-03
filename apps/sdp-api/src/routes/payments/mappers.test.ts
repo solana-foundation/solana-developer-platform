@@ -58,6 +58,7 @@ function offrampRow(overrides: Partial<PaymentTransferRow> = {}): PaymentTransfe
     idempotency_fingerprint: null,
     confirmed_at: "2026-10-19T23:07:00.000Z",
     finalization_last_polled_at: null,
+    audit_intent_id: null,
     created_at: "2026-10-19T23:01:00.626Z",
     updated_at: "2026-10-19T23:07:00.000Z",
     ...overrides,
