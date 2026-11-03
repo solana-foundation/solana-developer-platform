@@ -15,7 +15,6 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
-import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -711,13 +710,11 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
         </Button>
         <Button
           className="flex-[2]"
-          disabled={submitting || submitBlocked}
-          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          disabled={submitBlocked}
+          loading={submitting}
           onClick={onSubmit}
         >
-          {submitting
-            ? t("DashboardEarn.vaultWithdraw.submitting")
-            : t("DashboardEarn.vaultWithdraw.submit")}
+          {t("DashboardEarn.vaultWithdraw.submit")}
         </Button>
       </div>
     </>

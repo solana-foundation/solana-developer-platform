@@ -15,7 +15,6 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { StatusText } from "@sdp/ui/status-text";
-import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import type { MessageKey } from "@/i18n/messages";
@@ -883,12 +882,10 @@ export function EarnWithdrawModal({
           </Button>
           <Button
             onClick={submit}
-            disabled={submitting || !amountValid || !destinationValid}
-            iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
+            disabled={!amountValid || !destinationValid}
+            loading={submitting}
           >
-            {submitting
-              ? t("DashboardEarn.withdraw.confirming")
-              : t("DashboardEarn.withdraw.confirm")}
+            {t("DashboardEarn.withdraw.confirm")}
           </Button>
         </div>
       </div>

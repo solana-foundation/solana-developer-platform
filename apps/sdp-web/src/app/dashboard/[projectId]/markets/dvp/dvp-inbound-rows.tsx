@@ -99,7 +99,8 @@ function InboundFundAction({
         <Button
           // A transfer into a frozen escrow bounces, so offering to send one is
           // offering to waste a signature and a fee.
-          disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+          disabled={unavailable || frozen}
+          loading={pending.has(`fund:${side}`)}
           onClick={() => {
             if (wallet?.isRuntimeExecutionAllowed === true) {
               void act("fund", { side, walletId: wallet.id, symbol });
@@ -109,9 +110,7 @@ function InboundFundAction({
           type="button"
           variant="secondary"
         >
-          {pending.has(`fund:${side}`)
-            ? t("DashboardMarkets.dvp.inboundFunding")
-            : t("DashboardMarkets.dvp.inboundFundAction")}
+          {t("DashboardMarkets.dvp.inboundFundAction")}
         </Button>
       ) : null}
     </span>

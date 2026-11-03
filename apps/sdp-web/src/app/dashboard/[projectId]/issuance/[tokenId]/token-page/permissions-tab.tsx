@@ -198,10 +198,8 @@ export function TokenPermissionsTab({
         </div>
         {draft && form.dirty ? (
           <div className="flex flex-wrap items-center gap-3">
-            <Button size="sm" disabled={form.saving} onClick={() => void form.save()}>
-              {form.saving
-                ? t("DashboardIssuance.newDesign.details.saving")
-                : t("DashboardIssuance.newDesign.details.saveChanges")}
+            <Button size="sm" loading={form.saving} onClick={() => void form.save()}>
+              {t("DashboardIssuance.newDesign.details.saveChanges")}
             </Button>
             <Button variant="ghost" size="sm" disabled={form.saving} onClick={form.discard}>
               {t("DashboardIssuance.newDesign.details.discard")}

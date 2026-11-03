@@ -9,16 +9,7 @@ export interface InstructionAction {
   onClick: () => void;
   icon: ReactNode;
   idleLabel: string;
-  busyLabel: string;
   doneLabel: string;
-}
-
-type InstructionActionState = "idle" | "busy" | "done";
-
-function instructionActionState(action: InstructionAction): InstructionActionState {
-  if (action.succeeded) return "done";
-  if (action.loading) return "busy";
-  return "idle";
 }
 
 export function InstructionActionButton({
@@ -30,24 +21,6 @@ export function InstructionActionButton({
   variant?: "default" | "secondary";
   size?: "default" | "xs";
 }) {
-  const state = instructionActionState(action);
-  let label: string;
-  switch (state) {
-    case "idle":
-      label = action.idleLabel;
-      break;
-    case "busy":
-      label = action.busyLabel;
-      break;
-    case "done":
-      label = action.doneLabel;
-      break;
-    default: {
-      const exhaustive: never = state;
-      throw new Error(`Unknown instruction action state: ${exhaustive}`);
-    }
-  }
-
   return (
     <Button
       type="button"
@@ -55,9 +28,10 @@ export function InstructionActionButton({
       size={size}
       iconLeft={action.succeeded ? <CheckCircle2Icon /> : action.icon}
       onClick={action.onClick}
-      disabled={action.disabled || action.loading || action.succeeded}
+      disabled={action.disabled || action.succeeded}
+      loading={action.loading}
     >
-      {label}
+      {action.succeeded ? action.doneLabel : action.idleLabel}
     </Button>
   );
 }

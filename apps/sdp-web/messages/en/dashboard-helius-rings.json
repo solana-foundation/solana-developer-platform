@@ -19,7 +19,6 @@
       "ringRpc": "Custom Ring RPC URL (optional)",
       "allowHttp": "Allow plain HTTP for local development",
       "save": "Test and save configuration",
-      "saving": "Checking configuration…",
       "loading": "Loading project configuration…",
       "failed": "The configuration could not be saved."
     },
@@ -58,7 +57,6 @@
       "auditorKey": "Auditor public key",
       "lookupTable": "Lookup table",
       "submit": "Record and bring up",
-      "submitting": "Bringing up…",
       "retry": "Retry bring-up",
       "repointHint": "Re-submitting a recorded name resumes its bring-up. Entering a different id under that name replaces its program, which is possible only while the ring has never been active.",
       "submitFailed": "Ring bring-up failed.",
@@ -85,7 +83,6 @@
       "createNamePlaceholder": "Private Treasury",
       "createWalletLabel": "Custody wallet",
       "createWalletPlaceholder": "Select a custody wallet",
-      "creating": "Provisioning…",
       "createFailed": "The wallet could not be created. Check the details and try again.",
       "retry": "Retry provision",
       "noCustodyWallets": "No custody wallets available. Create a wallet under Wallets first.",
@@ -95,7 +92,6 @@
     },
     "identity": {
       "check": "Check on chain",
-      "checking": "Checking…",
       "viewDetails": "View details",
       "dialogTitle": "On-chain identity",
       "reading": "Reading the on-chain registry record for this wallet's owner.",
@@ -118,7 +114,6 @@
     "balances": {
       "title": "Shielded balance",
       "refresh": "Refresh",
-      "refreshing": "Reading…",
       "unsynced": "Not read yet",
       "notProvisioned": "This wallet has no shielded identity yet, so there is nothing to read. Provision it first.",
       "paused": "This wallet is paused, so its balance cannot be read: the keys published for its owner are not the ones this deployment derives. Re-key it to publish the derived keys and make it usable again, at the cost of anything the published keys hold.",
@@ -185,7 +180,6 @@
       "review": "Review",
       "back": "Back",
       "confirm": "Confirm",
-      "preparing": "Preparing…",
       "started": "Operation started. Track it in Activity below.",
       "prepareFailed": "The operation could not be prepared. Check the details and try again.",
       "summaryOperation": "Operation",
@@ -234,13 +228,10 @@
     },
     "recovery": {
       "retry": "Retry",
-      "retrying": "Retrying…",
       "recheck": "Check indexer",
-      "rechecking": "Checking…",
       "recheckFound": "The indexer has caught up — this operation is now complete.",
       "recheckStillMissing": "The indexer still has no record of this transaction. It may be behind the chain; check again before voiding.",
       "void": "Void",
-      "voiding": "Voiding…",
       "voidConfirm": "Voiding asserts this signed transaction never landed on chain and releases the wallet's spend slot. Continue only if you have reconciled the signature and confirmed absence."
     },
     "rekey": {
@@ -250,7 +241,6 @@
       "effect": "This wallet's owner publishes an identity this deployment cannot derive, so nothing here can read or spend what those keys hold. Re-keying publishes the keys it derives now, which makes the wallet usable again for new deposits. Everything held under the old keys stays on chain with nothing able to open it.",
       "confirmPrompt": "Type {name} to confirm.",
       "submit": "Re-key and discard balance",
-      "submitting": "Re-keying…",
       "cancel": "Cancel",
       "failed": "The re-key did not complete. Check the wallet's status before trying again — the rotation may still have landed."
     }

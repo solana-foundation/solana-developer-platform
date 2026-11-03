@@ -64,8 +64,8 @@ export function WalletIdentityCheck({
       );
       setDialogOpen(true);
     } catch {
-      // No reply at all — offline, or aborted. Uncaught, the control would sit
-      // disabled on "Checking…" with no answer coming.
+      // No reply at all — offline, or aborted. Uncaught, the control would keep
+      // spinning with no answer coming.
       setCheck({ name: "failed", message: t("DashboardHeliusRings.identity.readFailed") });
       setDialogOpen(true);
     } finally {
@@ -78,10 +78,8 @@ export function WalletIdentityCheck({
 
   return (
     <div className="flex flex-col items-start gap-1.5">
-      <Button variant="secondary" size="sm" disabled={reading} onClick={() => void handleCheck()}>
-        {t(
-          reading ? "DashboardHeliusRings.identity.checking" : "DashboardHeliusRings.identity.check"
-        )}
+      <Button variant="secondary" size="sm" loading={reading} onClick={() => void handleCheck()}>
+        {t("DashboardHeliusRings.identity.check")}
       </Button>
 
       {hasResult && !dialogOpen ? (

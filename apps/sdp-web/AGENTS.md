@@ -54,13 +54,17 @@ Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes f
 
 A button whose action is running takes `loading` and keeps its words: the
 design-system button spins in place at its own width, so there is no "…ing"
-label and no busy variant. A test finds it by its words plus the spinner's
-("Save Loading"), so match the start of the name and assert `aria-busy`. A
-test that ends with a transition still pending holds every later one in its
-file (React 19 entangles async transitions), so one stale assertion can fail
-the whole file. A flow's new step fades in through `useStepFade` (`src/lib`),
-which `WizardFrame` applies for every flow it frames; both it and `Modal`'s
-entrance come from `@sdp/ui/motion` and stay off under reduced motion.
+label and no busy variant; `disabled` stays for a button that is not ready. A
+test finds it by its words plus the spinner's ("Save Loading"), so match the
+start of the name and assert `aria-busy`. jsdom still runs a loading button's
+`onClick` (in a browser the button's `pointer-events-none` and Base UI's
+Enter/Space handling stop the press), so a test shows a blocked press through
+`aria-disabled`, not by clicking again. A test that ends with a transition
+still pending holds every later one in its file (React 19 entangles async
+transitions), so one stale assertion can fail the whole file. A flow's new
+step fades in through `useStepFade` (`src/lib`), which `WizardFrame` applies
+for every flow it frames; both it and `Modal`'s entrance come from
+`@sdp/ui/motion` and stay off under reduced motion.
 
 # Stage smoke
 

@@ -6,7 +6,7 @@ import { Callout } from "@sdp/ui/callout";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { IdCardIcon, Loader2Icon, WalletCardsIcon } from "lucide-react";
+import { IdCardIcon, WalletCardsIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -39,12 +39,17 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
   const [name, setName] = useState("");
   const [walletId, setWalletId] = useState("");
   const [createdPrincipalId, setCreatedPrincipalId] = useState<string | null>(null);
+  // Whether the running press retries the wallet. A first press creates the identity mid-flight,
+  // and its button keeps saying Create until that press settles.
+  const [retryPressed, setRetryPressed] = useState(false);
   const [pending, startTransition] = useTransition();
+  const retryWallet = pending ? retryPressed : createdPrincipalId !== null;
 
   const submit = () => {
     const trimmedName = name.trim();
     if (trimmedName.length < 2 || !walletId) return;
 
+    setRetryPressed(createdPrincipalId !== null);
     startTransition(async () => {
       let principalId = createdPrincipalId;
       if (!principalId) {
@@ -98,16 +103,12 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
           <Button
             type="button"
             onClick={submit}
-            disabled={name.trim().length < 2 || !walletId || pending}
-            iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
+            disabled={name.trim().length < 2 || !walletId}
+            loading={pending}
           >
-            {pending
-              ? createdPrincipalId
-                ? t("DashboardPrivateChannels.members.verifyingWallet")
-                : t("DashboardPrivateChannels.members.creating")
-              : createdPrincipalId
-                ? t("DashboardPrivateChannels.members.retryWallet")
-                : t("DashboardPrivateChannels.members.create")}
+            {retryWallet
+              ? t("DashboardPrivateChannels.members.retryWallet")
+              : t("DashboardPrivateChannels.members.create")}
           </Button>
         </div>
       }
