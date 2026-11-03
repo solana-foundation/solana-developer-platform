@@ -38,6 +38,7 @@ import type {
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  RecurringPaymentLease,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
@@ -71,6 +72,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  recurringPaymentLease,
   refuseWhileSubscriptionAuthorityRevokes,
   type SubscriptionStep,
   savedStepSend,
@@ -290,6 +292,8 @@ async function recordCancelFailure(input: {
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   error: Error;
   failedAt: string;
+  /** A run another one took over writes nothing: the schedule is that run's now. */
+  lease: RecurringPaymentLease;
 }): Promise<void> {
   const claim = cancelAttemptMetadataSchema.parse(input.attempt.metadata);
   const restored =
@@ -298,6 +302,7 @@ async function recordCancelFailure(input: {
       : { status: "paused" as const, pausedReason: claim.pausedReason };
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
       attemptId: input.attempt.id,
       organizationId: input.organizationId,
@@ -324,7 +329,8 @@ async function recordCancelFailure(input: {
 }
 
 async function preserveRecoverableLifecycleAttempt(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  env: Env;
+  lease: RecurringPaymentLease;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
   organizationId: string;
   projectId: string;
@@ -337,14 +343,19 @@ async function preserveRecoverableLifecycleAttempt(input: {
   confirmedOnChain: boolean;
 }): Promise<void> {
   try {
-    await input.recurringRepo.updateLifecycleAttempt({
-      attemptId: input.attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: input.stage,
-      signature: input.signature,
-      error: recurringPaymentErrorMessage(input.error),
-      updatedAt: input.failedAt,
+    // A run another one took over writes nothing: the attempt is that run's now.
+    await getDb(input.env).transaction(async (tx) => {
+      const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+      await recurringRepo.assertRecurringPaymentLease(input.lease);
+      await recurringRepo.updateLifecycleAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: input.stage,
+        signature: input.signature,
+        error: recurringPaymentErrorMessage(input.error),
+        updatedAt: input.failedAt,
+      });
     });
   } catch (journalError) {
     if (!(journalError instanceof Error)) throw journalError;
@@ -393,6 +404,7 @@ async function finalizeRecurringPaymentCancel(input: {
   subscription: PaymentSubscriptionRow;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
   signature: Signature | null;
+  lease: RecurringPaymentLease;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   const recurringStatus = RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
@@ -401,6 +413,7 @@ async function finalizeRecurringPaymentCancel(input: {
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
 
     const updatedSubscription = await subscriptionsRepo.updateSubscription({
       subscriptionId: input.subscription.id,
@@ -662,6 +675,7 @@ async function runRecurringPaymentCancel(input: {
   }
   const { claimed } = claimResult;
   let { attempt } = claimResult;
+  const lease = recurringPaymentLease(claimed, "cancel");
 
   let currentStage: PaymentRecurringPaymentLifecycleAttemptStage = attempt.stage;
   let signature = parseNullableStoredSignature(attempt.signature);
@@ -736,6 +750,7 @@ async function runRecurringPaymentCancel(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      lease,
       rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
     } as const satisfies SubscriptionStep;
     let onChainDelegation: MaybeAccount<SubscriptionDelegation> | null = null;
@@ -766,6 +781,7 @@ async function runRecurringPaymentCancel(input: {
           sourceWallet: input.sourceWallet,
           tokenMint,
           releaseAuthority: input.releaseAuthority,
+          lease,
         });
       }
       onChainDelegation = step.account;
@@ -812,8 +828,10 @@ async function runRecurringPaymentCancel(input: {
         instructions: [instruction],
         submissionStore: createSubscriptionStepStore({
           ...lifecycleStep,
-          save: async (send) => {
-            const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+          save: async (send, tx) => {
+            const updatedAttempt = await createPostgresPaymentRecurringPaymentsRepository(
+              tx
+            ).updateLifecycleAttempt({
               attemptId: attempt.id,
               organizationId: input.organizationId,
               projectId: input.projectId,
@@ -850,6 +868,7 @@ async function runRecurringPaymentCancel(input: {
       sourceWallet: input.sourceWallet,
       tokenMint,
       releaseAuthority: input.releaseAuthority,
+      lease,
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -873,7 +892,8 @@ async function runRecurringPaymentCancel(input: {
       !definitelyFailed
     ) {
       await preserveRecoverableLifecycleAttempt({
-        recurringRepo,
+        env: input.env,
+        lease,
         attempt,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -897,6 +917,7 @@ async function runRecurringPaymentCancel(input: {
         stage: currentStage,
         error,
         failedAt,
+        lease,
       });
     } catch (resetError) {
       getLogger().error(
