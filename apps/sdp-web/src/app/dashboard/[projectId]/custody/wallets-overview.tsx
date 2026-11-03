@@ -28,6 +28,7 @@ import {
   formatWalletPurposeLabel,
   truncateMiddle,
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import { WalletsToolbarRowHold } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -532,17 +533,28 @@ export function WalletsOverview({
     replaceSearchParams({ [WALLET_SEARCH_QUERY_PARAM]: null });
   };
 
+  // No toolbar without wallets, but its row stays: the loading view held it.
+  const toolbarRowHold = isOverviewTab ? <WalletsToolbarRowHold loading={false} /> : null;
+
   if (walletsError) {
     return (
-      <div role="alert" className="space-y-1 text-body">
-        <p className="font-medium text-error">{t("DashboardCustody.unableToLoadWallets")}</p>
-        <p className="text-secondary">{walletsError}</p>
-      </div>
+      <>
+        {toolbarRowHold}
+        <div role="alert" className="space-y-1 text-body">
+          <p className="font-medium text-error">{t("DashboardCustody.unableToLoadWallets")}</p>
+          <p className="text-secondary">{walletsError}</p>
+        </div>
+      </>
     );
   }
 
   if (wallets.length === 0) {
-    return <EmptyWallets canManageCustody={canManageCustody} configsError={configsError} />;
+    return (
+      <>
+        {toolbarRowHold}
+        <EmptyWallets canManageCustody={canManageCustody} configsError={configsError} />
+      </>
+    );
   }
 
   const cards = (
