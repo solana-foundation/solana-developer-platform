@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import { SDP_GITHUB_REPO_URL, SDP_TERMS_PATH } from "@sdp/types/site";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -73,5 +73,11 @@ describe("HomepageFooter", () => {
   it("names who provides the platform", async () => {
     const doc = await renderFooter();
     expect(doc.body.textContent).toContain("Provided by the Solana Foundation");
+  });
+
+  it("links the Terms of Use from its last line", async () => {
+    const doc = await renderFooter();
+    const terms = doc.querySelector(`a[href="${SDP_TERMS_PATH}"]`);
+    expect(terms?.textContent).toBe("Terms of Use");
   });
 });
