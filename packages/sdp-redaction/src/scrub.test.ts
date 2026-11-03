@@ -822,6 +822,15 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     }
   });
 
+  it("redacts an escaped credential key in a document with a long number", () => {
+    const redacted = redactCredentialString(
+      '{"requestId":"1234567890123456","\\u006dnemonic":"alpha bravo"}'
+    );
+
+    assert.ok(!redacted.includes("alpha bravo"), redacted);
+    assert.ok(redacted.includes("1234567890123456"), redacted);
+  });
+
   it("masks a value that only starts with the redaction marker", () => {
     assert.equal(
       redactCredentialString("password=[REDACTED]correct horse battery staple"),

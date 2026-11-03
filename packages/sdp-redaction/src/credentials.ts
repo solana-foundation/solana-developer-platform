@@ -34,9 +34,9 @@ const MAX_JSON_LENGTH = 64 * 1024;
 const MAX_JSON_DEPTH = 16;
 
 const JSON_DOCUMENT_START = /^\s*["[{]/;
-// A number `JSON.parse` may round (16+ digits, or an exponent). A document
-// that has one is left to the scanners, so reserializing it never rewrites an
-// amount or a numeric id. A match inside a string only costs the parse.
+// A number `JSON.parse` may round (16+ digits, or an exponent), so
+// reserializing a document that has one could rewrite an amount or a numeric
+// id. A match inside a string only costs a second check.
 const LOSSY_NUMBER = /\d{16}|\d[eE][+-]?\d/;
 const PERCENT_ESCAPE = /%[0-9A-Fa-f]{2}/;
 const PERCENT_ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/g;
@@ -157,22 +157,37 @@ function redactString(value: string, nesting: number): string {
  * so formatting survives.
  */
 function redactJsonDocument(value: string, nesting: number): string | undefined {
-  if (
-    value.length > MAX_JSON_LENGTH ||
-    !JSON_DOCUMENT_START.test(value) ||
-    LOSSY_NUMBER.test(value)
-  ) {
+  if (value.length > MAX_JSON_LENGTH || !JSON_DOCUMENT_START.test(value)) {
     return undefined;
   }
-  let parsed: JsonValue;
-  try {
-    // SAFETY: JSON.parse only ever produces JSON values.
-    parsed = JSON.parse(value);
-  } catch {
+  const parsed = parseJson(value);
+  if (parsed === undefined) {
     return undefined;
   }
   const redacted = redactJsonValue(parsed, nesting, 0);
-  return redacted === parsed ? value : JSON.stringify(redacted);
+  if (redacted === parsed) {
+    return value;
+  }
+  if (LOSSY_NUMBER.test(value)) {
+    // The scanners keep number text as written. Use their output when parsing
+    // it finds nothing more to redact (an escaped key such as `\u006dnemonic`
+    // is one they miss); otherwise the secret wins over the number's digits.
+    const scanned = redactText(value);
+    const rescanned = parseJson(scanned);
+    if (rescanned !== undefined && redactJsonValue(rescanned, nesting, 0) === rescanned) {
+      return scanned;
+    }
+  }
+  return JSON.stringify(redacted);
+}
+
+function parseJson(value: string): JsonValue | undefined {
+  try {
+    // SAFETY: JSON.parse only ever produces JSON values.
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
 }
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
