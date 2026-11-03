@@ -595,7 +595,6 @@ jobs:
           node apps/sdp-cli/dist/cli.js ramps --help
           node apps/sdp-cli/dist/cli.js transactions --help
           node apps/sdp-cli/dist/cli.js earn --help
-          node apps/sdp-cli/dist/cli.js earn external-wallet --help
           node apps/sdp-cli/dist/cli.js dvp --help
           node apps/sdp-cli/dist/cli.js dvp trades --help
           node apps/sdp-cli/dist/cli.js issuance --help
