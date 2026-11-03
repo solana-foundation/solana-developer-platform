@@ -342,6 +342,8 @@ describe("Recurring Payment lifecycle actions", () => {
   const lastRunError =
     "Privy blocked signing due to a wallet policy. Review the policy in Privy or adjust the request.";
   const pausedCopy = {
+    destination_unavailable:
+      "SDP paused this schedule because its recipient or account is no longer available. Cancel it and create a new schedule with an active recipient.",
     failed_attempts: `SDP paused this schedule because its runs kept failing: one run failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`,
     custody_policy_refused:
       "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Review the wallet's policy and payment details, then resume or cancel it.",
@@ -385,16 +387,20 @@ describe("Recurring Payment lifecycle actions", () => {
   }
 
   it.each(RECURRING_PAYMENT_PAUSE_REASONS)(
-    "leads with Resume and offers Cancel on a schedule paused for %s, naming its reason and last failure",
+    "shows the available actions on a schedule paused for %s, naming its reason and last failure",
     async (pausedReason) => {
       renderDetail({ ...recurring, status: "paused", pausedReason, subscriptionId: "psub_test" }, [
         failedRun,
       ]);
       expect(await screen.findByText(pausedCopy[pausedReason])).toBeTruthy();
       expect(screen.getByText(`Last run: ${lastRunError}`)).toBeTruthy();
-      expect(
-        screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
-      ).toBe("default");
+      if (pausedReason === "destination_unavailable") {
+        expect(screen.queryByRole("button", { name: "Resume schedule" })).toBeNull();
+      } else {
+        expect(
+          screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
+        ).toBe("default");
+      }
       expect(
         screen.getByRole("button", { name: "Cancel schedule" }).getAttribute("data-variant")
       ).toBe("outline");

@@ -3141,6 +3141,84 @@ describe("Payments routes — recurring", () => {
     expect(dbRow?.status).toBe("canceled");
   });
 
+  it.each(["counterparty", "account", "legacy_parent", "wrong_parent"] as const)(
+    "pauses manual and automated collections for an unavailable %s",
+    async (target) => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      if (target === "legacy_parent") {
+        // Historical archives left the account active. Admission checks both.
+        await getDb(env).execute("UPDATE counterparties SET status = 'archived' WHERE id = ?", [
+          activated.counterpartyId,
+        ]);
+      } else if (target === "wrong_parent") {
+        const other = await seedCounterparty();
+        const otherAccount = await seedCryptoWalletCounterpartyAccount({
+          counterpartyId: other,
+          address: TEST_SOLANA_ADDRESSES.wallet2,
+        });
+        await getDb(env).execute(
+          "UPDATE payment_recurring_payments SET counterparty_account_id = ? WHERE id = ?",
+          [otherAccount, activated.id]
+        );
+      } else {
+        const path = `/v1/counterparties/${activated.counterpartyId}`;
+        const archived = await app.request(
+          target === "account" ? `${path}/accounts/${activated.counterpartyAccountId}` : path,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
+      }
+      const calls = recurringExecutionCallCounts();
+      const manual = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(manual.status).toBe(409);
+      const readPaused = async () => {
+        const response = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}`,
+          { headers: RECURRING_HEADERS },
+          env
+        );
+        return (await parseRecurringResponse(response)).data.recurringPayment;
+      };
+      expect(await readPaused()).toMatchObject({
+        status: "paused",
+        pausedReason: "destination_unavailable",
+      });
+      // Rewind only the pause so the cron exercises the same admission itself.
+      await getDb(env).execute(
+        "UPDATE payment_recurring_payments SET status = 'active', paused_reason = NULL WHERE id = ?",
+        [activated.id]
+      );
+      const automated = await collectDueRecurringPaymentsIn("sandbox", new Date());
+      expect(automated).toMatchObject({ collected: 0, skipped: 1, failed: 0 });
+      expect(await readPaused()).toMatchObject({
+        status: "paused",
+        pausedReason: "destination_unavailable",
+      });
+      expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+      expect(await failedCollectionAttempts(activated.id)).toBe(0);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+
+      const resume = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/resume`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(resume.status).toBe(404);
+      expect((await readPaused()).status).toBe("paused");
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    }
+  );
+
   it("resumes a paused recurring payment without signing", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await pauseRecurringPayment(activated.id);
@@ -4010,6 +4088,31 @@ describe("Payments routes — recurring", () => {
     await clearCollectionAttemptKeys(activated.subscriptionId);
     return { subscriptionId: activated.subscriptionId, collect };
   }
+
+  it("recovers an in-flight collection after its counterparty is archived without signing again", async () => {
+    const { subscriptionId, collect } = await leaveCollectionUnanswered();
+    const row = required(
+      await getDb(env)
+        .prepare("SELECT counterparty_id FROM payment_recurring_payments WHERE subscription_id = ?")
+        .bind(subscriptionId)
+        .first<{ counterparty_id: string }>()
+    );
+    const archived = await app.request(
+      `/v1/counterparties/${row.counterparty_id}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const signatures = poolSentSignatures();
+    recordSignatureStatus(required(signatures[2]), null);
+    const recovered = await collect();
+    expect(recovered.status).toBe(200);
+    expect((await parseCollectionResponse(recovered)).data.collectionAttempt).toMatchObject({
+      status: "confirmed",
+      signature: signatures[2],
+    });
+    expect(poolSentSignatures()).toEqual(signatures);
+  });
 
   it("fails a recovered collection whose pull has no record past its expiry, then pulls the period again", async () => {
     mockDistinctRecentBlockhashes();

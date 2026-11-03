@@ -24800,9 +24800,9 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -25169,9 +25169,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -25511,9 +25511,9 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -25877,9 +25877,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -26200,9 +26200,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -26537,9 +26537,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -26874,9 +26874,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -27523,7 +27523,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-r
 
 `POST /v1/payments/recurring-payments/{id}/resume`
 
-SDP pauses a recurring payment when a due period fails 5 times, or at once when the custody provider's policy refuses to sign a collection. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
+SDP pauses a recurring payment when a due period fails 5 times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable. Resume requires both recipient records to be active. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -27649,9 +27649,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Recurring payment status.
 
-      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts` · example `null`
+      - **`pausedReason`** · `string | null` · required · one of `custody_policy_refused`, `failed_attempts`, `destination_unavailable` · example `null`
 
-        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times. Resume clears it.
+        Why SDP paused the recurring payment, set exactly while `status` is `paused`: `custody_policy_refused` when the custody provider's policy refused to sign a collection, `failed_attempts` when one due period failed 5 times, or `destination_unavailable` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.
 
       - **`metadataUri`** · `string | null` · required
 
@@ -34423,11 +34423,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Archive counterparty
 Source: https://platform.solana.com/docs/reference/api/counterparties/archive-counterparty
 
-> Archives a counterparty.
+> Archives a counterparty and its active accounts and provider links atomically.
 
 `DELETE /v1/counterparties/{counterpartyId}`
 
-Archived counterparties are hidden from default lists.
+Archived counterparties are hidden from default lists. New transfers and batches cannot use those accounts. Recurring payments pause before their next new collection; work already in flight keeps its recovery path.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `counterparties.manage` action.
 

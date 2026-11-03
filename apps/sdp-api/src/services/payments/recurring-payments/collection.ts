@@ -88,6 +88,7 @@ import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { loadPaymentMint, loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -1865,6 +1866,55 @@ function refuseCanceledCollection(
   }
 }
 
+/** Re-check the recipient for a new cycle, after recovery and before signing. */
+async function admitCollectionDestination(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: CollectibleRecurringPaymentRow;
+}): Promise<void> {
+  try {
+    await resolveSolanaCounterpartyAccount({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      counterpartyId: input.recurringPayment.counterparty_id,
+      counterpartyAccountId: input.recurringPayment.counterparty_account_id,
+    });
+    return;
+  } catch (error) {
+    // Active-only, tenant-scoped lookups also refuse missing or moved rows.
+    // Database failures must propagate without changing the mandate.
+    if (!(error instanceof AppError) || error.code !== "NOT_FOUND") throw error;
+  }
+
+  const attemptedAt = new Date().toISOString();
+  const paused = await getDb(input.env).transaction(async (tx) => {
+    // Another collector may have claimed this cycle since recovery read it.
+    // Leave its status intact so that collection keeps its recovery path.
+    if (!(await lockOpenCollectionCycle(tx, { ...input, attemptedAt }))) return null;
+    return createPostgresPaymentRecurringPaymentsRepository(tx).pauseRecurringPayment({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      reason: "destination_unavailable",
+      updatedAt: attemptedAt,
+    });
+  });
+  if (paused) {
+    logEvent("warn", {
+      event: "sdp_recurring_payment_paused",
+      reason: "destination_unavailable",
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      recurring_payment_id: input.recurringPayment.id,
+    });
+  }
+  throw conflict(
+    "Recurring payment recipient is unavailable; cancel this schedule and create a new one"
+  );
+}
+
 export async function collectRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1934,6 +1984,7 @@ export async function collectRecurringPayment(input: {
   if (!recurringPayment.plan_pda || !recurringPayment.subscription_pda) {
     throw conflict("Recurring payment is missing on-chain subscription records");
   }
+  await admitCollectionDestination({ ...input, recurringPayment });
   await input.admitStart();
   const nowIso = new Date().toISOString();
 

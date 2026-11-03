@@ -1176,6 +1176,7 @@
       "statePausedBody": "SDP paused this schedule. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.",
       "statePausedFailedAttemptsBody": "SDP paused this schedule because its runs kept failing: one run failed {count} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.",
       "statePausedPolicyRefusedBody": "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Review the wallet's policy and payment details, then resume or cancel it.",
+      "statePausedDestinationUnavailableBody": "SDP paused this schedule because its recipient or account is no longer available. Cancel it and create a new schedule with an active recipient.",
       "stateLastRunError": "Last run: {error}",
       "stateCanceledBody": "This schedule will not run again. Its past runs keep their record.",
       "stateCanceledBeforeRunBody": "This schedule will not run again. It was canceled before its first run.",

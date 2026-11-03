@@ -521,6 +521,51 @@ describe("payment transfer batches", () => {
     await clearKVStores(env);
   });
 
+  it("refuses archived counterparties' accounts before creating or signing a batch", async () => {
+    const counterpartyId = await seedCounterparty("archive_batch_parent");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": crypto.randomUUID(),
+    };
+    const archived = await app.request(
+      `/v1/counterparties/${counterpartyId}`,
+      {
+        method: "DELETE",
+        headers,
+      },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          externalId: testRunId(),
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(404);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    expect(
+      await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .first()
+    ).toEqual({ count: 0 });
+  });
+
   it.each(
     ["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"].flatMap(
       (endpoint) => [

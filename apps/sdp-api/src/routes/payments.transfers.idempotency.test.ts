@@ -3,10 +3,12 @@ import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -33,6 +35,60 @@ import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
   installClusterRpcStub();
+  it("refuses new transfers after a parent archive and still replays the earlier transfer", async () => {
+    const counterpartyId = "cpty_archive_transfer";
+    const counterpartyAccountId = "cpacct_archive_transfer";
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      counterpartyId,
+      counterpartyAccountId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      counterpartyAccountId,
+      token: "SOL",
+      amount: "1",
+    };
+    const first = await postTransfer(body, { idempotencyKey: "before-archive" });
+    expect(first.status).toBe(200);
+    const original = await readTransferResponse(first);
+    const archived = await app.request(
+      `/v1/counterparties/${counterpartyId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "archive-contact",
+        },
+      },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const replayArchive = await app.request(
+      `/v1/counterparties/${counterpartyId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": "archive-contact",
+        },
+      },
+      env
+    );
+    expect(replayArchive.status).toBe(204);
+    const replay = await postTransfer(body, { idempotencyKey: "before-archive" });
+    expect(replay.status).toBe(200);
+    expect(await readTransferResponse(replay)).toEqual(original);
+    const fresh = await postTransfer(body, { idempotencyKey: "after-archive" });
+    expect(fresh.status).toBe(404);
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+    expect(await countTransferRows()).toBe(1);
+  });
+
   it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
