@@ -124,11 +124,11 @@ describe("0184 and 0185 recurring payment paused reason", () => {
   });
 });
 
-describe("0207 and 0208 destination pause reason", () => {
+describe("0208 and 0209 destination pause reason", () => {
   it("preserves existing pauses and accepts the new reason after validation", async () => {
     await insertRecurringPayment({ status: "paused", pausedReason: "failed_attempts" });
-    await client.query(readMigration("0207_recurring_payment_destination_pause.sql"));
-    await client.query(readMigration("0208_recurring_payment_destination_pause_validate.sql"));
+    await client.query(readMigration("0208_recurring_payment_destination_pause.sql"));
+    await client.query(readMigration("0209_recurring_payment_destination_pause_validate.sql"));
     const stored = await client.query(
       "SELECT status, paused_reason FROM payment_recurring_payments WHERE id = 'rp_0184'"
     );
