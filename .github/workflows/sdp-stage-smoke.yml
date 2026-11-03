@@ -2,7 +2,19 @@ name: SDP stage smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      beta:
+        description: "Also probe the beta API (api-beta.solana.com)"
+        required: false
+        type: boolean
+        default: true
   workflow_call:
+    inputs:
+      beta:
+        description: "Probe the beta API; false while the beta services do not exist"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -111,3 +123,62 @@ jobs:
             apps/sdp-web/playwright-report
             apps/sdp-web/test-results
           if-no-files-found: ignore
+
+  # Non-blocking: the merge deploy and the migration approval run require every stage job to
+  # conclude success, so this job always runs and its steps continue on error. A failed probe
+  # reaches the on-call through Loki (target=beta), never through this run's result.
+  beta:
+    name: Beta API smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    if: github.repository == 'solana-foundation/solana-developer-platform'
+    env:
+      SMOKE_TARGET: beta
+      BETA_ORIGIN: https://api-beta.solana.com
+    steps:
+      - name: Checkout
+        if: inputs.beta
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Probe the beta API
+        id: smoke
+        if: inputs.beta
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          HEALTH=$(curl -sS -m 15 "${BETA_ORIGIN}/health")
+          echo "$HEALTH"
+          echo "$HEALTH" | jq -e '.releaseChannel == "beta"' >/dev/null
+          READY=$(curl -sS -m 15 "${BETA_ORIGIN}/health/ready")
+          echo "$READY"
+          echo "$READY" | jq -e '.status == "ready" and .checks.database == "ok" and .checks.redis == "ok"' >/dev/null
+
+      - name: Install Doppler CLI
+        id: doppler
+        if: inputs.beta
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        id: doppler_login
+        if: steps.doppler.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: scripts/doppler/oidc-login.sh "${{ vars.DOPPLER_STAGE_SMOKE_IDENTITY_ID }}"
+
+      - name: Report beta run to Loki
+        if: steps.doppler_login.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          DOPPLER_PROJECT: solana-developer-platform
+          DOPPLER_CONFIG: stg_ci
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: doppler run --scope=. --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG" --preserve-env=SMOKE_OUTCOME,SMOKE_TARGET,RUN_ID,RUN_URL -- ./scripts/report-smoke-to-loki.sh

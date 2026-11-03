@@ -199,6 +199,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # The beta job posts the commit status that releases beta web.
+      statuses: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-stage.yml
 
   schema:
