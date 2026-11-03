@@ -34,6 +34,10 @@ describe("public web routes", () => {
     ).toBe(true);
   });
 
+  it("serves the Terms of Use to anyone, signed in or not", () => {
+    expect(isPublicRoute(new NextRequest("https://dashboard.example.com/terms"))).toBe(true);
+  });
+
   it("keeps shareable payment checkout links unauthenticated", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/pay/public-token"))).toBe(
       true

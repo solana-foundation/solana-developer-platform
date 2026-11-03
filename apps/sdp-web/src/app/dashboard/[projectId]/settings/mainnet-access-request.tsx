@@ -3,6 +3,7 @@
 import { COUNTRIES, COUNTRY_CODES } from "@sdp/types/countries";
 import { SDP_TERMS } from "@sdp/types/mainnet-access";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
+import { SDP_TERMS_PATH } from "@sdp/types/site";
 import { Button } from "@sdp/ui/button";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Modal } from "@sdp/ui/modal";
@@ -11,6 +12,7 @@ import { CheckCircle2Icon, Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
+import { SdpTermsContent } from "@/components/sdp-terms-content";
 import { useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
 import { notifyMainnetAccessAction, requestMainnetAccessAction } from "./mainnet-access-actions";
@@ -322,8 +324,16 @@ function TermsStep({
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border-default">
-        <div className="border-b border-border-default bg-fill px-4 py-2.5 text-xs text-tertiary">
-          {t("Shared.mainnetAccess.termsVersion", { version: SDP_TERMS.version })}
+        <div className="flex items-center justify-between gap-3 border-b border-border-default bg-fill px-4 py-2.5 text-xs text-tertiary">
+          <span>{t("Shared.mainnetAccess.termsVersion", { version: SDP_TERMS.version })}</span>
+          <a
+            href={SDP_TERMS_PATH}
+            target="_blank"
+            rel="noreferrer"
+            className="text-secondary underline-offset-2 hover:text-primary hover:underline"
+          >
+            {t("Shared.mainnetAccess.termsOpenPage")}
+          </a>
         </div>
         <div
           ref={readerRef}
@@ -338,14 +348,7 @@ function TermsStep({
             <p className="text-base font-medium text-primary">{SDP_TERMS.title}</p>
             <p className="text-xs text-tertiary">{SDP_TERMS.effectiveDate}</p>
           </div>
-          {SDP_TERMS.sections.map((section) => (
-            <section key={section.heading} className="space-y-1.5">
-              <h4 className="font-medium text-primary">{section.heading}</h4>
-              {section.paragraphs.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
-              ))}
-            </section>
-          ))}
+          <SdpTermsContent headings={{ section: "h4", subsection: "h5" }} className="space-y-6" />
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { SDP_TERMS_PATH } from "@sdp/types/site";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
@@ -21,6 +22,7 @@ export const isPublicRoute = createRouteMatcher([
   "/pay/:token",
   "/",
   "/docs(.*)",
+  SDP_TERMS_PATH,
   // Social-card images are fetched by unauthenticated link unfurlers, and the
   // extensionless metadata routes are not excluded by the proxy matcher.
   "/opengraph-image",

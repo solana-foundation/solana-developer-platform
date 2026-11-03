@@ -1,20 +1,79 @@
 import type { CountryCode } from "./countries";
+import { SDP_TERMS_MARKDOWN } from "./sdp-terms-text";
+
+/** One block of a terms section: a paragraph, a subsection's heading, or a bulleted list. */
+export type SdpTermsBlock =
+  | { kind: "paragraph"; text: string }
+  | { kind: "subheading"; text: string }
+  | { kind: "list"; items: readonly string[] };
 
 export interface SdpTermsSection {
   heading: string;
-  paragraphs: readonly string[];
+  blocks: readonly SdpTermsBlock[];
+}
+
+/** A run of terms text: `**…**` in the source marks the bold runs. */
+export interface SdpTermsRun {
+  text: string;
+  bold: boolean;
+}
+
+/** Splits a paragraph or list item of `SDP_TERMS_MARKDOWN` into plain and bold runs. */
+export function sdpTermsRuns(text: string): SdpTermsRun[] {
+  return text
+    .split("**")
+    .map((run, index) => ({ text: run, bold: index % 2 === 1 }))
+    .filter((run) => run.text !== "");
 }
 
 /**
- * The SDP Terms and Conditions an organization accepts when it asks for mainnet (HOO-2427): the
- * text the dashboard shows and the version the API records, held together. A request naming any
- * other version is refused, so an admin always agrees to this text. Legal's text is binding in
- * English, so it is not a translated catalog.
+ * Reads the Markdown subset `SDP_TERMS_MARKDOWN` is written in: `## ` opens a section, `### ` a
+ * subheading, a run of `- ` lines one list, and any other line a paragraph. A blank line ends a
+ * list.
+ */
+export function parseSdpTermsMarkdown(markdown: string): SdpTermsSection[] {
+  const sections: { heading: string; blocks: SdpTermsBlock[] }[] = [];
+  let list: string[] | null = null;
+  for (const line of markdown.split("\n")) {
+    if (line.trim() === "") {
+      list = null;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      sections.push({ heading: line.slice(3), blocks: [] });
+      list = null;
+      continue;
+    }
+    const section = sections.at(-1);
+    if (section === undefined) throw new Error("SDP terms text must open with a ## section");
+    if (line.startsWith("### ")) {
+      section.blocks.push({ kind: "subheading", text: line.slice(4) });
+      list = null;
+    } else if (line.startsWith("- ")) {
+      if (list === null) {
+        list = [];
+        section.blocks.push({ kind: "list", items: list });
+      }
+      list.push(line.slice(2));
+    } else {
+      section.blocks.push({ kind: "paragraph", text: line });
+      list = null;
+    }
+  }
+  return sections;
+}
+
+/**
+ * The SDP Terms of Use: the text the public `/terms` page and the mainnet access request
+ * (HOO-2427) show, and the version the API records when an organization accepts them. A request
+ * naming any other version is refused, so an admin always agrees to this text. Legal's text is
+ * binding in English, so it is not a translated catalog.
  *
  * Changing a word means a new `version`: `apps/sdp-api/src/services/sdp-terms.test.ts` pins each
  * version to a hash of its text.
  *
- * PLACEHOLDER until Legal's draft lands.
+ * DRAFT: Legal's v4 still carries the bracketed placeholders `[DATE]` and `[Solana Foundation]`.
+ * Prod takes no mainnet requests until a final version replaces it (HOO-2476).
  */
 export const SDP_TERMS: {
   version: string;
@@ -22,63 +81,10 @@ export const SDP_TERMS: {
   effectiveDate: string;
   sections: readonly SdpTermsSection[];
 } = {
-  version: "2026-10-placeholder",
-  title: "Solana Developer Platform Terms and Conditions",
-  effectiveDate: "Draft",
-  sections: [
-    {
-      heading: "Placeholder",
-      paragraphs: [
-        "This is placeholder text. The final Terms and Conditions from Solana Foundation Legal replace it before launch. Do not rely on this text.",
-      ],
-    },
-    {
-      heading: "1. The service",
-      paragraphs: [
-        "The Solana Developer Platform (SDP) gives your organization APIs and a dashboard for wallets, payments and token operations on the Solana network. Sandbox runs on devnet; mainnet moves real assets.",
-        "Mainnet access is granted to your organization at SDP's discretion, after it reviews your request.",
-      ],
-    },
-    {
-      heading: "2. Your organization",
-      paragraphs: [
-        "You confirm that you are authorized to accept these terms on behalf of your organization, and that the jurisdiction you declared is your organization's primary registered geography for business.",
-        "You are responsible for the people and API keys you give access to, and for keeping your credentials secure.",
-      ],
-    },
-    {
-      heading: "3. Acceptable use",
-      paragraphs: [
-        "You will use SDP only in compliance with the laws and regulations that apply to your organization and its customers, including sanctions, anti-money-laundering and consumer protection laws.",
-        "You will not use SDP to move assets for, or on behalf of, any person or jurisdiction subject to sanctions.",
-      ],
-    },
-    {
-      heading: "4. Third-party providers",
-      paragraphs: [
-        "Some features rely on custody, ramp, compliance and other providers that you contract with directly. Their terms govern your use of their services.",
-      ],
-    },
-    {
-      heading: "5. Transactions on Solana",
-      paragraphs: [
-        "Transactions submitted to the Solana network are final once confirmed and cannot be reversed by SDP. You are responsible for verifying addresses and amounts before you submit them.",
-      ],
-    },
-    {
-      heading: "6. Changes and termination",
-      paragraphs: [
-        "SDP may update these terms. When it does, it publishes a new version, and continued use of mainnet may require you to accept it.",
-        "SDP may suspend or end your organization's access if you breach these terms or if required by law.",
-      ],
-    },
-    {
-      heading: "7. Disclaimers and liability",
-      paragraphs: [
-        "SDP is provided as is. To the fullest extent the law allows, the Solana Foundation disclaims all warranties and is not liable for indirect or consequential losses.",
-      ],
-    },
-  ],
+  version: "2026-11-v4-draft",
+  title: "Terms of Use",
+  effectiveDate: "Last Modified: [DATE]",
+  sections: parseSdpTermsMarkdown(SDP_TERMS_MARKDOWN),
 };
 
 /**
