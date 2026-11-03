@@ -171,7 +171,8 @@ function CensusLink({ href, figure, label }: { href: string; figure: string; lab
 
 /**
  * The census entry for today: its volume in dollars, or how many payments it saw when one moved
- * a token with no price. Still loading or failed reads as a dash, never as a measured $0.00.
+ * a token with no price, marked as a floor ("20+") when the read stopped short of midnight.
+ * Still loading, failed or unknown reads as a dash, never as a measured $0.00.
  */
 function volumeCensusEntry(
   volume: TodaysVolumeFigure | null,
@@ -181,17 +182,21 @@ function volumeCensusEntry(
   if (volume === null) {
     return { figure: "—", label: t("Shared.homeWorkspace.summary.volume") };
   }
+  const floor = (figure: string, atLeast: boolean) =>
+    atLeast ? t("Shared.homeWorkspace.summary.atLeast", { figure }) : figure;
   switch (volume.kind) {
+    case "unknown":
+      return { figure: "—", label: t("Shared.homeWorkspace.summary.volume") };
     case "usd":
       return {
-        figure: formatCurrencyAmount(volume.usd, locale),
+        figure: floor(formatCurrencyAmount(volume.usd, locale), volume.atLeast),
         label: t("Shared.homeWorkspace.summary.volume"),
       };
     case "count":
       return {
-        figure: volume.count.toLocaleString(locale),
+        figure: floor(volume.count.toLocaleString(locale), volume.atLeast),
         label: t(
-          volume.count === 1
+          volume.count === 1 && !volume.atLeast
             ? "Shared.homeWorkspace.summary.payments.one"
             : "Shared.homeWorkspace.summary.payments.other"
         ),

@@ -543,7 +543,8 @@
       "payments": {
         "one": "payment today",
         "other": "payments today"
-      }
+      },
+      "atLeast": "{figure}+"
     },
     "recentActivity": "Recent activity",
     "activityStatus": "{type} {status}",

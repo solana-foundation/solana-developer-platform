@@ -172,7 +172,12 @@ describe("GET /api/dashboard/home/activity", () => {
     expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledOnce();
     expect(body.data.activityRows).toHaveLength(2);
     expect(body.data).toMatchObject({
-      todaysVolume: { transferCount: 1, amountByMint: { [USDC_MINT]: 125 }, complete: true },
+      todaysVolume: {
+        transferCount: 1,
+        amountByMint: { [USDC_MINT]: "125" },
+        complete: true,
+        coversDay: true,
+      },
       todaysVolumeError: null,
     });
   });
@@ -190,8 +195,9 @@ describe("GET /api/dashboard/home/activity", () => {
     expect(body.data.activityRows).toHaveLength(2);
     expect(body.data.todaysVolume).toEqual({
       transferCount: 1,
-      amountByMint: { [USDC_MINT]: 125 },
+      amountByMint: { [USDC_MINT]: "125" },
       complete: true,
+      coversDay: true,
     });
   });
 

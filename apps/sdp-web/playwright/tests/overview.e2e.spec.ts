@@ -50,8 +50,9 @@ test.describe("overview census", () => {
             // USDC is a well-known stablecoin, so the figure prices without a balance row.
             todaysVolume: {
               transferCount: 1,
-              amountByMint: { [WELL_KNOWN_TOKENS.USDC.mints.devnet.address]: 123_456_789 },
+              amountByMint: { [WELL_KNOWN_TOKENS.USDC.mints.devnet.address]: "123456789" },
               complete: true,
+              coversDay: true,
             },
             todaysVolumeError: null,
           },

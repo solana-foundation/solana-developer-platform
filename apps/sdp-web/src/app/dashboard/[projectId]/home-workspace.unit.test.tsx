@@ -160,7 +160,12 @@ beforeEach(() => {
     "dashboard-home-activity": {
       data: {
         activityRows: [],
-        todaysVolume: { transferCount: 3, amountByMint: { [USDC_MINT]: 1234.5 }, complete: true },
+        todaysVolume: {
+          transferCount: 3,
+          amountByMint: { [USDC_MINT]: "1234.5" },
+          complete: true,
+          coversDay: true,
+        },
         todaysVolumeError: null,
       },
     },
@@ -266,8 +271,9 @@ describe("Overview (HomeWorkspace)", () => {
         activityRows: [],
         todaysVolume: {
           transferCount: 2,
-          amountByMint: { [SOL_MINT]: 0.5, [USDC_MINT]: 10 },
+          amountByMint: { [SOL_MINT]: "0.5", [USDC_MINT]: "10" },
           complete: true,
+          coversDay: true,
         },
         todaysVolumeError: null,
       },
@@ -275,6 +281,24 @@ describe("Overview (HomeWorkspace)", () => {
     renderOverview({ balances: [at(BALANCES, 0), UNPRICED_SOL] });
     const balance = within(requireSection("balance"));
     expect(balance.getByRole("link", { name: "2 payments today" })).toBeTruthy();
+  });
+
+  it("marks today's volume as a floor when the read stopped short of midnight", () => {
+    mocks.swr["dashboard-home-activity"] = {
+      data: {
+        activityRows: [],
+        todaysVolume: {
+          transferCount: 20,
+          amountByMint: { [USDC_MINT]: "20" },
+          complete: true,
+          coversDay: false,
+        },
+        todaysVolumeError: null,
+      },
+    };
+    renderOverview();
+    const balance = within(requireSection("balance"));
+    expect(balance.getByRole("link", { name: "$20.00+ today’s volume" })).toBeTruthy();
   });
 
   it("turns the first run into the wallet prompt with no activity list", () => {

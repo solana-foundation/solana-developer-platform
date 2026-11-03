@@ -1,5 +1,10 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types/payments";
+import {
+  isSuccessfulPaymentTransferStatus,
+  PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferStatus,
+  type PaymentTransferSummary,
+} from "@sdp/types/payments";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -204,6 +209,8 @@ describe("token mint passthrough", () => {
 describe("today's volume", () => {
   const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
   const TODAY = "2026-10-23T09:00:00.000Z";
+  const YESTERDAY = "2026-10-22T09:00:00.000Z";
+  const WINDOW = 20;
 
   function sent(
     token: string | undefined,
@@ -212,7 +219,7 @@ describe("today's volume", () => {
     createdAt = TODAY
   ): PaymentTransferSummary {
     return {
-      id: `transfer_${token}_${amount}_${status}`,
+      id: `transfer_${token}_${amount}_${status}_${createdAt}`,
       custodyWalletId: "wallet_1",
       providerWalletId: "provider_wallet_1",
       status,
@@ -238,64 +245,115 @@ describe("today's volume", () => {
     vi.useRealTimers();
   });
 
-  it("keeps today's amounts per mint, since SOL and USDC do not add", () => {
-    const volume = computeTodaysVolume([
-      sent(SOL_MINT, "0.5", "completed"),
-      sent(USDC_MINT, "10"),
-      sent(USDC_MINT, "5", "confirmed"),
-      sent(USDC_MINT, "100", "finalized", "2026-10-22T09:00:00.000Z"),
-    ]);
+  it("keeps today's amounts per mint as exact decimals, since SOL and USDC do not add", () => {
+    const volume = computeTodaysVolume(
+      [
+        sent(SOL_MINT, "0.1", "completed"),
+        sent(SOL_MINT, "0.2"),
+        sent(USDC_MINT, "10"),
+        sent(USDC_MINT, "5", "confirmed"),
+        sent(USDC_MINT, "100", "finalized", YESTERDAY),
+      ],
+      WINDOW
+    );
 
+    // 0.1 + 0.2 is 0.30000000000000004 as floats; the sum here is exact.
     expect(volume).toEqual({
-      transferCount: 3,
-      amountByMint: { [SOL_MINT]: 0.5, [USDC_MINT]: 15 },
+      transferCount: 4,
+      amountByMint: { [SOL_MINT]: "0.3", [USDC_MINT]: "15" },
       complete: true,
+      coversDay: true,
     });
   });
 
   it("counts only transfers that succeeded", () => {
-    const unsuccessful: PaymentTransferStatus[] = [
-      "pending",
-      "processing",
-      "failed",
-      "canceled",
-      "expired",
-      "awaiting_payment",
-      "settling",
-    ];
-    const volume = computeTodaysVolume(unsuccessful.map((status) => sent(USDC_MINT, "10", status)));
+    const unsuccessful = PAYMENT_TRANSFER_STATUSES.filter(
+      (status) => !isSuccessfulPaymentTransferStatus(status)
+    );
+    const volume = computeTodaysVolume(
+      unsuccessful.map((status) => sent(USDC_MINT, "10", status)),
+      WINDOW
+    );
 
-    expect(volume).toEqual({ transferCount: 0, amountByMint: {}, complete: true });
+    expect(volume).toMatchObject({ transferCount: 0, amountByMint: {}, complete: true });
   });
 
   it("marks the day incomplete when a counted transfer has no token to price", () => {
-    expect(computeTodaysVolume([sent(undefined, "10")])).toEqual({
+    expect(computeTodaysVolume([sent(undefined, "10")], WINDOW)).toMatchObject({
       transferCount: 1,
       amountByMint: {},
       complete: false,
     });
   });
 
+  it("covers the day when the window is short of full or reaches back past midnight", () => {
+    const today = Array.from({ length: WINDOW - 1 }, () => sent(USDC_MINT, "1"));
+    expect(computeTodaysVolume(today, WINDOW).coversDay).toBe(true);
+    expect(
+      computeTodaysVolume([...today, sent(USDC_MINT, "1", "finalized", YESTERDAY)], WINDOW)
+        .coversDay
+    ).toBe(true);
+  });
+
+  it("does not cover the day when a full window is all from today", () => {
+    const full = Array.from({ length: WINDOW }, () => sent(USDC_MINT, "1"));
+    expect(computeTodaysVolume(full, WINDOW)).toMatchObject({
+      transferCount: WINDOW,
+      coversDay: false,
+    });
+  });
+
   it("prices each mint with the market price its balance row carried", () => {
-    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")]);
+    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")], WINDOW);
 
     // SOL at the API's $150, USDC at a dollar as a well-known stablecoin.
-    expect(priceTodaysVolume(volume, [held(SOL_MINT, 150)])).toEqual({ kind: "usd", usd: 310 });
+    expect(priceTodaysVolume(volume, [held(SOL_MINT, 150)])).toEqual({
+      kind: "usd",
+      usd: 310,
+      atLeast: false,
+    });
   });
 
   it("reads as a count when a token moved today has no price, rather than adding SOL to dollars", () => {
-    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")]);
+    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")], WINDOW);
 
-    expect(priceTodaysVolume(volume, [held(SOL_MINT)])).toEqual({ kind: "count", count: 2 });
+    expect(priceTodaysVolume(volume, [held(SOL_MINT)])).toEqual({
+      kind: "count",
+      count: 2,
+      atLeast: false,
+    });
   });
 
   it("reads as a count when the day is incomplete", () => {
-    const volume = computeTodaysVolume([sent(undefined, "10"), sent(USDC_MINT, "10")]);
+    const volume = computeTodaysVolume([sent(undefined, "10"), sent(USDC_MINT, "10")], WINDOW);
 
-    expect(priceTodaysVolume(volume, [])).toEqual({ kind: "count", count: 2 });
+    expect(priceTodaysVolume(volume, [])).toEqual({ kind: "count", count: 2, atLeast: false });
+  });
+
+  it("is a floor when the window stopped short of midnight", () => {
+    const full = Array.from({ length: WINDOW }, () => sent(USDC_MINT, "1"));
+
+    expect(priceTodaysVolume(computeTodaysVolume(full, WINDOW), [])).toEqual({
+      kind: "usd",
+      usd: WINDOW,
+      atLeast: true,
+    });
+  });
+
+  it("is unknown when a window cut short holds nothing that succeeded", () => {
+    // Twenty newer failures hide whatever succeeded earlier today; $0.00 would be a guess.
+    const failures = Array.from({ length: WINDOW }, () => sent(USDC_MINT, "1", "failed"));
+
+    expect(priceTodaysVolume(computeTodaysVolume(failures, WINDOW), [])).toEqual({
+      kind: "unknown",
+    });
   });
 
   it("is a measured $0.00 on a day without payments", () => {
-    expect(priceTodaysVolume(computeTodaysVolume([]), [])).toEqual({ kind: "usd", usd: 0 });
+    expect(priceTodaysVolume(computeTodaysVolume([], WINDOW), [])).toEqual({
+      kind: "usd",
+      usd: 0,
+      atLeast: false,
+    });
   });
 });
