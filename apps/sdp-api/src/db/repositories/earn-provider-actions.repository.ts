@@ -89,6 +89,15 @@ function claimsDiverge(row: EarnProviderActionRow, input: EarnProviderActionClai
   );
 }
 
+/**
+ * The status predicate of the one-active-cancellation index (migration 0208:
+ * `WHERE action='cancellation' AND status NOT IN ('failed','prepared')`). Every
+ * query that reasons about the slot must match it exactly: a `prepared` build
+ * holds no slot, so letting it answer a slot lookup hides the row whose
+ * abandoned lease a new key must recover.
+ */
+const ONE_ACTIVE_CANCELLATION_SQL = "action='cancellation' AND status NOT IN ('failed','prepared')";
+
 export function createEarnProviderActionsRepository(db: DatabaseClient) {
   return {
     async get(scope: Scope): Promise<EarnProviderActionRow | null> {
@@ -123,7 +132,7 @@ export function createEarnProviderActionsRepository(db: DatabaseClient) {
       if (prior === null && input.action === "cancellation") {
         const active = await db
           .prepare(
-            "SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND action='cancellation' AND status<>'failed'"
+            `SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND ${ONE_ACTIVE_CANCELLATION_SQL}`
           )
           .bind(input.organization_id, input.project_id, input.parent_movement_id)
           .first();
@@ -242,7 +251,7 @@ export function createEarnProviderActionsRepository(db: DatabaseClient) {
     ): Promise<EarnProviderActionRow | null> {
       const row = await db
         .prepare(
-          "SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND action='cancellation' AND id<>? AND status<>'failed' ORDER BY created_at LIMIT 1"
+          `SELECT * FROM earn_provider_actions WHERE organization_id=? AND project_id=? AND parent_movement_id=? AND id<>? AND ${ONE_ACTIVE_CANCELLATION_SQL} ORDER BY created_at LIMIT 1`
         )
         .bind(scope.organizationId, scope.projectId, parentMovementId, scope.actionId)
         .first();

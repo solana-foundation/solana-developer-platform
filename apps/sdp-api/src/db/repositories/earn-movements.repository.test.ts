@@ -257,6 +257,34 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(reclaimed.owned).toBe(true);
       expect(reclaimed.row.id).toBe(first.id);
     });
+    it("reaches the abandoned claim past an older prepared build", async () => {
+      const { movement } = await ledger.createSignedVaultDepositIntent(intent());
+      const repo = createEarnProviderActionsRepository(getDb(env));
+      // The unique slot excludes `prepared`, so an older build can coexist
+      // with a newer claim whose creator was lost mid-preparation.
+      const { row: stale } = await repo.claim(actionClaim(movement.id, "cancel-1"));
+      await repo.advance(
+        {
+          organizationId: ORG,
+          projectId: PROJECT,
+          actionId: stale.id,
+          preparationLeaseUntil: stale.lease_until,
+        },
+        "preparing",
+        "prepared",
+        { unsigned_transaction: "stale unsigned bytes" }
+      );
+      const { row: lost } = await repo.claim(actionClaim(movement.id, "cancel-2"));
+      await getDb(env)
+        .prepare("UPDATE earn_provider_actions SET lease_until=? WHERE id=?")
+        .bind("2000-01-01T00:00:00.000Z", lost.id)
+        .run();
+      // The stale build holds no slot and its submission can only conflict:
+      // a new key must reach the newer abandoned claim and reclaim it instead.
+      const reclaimed = await repo.claim(actionClaim(movement.id, "cancel-3"));
+      expect(reclaimed.owned).toBe(true);
+      expect(reclaimed.row.id).toBe(lost.id);
+    });
     it("conflicts with a recovery claiming different fields than the abandoned claim", async () => {
       const { movement } = await ledger.createSignedVaultDepositIntent(intent());
       const repo = createEarnProviderActionsRepository(getDb(env));
