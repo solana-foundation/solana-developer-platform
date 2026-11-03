@@ -150,9 +150,9 @@ describe("DvpCloseActions", () => {
   });
 });
 
-/** The words on each button the markup marks busy (`aria-busy`), tags stripped. */
+/** The words on each button the markup marks busy (`aria-busy`): the button with its tags stripped. */
 function busyButtonWords(html: string): string[] {
-  return [...html.matchAll(/<button[^>]*aria-busy="true"[^>]*>(.*?)<\/button>/g)].map((match) =>
-    (match[1] ?? "").replace(/<[^>]+>/g, "")
+  return [...html.matchAll(/<button[^>]*aria-busy="true"[^>]*>.*?<\/button>/g)].map(([button]) =>
+    button.replace(/<[^>]+>/g, "")
   );
 }

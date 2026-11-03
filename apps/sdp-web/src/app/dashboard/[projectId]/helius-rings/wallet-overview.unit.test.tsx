@@ -206,7 +206,7 @@ describe("WalletOverview", () => {
 
 /** Refresh is off for a wallet nothing can read: disabled, and not spinning on a read that never starts. */
 function expectRefreshUnavailable() {
-  const refresh = screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement;
-  expect(refresh.disabled).toBe(true);
+  const refresh = screen.getByRole("button", { name: "Refresh" });
+  expect(refresh).toHaveProperty("disabled", true);
   expect(refresh.getAttribute("aria-busy")).toBe("false");
 }
