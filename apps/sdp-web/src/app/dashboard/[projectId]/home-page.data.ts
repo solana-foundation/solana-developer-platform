@@ -1,4 +1,10 @@
-import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferSummary } from "@sdp/types/payments";
+import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import {
+  isSuccessfulPaymentTransferStatus,
+  PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferSummary,
+} from "@sdp/types/payments";
 import {
   TOKEN_TRANSACTION_STATUSES,
   type TokenTransaction,
@@ -10,7 +16,7 @@ import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { readTransactionParam, toTitleCase } from "./activity-format-utils";
-import { resolveTransferTokenLabel } from "./payments/payments-overview.utils";
+import { resolveTransferTokenLabel, resolveUsdUnitPrice } from "./payments/payments-overview.utils";
 import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -131,31 +137,114 @@ function resolveIssuanceExplorer(transaction: TokenTransaction): HomeActivityExp
   return null;
 }
 
-export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
+export const todaysVolumeSchema = z.object({
+  /** Successful transfers created since 00:00 UTC, among those the read saw. */
+  transferCount: z.number().int().nonnegative(),
+  /** What they moved, as exact decimal strings summed per mint: SOL and USDC do not add. */
+  amountByMint: z.record(z.string(), z.string()),
+  /** False when a counted transfer had no token or no readable amount, so the sums miss it. */
+  complete: z.boolean(),
+  /**
+   * False when the read's window filled before it reached back to midnight UTC: earlier
+   * transfers from today may sit past it, so the figures are a floor, not the day.
+   */
+  coversDay: z.boolean(),
+});
+
+export type TodaysVolume = z.infer<typeof todaysVolumeSchema>;
+
+/**
+ * Today's successful transfers and what they moved, per mint. Only a successful transfer moved
+ * value: a pending one may still fail, and a failed, canceled or unpaid one moved nothing. Home
+ * prices the amounts with the balance read it already has (`priceTodaysVolume`).
+ *
+ * @param transfers - The newest transfers, at most `windowSize` of them.
+ * @param windowSize - How many the read asked for.
+ */
+export function computeTodaysVolume(
+  transfers: PaymentTransferSummary[],
+  windowSize: number
+): TodaysVolume {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  let hasNumericAmount = false;
+  const amountByMint: Record<string, string> = {};
+  let transferCount = 0;
+  let complete = true;
+  // The window is the newest `windowSize` transfers. A short one, or one that reaches back past
+  // midnight, holds every transfer from today; a full one that does not may have cut some off.
+  let coversDay = transfers.length < windowSize;
 
-  const total = transfers.reduce((sum, transfer) => {
+  for (const transfer of transfers) {
     if (!transfer.createdAt) {
-      return sum;
+      continue;
     }
 
     const createdAt = new Date(transfer.createdAt);
-    if (Number.isNaN(createdAt.getTime()) || createdAt < startOfDay) {
-      return sum;
+    if (Number.isNaN(createdAt.getTime())) {
+      continue;
+    }
+    if (createdAt < startOfDay) {
+      coversDay = true;
+      continue;
+    }
+    if (!isSuccessfulPaymentTransferStatus(transfer.status)) {
+      continue;
     }
 
-    const amount = Number(transfer.amount);
-    if (!Number.isFinite(amount)) {
-      return sum;
+    transferCount += 1;
+    const mint = transfer.token?.trim();
+    const amount = transfer.amount?.trim();
+    if (!mint || amount === undefined || !isDecimalString(amount)) {
+      complete = false;
+      continue;
     }
 
-    hasNumericAmount = true;
-    return sum + amount;
-  }, 0);
+    const sum = amountByMint[mint];
+    amountByMint[mint] = sum === undefined ? amount : addDecimalAmounts(sum, amount);
+  }
 
-  return hasNumericAmount ? total : null;
+  return { transferCount, amountByMint, complete, coversDay };
+}
+
+/**
+ * Home's volume figure: dollars when every transfer today has a price, otherwise how many, at
+ * least that when the read could not reach back to midnight. Nothing counted from a read that
+ * may have missed the day is no figure at all.
+ */
+export type TodaysVolumeFigure =
+  | { kind: "usd"; usd: number; atLeast: boolean }
+  | { kind: "count"; count: number; atLeast: boolean }
+  | { kind: "unknown" };
+
+/**
+ * Prices today's volume with the balances on screen, which carry the API's market price for
+ * each mint held. A transfer in a token with no price makes a dollar sum wrong, not smaller, so
+ * the day reads as a count instead.
+ */
+export function priceTodaysVolume(
+  volume: TodaysVolume,
+  balances: readonly CustodyWalletTokenBalance[]
+): TodaysVolumeFigure {
+  const atLeast = !volume.coversDay;
+  if (atLeast && volume.transferCount === 0) {
+    return { kind: "unknown" };
+  }
+  if (!volume.complete) {
+    return { kind: "count", count: volume.transferCount, atLeast };
+  }
+
+  let usd = 0;
+  for (const [mint, amount] of Object.entries(volume.amountByMint)) {
+    const usdPrice = resolveUsdUnitPrice(mint, balances);
+    if (usdPrice === null) {
+      return { kind: "count", count: volume.transferCount, atLeast };
+    }
+    // A display figure, priced like the API's own `usdValue` (amount times a float market
+    // price), so the dollars are a float; the token amounts summed above are exact.
+    usd += Number(amount) * usdPrice;
+  }
+
+  return { kind: "usd", usd, atLeast };
 }
 
 export function buildHomeActivityRows(

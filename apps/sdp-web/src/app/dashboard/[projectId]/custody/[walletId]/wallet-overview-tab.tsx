@@ -15,13 +15,16 @@ import {
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
+  formatTotalBalance,
   resolveTotalBalance,
+  resolveUsdBalanceValue,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
 } from "@/app/dashboard/[projectId]/payments/payments-table";
+import { UnpricedHoldingsHint } from "@/app/dashboard/[projectId]/payments/unpriced-holdings-hint";
 import {
   RecordBlock,
   RecordColumns,
@@ -92,8 +95,12 @@ function BalanceFigure({ balancesPromise }: { balancesPromise: Promise<WalletBal
     );
   }
   return (
-    <p className="text-amount font-medium text-primary tabular-nums" data-wallet-balance>
-      {formatCurrencyAmount(resolveTotalBalance(balances), locale)}
+    <p
+      className="flex items-center gap-2 text-amount font-medium text-primary tabular-nums"
+      data-wallet-balance
+    >
+      {formatTotalBalance(resolveTotalBalance(balances), locale)}
+      <UnpricedHoldingsHint balances={balances} />
     </p>
   );
 }
@@ -220,6 +227,8 @@ function TokensTable({
           {balances.map((balance) => {
             const issuedToken = balance.token === "SOL" ? undefined : issued[balance.mint];
             const name = issuedToken?.name ?? balance.token;
+            // The same valuation as the total above, so a row and the total never disagree.
+            const usdValue = resolveUsdBalanceValue(balance);
             return (
               <TableRow key={`${balance.mint}-${balance.token}`}>
                 <TableCell className={PAYMENTS_TABLE_CELL}>
@@ -247,10 +256,10 @@ function TokensTable({
                 <TableCell
                   className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
                 >
-                  {balance.usdValue === undefined ? (
+                  {usdValue === null ? (
                     <span className="text-tertiary">{t("DashboardCustody.walletNoPrice")}</span>
                   ) : (
-                    formatCurrencyAmount(balance.usdValue, locale)
+                    formatCurrencyAmount(usdValue, locale)
                   )}
                 </TableCell>
               </TableRow>

@@ -15,6 +15,8 @@ interface RampWizardShellProps {
   stepIndex: number;
   primaryDisabled: boolean;
   primaryLabel: string;
+  /** Spins the primary action in place while what it started runs; its label and width hold. */
+  primaryLoading?: boolean;
   /** Overrides the default Cancel/Previous secondary label. */
   secondaryLabel?: string;
   walletsError: string | null;
@@ -75,7 +77,7 @@ function RefreshFooter({
   cancel: { label: string; disabled: boolean; onClick: () => void } | null;
   hint: ReactNode;
   actions: ReactNode;
-  primary: { label: string; disabled: boolean; onClick: () => void } | null;
+  primary: { label: string; disabled: boolean; loading?: boolean; onClick: () => void } | null;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -96,8 +98,10 @@ function RefreshFooter({
         {primary ? (
           <Button
             type="button"
-            variant={primary.disabled ? "outline" : "default"}
+            // A running action stays filled under its spinner rather than reading as unavailable.
+            variant={primary.disabled && !primary.loading ? "outline" : "default"}
             disabled={primary.disabled}
+            loading={primary.loading}
             onClick={primary.onClick}
           >
             {primary.label}
@@ -116,7 +120,7 @@ function LegacyFooter({
 }: {
   secondary: { label: string; disabled?: boolean; onClick: () => void } | null;
   actions?: ReactNode;
-  primary: { label: string; disabled?: boolean; onClick: () => void } | null;
+  primary: { label: string; disabled?: boolean; loading?: boolean; onClick: () => void } | null;
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -135,7 +139,12 @@ function LegacyFooter({
       <div className="ml-auto flex items-center gap-3">
         {actions}
         {primary ? (
-          <Button type="button" disabled={primary.disabled} onClick={primary.onClick}>
+          <Button
+            type="button"
+            disabled={primary.disabled}
+            loading={primary.loading}
+            onClick={primary.onClick}
+          >
             {primary.label}
           </Button>
         ) : null}
@@ -164,7 +173,7 @@ function wizardFooter({
 }: {
   refresh: boolean;
   stepIndex: number;
-  primary: { label: string; disabled: boolean; onClick: () => void } | null;
+  primary: { label: string; disabled: boolean; loading?: boolean; onClick: () => void } | null;
   secondaryLabel: string | undefined;
   secondaryDisabled: boolean | undefined;
   hideSecondary: boolean | undefined;
@@ -277,6 +286,7 @@ function shellFooter({
   stepIndex,
   primaryLabel,
   primaryDisabled,
+  primaryLoading,
   onPrimary,
   hidePrimary,
   secondaryLabel,
@@ -297,6 +307,7 @@ function shellFooter({
   stepIndex: number;
   primaryLabel: string;
   primaryDisabled: boolean;
+  primaryLoading: boolean | undefined;
   onPrimary: () => void;
   hidePrimary: boolean | undefined;
   secondaryLabel: string | undefined;
@@ -327,7 +338,12 @@ function shellFooter({
     stepIndex,
     primary: hidePrimary
       ? null
-      : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary },
+      : {
+          label: primaryLabel,
+          disabled: primaryDisabled,
+          loading: primaryLoading,
+          onClick: onPrimary,
+        },
     secondaryLabel,
     secondaryDisabled,
     hideSecondary,
@@ -350,6 +366,7 @@ export function RampWizardShell({
   stepIndex,
   primaryDisabled,
   primaryLabel,
+  primaryLoading,
   secondaryLabel,
   walletsError,
   onPrimary,
@@ -388,6 +405,7 @@ export function RampWizardShell({
     stepIndex,
     primaryLabel,
     primaryDisabled,
+    primaryLoading,
     onPrimary,
     hidePrimary,
     secondaryLabel,

@@ -14,6 +14,9 @@ import { getTranslations } from "@/i18n/server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
+/** The newest transfers Home reads: the list shows them, and the volume knows they may stop short. */
+const HOME_TRANSFERS_WINDOW = 20;
+
 /**
  * Home's recent activity and today's volume, from one read of the transfers.
  *
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
     );
     const [transfersResult, issuanceActivityResult, issuedTokenSymbolsResult] = await Promise.all([
       trace.step("fetch_payment_transfers", () =>
-        fetchDashboardPaymentTransfers(apiClient.request, 20, {
+        fetchDashboardPaymentTransfers(apiClient.request, HOME_TRANSFERS_WINDOW, {
           walletDeadlineMs: WALLET_TRANSFERS_DEADLINE_MS,
         })
       ),
@@ -85,7 +88,9 @@ export async function GET(request: Request) {
           activityRows,
           activityError,
           activityNotice: activityNotice || null,
-          todaysVolume: completeTransfers ? computeTodaysVolume(completeTransfers) : null,
+          todaysVolume: completeTransfers
+            ? computeTodaysVolume(completeTransfers, HOME_TRANSFERS_WINDOW)
+            : null,
           todaysVolumeError: completeTransfers
             ? null
             : t("Shared.homeWorkspace.paymentsActivityUnavailable"),

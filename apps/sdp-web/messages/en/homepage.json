@@ -312,7 +312,8 @@
         "partners": "Partners",
         "builders": "Builders"
       },
-      "providedBy": "Provided by the {organization}"
+      "providedBy": "Provided by the {organization}",
+      "terms": "Terms of Use"
     }
   }
 }

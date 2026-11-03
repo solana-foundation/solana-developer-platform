@@ -12,6 +12,8 @@ import {
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
+import { PayStatusWatch } from "./pay-status-watch";
 
 export const dynamic = "force-dynamic";
 
@@ -98,12 +100,23 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
   const statusPanel =
     request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
+  // The watch reads from the payer's browser, so it takes the address a browser can reach.
+  const publicApiBaseUrl = findPublicSdpApiBaseUrl({
+    NEXT_PUBLIC_SDP_API_BASE_URL: process.env.NEXT_PUBLIC_SDP_API_BASE_URL,
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+  });
 
   return (
     <main
       {...refreshThemeProps}
       className="flex min-h-screen items-center justify-center bg-surface px-4 py-12"
     >
+      {publicApiBaseUrl ? (
+        <PayStatusWatch
+          statusUrl={`${publicApiBaseUrl}/pay/${encodeURIComponent(token)}`}
+          status={request.status}
+        />
+      ) : null}
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
         <div className="p-8">
           <div className="flex items-center justify-center">

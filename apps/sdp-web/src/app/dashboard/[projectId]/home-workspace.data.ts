@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import { homeActivityRowSchema } from "./home-page.data";
+import { homeActivityRowSchema, todaysVolumeSchema } from "./home-page.data";
 import { homeQueryKeys } from "./home-query-key";
 
 const homeActivityResponseSchema = z.object({
@@ -11,7 +11,7 @@ const homeActivityResponseSchema = z.object({
     activityRows: z.array(homeActivityRowSchema),
     activityError: z.string().nullable(),
     activityNotice: z.string().nullable(),
-    todaysVolume: z.number().nullable(),
+    todaysVolume: todaysVolumeSchema.nullable(),
     todaysVolumeError: z.string().nullable(),
   }),
 });
@@ -23,7 +23,7 @@ const HOME_ACTIVITY_REFRESH_MS = 60_000;
 const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 /** The saved snapshot's shape: bump it with any change to the route's answer, so a browser
  * holding the old shape drops it instead of drawing it. */
-const HOME_ACTIVITY_SNAPSHOT_VERSION = 2;
+const HOME_ACTIVITY_SNAPSHOT_VERSION = 3;
 
 /**
  * Home's activity list and today's volume, from the one route that builds both. Parsed, not

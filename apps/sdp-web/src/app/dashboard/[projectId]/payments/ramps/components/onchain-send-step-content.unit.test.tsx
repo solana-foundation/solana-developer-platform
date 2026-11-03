@@ -202,20 +202,30 @@ describe("OnchainSendStepContent", () => {
 
   it.each([
     {
-      name: "signature",
+      name: "a confirmed signature",
+      status: "confirmed" as const,
       signature: "Signature111111111111111111111111111111111111",
       expectedCopy: "Your transfer was sent successfully.",
       explorerVisible: true,
     },
     {
+      // A signature is not success: until the status confirms it, the transfer is in flight.
+      name: "a signature still processing",
+      status: "processing" as const,
+      signature: "Signature111111111111111111111111111111111111",
+      expectedCopy: "Status: processing",
+      explorerVisible: true,
+    },
+    {
       name: "no signature",
+      status: "processing" as const,
       signature: null,
       expectedCopy: "Status: processing",
       explorerVisible: false,
     },
   ])(
     "shows submitted transfer behavior with $name",
-    ({ signature, expectedCopy, explorerVisible }) => {
+    ({ status, signature, expectedCopy, explorerVisible }) => {
       renderStep({
         ...baseWizard,
         currentStepId: "REVIEW",
@@ -223,7 +233,7 @@ describe("OnchainSendStepContent", () => {
           id: "xfr_test",
           custodyWalletId: labeledWallet.id,
           providerWalletId: labeledWallet.walletId,
-          status: "processing",
+          status,
           signature,
           rampsMemo: {},
         },
@@ -234,6 +244,11 @@ describe("OnchainSendStepContent", () => {
       expect(screen.queryByText(expectedCopy)).not.toBeNull();
       expect(screen.queryByRole("button", { name: "View on explorer" }) !== null).toBe(
         explorerVisible
+      );
+      // The status and, once there is one, the signature to copy.
+      expect(screen.getByText("Status")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Copy the signature" }) !== null).toBe(
+        signature !== null
       );
     }
   );

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { cleanup, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -18,6 +19,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const ACTIVITY_PATH = "/api/dashboard/home/activity";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const SNAPSHOT = {
   activityRows: [
     {
@@ -35,7 +37,12 @@ const SNAPSHOT = {
   ],
   activityError: null,
   activityNotice: null,
-  todaysVolume: 125,
+  todaysVolume: {
+    transferCount: 1,
+    amountByMint: { [USDC_MINT]: "125" },
+    complete: true,
+    coversDay: true,
+  },
   todaysVolumeError: null,
 };
 

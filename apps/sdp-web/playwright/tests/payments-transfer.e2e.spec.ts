@@ -103,7 +103,8 @@ test.describe
       await expect(sendButton).toBeEnabled({ timeout: 120_000 });
       await sendButton.click();
 
-      await expect(app.getByText("Transfer submitted")).toBeVisible({ timeout: 120_000 });
+      // The heading names the outcome: sent once finalized, submitted while still confirming.
+      await expect(app.getByText(/^Transfer (sent|submitted)$/)).toBeVisible({ timeout: 120_000 });
       const doneButton = app.getByRole("button", { name: "Done", exact: true });
       await doneButton.focus();
       await doneButton.press("Enter");

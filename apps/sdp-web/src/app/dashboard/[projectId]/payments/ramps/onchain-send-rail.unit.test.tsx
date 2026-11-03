@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -121,23 +122,69 @@ describe("OnchainSendRail heading", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Review transfer");
   });
 
-  it("gives a sent transfer one heading that says it was submitted", () => {
+  const result = {
+    id: "xfr_test",
+    custodyWalletId: "cwlt_treasury",
+    providerWalletId: "wallet_treasury",
+    signature: "Signature111111111111111111111111111111111111",
+    rampsMemo: {},
+  };
+
+  it("gives a confirmed transfer one heading that says it was sent", () => {
     renderRail({
       ...reviewWizard,
       finished: true,
-      transferResult: {
-        id: "xfr_test",
-        custodyWalletId: "cwlt_treasury",
-        providerWalletId: "wallet_treasury",
-        status: "confirmed",
-        signature: "Signature111111111111111111111111111111111111",
-        rampsMemo: {},
-      },
+      transferResult: { ...result, status: "confirmed" },
+    });
+
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Transfer sent");
+    expect(screen.getAllByText("Transfer sent")).toHaveLength(1);
+    expect(screen.queryByText("Review transfer")).toBeNull();
+    expect(screen.queryByText("Your transfer was sent successfully.")).not.toBeNull();
+  });
+
+  it("never heads a failed transfer as submitted, and says why it failed", () => {
+    renderRail({
+      ...reviewWizard,
+      finished: true,
+      transferResult: { ...result, status: "failed", signature: null, error: null },
+    });
+
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Transfer failed");
+    expect(screen.queryByText("Transfer submitted")).toBeNull();
+    expect(
+      screen.getByText("No reason came back. Check the transaction before sending again.")
+    ).toBeTruthy();
+  });
+
+  it("heads a transfer that has a signature but no confirmation as submitted, not sent", () => {
+    renderRail({
+      ...reviewWizard,
+      finished: true,
+      transferResult: { ...result, status: "processing" },
     });
 
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Transfer submitted");
-    expect(screen.getAllByText("Transfer submitted")).toHaveLength(1);
-    expect(screen.queryByText("Review transfer")).toBeNull();
-    expect(screen.queryByText("Your transfer was sent successfully.")).not.toBeNull();
+    expect(screen.queryByText("Your transfer was sent successfully.")).toBeNull();
+  });
+});
+
+describe("OnchainSendRail while sending", () => {
+  it("keeps the send label on a spinning button and says what it is waiting on", () => {
+    // The footer's waiting line is the refresh design's, where Pay runs.
+    mocks.wizard = { ...reviewWizard, submitting: true };
+    render(
+      <ThemeScopeProvider scope="refresh">
+        <OnchainSendRail {...railProps} />
+      </ThemeScopeProvider>,
+      { wrapper }
+    );
+
+    // The spinner joins the button's name, so match the label inside it.
+    const send = screen.getByRole("button", { name: /Send transfer/ });
+    expect(send.textContent).toBe("Send transfer");
+    expect(send.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("Sending and confirming on Solana…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   });
 });
