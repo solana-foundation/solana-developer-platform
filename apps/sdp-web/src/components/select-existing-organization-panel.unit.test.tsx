@@ -17,7 +17,9 @@ interface InvitationFixture {
 
 const mocks = vi.hoisted(() => {
   const invitations: InvitationFixture[] = [];
-  const session: { activeOrganization: { id: string } | null } = { activeOrganization: null };
+  const session: { activeOrganization: { id: string; name: string } | null } = {
+    activeOrganization: null,
+  };
   return {
     session,
     isLoaded: true,
@@ -59,12 +61,24 @@ vi.mock("@clerk/nextjs", () => ({
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-function renderPanel(noAccess: boolean) {
-  return render(
+function panel(refusedOrganizationId: string | null) {
+  return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <SelectExistingOrganizationPanel noAccess={noAccess} />
+      <SelectExistingOrganizationPanel refusedOrganizationId={refusedOrganizationId} />
     </I18nProvider>
   );
+}
+
+function renderPanel(refusedOrganizationId: string | null = null) {
+  return render(panel(refusedOrganizationId));
+}
+
+function membership(id: string, name: string) {
+  return { organization: { id, name, imageUrl: "" } };
+}
+
+function choice(name: string): HTMLButtonElement {
+  return screen.getByRole<HTMLButtonElement>("button", { name });
 }
 
 describe("SelectExistingOrganizationPanel", () => {
@@ -94,7 +108,7 @@ describe("SelectExistingOrganizationPanel", () => {
   });
 
   it("offers existing memberships without an organization creation action", () => {
-    renderPanel(false);
+    renderPanel();
 
     expect(screen.getByRole("button", { name: "Existing workspace" })).toBeTruthy();
     expect(screen.queryByText(/create organization/i)).toBeNull();
@@ -102,7 +116,7 @@ describe("SelectExistingOrganizationPanel", () => {
 
   it("activates the selected membership and refreshes the server layout", async () => {
     const user = userEvent.setup();
-    renderPanel(false);
+    renderPanel();
 
     await user.click(screen.getByRole("button", { name: "Existing workspace" }));
 
@@ -112,7 +126,7 @@ describe("SelectExistingOrganizationPanel", () => {
 
   it("offers to create an organization with no memberships and no invitations", () => {
     mocks.memberships = [];
-    renderPanel(false);
+    renderPanel();
 
     expect(screen.getByRole("heading", { name: "Name your organization" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
@@ -129,7 +143,7 @@ describe("SelectExistingOrganizationPanel", () => {
         accept,
       },
     ];
-    renderPanel(false);
+    renderPanel();
 
     expect(screen.queryByRole("textbox", { name: "Organization name" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Join Invited workspace" }));
@@ -143,12 +157,72 @@ describe("SelectExistingOrganizationPanel", () => {
   });
 
   it("with no access, drops the refused organization and offers to create one when nothing remains", () => {
-    mocks.session.activeOrganization = { id: "org_existing" };
-    renderPanel(true);
+    renderPanel("org_existing");
 
-    expect(screen.getByRole("heading", { name: "No access to this organization" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "No access to Existing workspace" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "SDP has no active membership for you in this organization. Create your own organization, or ask an admin to invite you."
+      )
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Existing workspace" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
+  });
+
+  it("keeps the remaining choices usable when SDP refuses the next organization too", async () => {
+    const user = userEvent.setup();
+    mocks.memberships = [
+      membership("org_alpha", "Alpha"),
+      membership("org_beta", "Beta"),
+      membership("org_gamma", "Gamma"),
+    ];
+    const { rerender } = renderPanel("org_alpha");
+
+    await user.click(choice("Beta"));
+    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_beta" });
+    // The refreshed layout refuses Beta as well and renders this same panel again.
+    mocks.session.activeOrganization = { id: "org_beta", name: "Beta" };
+    rerender(panel("org_beta"));
+
+    expect(screen.getByRole("heading", { name: "No access to Beta" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "SDP has no active membership for you in this organization. Choose another organization, or ask an admin to invite you."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Beta" })).toBeNull();
+    await waitFor(() => expect(choice("Gamma").disabled).toBe(false));
+    expect(choice("Gamma").parentElement?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("holds every choice while a switch is in flight", async () => {
+    const user = userEvent.setup();
+    let finishSwitch = () => {};
+    mocks.memberships = [membership("org_alpha", "Alpha"), membership("org_beta", "Beta")];
+    mocks.setActive.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishSwitch = resolve;
+      })
+    );
+    renderPanel();
+
+    await user.click(choice("Alpha"));
+
+    expect(choice("Alpha").disabled).toBe(true);
+    expect(choice("Beta").disabled).toBe(true);
+    expect(choice("Beta").parentElement?.getAttribute("aria-busy")).toBe("true");
+    finishSwitch();
+    await waitFor(() => expect(choice("Beta").disabled).toBe(false));
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("names the refused organization from the session when the loaded list lacks it", () => {
+    mocks.session.activeOrganization = { id: "org_unlisted", name: "Unlisted workspace" };
+    renderPanel("org_unlisted");
+
+    expect(screen.getByRole("heading", { name: "No access to Unlisted workspace" })).toBeTruthy();
+    expect(choice("Existing workspace").disabled).toBe(false);
   });
 
   it("keeps an accepted invitation accepted when switching to its organization fails", async () => {
@@ -164,7 +238,7 @@ describe("SelectExistingOrganizationPanel", () => {
       },
     ];
     mocks.setActive.mockRejectedValue(new Error("switch refused"));
-    renderPanel(false);
+    renderPanel();
 
     await user.click(screen.getByRole("button", { name: "Join Invited workspace" }));
 
@@ -182,7 +256,7 @@ describe("SelectExistingOrganizationPanel", () => {
   it("loads more existing memberships when Clerk has another page", async () => {
     const user = userEvent.setup();
     mocks.hasNextPage = true;
-    renderPanel(false);
+    renderPanel();
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 

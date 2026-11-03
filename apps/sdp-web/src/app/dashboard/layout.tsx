@@ -36,7 +36,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (!orgId) {
     return (
       <AuthPageShell action={null}>
-        <SelectExistingOrganizationPanel noAccess={false} />
+        <SelectExistingOrganizationPanel refusedOrganizationId={null} />
       </AuthPageShell>
     );
   }
@@ -44,7 +44,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (!(await sdpAdmitsSession())) {
     return (
       <AuthPageShell action={null}>
-        <SelectExistingOrganizationPanel noAccess />
+        <SelectExistingOrganizationPanel refusedOrganizationId={orgId} />
       </AuthPageShell>
     );
   }

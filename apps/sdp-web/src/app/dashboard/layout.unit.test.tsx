@@ -28,9 +28,27 @@ describe("dashboard layout", () => {
       type: AuthPageShell,
       props: {
         action: null,
-        children: { type: SelectExistingOrganizationPanel, props: { noAccess: true } },
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { refusedOrganizationId: "org_test" },
+        },
       },
     });
+  });
+
+  it("offers the organization choices without a refusal when the session names no organization", async () => {
+    mocks.getSdpAuth.mockResolvedValue({ userId: "user_test", orgId: null });
+    const memberRole = vi.spyOn(sdpApi, "requestMemberRole");
+
+    const layout = await DashboardLayout({ children: "dashboard page" });
+
+    expect(layout).toMatchObject({
+      type: AuthPageShell,
+      props: {
+        children: { type: SelectExistingOrganizationPanel, props: { refusedOrganizationId: null } },
+      },
+    });
+    expect(memberRole).not.toHaveBeenCalled();
   });
 
   it("propagates any other failure of the member read", async () => {

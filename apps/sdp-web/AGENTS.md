@@ -52,6 +52,14 @@ Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes f
 - The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
 - Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
 
+The organization entry panel (`components/select-existing-organization-panel.tsx`)
+lists Clerk memberships, but SDP admits only organizations its own database
+created (ADR 0012), and one Clerk instance backs several databases (dev: every
+local stack, PR preview, api-dev and ephemeral API; prod: prod and stage). So a
+choice can come back refused: the layout passes the refused organization's id,
+and the panel, left unkeyed so it stays mounted, hides each refused one for the
+visit and holds the list in a transition until the server answers.
+
 A button whose action is running takes `loading` and keeps its words: the
 design-system button spins in place at its own width, so there is no "…ing"
 label and no busy variant; `disabled` stays for a button that is not ready. A

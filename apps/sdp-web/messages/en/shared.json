@@ -341,7 +341,9 @@
     "acceptInvitation": "Join {organization}",
     "acceptInvitationFailed": "Could not accept the invitation. Try the link in your invitation email.",
     "noOrganizationAccessTitle": "No access to this organization",
-    "noOrganizationAccessDescription": "You are not a member of this organization in SDP. Choose another organization, or ask an admin to invite you.",
+    "noNamedOrganizationAccessTitle": "No access to {organization}",
+    "noOrganizationAccessDescription": "SDP has no active membership for you in this organization. Choose another organization, or ask an admin to invite you.",
+    "noOrganizationAccessCreateDescription": "SDP has no active membership for you in this organization. Create your own organization, or ask an admin to invite you.",
     "switchOrganizationFailed": "Joined, but could not switch to the organization. Choose it from the list."
   },
   "dashboardShell": {
