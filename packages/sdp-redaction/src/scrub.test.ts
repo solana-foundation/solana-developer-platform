@@ -805,6 +805,22 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     );
   });
 
+  it("masks a value that only starts with the redaction marker", () => {
+    assert.equal(
+      redactCredentialString("password=[REDACTED]correct horse battery staple"),
+      "password=[REDACTED]"
+    );
+    assert.equal(redactCredentialString("token=[REDACTED]not-a-real-token"), "token=[REDACTED]");
+    assert.equal(
+      redactCredentialString("__clerk_ticket=[REDACTED]not-a-real-ticket&x=1"),
+      "__clerk_ticket=[REDACTED]&x=1"
+    );
+    assert.equal(
+      redactCredentialString("token=[REDACTED], status=502"),
+      "token=[REDACTED], status=502"
+    );
+  });
+
   it("masks to the end rather than guess where a malformed value ends", () => {
     assert.equal(redactCredentialString('{"mnemonic":"alpha bravo'), '{"mnemonic":"[REDACTED]');
     assert.equal(redactCredentialString('{"secretKey":[12,34'), '{"secretKey":[REDACTED]');

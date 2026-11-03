@@ -20,7 +20,7 @@
  * and which mask to the end of the text when a value never closes.
  */
 
-import { isCredentialKey, isFreeTextCredentialKey, REDACTED } from "./policy";
+import { isCredentialKey, isFreeTextCredentialKey, normalizeKey, REDACTED } from "./policy";
 
 /**
  * How many times one string may be re-read: a JSON string inside a JSON
@@ -110,6 +110,7 @@ const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 // more, `%3D`, `%253D`, ...). Its value stops at `&`, so the query string
 // after it stays readable. The JSON field form is the generic field scanner's.
 const CLERK_TICKET_PATTERN = /(__clerk_ticket(?:=|%(?:25)*3D))[^&\s"'#%<>]+/gi;
+const CLERK_TICKET_VALUE_END = /[&\s"'#%<>]/;
 
 export function redactCredentialString(value: string): string {
   return redactString(value, 0);
@@ -365,16 +366,19 @@ function redactAssignments(text: string): string {
       continue;
     }
     const valueStart = match.index + match[0].length;
-    if (text.startsWith(REDACTED, valueStart)) {
-      // Already redacted by an earlier rule (a cookie header, a Clerk ticket
-      // whose query string follows): keep what comes after it.
+    if (isRedactedClerkTicket(key, text, valueStart)) {
+      // The Clerk ticket rule ends its value at the query delimiter; keep the
+      // query string after it.
       start.lastIndex = valueStart + REDACTED.length;
       continue;
     }
     const valueEnd = isFreeTextCredentialKey(key)
       ? freeTextValueEnd(text, valueStart)
       : stickyEnd(ASSIGNMENT_VALUE, text, valueStart);
-    if (valueEnd === valueStart) {
+    // Only a value that is exactly the marker is already redacted; a value
+    // that merely starts with it (`password=[REDACTED]rest`) is still masked.
+    if (valueEnd === valueStart || text.slice(valueStart, valueEnd) === REDACTED) {
+      start.lastIndex = Math.max(valueEnd, start.lastIndex);
       continue;
     }
     redacted += text.slice(copiedUpTo, valueStart - separator.length) + separator + REDACTED;
@@ -382,6 +386,20 @@ function redactAssignments(text: string): string {
     start.lastIndex = valueEnd;
   }
   return redacted + text.slice(copiedUpTo);
+}
+
+/**
+ * Whether `valueStart` holds a Clerk ticket that `CLERK_TICKET_PATTERN`
+ * already redacted: the marker followed by a character that pattern ends its
+ * value at, or the end of the text.
+ */
+function isRedactedClerkTicket(key: string, text: string, valueStart: number): boolean {
+  const after = valueStart + REDACTED.length;
+  return (
+    normalizeKey(key) === "clerkticket" &&
+    text.startsWith(REDACTED, valueStart) &&
+    (after === text.length || CLERK_TICKET_VALUE_END.test(text[after]))
+  );
 }
 
 /** The last of several space-separated words, or undefined for one word. */
