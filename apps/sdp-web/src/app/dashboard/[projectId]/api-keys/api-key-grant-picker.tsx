@@ -84,7 +84,9 @@ export function ApiKeyGrantPicker({
               <legend className="sr-only">{label}</legend>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-primary">{label}</p>
-                <p className="mt-0.5 text-xs text-secondary">{grantModuleDescription(module, t)}</p>
+                <p className="mt-0.5 text-xs text-secondary">
+                  {grantModuleDescription(module, t, offered)}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 {actions.map((action) => {

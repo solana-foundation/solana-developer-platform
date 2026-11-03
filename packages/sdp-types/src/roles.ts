@@ -20,10 +20,10 @@ export type LegacyOrganizationRole = OrganizationRole | "owner" | "developer";
 export function normalizeOrganizationRole(
   role: LegacyOrganizationRole | string | null | undefined
 ): OrganizationRole {
-  if (role === "admin" || role === "owner" || role === "org:admin" || role === "org:owner") {
+  if (role === "admin" || role === "owner") {
     return "admin";
   }
-  if (role === "member" || role === "developer" || role === "org:member") {
+  if (role === "member" || role === "developer") {
     return "member";
   }
 

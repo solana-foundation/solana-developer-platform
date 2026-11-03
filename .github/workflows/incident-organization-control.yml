@@ -1,0 +1,150 @@
+# Organization status uses the existing authentication and signing gates.
+# Prod resume requires release-production approval and a current control version.
+name: Incident — organization control
+
+run-name: "Organization ${{ inputs.action }} — ${{ inputs.target }} — ${{ github.actor }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment to act on"
+        type: choice
+        options: [prod, stage]
+        required: true
+      action:
+        description: "status reads organization state; suspend blocks its requests and new starts; resume restores access (approval)"
+        type: choice
+        options: [status, suspend, resume]
+        required: true
+      organization_id:
+        description: "Organization id to inspect or control across all its projects"
+        type: string
+        required: true
+      reason:
+        description: "suspend/resume only: why (recorded on the control row)"
+        type: string
+      ticket:
+        description: "suspend/resume only: tracking issue, e.g. HOO-2334"
+        type: string
+      expected_version:
+        description: "resume only: current organization control version from status"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate and stage the command
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      args: ${{ steps.compose.outputs.args }}
+      gated: ${{ steps.compose.outputs.gated }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Compose the allowlisted command
+        id: compose
+        env:
+          TARGET: ${{ inputs.target }}
+          ACTION: ${{ inputs.action }}
+          ORGANIZATION_ID: ${{ inputs.organization_id }}
+          REASON: ${{ inputs.reason }}
+          TICKET: ${{ inputs.ticket }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          OPERATOR: ${{ github.actor }}
+        run: bash scripts/ci/compose-organization-control.sh
+
+  approve:
+    name: Resume approval
+    needs: validate
+    if: needs.validate.outputs.gated == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: release-production
+    concurrency:
+      group: sdp-incident-ops-approval
+      cancel-in-progress: true
+    steps:
+      - name: Record the approved command
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: |
+          echo "Approved organization-control command on prod: ${ARGS//|/ }" >> "${GITHUB_STEP_SUMMARY}"
+
+  run-prod:
+    name: Run on prod
+    needs: [validate, approve]
+    if: >-
+      always() && inputs.target == 'prod' &&
+      needs.validate.result == 'success' &&
+      (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    # Executions serialize per target at the job, not the workflow: a gated run
+    # waiting on approval must never block an emergency suspend.
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
+    env:
+      PROJECT_ID: solana-developer-platform
+      REGION: us-central1
+      OPS_JOB: sdp-prod-incident-ops
+      MIGRATE_JOB: sdp-prod-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh
+
+  run-stage:
+    name: Run on stage
+    needs: [validate]
+    if: inputs.target == 'stage' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
+    env:
+      PROJECT_ID: solana-developer-platform-stg
+      REGION: us-central1
+      OPS_JOB: sdp-stage-incident-ops
+      MIGRATE_JOB: sdp-stage-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh

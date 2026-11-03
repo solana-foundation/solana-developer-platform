@@ -24,10 +24,66 @@ import { isCredentialKey, REDACTED } from "./policy";
 // `quotedValueEnd` finds where the value closes. A quote token may carry
 // backslashes (a body serialized more than once), and the lookbehind starts a
 // token only where its backslash run starts, so a long run is scanned once.
+// Bare `seed` sits outside the suffix group: public PDA keys such as
+// `pda_seed` are not credentials under the object-key policy.
 const SENSITIVE_JSON_FIELD_START =
-  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(\\*)(["'])/gi;
+  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|cookies?|passphrase|password|pem|credential|secret|token|set[-_ ]?cookie|wallet[-_ ]?passphrase|seed[-_ ]?phrase)|seed)\1\s*:\s*(\\*)(["'])/gi;
+// A cookie header is a credential container, not one credential: every
+// `name=value` pair after `Cookie:` is a session, and they are separated by
+// spaces — exactly where the generic assignment pattern's value stops. Consume
+// the whole header value: to the end of the line for a raw header, to the end
+// of the containing string for one embedded in serialized data. The tempered
+// value ends at an unescaped quote that opens structure — a `,`/`}`/`]` run
+// followed either by a quoted key with a colon (`","status":502`) or by
+// nothing but structure to the end. Cookie syntax has no quoted keys, so a raw
+// header — quoted values like `session="abc", refresh="def"` included — still
+// consumes its line, and an escaped quote inside the value (`\"`) never ends
+// it. Without the boundary, redacting
+// `{"message":"Cookie: session=abc","status":502}` erased `status` and the
+// closing quotes along with the header. The token stays linear: the lookahead
+// only runs its structure scan past a quote, never per character.
+const COOKIE_ASSIGNMENT_PATTERN =
+  /\b(cookies?)\b(\s*[:=]\s*)(?:(?!(?<!\\)["']\s*[,}\]][\s,}\]]*(?:["'][^"'\n\r]*["']\s*:|$))[^\n\r])*/gi;
+// Do not start the exact-only seed alternative after an identifier separator.
 const SENSITIVE_ASSIGNMENT_PATTERN =
-  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
+  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|pem|credential|secret|token)\b(\s*[:=]\s*)[^,\s}]+/gi;
+// The recovery-secret keys take values whose canonical form is
+// whitespace-separated — a BIP-39 mnemonic is `word word word` and a passphrase is
+// free text — so the generic rule above, whose value stops at the first
+// space, left every word after the first readable in an interpolated message:
+// `seed=word1 word2 word3` redacted to `seed=[REDACTED] word2 word3`. These
+// keys' values continue across runs of horizontal whitespace instead — a
+// double space or a tab between words is just formatting, and stopping there
+// exposed the rest of the secret (`seed=legal  winner thank` kept `winner
+// thank`) — up to a clear boundary: a comma or brace (the containing-structure
+// delimiters the generic rule also stops at), a newline (the value never
+// crosses lines), or a `name=` assignment following the value — the next
+// pair's key must not be swallowed into this redaction, both so the structure
+// after the value survives and so that pair's own value is still redacted by
+// the generic rule. Punctuation stays INSIDE the value exactly as the generic
+// rule keeps it: `password=alpha;bravo` is one value, and a `;`, `)`, `]` or
+// quote that follows a word is that word's tail while the `=` that opens the
+// next assignment is not. That boundary also has to preserve a multi-word
+// credential name whole: a word followed by a space otherwise reads as more
+// value, so `password=foo api key=SECRET` redacted `foo api` and left the
+// mangled remainder `key=SECRET` — a name no rule recognizes — readable. A
+// continuation word therefore must not OPEN a complete space-separated name
+// assignment (the two-word keys the generic and word rules recognize): the
+// lookahead at the word's start rejects it, which ends the value before the
+// name so the name's own rule redacts the pair. A word before an unknown
+// `name=` pair (`beta key=`) is still value: only complete credential names
+// are protected. Every quantified part has one forced parse — the whitespace
+// and word classes are disjoint, so their split cannot move, and both
+// lookaheads reject every shorter parse of a continuation word (a prefix is
+// followed by a word character, and a word that opens a name assignment is
+// rejected whole) — so the scan stays linear.
+const MULTI_WORD_CREDENTIAL_ASSIGNMENT = String.raw`(?:app[^\S\n\r]+secret|api[^\S\n\r]+(?:secret|key)|client[^\S\n\r]+secret|wallet[^\S\n\r]+(?:secret|passphrase)|signing[^\S\n\r]+secret|private[^\S\n\r]+key|secret[^\S\n\r]+key|access[^\S\n\r]+token|refresh[^\S\n\r]+token|id[^\S\n\r]+token|set[^\S\n\r]+cookie|seed[^\S\n\r]+(?:phrase|mnemonic))[^\S\n\r]*[:=]`;
+const SENSITIVE_WORD_ASSIGNMENT_PATTERN = new RegExp(
+  String.raw`\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[^\S\n\r]+(?!` +
+    MULTI_WORD_CREDENTIAL_ASSIGNMENT +
+    String.raw`)[^,\s}=]+(?![\w=-]))*`,
+  "gi"
+);
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =
@@ -53,10 +109,19 @@ export function redactCredentialString(value: string): string {
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );
-  return redactSensitiveJsonFields(withoutHeaders).replace(
-    SENSITIVE_ASSIGNMENT_PATTERN,
-    (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-  );
+  return redactSensitiveJsonFields(withoutHeaders)
+    .replace(
+      COOKIE_ASSIGNMENT_PATTERN,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+    )
+    .replace(
+      SENSITIVE_WORD_ASSIGNMENT_PATTERN,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+    )
+    .replace(
+      SENSITIVE_ASSIGNMENT_PATTERN,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+    );
 }
 
 /**

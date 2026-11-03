@@ -1,5 +1,4 @@
 import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
-import type { CustodyWalletPurpose } from "@sdp/types/custody";
 import { RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
   ORGANIZATION_PROVIDER_FAMILIES,
@@ -13,6 +12,7 @@ import {
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
+  WALLET_PURPOSE_OWNERS,
 } from "@sdp/types/release-channels";
 import { TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
 import { UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types/unified-transactions";
@@ -26,21 +26,9 @@ import { z } from "zod";
  * provider). Every enum value a module owns is classified here, from the
  * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
  * document's channel does not publish. Actions carry their owner in the
- * registry; the `Record` type makes a new wallet purpose fail to compile until
- * it is classified.
+ * registry, and wallet purposes in `WALLET_PURPOSE_OWNERS`, which the dashboard
+ * filters its purpose pickers by too.
  */
-
-/** `core` values run in every release channel. */
-type ValueOwner = SdpModule | "core";
-
-const WALLET_PURPOSE_OWNERS = {
-  root: "core",
-  mint_authority: "issuance",
-  freeze_authority: "issuance",
-  fee_payer: "core",
-  transfer: "core",
-  dvp_settlement_authority: "dvp",
-} as const satisfies Record<CustodyWalletPurpose, ValueOwner>;
 
 export type Owner = { module: SdpModule } | { rampProvider: RampProviderId };
 

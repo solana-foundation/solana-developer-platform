@@ -6,10 +6,8 @@ import type {
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import {
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { recurringPaymentReadFailureOutcome } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-state";
 import { RecurringPaymentDetailWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace";
 import {
@@ -106,7 +104,7 @@ export default async function RecurringPaymentDetailRoute({
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
         trace.step("fetch_issued_token_symbols", () =>
-          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          fetchIssuedTokenSymbolsWhenIssuanceEnabled(apiClient.request)
         ),
       ]);
       const issuedTokensByMint = Object.fromEntries(

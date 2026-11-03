@@ -39,6 +39,7 @@ import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { useHomeActivitySnapshot } from "./home-workspace.data";
 import { OverviewNetwork } from "./overview-network";
 import { useOverviewNetwork } from "./overview-network.data";
+import { payLineKey } from "./payments/payments-command-center.utils";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -101,9 +102,16 @@ function ActivityAddress({ row, cluster }: { row: HomeActivityRow; cluster: Sola
 
 /**
  * The zero state's left column: the balance it will fill, and the one thing everything else
- * waits on. A token needs somewhere to be held and a payment somewhere to leave from.
+ * waits on. A token needs somewhere to be held and a payment somewhere to leave from; the token
+ * is named only where the channel runs Issuance.
  */
-function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
+function FirstWalletPrompt({
+  canCreateWallet,
+  issuanceEnabled,
+}: {
+  canCreateWallet: boolean;
+  issuanceEnabled: boolean;
+}) {
   const t = useTranslations();
   const canWrite = useCanWrite();
   const locale = useLocale();
@@ -120,7 +128,11 @@ function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
         {t("Shared.homeWorkspace.newDesign.firstRunTitle")}
       </h3>
       <p className="mt-2 max-w-sm text-body text-secondary">
-        {t("Shared.homeWorkspace.newDesign.firstRunBody")}
+        {t(
+          issuanceEnabled
+            ? "Shared.homeWorkspace.newDesign.firstRunBody"
+            : "Shared.homeWorkspace.newDesign.firstRunBodyPayments"
+        )}
       </p>
       {canCreateWallet ? (
         <Button asChild variant="outline" className="mt-6 h-control-md">
@@ -662,7 +674,7 @@ export function HomeWorkspace({
             href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
             icon: ReceiptIcon,
             label: "Shared.homeWorkspace.quickActionPayments",
-            description: "Shared.homeWorkspace.newDesign.quickActionPaymentsBody",
+            description: payLineKey({ ramps: flags.ramps, compliance: flags.compliance }),
           } as const,
         ]
       : []),
@@ -686,7 +698,7 @@ export function HomeWorkspace({
       <DashboardQuickStart variant="overview" />
       <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
         {firstRun ? (
-          <FirstWalletPrompt canCreateWallet={canCreateWallet} />
+          <FirstWalletPrompt canCreateWallet={canCreateWallet} issuanceEnabled={flags.issuance} />
         ) : (
           <BalanceSummary
             totalBalance={totalBalance}

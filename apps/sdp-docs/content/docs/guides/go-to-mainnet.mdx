@@ -1,0 +1,97 @@
+---
+title: Go to mainnet
+description: Request mainnet access, connect your own custody account, and go live.
+icon: Rocket
+breadcrumbParent: /docs
+---
+
+You start with a Sandbox project on devnet. The SDP team must approve your
+organization before enabling Production on mainnet.
+
+## 1. Request mainnet access
+
+Sign in to the [dashboard](https://platform.solana.com/dashboard) as an
+**organization admin**. Open the account menu at the bottom of the sidebar, then
+**Settings**. Under **Mainnet access**, click **Request mainnet access**. If the
+section is missing, ask an admin to submit.
+
+[![The Mainnet access section in organization settings, with Request mainnet access](/images/go-to-mainnet/01-request-access.png)](/docs/images/go-to-mainnet/01-request-access.png)
+
+Select your organization's registered **Country or region** and click
+**Continue**. Contact the SDP team to change it after submission.
+
+[![Request mainnet access with Singapore selected as the organization's jurisdiction](/images/go-to-mainnet/02-jurisdiction.png)](/docs/images/go-to-mainnet/02-jurisdiction.png)
+
+Read the **Terms and Conditions** to the end, accept them on your organization's
+behalf, and click **Send request**. **Request sent** confirms submission;
+Settings shows **In review** until approval.
+
+[![Request sent confirmation, with SDP review still pending](/images/go-to-mainnet/request-sent.png)](/docs/images/go-to-mainnet/request-sent.png)
+
+If you see **Request not sent**, click **Send request again**; your details are
+saved. If requests aren't open, contact the SDP team.
+
+## 2. Switch to Production
+
+After approval, refresh **Settings**. When **Mainnet access** shows **Approved**,
+use the sidebar's top workspace switcher to select your production project
+(default: **Default Production Project**).
+
+<a href="/docs/images/go-to-mainnet/03-production-project.png">
+  <img
+    src="/docs/images/go-to-mainnet/03-production-project.png"
+    alt="The workspace switcher showing Default Production Project"
+    width="330"
+    height="342"
+    style={{ maxWidth: "100%", height: "auto" }}
+  />
+</a>
+
+Production uses `mainnet-beta`. Wallets, provider connections, and API keys are
+separate from Sandbox and must be set up again.
+
+## 3. Connect your custody provider account
+
+Production requires **Bring your own credentials**. In Production, open
+**Wallets**, click **Create wallet**, select **Privy**, then **Continue**.
+
+Enter a **Credential label**, your **Privy app ID** and **Privy app secret** from
+the [Privy dashboard](https://dashboard.privy.io), and an **Initial wallet label**.
+Click **Connect and verify** to verify the connection and create your first
+Privy wallet.
+
+[![Privy credential form with an example app ID and a masked app secret](/images/go-to-mainnet/04-connect-privy.png)](/docs/images/go-to-mainnet/04-connect-privy.png)
+
+For more wallets, select this connection. See
+[Create a wallet](/docs/guides/setup-wallets).
+
+## 4. Create a production API key
+
+In Production, open **API keys** and click **New API key**. Name it, grant the
+required actions, choose which wallets it can sign with, and review the summary.
+Click **Create key**.
+
+[![API key review showing Production, selected permissions, and the Treasury wallet](/images/go-to-mainnet/05-production-api-key.png)](/docs/images/go-to-mainnet/05-production-api-key.png)
+
+Copy the key to your secret manager; it's shown once. Replace your backend's
+sandbox key. The API URL stays `https://api.solana.com`; the key's project
+determines the network. See
+[API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
+
+## 5. Fund your wallet with mainnet USDC
+
+Send a small amount of **USDC on Solana mainnet** to your wallet's address.
+Devnet tokens have no value on mainnet. Circle's
+[mainnet USDC mint](https://developers.circle.com/stablecoins/usdc-contract-addresses)
+is `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+
+Use `"token": "USDC"` in transfer requests so SDP selects the mint for your network.
+Replace any hardcoded devnet mint addresses.
+
+SDP sponsors network fees and recipient token-account rent for transfers it
+signs from your Privy wallet. Fund it with USDC; no SOL is needed for those fees.
+Sponsorship limits apply. If sponsorship is unavailable, SDP refuses the transfer
+instead of charging your wallet.
+
+Send a [small first payment](/docs/payments/send-basic-payment) and
+[verify its status](/docs/payments/accept-verification) before increasing volume.

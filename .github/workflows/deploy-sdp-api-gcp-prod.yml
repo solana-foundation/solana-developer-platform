@@ -469,7 +469,7 @@ jobs:
 
       - name: Deploy candidate without production traffic
         id: candidate
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"

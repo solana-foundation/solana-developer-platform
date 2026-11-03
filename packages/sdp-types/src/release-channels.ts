@@ -17,6 +17,7 @@ import {
   CUSTODY_PROVIDERS,
   type CustodyMode,
   type CustodyProvider,
+  type CustodyWalletPurpose,
   isByokCustodyProvider,
 } from "./custody";
 import { RAMP_PROVIDERS, type RampProviderId } from "./provider-access";
@@ -215,3 +216,18 @@ export const SDP_RELEASE_CHANNELS = {
   beta: modulesInReleaseChannel("beta"),
   stable: modulesInReleaseChannel("stable"),
 } as const satisfies Record<SdpReleaseChannel, readonly SdpModule[]>;
+
+/**
+ * The module each wallet purpose serves. A `core` purpose runs in every release channel; any
+ * other runs only where its module does, so elsewhere the public OpenAPI document drops it and
+ * the dashboard does not offer it. The `Record` type makes a new purpose fail to compile until
+ * it is classified here.
+ */
+export const WALLET_PURPOSE_OWNERS = {
+  root: "core",
+  mint_authority: "issuance",
+  freeze_authority: "issuance",
+  fee_payer: "core",
+  transfer: "core",
+  dvp_settlement_authority: "dvp",
+} as const satisfies Record<CustodyWalletPurpose, SdpModule | "core">;

@@ -165,6 +165,11 @@ export const createTransferRequestSchema = createTransferSchemaBase
       description: "Destination wallet address.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
+    counterpartyAccountId: withOpenApi(createTransferSchemaBase.shape.counterpartyAccountId, {
+      description:
+        "The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.",
+      example: "cpacct_example",
+    }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
         "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",

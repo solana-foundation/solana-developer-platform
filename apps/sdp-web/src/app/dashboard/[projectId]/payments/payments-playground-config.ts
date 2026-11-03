@@ -173,6 +173,11 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           required: true,
         },
         {
+          key: "counterpartyAccountId",
+          label: "counterpartyAccountId",
+          placeholder: t("DashboardPayments.playground.optionalCounterpartyAccount"),
+        },
+        {
           key: "token",
           label: "token",
           placeholder: t("DashboardPayments.playground.usdc"),

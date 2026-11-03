@@ -11,6 +11,7 @@ import type { PaymentsIssuedTokenSymbol } from "@/app/dashboard/[projectId]/paym
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { TransactionDetailWorkspace } from "./transaction-detail-workspace";
+import { enabledPaymentTransactionKinds } from "./transaction-modules";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
@@ -93,6 +94,7 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
           wallets={[]}
           counterparties={[{ id: "cpty_test", name: "Acme Treasury" }]}
           modules={UNIFIED_TRANSACTION_MODULES}
+          paymentKinds={enabledPaymentTransactionKinds({ ramps: true })}
         />
       </I18nProvider>
     </SWRConfig>

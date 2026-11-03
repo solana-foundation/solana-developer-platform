@@ -579,9 +579,9 @@
       "totalBalance": "Total balance",
       "firstRunTitle": "Start with a wallet",
       "firstRunBody": "Everything else here needs one. A token you issue has to be held somewhere, and a payment has to leave from somewhere.",
+      "firstRunBodyPayments": "Everything else here needs one: a payment has to leave from somewhere.",
       "quickActionWalletsBody": "Somewhere to hold funds.",
-      "quickActionApiKeysBody": "So your systems can call.",
-      "quickActionPaymentsBody": "Onchain or fiat, checked."
+      "quickActionApiKeysBody": "So your systems can call."
     }
   },
   "integrations": {

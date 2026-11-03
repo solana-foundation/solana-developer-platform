@@ -42,6 +42,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferDirection as TransferDirection,
@@ -84,7 +85,11 @@ import {
   isModuleInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
+import {
+  type AppContext,
+  getCounterpartyAccountsRepository,
+  getPaymentsRepository,
+} from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
@@ -109,6 +114,7 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import {
   isFireblocksTransfer,
   prepareFireblocksTransfer,
@@ -146,6 +152,8 @@ async function createTransferRecord(
     projectId: string;
     custodyWalletId: string;
     walletId: string;
+    /** The contact the transfer pays, when the request named one of its accounts. */
+    counterpartyId: string | null;
     sourceAddress: string;
     destinationAddress: string;
     token: string;
@@ -176,7 +184,7 @@ async function createTransferRecord(
       projectId: input.projectId,
       custodyWalletId: input.custodyWalletId,
       walletId: input.walletId,
-      counterpartyId: null,
+      counterpartyId: input.counterpartyId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -233,6 +241,8 @@ interface TransferResolved {
   operation: OutboundPaymentOperation;
   /** The ramp deposit a `transferId` request funds, in the caller's project, whatever its state. */
   rampTransfer: TransferRow | null;
+  /** The contact account `counterpartyAccountId` names, in the caller's project, whatever its state. */
+  counterpartyAccount: CounterpartyAccountRow | null;
 }
 
 function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
@@ -376,12 +386,13 @@ async function updateOnchainTransferForRamp(
 
 /**
  * The create-transfer access check (HOO-1918, ADR 0009): the caller may move
- * money from the named source wallet, read fresh, in its own project. It runs
- * before the Idempotency-Key is claimed, so a replay passes exactly these
- * checks. A wallet deactivated since a request ran still passes here (a replay
- * moves nothing); admission refuses new work on it.
+ * money from the named source wallet, read fresh, in its own project, and a
+ * named contact account is in that project. It runs before the Idempotency-Key
+ * is claimed, so a replay passes exactly these checks. A wallet deactivated, or
+ * an account archived, since a request ran still passes here (a replay moves
+ * nothing); admission refuses new work on either.
  *
- * @returns The resolved scope and outbound operation, for the later steps.
+ * @returns The resolved scope, outbound operation and named contact account, for the later steps.
  */
 export async function authorizeTransfer(
   c: AppContext,
@@ -414,7 +425,48 @@ export async function authorizeTransfer(
     });
     if (!rampTransfer) throw notFound("Ramp transfer");
   }
-  return { scope, operation, rampTransfer };
+  // A contact account is named the same way: in the project, any status, as a batch checks its
+  // recipients. A ramp deposit already carries its counterparty, so the two never combine.
+  let counterpartyAccount: CounterpartyAccountRow | null = null;
+  if (body.counterpartyAccountId) {
+    if (body.transferId) {
+      throw badRequest("counterpartyAccountId cannot be combined with transferId");
+    }
+    const [account] = await getCounterpartyAccountsRepository(
+      c
+    ).listCounterpartyAccountsByIdsInProject({
+      counterpartyAccountIds: [body.counterpartyAccountId],
+      organizationId: scope.auth.organizationId,
+      projectId: requireProjectId(c),
+      status: "any",
+    });
+    if (!account) throw notFound(`Counterparty account ${body.counterpartyAccountId}`);
+    counterpartyAccount = account;
+  }
+  return { scope, operation, rampTransfer, counterpartyAccount };
+}
+
+/**
+ * Checks, as new work, that the contact account a transfer names can still be paid at its
+ * destination: active (archived since is a 404, as for a batch recipient), a Solana wallet,
+ * and the very address the request sends to, so the record never ties a payment to a contact
+ * it did not go to.
+ *
+ * @param account - The account authorize loaded.
+ * @param destination - The request's destination address.
+ * @throws AppError 404 when the account is no longer active, 400 when it is not the destination's.
+ */
+function assertCounterpartyAccountPaysDestination(
+  account: CounterpartyAccountRow,
+  destination: string
+): void {
+  if (account.status !== "active") throw notFound(`Counterparty account ${account.id}`);
+  if (account.account_kind !== "crypto_wallet") {
+    throw badRequest("counterpartyAccountId must be a crypto wallet account");
+  }
+  if (readSolanaCryptoWalletAddress(account.details) !== destination) {
+    throw badRequest("destination must be the address of the counterpartyAccountId account");
+  }
 }
 
 /**
@@ -426,10 +478,16 @@ export async function admitTransferExecution(
   c: AppContext,
   input: MovementStepInput<TransferResolved>
 ): Promise<void> {
-  const { rampTransfer } = input.authorized;
+  const { rampTransfer, counterpartyAccount } = input.authorized;
   if (rampTransfer) {
     // An excluded provider's deposit is never funded.
     assertTransferRampProviderInChannel(c, rampTransfer);
+  }
+  if (counterpartyAccount) {
+    assertCounterpartyAccountPaysDestination(
+      counterpartyAccount,
+      input.authorized.operation.destinationAddress
+    );
   }
   await admitPaymentStart(c, input.authorized.operation.sourceWallet, "payments.transfer");
 }
@@ -956,7 +1014,8 @@ async function executeFireblocksTransfer(
 
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
-  const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  const { scope, operation, rampTransfer, counterpartyAccount } =
+    getAuthorized<TransferResolved>(c);
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
@@ -1007,6 +1066,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         projectId: requireProjectId(c),
         custodyWalletId: operation.sourceWallet.id,
         walletId: operation.sourceWallet.walletId,
+        counterpartyId: counterpartyAccount ? counterpartyAccount.counterparty_id : null,
         sourceAddress: operation.sourceWallet.publicKey,
         destinationAddress: body.destination,
         token: operation.token,
@@ -1042,6 +1102,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         walletId: operation.sourceWallet.walletId,
         sourceAddress: operation.sourceWallet.publicKey,
         destination: body.destination,
+        counterpartyAccountId: counterpartyAccount ? counterpartyAccount.id : null,
         // Named tokenMint: a bare "token" key is scrubbed as a credential by
         // the audit redaction policy, and a mint address is not a secret.
         tokenMint: operation.token,

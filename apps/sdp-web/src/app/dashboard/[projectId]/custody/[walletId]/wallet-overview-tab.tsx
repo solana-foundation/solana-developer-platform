@@ -8,7 +8,10 @@ import Link from "next/link";
 import { Suspense, use } from "react";
 import { useWalletActions } from "@/app/dashboard/[projectId]/custody/use-wallet-actions";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { truncateMiddle } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import {
+  truncateMiddle,
+  walletSignersKey,
+} from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -65,9 +68,10 @@ function PartSkeleton({ rows = 3 }: { rows?: number }) {
 /** Whether the wallet can sign, as the design heads every wallet's page. */
 function WalletStateBand({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
+  const { flags } = useDashboardWorkspace();
   return wallet.isRuntimeExecutionAllowed ? (
     <StateBand tone="ok" state={t("DashboardCustody.walletStateActive")}>
-      {t("DashboardCustody.walletStateActiveBody")}
+      {t(walletSignersKey(flags))}
     </StateBand>
   ) : (
     <StateBand tone="warn" state={t("DashboardCustody.restricted")}>
@@ -103,6 +107,7 @@ function BalanceBlock({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const { flags } = useDashboardWorkspace();
   return (
     <RecordBlock title={t("DashboardCustody.balance")} quiet>
       <Suspense
@@ -116,7 +121,11 @@ function BalanceBlock({
             <RecordRow label={t("DashboardCustody.provider")}>{wallet.providerName}</RecordRow>
             <RecordRow
               label={t("DashboardCustody.purpose")}
-              hint={t("DashboardCustody.walletPurposeInfo")}
+              hint={t(
+                flags.issuance
+                  ? "DashboardCustody.walletPurposeInfo"
+                  : "DashboardCustody.walletPurposeInfoPayments"
+              )}
             >
               {wallet.purposeLabel ?? (
                 <span className="text-tertiary">{t("DashboardCustody.unknown")}</span>

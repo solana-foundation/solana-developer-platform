@@ -24,6 +24,7 @@ import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { CRYPTO_ACCOUNT_NETWORKS, type CryptoAccountNetwork } from "./counterparty-create-schemas";
 import { ScreeningProgress } from "./screening-progress";
+import { useAddressScreeningEnabled } from "./use-address-screening";
 
 type AddPhase = "idle" | "screening" | "revealing" | "ready" | "submitting";
 
@@ -60,6 +61,7 @@ export function CryptoAccountForm({
   const [snapshot, setSnapshot] = useState<ComplianceSnapshot | null>(null);
   const [screenUnavailable, setScreenUnavailable] = useState(false);
   const [complianceNotEnabled, setComplianceNotEnabled] = useState(false);
+  const screeningEnabled = useAddressScreeningEnabled();
   const submittingRef = useRef(false);
 
   const trimmedAddress = address.trim();
@@ -150,6 +152,10 @@ export function CryptoAccountForm({
 
   async function handleAdd() {
     if (!trimmedAddress) return;
+    if (!screeningEnabled) {
+      await createAccount();
+      return;
+    }
     setError(null);
     setScreenUnavailable(false);
     setComplianceNotEnabled(false);
