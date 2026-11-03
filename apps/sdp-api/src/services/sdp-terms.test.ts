@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  */
 const TERMS_TEXT_BY_VERSION = {
   "2026-10-placeholder": "8451f2301632842f33337452d6be2c6041e492c48c031b8b831b227f1e005574",
-  "2026-11-v4-draft": "741e602998546d061002facf359212c6ad140a9f33347e9995900964572e253d",
+  "2026-11-03": "f35a5d370dc6b4466844a0b237d8f91ccec0cd86c1f7988330bffa559588c17a",
 } as const satisfies Record<string, string>;
 
 function textHash(): string {

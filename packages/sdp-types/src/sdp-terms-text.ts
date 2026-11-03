@@ -1,13 +1,14 @@
 /**
- * The Terms of Use Solana Foundation Legal supplied (document 14888460 v4), word for word, as
- * Markdown: `##` starts a section, `###` a subsection inside it, `- ` a bullet and `**…**` bold
- * text. The title and the Last Modified line live on `SDP_TERMS` in `./mainnet-access`.
+ * The Terms of Use Solana Foundation Legal supplied (document 14888460 v4), word for word, with
+ * the party, the date and two corrections Legal approved on 2026-11-03. It is Markdown: `##`
+ * starts a section, `###` a subsection inside it, `- ` a bullet and `**…**` bold text. The title
+ * and the Last Modified line live on `SDP_TERMS` in `./mainnet-access`.
  *
  * A new revision from Legal replaces this text whole and takes a new `SDP_TERMS.version`.
  */
 export const SDP_TERMS_MARKDOWN = `## Acceptance of the Terms of Use
 
-These terms of use are entered into by and between you and [Solana Foundation] (“**Company**,” “**we**” or “**us**,” and their variants, including “**our**” and “**ours**”). These terms of use, together with any documents they expressly incorporate by reference (collectively, these “**Terms of Use**”), govern your access to and use of the Solana Earn platform (“**Earn**”), and the Solana Developer Platform (“**SDP**” and together with Earn, the “**Platforms**”) available at www.solana.com (the “**Website**”), and any content, functionality, interfaces, tools, and features offered on or through the Website (collectively, the “**UI**”, and together with the Platforms and the Website, the “**Services**”).
+These terms of use are entered into by and between you and Solana Foundation (“**Company**,” “**we**” or “**us**,” and their variants, including “**our**” and “**ours**”). These terms of use, together with any documents they expressly incorporate by reference (collectively, these “**Terms of Use**”), govern your access to and use of the Solana Earn platform (“**Earn**”), and the Solana Developer Platform (“**SDP**” and together with Earn, the “**Platforms**”) available at platform.solana.com (the “**Website**”), and any content, functionality, interfaces, tools, and features offered on or through the Website (collectively, the “**UI**”, and together with the Platforms and the Website, the “**Services**”).
 
 If the user engages with the Services under authority from a different party or on another party’s behalf, then “**you**” (and its variants, including “**your**” and “**yours**”) as used herein refers to that person on whose behalf the Services are used (e.g., an employer). Each individual who accesses or uses the Services on your behalf (each, an “**Authorized User**”) represents and warrants that he/she is authorized to bind you to these Terms of Use. You are responsible for the actions and inactions of all Authorized Users and any other persons who access or use the Services through your account as if they were your own.
 
@@ -23,7 +24,7 @@ YOU ACKNOWLEDGE AND AGREE THAT THE SERVICES, OR SOME PORTIONS THEREOF, WILL BE U
 
 NEITHER WE NOR OUR SERVICE PROVIDERS ARE RESPONSIBLE FOR ANY ACTIVITIES THAT YOU ENGAGE IN WHEN USING ANY THIRD PARTY SERVICES OR BLOCKCHAIN TECHNOLOGIES NOT PROVIDED BY US.
 
-SDP AND ITS PRODUCTS ONLY A FRONT-END THROUGH WHICH YOU WILL INTERACT AND TRANSACT WITH THIRD PARTIES, OR USE THIRD PARTY PRODUCTS OR SERVICES. WE HAVE NO RESPONSIBILITY AND ACCEPT NO LIABILITY FOR ANY ACTIONS OF SUCH THIRD PARTIES, OR FOR YOUR TRANSACTIONS.
+SDP AND ITS PRODUCTS ARE ONLY A FRONT-END THROUGH WHICH YOU WILL INTERACT AND TRANSACT WITH THIRD PARTIES, OR USE THIRD PARTY PRODUCTS OR SERVICES. WE HAVE NO RESPONSIBILITY AND ACCEPT NO LIABILITY FOR ANY ACTIONS OF SUCH THIRD PARTIES, OR FOR YOUR TRANSACTIONS.
 
 By using the Services, you represent and warrant that you are a business or other legal entity duly organized, validly existing, and in good standing in your jurisdiction of organization or formation, that you have full power and authority to enter into and perform these Terms of Use, that you have authorized the Authorized Users accessing the Services on your behalf to agree to these Terms of Use, that you otherwise meet all of the foregoing eligibility requirements, and that will comply with these Terms of Use and ensure your Authorized Users do as well. If you do not meet all of these requirements, you must not access or use any of the Services or allow your Authorized Users to do so.
 

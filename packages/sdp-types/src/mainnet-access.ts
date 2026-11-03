@@ -71,9 +71,6 @@ export function parseSdpTermsMarkdown(markdown: string): SdpTermsSection[] {
  *
  * Changing a word means a new `version`: `apps/sdp-api/src/services/sdp-terms.test.ts` pins each
  * version to a hash of its text.
- *
- * DRAFT: Legal's v4 still carries the bracketed placeholders `[DATE]` and `[Solana Foundation]`.
- * Prod takes no mainnet requests until a final version replaces it (HOO-2476).
  */
 export const SDP_TERMS: {
   version: string;
@@ -81,9 +78,9 @@ export const SDP_TERMS: {
   effectiveDate: string;
   sections: readonly SdpTermsSection[];
 } = {
-  version: "2026-11-v4-draft",
+  version: "2026-11-03",
   title: "Terms of Use",
-  effectiveDate: "Last Modified: [DATE]",
+  effectiveDate: "Last Modified: November 3, 2026",
   sections: parseSdpTermsMarkdown(SDP_TERMS_MARKDOWN),
 };
 
