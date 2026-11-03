@@ -37,30 +37,36 @@ function termsBlockKey(block: SdpTermsBlock): string {
 }
 
 function TermsBlock({ block, subheading }: { block: SdpTermsBlock; subheading: "h3" | "h5" }) {
-  if (block.kind === "subheading") {
-    const Subheading = subheading;
-    return (
-      <Subheading className="pt-2 font-medium text-primary underline underline-offset-4">
-        {block.text}
-      </Subheading>
-    );
+  switch (block.kind) {
+    case "subheading": {
+      const Subheading = subheading;
+      return (
+        <Subheading className="pt-2 font-medium text-primary underline underline-offset-4">
+          {block.text}
+        </Subheading>
+      );
+    }
+    case "list":
+      return (
+        <ul className="list-disc space-y-2 pl-5 marker:text-tertiary">
+          {block.items.map((item) => (
+            <li key={item}>
+              <TermsText text={item} />
+            </li>
+          ))}
+        </ul>
+      );
+    case "paragraph":
+      return (
+        <p>
+          <TermsText text={block.text} />
+        </p>
+      );
+    default: {
+      const exhaustive: never = block;
+      return exhaustive;
+    }
   }
-  if (block.kind === "list") {
-    return (
-      <ul className="list-disc space-y-2 pl-5 marker:text-tertiary">
-        {block.items.map((item) => (
-          <li key={item}>
-            <TermsText text={item} />
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  return (
-    <p>
-      <TermsText text={block.text} />
-    </p>
-  );
 }
 
 function TermsText({ text }: { text: string }) {
