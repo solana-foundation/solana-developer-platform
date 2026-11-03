@@ -98,12 +98,18 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" disabled={!changed || pending}>
-            {pending ? t("DashboardCustody.saving") : t("DashboardCustody.walletSaveChanges")}
+          <Button type="submit" size="sm" disabled={!changed} loading={pending}>
+            {t("DashboardCustody.walletSaveChanges")}
           </Button>
-          {changed && !pending ? (
+          {changed ? (
             <>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setDraft(saved)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => setDraft(saved)}
+              >
                 {t("DashboardCustody.walletDiscard")}
               </Button>
               <span className="text-body text-secondary">
@@ -162,11 +168,12 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
             type="button"
             variant="outline"
             size="sm"
-            disabled={isBusy || blocked !== null}
+            disabled={blocked !== null}
+            loading={isBusy}
             aria-describedby={blocked ? "wallet-prove-why" : undefined}
             onClick={runSignerCheck}
           >
-            {isBusy ? t("DashboardCustody.proving") : t("DashboardCustody.proveOwnership")}
+            {t("DashboardCustody.proveOwnership")}
           </Button>
           {blocked ? (
             <p id="wallet-prove-why" className="max-w-[40em] text-body text-secondary">

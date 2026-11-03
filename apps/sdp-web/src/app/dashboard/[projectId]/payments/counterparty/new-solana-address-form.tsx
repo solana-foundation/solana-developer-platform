@@ -23,24 +23,15 @@ import { useAddressScreeningEnabled } from "./use-address-screening";
 
 type Phase = "idle" | "screening" | "flagged" | "adding";
 
-/** The primary button's words for each phase; idle names what pressing it does here. */
-function primaryLabelKey(phase: Phase, screeningEnabled: boolean): MessageKey {
-  switch (phase) {
-    case "screening":
-      return "DashboardPayments.counterparty.screening";
-    case "adding":
-      return "DashboardPayments.counterparty.adding";
-    case "flagged":
-      return "DashboardPayments.counterparty.addAnyway";
-    case "idle":
-      return screeningEnabled
-        ? "DashboardPayments.counterparty.screenAndAdd"
-        : "DashboardPayments.counterparty.addAddress";
-    default: {
-      const unreachable: never = phase;
-      throw new Error(`Unknown phase: ${String(unreachable)}`);
-    }
-  }
+/**
+ * The primary button's words: what pressing it does, kept while that runs, so a press past a
+ * flag still reads "Add anyway" while it saves.
+ */
+function primaryLabelKey(screeningEnabled: boolean, overridingFlag: boolean): MessageKey {
+  if (overridingFlag) return "DashboardPayments.counterparty.addAnyway";
+  return screeningEnabled
+    ? "DashboardPayments.counterparty.screenAndAdd"
+    : "DashboardPayments.counterparty.addAddress";
 }
 
 interface NewSolanaAddressFormProps {
@@ -77,7 +68,10 @@ export function NewSolanaAddressForm({
   const trimmedAddress = address.trim();
   const busy = phase === "screening" || phase === "adding";
   const flagged = phase === "flagged";
-  const canSubmit = trimmedAddress !== "" && !busy;
+  // A press past a flag keeps the flag's outline and words while it runs.
+  const overridingFlag = flagged || (phase === "adding" && flag !== null);
+  const hasAddress = trimmedAddress !== "";
+  const canSubmit = hasAddress && !busy;
 
   async function save() {
     setPhase("adding");
@@ -148,7 +142,7 @@ export function NewSolanaAddressForm({
     }
   }
 
-  const primaryLabel = t(primaryLabelKey(phase, screeningEnabled));
+  const primaryLabel = t(primaryLabelKey(screeningEnabled, overridingFlag));
 
   return (
     <div
@@ -220,10 +214,11 @@ export function NewSolanaAddressForm({
             faded primary. */}
         <Button
           type="button"
-          variant={flagged || !canSubmit ? "outline" : "default"}
+          variant={overridingFlag || !hasAddress ? "outline" : "default"}
           size="sm"
-          disabled={!canSubmit}
-          className={cn(!canSubmit && "opacity-100 text-tertiary refresh:bg-fill")}
+          disabled={!hasAddress}
+          loading={busy}
+          className={cn(!hasAddress && "opacity-100 text-tertiary refresh:bg-fill")}
           onClick={() => void (flagged ? save() : screenAndSave())}
         >
           {primaryLabel}

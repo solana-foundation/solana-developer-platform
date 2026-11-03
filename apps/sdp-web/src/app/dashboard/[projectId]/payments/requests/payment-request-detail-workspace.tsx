@@ -5,7 +5,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { Modal } from "@sdp/ui/modal";
-import { CopyIcon, DownloadIcon, Loader2Icon, Share2Icon } from "lucide-react";
+import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -252,13 +252,10 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
             <Button
               type="button"
               variant="destructive"
-              disabled={canceling}
-              iconLeft={
-                canceling ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
-              }
+              loading={canceling}
               onClick={() => void cancel()}
             >
-              {canceling ? t("DashboardPayments.requestDetail.canceling") : title}
+              {title}
             </Button>
           </div>
         </div>

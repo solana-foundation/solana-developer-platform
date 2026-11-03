@@ -23,8 +23,6 @@ function offrampPrimaryLabel(
   t: Translate
 ): string {
   switch (true) {
-    case wizard.hostedQuoteLoading:
-      return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
@@ -124,6 +122,7 @@ export function OfframpRail({
       stepIndex={preSteps.length + wizard.stepIndex}
       completionTitle={offrampCompletionTitle(wizard, t)}
       primaryDisabled={offrampPrimaryDisabled(wizard, verificationPending)}
+      primaryLoading={wizard.hostedQuoteLoading}
       primaryLabel={offrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={offrampPrimaryAction(wizard, verificationUrl)}

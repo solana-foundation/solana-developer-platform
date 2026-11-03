@@ -124,17 +124,8 @@ export function RekeyWalletDialog({
             >
               {t("DashboardHeliusRings.rekey.cancel")}
             </Button>
-            <Button
-              type="submit"
-              variant="destructive"
-              disabled={!matches || submitting}
-              aria-busy={submitting}
-            >
-              {t(
-                submitting
-                  ? "DashboardHeliusRings.rekey.submitting"
-                  : "DashboardHeliusRings.rekey.submit"
-              )}
+            <Button type="submit" variant="destructive" disabled={!matches} loading={submitting}>
+              {t("DashboardHeliusRings.rekey.submit")}
             </Button>
           </div>
         </form>

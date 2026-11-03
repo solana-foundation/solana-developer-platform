@@ -56,7 +56,10 @@ describe("CreateOrganizationForm", () => {
     await user.click(screen.getByRole("button", { name: "Create organization" }));
 
     expect(create).toHaveBeenCalledWith("Acme Inc");
-    expect(screen.getByRole("button", { name: "Creating…" })).toHaveProperty("disabled", true);
+    // The button keeps its words and spins while the organization is created.
+    expect(
+      screen.getByRole("button", { name: /^Create organization/ }).getAttribute("aria-busy")
+    ).toBe("true");
     expect(mocks.setActive).not.toHaveBeenCalled();
 
     created.resolve({ ok: true, clerkOrganizationId: "org_created" });

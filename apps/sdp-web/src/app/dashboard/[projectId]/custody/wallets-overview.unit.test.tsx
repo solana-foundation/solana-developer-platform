@@ -194,7 +194,17 @@ describe("empty and failed lists", () => {
   it("invites an admin to create the first wallet", () => {
     renderOverview({ wallets: [] });
     expect(screen.getByText("Create your first wallet")).toBeTruthy();
-    expect(screen.queryByTestId("tab-row")).toBeNull();
+  });
+
+  // On a phone the tabs are hidden and the row is the toolbar's alone; the loading view held it.
+  it.each([
+    ["no wallets", { wallets: [] }],
+    ["a failed read", { walletsError: "Upstream timed out" }],
+  ])("keeps the toolbar's row, with no toolbar, for %s", (_label, overrides) => {
+    renderOverview(overrides);
+    const tabRow = screen.getByTestId("tab-row");
+    expect(tabRow.querySelector("span.h-7")).not.toBeNull();
+    expect(within(tabRow).queryByRole("button")).toBeNull();
   });
 
   it("tells a member who cannot create wallets why the list is empty", () => {

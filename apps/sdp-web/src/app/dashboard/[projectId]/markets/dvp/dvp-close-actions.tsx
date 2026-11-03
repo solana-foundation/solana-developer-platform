@@ -15,16 +15,12 @@
 
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { formatTimestamp } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import type { DvpTrade } from "./dvp-trade";
 import { canCancelDvpTrade, dvpTimestampToIso } from "./dvp-trade";
 import type { DvpPendingAction } from "./use-dvp-trade-actions";
-
-/** Shown in place of a button's icon while its request is out. */
-const PENDING_ICON = <Loader2Icon aria-hidden className="animate-spin" />;
 
 export function DvpCloseActions({
   onAct,
@@ -76,13 +72,11 @@ export function DvpCloseActions({
           <Button
             className="shrink-0"
             disabled={settle !== "available" || pending.size > 0}
-            iconLeft={settling ? PENDING_ICON : undefined}
+            loading={settling}
             onClick={() => onAct("settle")}
             type="button"
           >
-            {t(
-              settling ? "DashboardMarkets.dvp.actionSettling" : "DashboardMarkets.dvp.actionSettle"
-            )}
+            {t("DashboardMarkets.dvp.actionSettle")}
           </Button>
         </section>
       )}
@@ -98,16 +92,12 @@ export function DvpCloseActions({
         <Button
           className="shrink-0 text-destructive"
           disabled={pending.size > 0}
-          iconLeft={cancelling ? PENDING_ICON : undefined}
+          loading={cancelling}
           onClick={() => setConfirmingCancel(true)}
           type="button"
           variant="outline"
         >
-          {t(
-            cancelling
-              ? "DashboardMarkets.dvp.actionCancelling"
-              : "DashboardMarkets.dvp.actionCancel"
-          )}
+          {t("DashboardMarkets.dvp.actionCancel")}
         </Button>
       </section>
 

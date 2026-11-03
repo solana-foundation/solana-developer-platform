@@ -4,7 +4,6 @@ import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { StatusText } from "@sdp/ui/status-text";
-import { Loader2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { RecordBlock } from "@/components/refresh-record";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
@@ -91,9 +90,6 @@ function WithdrawalRequestItem({
   const cancelable = parRedemption
     ? isEarnVaultParRedemptionCancelable(request)
     : request.status === "expiredCancelable";
-  const cancellingKey = parRedemption
-    ? "DashboardEarn.parRedemption.cancelling"
-    : "DashboardEarn.queuedWithdraw.cancelling";
   const cancelKey = parRedemption
     ? "DashboardEarn.parRedemption.cancelAction"
     : "DashboardEarn.queuedWithdraw.cancelAction";
@@ -123,13 +119,12 @@ function WithdrawalRequestItem({
       {cancelable && canWrite ? (
         <Button
           className="justify-self-start md:justify-self-end"
-          disabled={busy}
-          iconLeft={busy ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          loading={busy}
           onClick={onCancel}
           size="sm"
           variant="outline"
         >
-          {t(busy ? cancellingKey : cancelKey)}
+          {t(cancelKey)}
         </Button>
       ) : null}
     </li>

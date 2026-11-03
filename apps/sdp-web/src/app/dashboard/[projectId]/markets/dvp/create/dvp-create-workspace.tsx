@@ -66,10 +66,13 @@ function WizardFooter({
         {t("DashboardMarkets.dvp.wizardBack")}
       </Button>
       {onLastStep ? (
-        <Button disabled={form.submitting || !form.ready} onClick={form.submit} type="button">
-          {form.submitting
-            ? t("DashboardMarkets.dvp.createSubmitting")
-            : t("DashboardMarkets.dvp.createAction")}
+        <Button
+          disabled={!form.ready}
+          loading={form.submitting}
+          onClick={form.submit}
+          type="button"
+        >
+          {t("DashboardMarkets.dvp.createAction")}
         </Button>
       ) : (
         <Button disabled={!canContinue} onClick={onContinue} type="button">

@@ -53,10 +53,8 @@ export function TokenSaveFooter({
           <Button variant="outline" disabled={saving} onClick={onDiscard}>
             {t("DashboardIssuance.newDesign.details.discard")}
           </Button>
-          <Button disabled={saving || saveDisabled} onClick={onSave}>
-            {saving
-              ? t("DashboardIssuance.newDesign.details.saving")
-              : t("DashboardIssuance.newDesign.details.saveChanges")}
+          <Button disabled={saveDisabled} loading={saving} onClick={onSave}>
+            {t("DashboardIssuance.newDesign.details.saveChanges")}
           </Button>
         </div>
       </div>

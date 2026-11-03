@@ -3,7 +3,6 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import { Button } from "@sdp/ui/button";
 import { useThemeScope } from "@sdp/ui/theme-scope";
-import { domAnimation, LazyMotion, m } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-dialog";
 import { WizardFrame } from "@/components/wizard-frame";
@@ -444,17 +443,10 @@ export function RampWizardShell({
             </div>
           ) : null}
 
-          <LazyMotion features={domAnimation}>
-            <m.div
-              key={stepIndex}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="space-y-6"
-            >
-              {children}
-            </m.div>
-          </LazyMotion>
+          {/* Each step mounts fresh; the frame fades it in. */}
+          <div key={stepIndex} className="space-y-6">
+            {children}
+          </div>
         </div>
       </WizardFrame>
 

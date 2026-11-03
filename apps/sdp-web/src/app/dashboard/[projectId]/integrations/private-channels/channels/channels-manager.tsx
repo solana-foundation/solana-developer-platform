@@ -5,7 +5,7 @@ import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { Loader2Icon, Trash2Icon } from "lucide-react";
+import { Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
@@ -93,8 +93,11 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
                   if (e.key === "Enter") handleCreate();
                 }}
               />
-              <Button onClick={handleCreate} disabled={isCreating || !name.trim()}>
-                {isCreating && !deletingId ? <Loader2Icon className="animate-spin" /> : null}
+              <Button
+                onClick={handleCreate}
+                disabled={isCreating || !name.trim()}
+                loading={isCreating && deletingId === null}
+              >
                 {t("DashboardPrivateChannels.channels.add")}
               </Button>
             </div>
@@ -139,13 +142,10 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
                       ? t("DashboardPrivateChannels.channels.deleteDefaultTitle")
                       : t("DashboardPrivateChannels.channels.deleteTitle")
                   }
+                  loading={deletingId === channel.id}
                   onClick={() => handleDelete(channel)}
                 >
-                  {deletingId === channel.id ? (
-                    <Loader2Icon className="animate-spin" />
-                  ) : (
-                    <Trash2Icon />
-                  )}
+                  <Trash2Icon />
                 </Button>
               ) : null}
             </li>

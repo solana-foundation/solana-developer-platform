@@ -135,18 +135,24 @@ describe("DvpCloseActions", () => {
   it("keeps the settle panel and its spinner while a settle confirms past expiry", () => {
     const html = renderActions(trade("expired", true), new Set(["settle"]));
 
-    expect(html).toContain("Settling…");
+    expect(busyButtonWords(html)).toEqual([expect.stringMatching(/^Settle/)]);
   });
 
   // The close waits for confirmation, up to 15 seconds. A greyed-out button
-  // alone read as nothing happening.
+  // alone read as nothing happening, so the button spins, keeping its words.
   it.each([
-    ["settle", "Settling…"],
-    ["cancel", "Cancelling…"],
-  ] as const)("names the %s in flight on its button", (action, label) => {
+    ["settle", "Settle"],
+    ["cancel", "Cancel"],
+  ] as const)("spins the %s in flight on its own button", (action, label) => {
     const html = renderActions(trade("funded", true), new Set([action]));
 
-    expect(html).toContain(label);
-    expect(html).toContain("animate-spin");
+    expect(busyButtonWords(html)).toEqual([expect.stringMatching(new RegExp(`^${label}`))]);
   });
 });
+
+/** The words on each button the markup marks busy (`aria-busy`): the button with its tags stripped. */
+function busyButtonWords(html: string): string[] {
+  return [...html.matchAll(/<button[^>]*aria-busy="true"[^>]*>.*?<\/button>/g)].map(([button]) =>
+    button.replace(/<[^>]+>/g, "")
+  );
+}

@@ -229,12 +229,11 @@ function RingCreateForm({
           />
         </div>
         <Button
-          disabled={submitting || !formComplete}
+          disabled={!formComplete}
+          loading={submitting}
           onClick={() => onSubmit({ name: trimmedName, ringProgramId: ringProgramId.trim() })}
         >
-          {t(
-            submitting ? "DashboardHeliusRings.ring.submitting" : "DashboardHeliusRings.ring.submit"
-          )}
+          {t("DashboardHeliusRings.ring.submit")}
         </Button>
       </div>
     </div>
@@ -254,12 +253,13 @@ function RingRetryButton({
   const t = useTranslations();
   return (
     <div>
-      <Button variant="secondary" disabled={submittingName !== null} onClick={onRetry}>
-        {t(
-          submittingName === ring.name
-            ? "DashboardHeliusRings.ring.submitting"
-            : "DashboardHeliusRings.ring.retry"
-        )}
+      <Button
+        variant="secondary"
+        disabled={submittingName !== null}
+        loading={submittingName === ring.name}
+        onClick={onRetry}
+      >
+        {t("DashboardHeliusRings.ring.retry")}
       </Button>
     </div>
   );

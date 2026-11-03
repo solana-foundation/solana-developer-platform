@@ -184,12 +184,11 @@ export function RampOpenSale({
             <Button
               type="button"
               iconLeft={<SendIcon />}
-              disabled={sending || canceling || sent !== undefined}
+              disabled={canceling || sent !== undefined}
+              loading={sending}
               onClick={() => setConfirmingSend(true)}
             >
-              {sending
-                ? t("DashboardPayments.ramps.sending")
-                : t("DashboardPayments.ramps.sendCrypto", { amount: deposit.amount, token })}
+              {t("DashboardPayments.ramps.sendCrypto", { amount: deposit.amount, token })}
             </Button>
           ) : null}
           <Button

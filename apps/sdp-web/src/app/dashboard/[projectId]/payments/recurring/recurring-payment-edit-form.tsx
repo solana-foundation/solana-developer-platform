@@ -10,7 +10,6 @@ import { Button } from "@sdp/ui/button";
 import { Combobox } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
@@ -297,12 +296,7 @@ export function RecurringPaymentEditForm({
         <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onClose}>
           {t("DashboardPayments.recurring.cancel")}
         </Button>
-        <Button
-          type="submit"
-          size="sm"
-          disabled={saveDisabled}
-          iconLeft={saving ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined}
-        >
+        <Button type="submit" size="sm" disabled={saveDisabled} loading={saving}>
           {t("DashboardPayments.recurring.saveChanges")}
         </Button>
       </div>

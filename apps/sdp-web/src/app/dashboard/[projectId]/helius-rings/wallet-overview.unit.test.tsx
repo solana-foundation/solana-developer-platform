@@ -176,8 +176,7 @@ describe("WalletOverview", () => {
     renderOverview();
     await screen.findByText("$225.00");
 
-    // The control only names itself "Refresh" once a read has landed; while one
-    // is in flight it reads "Reading…" and is disabled.
+    // The control keeps its name while a read is in flight and spins in place.
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(mocks.syncRingsWallet).toHaveBeenCalledTimes(2);
@@ -187,9 +186,7 @@ describe("WalletOverview", () => {
     renderOverview(RINGS, { ...WALLET, shieldedAddress: null, status: "pending" });
 
     expect(screen.getByText("Not provisioned yet.")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expectRefreshUnavailable();
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
   });
 
@@ -202,9 +199,14 @@ describe("WalletOverview", () => {
 
     expect(screen.getByText(/This wallet is paused/)).toBeTruthy();
     expect(screen.queryByText(/Balance could not be read/)).toBeNull();
-    expect((screen.getByRole("button", { name: "Reading…" }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expectRefreshUnavailable();
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
   });
 });
+
+/** Refresh is off for a wallet nothing can read: disabled, and not spinning on a read that never starts. */
+function expectRefreshUnavailable() {
+  const refresh = screen.getByRole("button", { name: "Refresh" });
+  expect(refresh).toHaveProperty("disabled", true);
+  expect(refresh.getAttribute("aria-busy")).toBe("false");
+}

@@ -7,7 +7,7 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
-import { Loader2Icon, ShieldAlertIcon } from "lucide-react";
+import { ShieldAlertIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { WizardFrame } from "@/components/wizard-frame";
@@ -172,14 +172,14 @@ function FlaggedAddressDialog() {
             {t("DashboardPayments.counterparty.skipAddress")}
           </Button>
           {failed ? (
-            <Button type="button" disabled={submitting} onClick={() => void attachFlaggedAddress()}>
+            <Button type="button" loading={submitting} onClick={() => void attachFlaggedAddress()}>
               {t("DashboardPayments.counterparty.tryAgain")}
             </Button>
           ) : (
             <Button
               type="button"
               variant="destructive"
-              disabled={submitting}
+              loading={submitting}
               iconLeft={<ShieldAlertIcon />}
               onClick={() => void attachFlaggedAddress()}
             >
@@ -217,15 +217,8 @@ export function CounterpartyCreatePage({
       <Button type="button" variant="ghost" onClick={cancel} disabled={busy}>
         {t("DashboardPayments.counterparty.cancel")}
       </Button>
-      <Button
-        type="button"
-        onClick={() => void submit()}
-        disabled={busy}
-        iconLeft={submitting ? <Loader2Icon className="animate-spin" /> : undefined}
-      >
-        {submitting
-          ? t("DashboardPayments.counterparty.adding")
-          : t("DashboardPayments.counterparty.addToContacts")}
+      <Button type="button" onClick={() => void submit()} disabled={busy} loading={submitting}>
+        {t("DashboardPayments.counterparty.addToContacts")}
       </Button>
     </div>
   );

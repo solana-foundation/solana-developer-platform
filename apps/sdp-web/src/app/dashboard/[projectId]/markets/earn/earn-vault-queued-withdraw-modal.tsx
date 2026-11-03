@@ -434,17 +434,8 @@ function QueuedWithdrawalResult({
       {cancelError ? <EarnErrorNote message={cancelError} /> : null}
       <div className="mt-5 flex justify-end gap-2">
         {request.status === "expiredCancelable" ? (
-          <Button
-            disabled={cancelling}
-            iconLeft={
-              cancelling ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
-            }
-            onClick={() => void cancel()}
-            variant="outline"
-          >
-            {cancelling
-              ? t("DashboardEarn.queuedWithdraw.cancelling")
-              : t("DashboardEarn.queuedWithdraw.cancelAction")}
+          <Button loading={cancelling} onClick={() => void cancel()} variant="outline">
+            {t("DashboardEarn.queuedWithdraw.cancelAction")}
           </Button>
         ) : null}
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -532,13 +523,11 @@ function QueueReview({
         </Button>
         <Button
           className="flex-[2]"
-          disabled={submitting || loading || !preview || preview.blockingIssues.length > 0}
-          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          disabled={loading || !preview || preview.blockingIssues.length > 0}
+          loading={submitting}
           onClick={onSubmit}
         >
-          {submitting
-            ? t("DashboardEarn.queuedWithdraw.submitting")
-            : t("DashboardEarn.queuedWithdraw.submit")}
+          {t("DashboardEarn.queuedWithdraw.submit")}
         </Button>
       </div>
     </>

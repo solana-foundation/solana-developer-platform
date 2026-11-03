@@ -5,6 +5,7 @@ import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import Link from "next/link";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { PayEmptyReason } from "./pay-readiness";
 
 const EMPTY_STEP = [{ label: "", title: "" }];
@@ -16,16 +17,19 @@ const EMPTY_STEP = [{ label: "", title: "" }];
  */
 export function PayEmptyState({ reason, onExit }: { reason: PayEmptyReason; onExit: () => void }) {
   const t = useTranslations();
+  const href = useProjectHref();
   const addContact = (
     <Button asChild variant="outline">
-      <Link href="/dashboard/payments/counterparty/create">
+      <Link href={href("/dashboard/payments/counterparty/create")}>
         {t("DashboardPayments.payForm.addContact")}
       </Link>
     </Button>
   );
   const depositFirst = (
     <Button asChild variant={reason === "no_funds" ? "outline" : "ghost"}>
-      <Link href="/dashboard/payments/deposit">{t("DashboardPayments.payForm.depositFirst")}</Link>
+      <Link href={href("/dashboard/payments/deposit")}>
+        {t("DashboardPayments.payForm.depositFirst")}
+      </Link>
     </Button>
   );
   const message =

@@ -98,8 +98,8 @@ export function InviteMemberForm() {
           </Select>
         </div>
 
-        <Button type="submit" disabled={isPending} className="w-full sm:w-auto">
-          {isPending ? t("Shared.members.inviteSending") : t("Shared.members.inviteSubmit")}
+        <Button type="submit" loading={isPending} className="w-full sm:w-auto">
+          {t("Shared.members.inviteSubmit")}
         </Button>
       </div>
     </form>

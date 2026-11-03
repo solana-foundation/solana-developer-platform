@@ -9,7 +9,6 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { Loader2Icon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useReducer, useTransition } from "react";
 import { toast } from "sonner";
@@ -279,11 +278,7 @@ export function DepositForm({
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      <Button
-        disabled={isSubmitting || !amount.trim()}
-        iconLeft={isSubmitting ? <Loader2Icon className="size-4 animate-spin" /> : undefined}
-        type="submit"
-      >
+      <Button disabled={!amount.trim()} loading={isSubmitting} type="submit">
         {t("DashboardPrivateChannels.deposit.submit")}
       </Button>
     </form>

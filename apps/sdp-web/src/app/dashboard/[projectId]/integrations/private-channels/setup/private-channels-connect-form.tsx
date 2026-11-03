@@ -50,19 +50,13 @@ function RefreshSetupFooter({
   const t = useTranslations();
   const commitLabel =
     commit.kind === "update"
-      ? commit.working
-        ? t("DashboardPrivateChannels.instance.updating")
-        : t("DashboardPrivateChannels.instance.update")
-      : commit.working
-        ? t("DashboardPrivateChannels.instance.connecting")
-        : t("DashboardPrivateChannels.instance.connect");
+      ? t("DashboardPrivateChannels.instance.update")
+      : t("DashboardPrivateChannels.instance.connect");
   return (
     <div className="flex items-center gap-2">
       {onTest ? (
-        <Button type="button" variant="outline" onClick={onTest} disabled={busy}>
-          {testing
-            ? t("DashboardPrivateChannels.instance.testing")
-            : t("DashboardPrivateChannels.instance.testConnection")}
+        <Button type="button" variant="outline" onClick={onTest} disabled={busy} loading={testing}>
+          {t("DashboardPrivateChannels.instance.testConnection")}
         </Button>
       ) : null}
       <div className="ml-auto flex items-center gap-2">
@@ -74,6 +68,7 @@ function RefreshSetupFooter({
           variant={canCommit ? "default" : "outline"}
           onClick={commit.onClick}
           disabled={!canCommit || busy}
+          loading={commit.working}
         >
           {commitLabel}
         </Button>
@@ -98,26 +93,30 @@ function ActionButtons({
         <Button
           type="button"
           variant="secondary"
-          className="min-w-36"
           onClick={form.runTest}
           disabled={busy}
+          loading={isTesting}
         >
-          {isTesting
-            ? t("DashboardPrivateChannels.instance.testing")
-            : t("DashboardPrivateChannels.instance.testConnection")}
+          {t("DashboardPrivateChannels.instance.testConnection")}
         </Button>
       ) : null}
       {initiallyConnected ? (
-        <Button type="button" onClick={form.runUpdate} disabled={!isValid || busy}>
-          {isUpdating
-            ? t("DashboardPrivateChannels.instance.updating")
-            : t("DashboardPrivateChannels.instance.update")}
+        <Button
+          type="button"
+          onClick={form.runUpdate}
+          disabled={!isValid || busy}
+          loading={isUpdating}
+        >
+          {t("DashboardPrivateChannels.instance.update")}
         </Button>
       ) : (
-        <Button type="button" onClick={() => form.runConnect(false)} disabled={!isValid || busy}>
-          {isConnecting
-            ? t("DashboardPrivateChannels.instance.connecting")
-            : t("DashboardPrivateChannels.instance.connect")}
+        <Button
+          type="button"
+          onClick={() => form.runConnect(false)}
+          disabled={!isValid || busy}
+          loading={isConnecting}
+        >
+          {t("DashboardPrivateChannels.instance.connect")}
         </Button>
       )}
     </>

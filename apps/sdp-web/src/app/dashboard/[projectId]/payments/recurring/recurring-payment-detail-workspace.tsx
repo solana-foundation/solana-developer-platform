@@ -11,7 +11,7 @@ import {
   type RecurringPaymentTokenApproval,
 } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
-import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
+import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
@@ -694,12 +694,10 @@ function CancelConfirm({
           variant="destructive"
           size="sm"
           disabled={disabled}
-          iconLeft={busy ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined}
+          loading={busy}
           onClick={onConfirm}
         >
-          {busy
-            ? t("DashboardPayments.recurring.canceling")
-            : t("DashboardPayments.newDesign.recurring.cancelPayment")}
+          {t("DashboardPayments.newDesign.recurring.cancelPayment")}
         </Button>
       </div>
     </fieldset>
@@ -745,15 +743,13 @@ function ScheduleFooter({
                   variant={entry.primary ? "default" : "outline"}
                   size="sm"
                   disabled={isCancel ? cancelDisabled : signingActionsDisabled}
+                  loading={busy}
                   aria-expanded={isCancel ? confirmingCancel : undefined}
-                  iconLeft={
-                    busy ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
-                  }
                   onClick={() =>
                     isCancel ? setConfirmingCancel((open) => !open) : void onAction(entry.action)
                   }
                 >
-                  {busy ? actionWorkingLabel(entry.action, t) : entry.label}
+                  {entry.label}
                 </Button>
               </Fragment>
             );

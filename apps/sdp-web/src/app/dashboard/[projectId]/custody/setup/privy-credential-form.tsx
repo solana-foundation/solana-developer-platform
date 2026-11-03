@@ -148,7 +148,7 @@ function RecoveryPanel({
   marker: string;
   message: string;
   tone: "neutral" | "error";
-  action?: { label: string; onClick: () => void; disabled: boolean };
+  action?: { label: string; onClick: () => void; loading: boolean };
 }) {
   const isError = tone === "error";
   return (
@@ -165,7 +165,7 @@ function RecoveryPanel({
       </p>
       {action ? (
         <div>
-          <Button type="button" onClick={action.onClick} disabled={action.disabled}>
+          <Button type="button" onClick={action.onClick} loading={action.loading}>
             {action.label}
           </Button>
         </div>
@@ -430,11 +430,9 @@ function CredentialRecoveryPanel({
         message={t("DashboardCustody.byokRetryUnknown")}
         tone="neutral"
         action={{
-          label: isPending
-            ? t("DashboardCustody.byokChecking")
-            : t("DashboardCustody.byokRetrySubmit"),
+          label: t("DashboardCustody.byokRetrySubmit"),
           onClick: () => onReplay(check.payload),
-          disabled: isPending,
+          loading: isPending,
         }}
       />
     );
@@ -447,11 +445,9 @@ function CredentialRecoveryPanel({
       message={isRefusal ? check.message : t("DashboardCustody.byokRetryUnknown")}
       tone={isRefusal ? "error" : "neutral"}
       action={{
-        label: isPending
-          ? t("DashboardCustody.byokChecking")
-          : t("DashboardCustody.byokCheckAgain"),
+        label: t("DashboardCustody.byokCheckAgain"),
         onClick: () => onRecheck(check.connectionId),
-        disabled: isPending,
+        loading: isPending,
       }}
     />
   );
@@ -628,8 +624,8 @@ export function ByokCredentialForm({
 
       {showSubmitButton ? (
         <div>
-          <Button type="submit" disabled={isPending || childPending || !ready}>
-            {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
+          <Button type="submit" disabled={childPending || !ready} loading={isPending}>
+            {t("DashboardCustody.byokConnect")}
           </Button>
         </div>
       ) : null}

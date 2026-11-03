@@ -2,7 +2,6 @@
 
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 
@@ -58,12 +57,9 @@ export function DeleteCounterpartyDialog({
             type="button"
             variant="destructive"
             onClick={() => void handleConfirm()}
-            disabled={deleting}
-            iconLeft={deleting ? <Loader2Icon className="animate-spin" /> : undefined}
+            loading={deleting}
           >
-            {deleting
-              ? t("DashboardPayments.counterparty.deleting")
-              : t("DashboardPayments.counterparty.delete")}
+            {t("DashboardPayments.counterparty.delete")}
           </Button>
         </div>
       </div>

@@ -191,10 +191,8 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
           <Button type="button" variant="secondary" onClick={handleClose} disabled={submitting}>
             {t("DashboardPayments.batchSend.cancel")}
           </Button>
-          <Button type="button" onClick={() => void handleImport()} disabled={submitting}>
-            {submitting
-              ? t("DashboardPayments.batchSend.importing")
-              : t("DashboardPayments.batchSend.import")}
+          <Button type="button" onClick={() => void handleImport()} loading={submitting}>
+            {t("DashboardPayments.batchSend.import")}
           </Button>
         </div>
       </div>

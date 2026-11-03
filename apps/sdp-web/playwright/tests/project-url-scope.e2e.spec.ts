@@ -53,4 +53,14 @@ test.describe
       await page.goto(projectHref("prj_test_unlisted", "/dashboard/api-keys"));
       await expect(page).toHaveURL(projectHref(projects.sandbox, "/dashboard/api-keys"));
     });
+
+    // Only the Project's own 404 has this way back; the root one leaves for bare /dashboard.
+    test("an address no route matches keeps the Project's shell", async ({ page }) => {
+      await page.goto(projectHref(projects.sandbox, "/dashboard/no-such-page"));
+      await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Back to Overview" })).toHaveAttribute(
+        "href",
+        projectHref(projects.sandbox, "/dashboard")
+      );
+    });
   });
