@@ -654,23 +654,67 @@ function logSubmittedUnconfirmed(transfer: TransferRow, signature: string | null
   });
 }
 
+/** The open audit intent a failed send closes, and the outcome it closes with. */
+interface ClosingTransferAudit {
+  service: AuditService;
+  intent: AuditIntent;
+  outcome: CriticalOutcome;
+}
+
 /**
  * An off-ramp deposit that failed before SDP recorded signed bytes moved
  * nothing, so its sale goes back to awaiting the deposit instead of failing.
- * False when the row holds anything a broadcast could have used.
+ * False when the row holds anything a broadcast could have used. With `audit`,
+ * the release and the attempt's audit outcome commit in one ledger transaction:
+ * a released row is claimable again, and the next claim records its own intent
+ * over this one. A ledger failure keeps the claim, and the caller fails the row.
  */
 async function releaseUnsentRampDeposit(
   c: AppContext,
   transfer: TransferRow,
-  cause: unknown
+  cause: unknown,
+  audit?: ClosingTransferAudit
 ): Promise<boolean> {
   if (transfer.type !== "offramp") return false;
-  const released = await getPaymentsRepository(c).releaseOfframpDepositClaim({
+  const release = {
     transferId: transfer.id,
     organizationId: transfer.organization_id,
     projectId: transfer.project_id,
     updatedAt: new Date().toISOString(),
-  });
+  };
+  let released: TransferRow | null;
+  if (audit === undefined) {
+    released = await getPaymentsRepository(c).releaseOfframpDepositClaim(release);
+  } else {
+    try {
+      released = await audit.service.logWithin(c, async (tx) => {
+        const payments = createPostgresPaymentsRepository(tx, getRequestTenantScope(c));
+        const row = await payments.releaseOfframpDepositClaim(release);
+        const closed =
+          row !== null &&
+          (await payments.closeTransferAuditIntent({
+            transferId: transfer.id,
+            organizationId: transfer.organization_id,
+            projectId: transfer.project_id,
+            auditIntentId: audit.intent.id,
+          }));
+        return {
+          entry: closed ? criticalOutcomeEntry(audit.intent, audit.outcome) : null,
+          result: row,
+        };
+      });
+    } catch (error) {
+      logEvent("warn", {
+        event: "sdp_api_ramp_deposit_release_unaudited",
+        provider: transfer.provider,
+        organization_id: transfer.organization_id,
+        project_id: transfer.project_id,
+        transfer_id: transfer.id,
+        ...describeError(error),
+      });
+      return false;
+    }
+  }
   if (released === null) return false;
   markIdempotencyReleased(c);
   logEvent("warn", {
@@ -691,7 +735,8 @@ async function releaseUnsentRampDeposit(
  * success closes the audit intent like a concurrent verdict, and a failure
  * answers exactly as a later replay of the row would.
  * Before that marker, no broadcast was possible and the
- * transfer can fail normally; an unsigned off-ramp deposit is released.
+ * transfer can fail normally; an unsigned off-ramp deposit is released,
+ * closing `audit`'s intent with the release.
  */
 async function settleTransferExecutionFailure(
   c: AppContext,
@@ -699,7 +744,8 @@ async function settleTransferExecutionFailure(
   recorder: { submittedRow(): Promise<TransferRow | null> },
   error: unknown,
   toPayload: (row: TransferRow) => Record<string, unknown>,
-  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>
+  onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>,
+  audit?: Omit<ClosingTransferAudit, "outcome">
 ): Promise<Response> {
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
@@ -722,7 +768,15 @@ async function settleTransferExecutionFailure(
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const answer = mapTransferExecutionError(error);
-  if (submitted === null && (await releaseUnsentRampDeposit(c, transfer, error))) {
+  if (
+    submitted === null &&
+    (await releaseUnsentRampDeposit(
+      c,
+      transfer,
+      error,
+      audit && { ...audit, outcome: { status: "failure", metadata: { error: message } } }
+    ))
+  ) {
     throw answer;
   }
   const settled = resolveTransferUpdateResult(
@@ -1265,7 +1319,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
               metadata: { signature: settled.signature, slot: settled.slot?.toString() ?? null },
             });
           }
-        }
+        },
+        { service: auditService, intent: auditIntent }
       );
     } catch (settledError) {
       await completeTransferAudit(c, auditService, transfer, auditIntent, {
