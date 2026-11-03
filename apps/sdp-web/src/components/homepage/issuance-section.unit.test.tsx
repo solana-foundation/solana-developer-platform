@@ -83,7 +83,6 @@ describe("IssuanceSheet", () => {
       "Supply",
       "Transfer controls",
       "Authority",
-      "Privacy",
     ]);
     expect(screen.getByText("Live")).toBeTruthy();
     expect(screen.getByText("100,000,000")).toBeTruthy();

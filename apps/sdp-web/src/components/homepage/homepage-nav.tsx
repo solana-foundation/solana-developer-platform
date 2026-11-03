@@ -39,7 +39,6 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
         },
       ],
       links: [
-        { label: t("Homepage.nav.platform.privacy"), href: "#privacy" },
         { label: t("Homepage.nav.platform.partners"), href: "#stack" },
         { label: t("Homepage.nav.platform.interfaces"), href: "#interfaces" },
         { label: t("Homepage.nav.platform.network"), href: "#network" },
@@ -97,8 +96,6 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
         },
       ],
       links: [
-        { label: t("Homepage.nav.docs.execute"), href: "#interfaces" },
-        { label: t("Homepage.nav.docs.prepare"), href: "#interfaces" },
         { label: t("Homepage.nav.docs.dashboard"), href: links.signIn },
       ],
     },
@@ -108,7 +105,6 @@ export async function HomepageNav({ links }: { links: HomepageLinks }) {
     { label: t("Homepage.nav.platform.payments.title"), href: "#payments-api" },
     { label: t("Homepage.nav.platform.issuance.title"), href: "#issuance" },
     { label: t("Homepage.nav.platform.markets.title"), href: "#markets" },
-    { label: t("Homepage.nav.platform.privacy"), href: "#privacy" },
     { label: t("Homepage.nav.platform.partners"), href: "#stack" },
     { label: t("Homepage.nav.mobile.builders"), href: "#builders" },
     { label: t("Homepage.nav.platform.interfaces"), href: "#interfaces" },

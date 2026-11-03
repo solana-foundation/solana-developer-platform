@@ -14,7 +14,6 @@ import { NetworkSection } from "@/components/homepage/network-section";
 import { PaymentKindProvider } from "@/components/homepage/payments/payment-kind-context";
 import { PaymentsApiSection } from "@/components/homepage/payments-api-section";
 import { PaymentsSection } from "@/components/homepage/payments-section";
-import { PrivacySection } from "@/components/homepage/privacy-section";
 import { StackSection } from "@/components/homepage/stack-section";
 import { StartSection } from "@/components/homepage/start-section";
 import { homepageOpenSignup } from "@/flags";
@@ -62,10 +61,8 @@ export default async function Home() {
         {/* the bench under issuance moves the bubble of the payments API further down */}
         <PaymentKindProvider>
           <PaymentsSection />
-          {/* markets and privacy share one dark panel */}
           <div className={cn(styles.panel, styles.panelRun)}>
             <MarketsSection />
-            <PrivacySection />
           </div>
           <InterfacesSection links={links} />
           <PaymentsApiSection />

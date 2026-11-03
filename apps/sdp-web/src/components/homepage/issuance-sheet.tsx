@@ -222,10 +222,6 @@ export function IssuanceSheet() {
         <dt>{t("Homepage.issuance.sheet.authorityLabel")}</dt>
         <dd className={styles.value}>{t("Homepage.issuance.sheet.authorityValue")}</dd>
       </div>
-      <div className={styles.row}>
-        <dt>{t("Homepage.issuance.sheet.privacyLabel")}</dt>
-        <dd className={styles.value}>{t("Homepage.issuance.sheet.privacyValue")}</dd>
-      </div>
     </dl>
   );
 }

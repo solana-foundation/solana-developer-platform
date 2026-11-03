@@ -27,7 +27,6 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
         { label: t("Homepage.footer.links.payments"), href: "#payments-api" },
         { label: t("Homepage.footer.links.issuance"), href: "#issuance" },
         { label: t("Homepage.footer.links.markets"), href: "#markets" },
-        { label: t("Homepage.footer.links.privacy"), href: "#privacy" },
       ],
     },
     {

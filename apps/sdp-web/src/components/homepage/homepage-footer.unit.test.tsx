@@ -60,7 +60,6 @@ describe("HomepageFooter", () => {
       Issuance: "#issuance",
       Payments: "#payments-api",
       Markets: "#markets",
-      Privacy: "#privacy",
       Interfaces: "#interfaces",
       Docs: links.docs,
       OpenAPI: links.openapi,

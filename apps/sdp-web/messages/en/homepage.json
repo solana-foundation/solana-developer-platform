@@ -20,7 +20,6 @@
         "issuance": { "title": "Issuance", "body": "Launch the asset. Control it after." },
         "payments": { "title": "Payments", "body": "Stablecoins and fiat, one API." },
         "markets": { "title": "Markets", "body": "Earn on it. Settle against it." },
-        "privacy": "Privacy",
         "partners": "Partners",
         "interfaces": "Interfaces",
         "network": "The network",
@@ -41,8 +40,6 @@
         "docs": { "title": "Docs", "body": "Guides and reference for the whole surface." },
         "openapi": { "title": "OpenAPI", "body": "The full API contract, machine-readable." },
         "llms": { "title": "llms.txt", "body": "Context for coding assistants." },
-        "execute": "Execute mode",
-        "prepare": "Prepare mode",
         "dashboard": "Dashboard"
       },
       "mobile": {
@@ -70,7 +67,7 @@
     },
     "stack": {
       "title": "One integration across the stack",
-      "sub": "SDP is the Foundation’s aggregation layer: one integration across custody, compliance, ramps, nodes, privacy and more. Pick the partner on your criteria. Switch without rebuilding.",
+      "sub": "SDP is the Foundation’s aggregation layer: one integration across custody, compliance, ramps, nodes and more. Pick the partner on your criteria. Switch without rebuilding.",
       "labels": {
         "partners": "Partner APIs",
         "sdp": "SDP",
@@ -136,8 +133,6 @@
         "paused": "Paused",
         "authorityLabel": "Authority",
         "authorityValue": "Issuer multisig",
-        "privacyLabel": "Privacy",
-        "privacyValue": "Confidential balances",
         "status": {
           "live": "Live",
           "minted": "Minted",
@@ -232,35 +227,16 @@
         "withdrawLabel": "to withdraw, either strategy"
       }
     },
-    "privacy": {
-      "titleLine1": "Confidential",
-      "titleLine2": "per operation.",
-      "body": "Turn privacy on per operation. Settlement stays onchain; balances, positions and payroll stay off the public ledger, through confidential balances, private channels and shielded rings.",
-      "policiesLink": "See the policies",
-      "bubbleLabel": "What stays private: payments, issuance, markets, payroll, balances",
-      "words": {
-        "payments": "Payments",
-        "issuance": "Issuance",
-        "markets": "Markets",
-        "payroll": "Payroll",
-        "balances": "Balances"
-      }
-    },
     "interfaces": {
       "headlineLine1": "Call the API.",
       "headlineLine2": "Or use the dashboard.",
       "intro": "REST for integrations, dashboard for ops, OpenAPI for agents. One public contract.",
       "modes": "Ways to work with the platform",
       "response": "Response",
-      "execute": {
-        "title": "Execute mode",
-        "body": "SDP constructs, signs and submits for server‑to‑server workflows.",
+      "api": {
+        "title": "REST API",
+        "body": "One call per operation, for server‑to‑server workflows.",
         "status": "200 · confirmed"
-      },
-      "prepare": {
-        "title": "Prepare mode",
-        "body": "SDP returns an unsigned transaction for your HSM, multisig or wallet.",
-        "status": "200 · ready to sign"
       },
       "dashboard": {
         "title": "Dashboard",
@@ -304,7 +280,6 @@
         "issuance": "Issuance",
         "payments": "Payments",
         "markets": "Markets",
-        "privacy": "Privacy",
         "interfaces": "Interfaces",
         "docs": "Docs",
         "openApi": "OpenAPI",

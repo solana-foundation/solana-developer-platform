@@ -41,8 +41,7 @@ function escapeRegExp(literal: string): string {
 }
 
 const copy = {
-  execute: { title: "Execute mode", body: "Execute body", status: "200 · confirmed" },
-  prepare: { title: "Prepare mode", body: "Prepare body", status: "200 · ready to sign" },
+  api: { title: "REST API", body: "API body", status: "200 · confirmed" },
   dashboard: { title: "Dashboard", body: "Dashboard body", status: "200 · 1 pending" },
 };
 
@@ -87,15 +86,10 @@ describe("InterfacesSection", () => {
     expect(tablist?.getAttribute("aria-label")).toBe("Ways to work with the platform");
     const tabs = [...doc.querySelectorAll('[role="tab"]')];
     expect(tabs.map((tab) => tab.querySelector("b")?.textContent)).toEqual([
-      "Execute mode",
-      "Prepare mode",
+      "REST API",
       "Dashboard",
     ]);
-    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
-      "true",
-      "false",
-      "false",
-    ]);
+    expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["true", "false"]);
 
     const panel = doc.querySelector('[role="tabpanel"]');
     expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0]?.id);
@@ -174,18 +168,20 @@ describe("InterfacesConsole", () => {
   it("selects a way from the keyboard and holds it", () => {
     renderConsole();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1]);
 
     act(() => tabs[0]?.focus());
     fireEvent.keyDown(tabs[0], { key: "ArrowDown" });
     expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(tabs[1]);
     expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(tabs[1]?.id);
-    expect(screen.getByRole("tabpanel").textContent).toContain("prepare-collection");
+    expect(screen.getByRole("tabpanel").textContent).toContain("status=pending");
 
-    fireEvent.keyDown(tabs[1], { key: "End" });
-    expect(tabs[2]?.getAttribute("aria-selected")).toBe("true");
-    fireEvent.keyDown(tabs[2], { key: "ArrowDown" });
+    fireEvent.keyDown(tabs[1], { key: "Home" });
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[0], { key: "End" });
+    expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(tabs[1], { key: "ArrowDown" });
     expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
     expect(activeBar().dataset.state).toBe("held");
   });

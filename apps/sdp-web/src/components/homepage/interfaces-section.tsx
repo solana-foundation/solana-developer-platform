@@ -44,15 +44,10 @@ export async function InterfacesSection({ links }: { links: HomepageLinks }) {
           modesLabel={t("Homepage.interfaces.modes")}
           responseLabel={t("Homepage.interfaces.response")}
           copy={{
-            execute: {
-              title: t("Homepage.interfaces.execute.title"),
-              body: t("Homepage.interfaces.execute.body"),
-              status: t("Homepage.interfaces.execute.status"),
-            },
-            prepare: {
-              title: t("Homepage.interfaces.prepare.title"),
-              body: t("Homepage.interfaces.prepare.body"),
-              status: t("Homepage.interfaces.prepare.status"),
+            api: {
+              title: t("Homepage.interfaces.api.title"),
+              body: t("Homepage.interfaces.api.body"),
+              status: t("Homepage.interfaces.api.status"),
             },
             dashboard: {
               title: t("Homepage.interfaces.dashboard.title"),

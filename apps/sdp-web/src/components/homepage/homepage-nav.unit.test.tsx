@@ -123,7 +123,6 @@ describe("HomepageNav", () => {
       "#payments-api",
       "#issuance",
       "#markets",
-      "#privacy",
       "#stack",
       "#interfaces",
       "#network",
@@ -175,7 +174,7 @@ describe("HomepageNav", () => {
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
 
-    const panelLink = screen.getByRole("link", { name: t("Homepage.nav.docs.execute") });
+    const panelLink = screen.getByRole("link", { name: t("Homepage.nav.docs.dashboard") });
     act(() => panelLink.focus());
     fireEvent.keyDown(panelLink, { key: "Escape" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");

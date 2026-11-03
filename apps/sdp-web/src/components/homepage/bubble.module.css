@@ -1,6 +1,6 @@
 /*
- * The page's bubble: a pill in two rings, shared by the stack,
- * payments and privacy. The bubble's root takes `.bubble` and a tone (`.violet`, `.mint`, `.grey`);
+ * The page's bubble: a pill in two rings, shared by the stack
+ * and payments. The bubble's root takes `.bubble` and a tone (`.violet`, `.mint`, `.grey`);
  * its outer ring `.ring`, its inner ring `.inner`, its pill `.pill`. Each section keeps its own
  * layout (sizes in cqw, the pill's width and what is in it) and may set `--ring-pad` and
  * `--inner-pad` on the root. The script toggles data-beat (the pill swells, the wave runs out
@@ -50,10 +50,6 @@
   --pill-shadow: inset 0 0 18px #14f19566, inset 0 0 44px #14f19533, 0 10px 40px -18px #05bf8666;
   --pill-shadow-beat:
     inset 0 0 22px #14f19588, inset 0 0 54px #14f19544, 0 12px 56px -12px #05bf8699;
-  /* drawn for the dark panel privacy sits on: no white wash, the green only glows a little deeper */
-  --pill-shadow-hover: inset 0 0 22px #14f1957a, inset 0 0 52px #14f1953a, 0 0 40px -12px #14f19559;
-  --lit-strength: 0.22;
-  --lit-reach: 40%;
 }
 
 /* the stack's partner services */

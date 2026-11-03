@@ -72,7 +72,6 @@ const SECTION_GROUP = {
   payments: platform,
   "payments-api": platform,
   markets: platform,
-  privacy: platform,
   interfaces: docs,
   builders,
   start: docs,

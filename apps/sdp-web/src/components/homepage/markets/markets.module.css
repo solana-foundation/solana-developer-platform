@@ -8,11 +8,10 @@
   --chart-ink: #fbfaf980;
 }
 
-/* privacy follows the chart closer than two sections apart */
 .layout {
   display: flex;
   flex-direction: column;
-  padding: var(--pad) 0 calc(var(--pad) * 0.65);
+  padding: var(--pad) 0;
 }
 
 /* the headline across two columns, the paragraph and its link in the third, on its first line */
