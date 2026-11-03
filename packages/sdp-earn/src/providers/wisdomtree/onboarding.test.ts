@@ -140,6 +140,22 @@ describe("WisdomTree onboarding wire contract", () => {
     await client.saveBusiness(ctx, body);
     assert.deepEqual(JSON.parse(String(f.mock.calls[1].arguments[1]?.body)), body);
   });
+  it("omits original_filename for uploads that returned only a blob path", async () => {
+    const f = replies(ok(token), {
+      status: 201,
+      body: { organization_guid: childGuid, status: "draft" },
+    });
+    await client.saveOnboardingApplication(ctx, {
+      entityType: "business",
+      application: { entity_type: "organization", status: "draft" },
+      documents: { formation_document: { blobPath: "onboarding_documents/unlinked/file.pdf" } },
+    });
+    // deepStrictEqual also fails on an own undefined-valued key, so this
+    // proves original_filename is absent, not just unused by the provider.
+    assert.deepEqual(JSON.parse(String(f.mock.calls[1].arguments[1]?.body)).formation_document, {
+      blob_path: "onboarding_documents/unlinked/file.pdf",
+    });
+  });
   it("rejects bare blob strings and numeric readback documents", async () => {
     const f = replies();
     for (const doc of ["blob/path.pdf", 123]) {
