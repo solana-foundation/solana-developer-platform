@@ -2,6 +2,7 @@
 
 import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import type { Project } from "@sdp/types/projects";
+import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -17,6 +18,7 @@ import { useState } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
+import { useUnlinkedOrganizations } from "@/lib/use-unlinked-organizations";
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
@@ -55,19 +57,32 @@ function CurrentBadge() {
   );
 }
 
-/** The expanded trigger's text: the organization's name over the active project's. */
+/**
+ * The expanded trigger's text: the organization's name over the active project's,
+ * with a Beta mark on the beta deployment, which shares sign-in with production.
+ */
 function WorkspaceTriggerText({
   organizationName,
   activeProject,
+  isBeta,
 }: {
   organizationName: string;
   activeProject: Pick<Project, "name"> | null;
+  isBeta: boolean;
 }) {
+  const t = useTranslations();
   return (
     <>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
-          {organizationName}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
+            {organizationName}
+          </span>
+          {isBeta ? (
+            <Badge variant="info" className="shrink-0">
+              {t("Shared.SharedComponents.betaBadge")}
+            </Badge>
+          ) : null}
         </span>
         {activeProject ? (
           <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
@@ -208,12 +223,20 @@ export function WorkspaceSwitcher({
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
-  const { projects, selectedProjectId, selectProject, isProjectSwitching } =
+  const { flags, projects, selectedProjectId, selectProject, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
   const { copied, copy, value: copiedValue } = useCopy(1200);
 
-  const memberships = userMemberships.data ?? [];
+  const loadedMemberships = userMemberships.data ?? [];
+  const { unlinkedIds } = useUnlinkedOrganizations(
+    loadedMemberships.map((membership) => membership.organization.id)
+  );
+  // An organization this deployment does not link is another deployment's: switching to it
+  // only lands on the organization picker, so it is not offered.
+  const memberships = loadedMemberships.filter(
+    (membership) => !unlinkedIds.has(membership.organization.id)
+  );
   const activeProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isSwitching = isOrganizationSwitching || isProjectSwitching;
   const organizationName = activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization");
@@ -249,6 +272,7 @@ export function WorkspaceSwitcher({
             <WorkspaceTriggerText
               organizationName={organizationName}
               activeProject={activeProject}
+              isBeta={flags.releaseChannel === "beta"}
             />
           )}
         </button>

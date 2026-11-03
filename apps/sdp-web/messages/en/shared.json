@@ -88,6 +88,7 @@
   },
   "authShell": {
     "productName": "Developer Platform",
+    "betaNotice": "Beta is a devnet sandbox with its own organizations, separate from production. Its modules are available to sandbox projects until they are promoted.",
     "requestAccess": "Request access",
     "emailPlaceholder": "jane@acme.com",
     "forgotPasswordTitle": "Forgot your password?"
@@ -236,9 +237,11 @@
     "createApiKey": "Create API key",
     "selectOrganization": "Select organization",
     "selectExistingOrganizationDescription": "Choose an existing organization to continue.",
+    "unlinkedOrganizationDescription": "The organization you last used is not on this deployment. Choose another organization to continue.",
     "organizations": "Organizations",
     "projects": "Projects",
     "current": "Current",
+    "betaBadge": "Beta",
     "noOrganizations": "No organizations yet.",
     "noProjects": "No projects yet.",
     "locked": "Locked",

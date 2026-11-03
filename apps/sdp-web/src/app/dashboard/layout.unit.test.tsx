@@ -21,6 +21,10 @@ describe("dashboard layout", () => {
     vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
       new sdpApi.SdpApiResponseError(401, "unauthorized")
     );
+    vi.spyOn(sdpApi, "requestOnboardingStatus").mockResolvedValue({
+      linked: true,
+      organization: { id: "org_sdp" },
+    });
 
     const layout = await DashboardLayout({ children: "dashboard page" });
 
@@ -28,9 +32,50 @@ describe("dashboard layout", () => {
       type: AuthPageShell,
       props: {
         action: null,
-        children: { type: SelectExistingOrganizationPanel, props: { noAccess: true } },
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { sessionOrganization: "refused" },
+        },
       },
     });
+  });
+
+  it("offers the organization picker when this deployment does not link the session's organization", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(401, "unauthorized")
+    );
+    vi.spyOn(sdpApi, "requestOnboardingStatus").mockResolvedValue({
+      linked: false,
+      organization: null,
+    });
+
+    const layout = await DashboardLayout({ children: "dashboard page" });
+
+    expect(layout).toMatchObject({
+      props: {
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { sessionOrganization: "unlinked" },
+        },
+      },
+    });
+  });
+
+  it("propagates a failed link status read", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(401, "unauthorized")
+    );
+    vi.spyOn(sdpApi, "requestOnboardingStatus").mockRejectedValue(new Error("unavailable"));
+
+    await expect(DashboardLayout({ children: "dashboard page" })).rejects.toThrow("unavailable");
+  });
+
+  it("renders the dashboard, reading no link status, when SDP admits the session", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("admin");
+    const onboarding = vi.spyOn(sdpApi, "requestOnboardingStatus");
+
+    await expect(DashboardLayout({ children: "dashboard page" })).resolves.toBe("dashboard page");
+    expect(onboarding).not.toHaveBeenCalled();
   });
 
   it("propagates any other failure of the member read", async () => {
