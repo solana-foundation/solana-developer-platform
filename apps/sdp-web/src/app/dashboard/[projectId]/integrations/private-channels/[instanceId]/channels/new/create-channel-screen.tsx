@@ -4,7 +4,6 @@ import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -79,8 +78,8 @@ export function CreateChannelScreen({
             </Button>
             <Button
               className="min-w-40"
-              disabled={isCreating || !name.trim()}
-              iconLeft={isCreating ? <Loader2Icon className="size-4 animate-spin" /> : undefined}
+              disabled={!name.trim()}
+              loading={isCreating}
               onClick={submit}
               type="button"
             >

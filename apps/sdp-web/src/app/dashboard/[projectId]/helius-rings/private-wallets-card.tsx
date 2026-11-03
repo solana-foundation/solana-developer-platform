@@ -161,12 +161,11 @@ export function PrivateWalletsCard({
             />
           </div>
           <Button
-            disabled={creating || !selectedCustodyWallet || !walletName.trim()}
+            disabled={!selectedCustodyWallet || !walletName.trim()}
+            loading={creating}
             onClick={() => void handleCreate()}
           >
-            {creating
-              ? t("DashboardHeliusRings.wallets.creating")
-              : t("DashboardHeliusRings.wallets.create")}
+            {t("DashboardHeliusRings.wallets.create")}
           </Button>
         </div>
       );
@@ -285,12 +284,10 @@ function RetryProvisionButton({
       <Button
         variant="secondary"
         size="sm"
-        disabled={retrying}
+        loading={retrying}
         onClick={(event) => void handleRetry(event)}
       >
-        {t(
-          retrying ? "DashboardHeliusRings.wallets.creating" : "DashboardHeliusRings.wallets.retry"
-        )}
+        {t("DashboardHeliusRings.wallets.retry")}
       </Button>
       {retryError ? (
         <Callout variant="danger" live>

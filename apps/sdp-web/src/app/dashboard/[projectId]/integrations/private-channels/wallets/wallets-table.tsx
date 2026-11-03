@@ -9,7 +9,7 @@ import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { Loader2Icon, Trash2Icon } from "lucide-react";
+import { Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -215,10 +215,10 @@ export function WalletsTable({
                             pubkey: verified.pubkey,
                           })}
                           title={t("DashboardPrivateChannels.verifiedWallets.revokeTitle")}
-                          disabled={busy}
+                          loading={busy}
                           onClick={() => handleDelete(verified.pubkey)}
                         >
-                          {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
+                          <Trash2Icon />
                         </Button>
                       </TableCell>
                     ) : null}
@@ -278,17 +278,8 @@ export function WalletsTable({
             >
               {t("DashboardPrivateChannels.common.cancel")}
             </Button>
-            <Button
-              type="submit"
-              className="w-44 whitespace-nowrap"
-              disabled={!selectedWallet || pending}
-              iconLeft={
-                pending ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
-              }
-            >
-              {pending
-                ? t("DashboardPrivateChannels.verifiedWallets.enrolling")
-                : t("DashboardPrivateChannels.verifiedWallets.enroll")}
+            <Button type="submit" disabled={!selectedWallet} loading={pending}>
+              {t("DashboardPrivateChannels.verifiedWallets.enroll")}
             </Button>
           </div>
         </form>

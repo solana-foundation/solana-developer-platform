@@ -10,7 +10,6 @@ import type {
 import { Button } from "@sdp/ui/button";
 import { Label } from "@sdp/ui/label";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { Loader2Icon } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
 import { AmountField } from "@/app/dashboard/[projectId]/integrations/private-channels/amount-field";
@@ -686,13 +685,9 @@ function TransferFields(props: {
 
       <Button
         disabled={
-          props.isSubmitting ||
-          !channelId ||
-          props.tokens.length === 0 ||
-          !recipientVerifiedWalletId ||
-          !amount.trim()
+          !channelId || props.tokens.length === 0 || !recipientVerifiedWalletId || !amount.trim()
         }
-        iconLeft={props.isSubmitting ? <Loader2Icon className="size-4 animate-spin" /> : undefined}
+        loading={props.isSubmitting}
         type="submit"
       >
         {props.t("DashboardPrivateChannels.transfer.submit")}

@@ -501,8 +501,13 @@ export function EventsList({
 
       {feed.events.length > 0 && feed.hasMore ? (
         <div className="flex justify-center">
-          <Button type="button" variant="secondary" onClick={loadMore} disabled={isBusy}>
-            {isLoadingMore ? <Loader2Icon className="animate-spin" /> : null}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={loadMore}
+            disabled={isBusy}
+            loading={isLoadingMore}
+          >
             {t("DashboardPrivateChannels.events.loadMore")}
           </Button>
         </div>

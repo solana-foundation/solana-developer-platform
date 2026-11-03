@@ -3,7 +3,6 @@
 import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 
 // The Private Channels connection's confirmation dialogs. The connect form and the channel actions
@@ -43,15 +42,8 @@ export function ReactivateConfirmationDialog(props: {
           <Button type="button" variant="outline" onClick={props.onCancel} disabled={props.working}>
             {t("DashboardPrivateChannels.common.cancel")}
           </Button>
-          <Button
-            type="button"
-            onClick={props.onConfirm}
-            disabled={props.working}
-            iconLeft={props.working ? <Loader2Icon className="animate-spin" /> : undefined}
-          >
-            {props.working
-              ? t("DashboardPrivateChannels.instance.reactivating")
-              : t("DashboardPrivateChannels.instance.reactivate")}
+          <Button type="button" onClick={props.onConfirm} loading={props.working}>
+            {t("DashboardPrivateChannels.instance.reactivate")}
           </Button>
         </div>
       </div>
@@ -97,12 +89,9 @@ export function DeleteConfirmationDialog(props: {
             type="button"
             variant="destructive"
             onClick={props.onConfirm}
-            disabled={props.working}
-            iconLeft={props.working ? <Loader2Icon className="animate-spin" /> : undefined}
+            loading={props.working}
           >
-            {props.working
-              ? t("DashboardPrivateChannels.instance.deleting")
-              : t("DashboardPrivateChannels.instance.delete")}
+            {t("DashboardPrivateChannels.instance.delete")}
           </Button>
         </div>
       </div>

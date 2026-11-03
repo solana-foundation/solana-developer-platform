@@ -54,6 +54,9 @@ const STEPS: { label: MessageKey; title: MessageKey }[] = [
 
 const LIST_PATH = "/dashboard/issuance";
 
+/** Where a save lands: the token list (Save and exit) or the new token (Create draft). */
+type DraftDestination = "list" | "token";
+
 function initialDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
   const first = wallets[0]?.id ?? "";
   return {
@@ -165,7 +168,7 @@ function DraftFlow({
     storageKey,
     localId,
   } = useDraftFlowState(wallets, keptId, resumeFrom);
-  const { pending, save, keepLocally } = useDraftSave({
+  const { saving, save, keepLocally } = useDraftSave({
     draft,
     access,
     step,
@@ -194,7 +197,7 @@ function DraftFlow({
           <DraftFlowFooter
             step={step}
             blocker={stepBlocker(step, draft, classified)}
-            pending={pending}
+            saving={saving}
             savable={savable}
             canKeepLocally={Boolean(storageKey)}
             onStep={setStep}
@@ -248,7 +251,7 @@ function DraftFlow({
 function DraftFlowFooter({
   step,
   blocker,
-  pending,
+  saving,
   savable,
   canKeepLocally,
   onStep,
@@ -257,17 +260,19 @@ function DraftFlowFooter({
 }: {
   step: number;
   blocker: MessageKey | null;
-  pending: boolean;
+  /** Where the running save goes, so only the button that started it spins. */
+  saving: DraftDestination | null;
   savable: boolean;
   canKeepLocally: boolean;
   onStep: (step: number) => void;
-  onSave: (destination: "list" | "token") => void;
+  onSave: (destination: DraftDestination) => void;
   onKeepLocally: () => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
   const projectHref = useProjectHref();
   const last = step === STEPS.length - 1;
+  const pending = saving !== null;
 
   // The design's flow buttons keep the 40px height with 16px sides, 2px less than the shared
   // large button.
@@ -294,16 +299,19 @@ function DraftFlowFooter({
           <Button
             variant="outline"
             disabled={pending || !(savable || canKeepLocally)}
+            loading={saving === "list"}
             onClick={() => (savable ? onSave("list") : onKeepLocally())}
           >
             {t("DashboardIssuance.newDesign.draft.saveAndExit")}
           </Button>
         )}
         {last ? (
-          <Button disabled={pending || !savable} onClick={() => onSave("token")}>
-            {pending
-              ? t("DashboardIssuance.newDesign.draft.creating")
-              : t("DashboardIssuance.newDesign.draft.createDraft")}
+          <Button
+            disabled={pending || !savable}
+            loading={saving === "token"}
+            onClick={() => onSave("token")}
+          >
+            {t("DashboardIssuance.newDesign.draft.createDraft")}
           </Button>
         ) : (
           <Button
@@ -341,6 +349,7 @@ function useDraftSave({
   const router = useRouter();
   const projectHref = useProjectHref();
   const [pending, startTransition] = useTransition();
+  const [destination, setDestination] = useState<DraftDestination>("list");
 
   const keepLocally = () => {
     if (!storageKey) return;
@@ -358,7 +367,8 @@ function useDraftSave({
     router.push(projectHref(LIST_PATH));
   };
 
-  const save = (destination: "list" | "token") =>
+  const save = (to: DraftDestination) => {
+    setDestination(to);
     startTransition(async () => {
       const result = await saveIssuanceDraft({ ...draft, allowlist: access === "allowlist" });
       if (result.state !== "success") {
@@ -369,7 +379,7 @@ function useDraftSave({
         return;
       }
       if (storageKey) removeLocalDraft(storageKey, localId);
-      const toToken = destination === "token";
+      const toToken = to === "token";
       toast.success(
         toToken
           ? t("DashboardIssuance.newDesign.draft.created")
@@ -385,8 +395,9 @@ function useDraftSave({
         projectHref(toToken && result.tokenId ? `${LIST_PATH}/${result.tokenId}` : LIST_PATH)
       );
     });
+  };
 
-  return { pending, save, keepLocally };
+  return { saving: pending ? destination : null, save, keepLocally };
 }
 
 /**

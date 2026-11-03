@@ -49,7 +49,8 @@ function renderCheck(wallet: RingsWallet = WALLET) {
 
 /** The check control in the table cell — not the dialog's close button. */
 function checkButton(): HTMLButtonElement {
-  return screen.getByRole("button", { name: /^(Check on chain|Checking…)$/ });
+  // The name gains the spinner's "Loading" while a read runs, so match its start.
+  return screen.getByRole("button", { name: /^Check on chain/ });
 }
 
 beforeEach(() => {
@@ -84,15 +85,16 @@ describe("WalletIdentityCheck", () => {
 
     await userEvent.setup().click(checkButton());
 
-    expect(checkButton().textContent).toBe("Checking…");
-    expect(checkButton().disabled).toBe(true);
+    // It keeps its words and spins, unavailable until the read answers.
+    expect(checkButton().getAttribute("aria-busy")).toBe("true");
+    expect(checkButton().getAttribute("aria-disabled")).toBe("true");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByText(/Reading the on-chain registry record/)).toBeNull();
 
     settle?.({ identity: identity() });
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(await screen.findByText("Not registered")).toBeTruthy();
-    expect(checkButton().disabled).toBe(false);
+    expect(checkButton().getAttribute("aria-busy")).toBe("false");
   });
 
   it("says provisioning will create the record when nothing is registered", async () => {
@@ -193,7 +195,7 @@ describe("WalletIdentityCheck", () => {
     expect(await screen.findByText(/Helius Rings setup is required/)).toBeTruthy();
     // A failure is not a verdict about the chain.
     expect(screen.queryByText("Not registered")).toBeNull();
-    expect(checkButton().disabled).toBe(false);
+    expect(checkButton().getAttribute("aria-busy")).toBe("false");
   });
 
   it("falls back to its own copy when the failure carried no message", async () => {
@@ -205,7 +207,7 @@ describe("WalletIdentityCheck", () => {
     expect(await screen.findByText(/could not be read/)).toBeTruthy();
   });
 
-  // Uncaught, a rejection would leave the control disabled on "Checking…".
+  // Uncaught, a rejection would leave the control spinning.
   it("answers, and re-enables the check, when the request never returns a reply", async () => {
     mocks.fetchRingsWalletIdentity.mockRejectedValue(new TypeError("Failed to fetch"));
     renderCheck();
@@ -213,7 +215,7 @@ describe("WalletIdentityCheck", () => {
     await userEvent.setup().click(checkButton());
 
     expect(await screen.findByText(/could not be read/)).toBeTruthy();
-    expect(checkButton().disabled).toBe(false);
+    expect(checkButton().getAttribute("aria-busy")).toBe("false");
   });
 
   it("replaces a failure with the next successful verdict", async () => {

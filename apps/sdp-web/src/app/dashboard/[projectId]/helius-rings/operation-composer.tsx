@@ -651,10 +651,8 @@ function ReviewStep({
         <Button variant="secondary" onClick={onBack}>
           {t("DashboardHeliusRings.composer.back")}
         </Button>
-        <Button disabled={submitting} onClick={onConfirm}>
-          {submitting
-            ? t("DashboardHeliusRings.composer.preparing")
-            : t("DashboardHeliusRings.composer.confirm")}
+        <Button loading={submitting} onClick={onConfirm}>
+          {t("DashboardHeliusRings.composer.confirm")}
         </Button>
       </div>
     </>

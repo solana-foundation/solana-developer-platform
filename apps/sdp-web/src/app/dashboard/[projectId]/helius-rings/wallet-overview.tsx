@@ -2,7 +2,7 @@
 
 import { Button } from "@sdp/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { formatCurrencyAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -60,10 +60,9 @@ export function WalletOverview({
   const readable = canWrite && wallet.shieldedAddress !== null && wallet.status !== "paused";
   const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
-  const reading = state.name === "loading";
-  const refreshLabel = t(
-    reading ? "DashboardHeliusRings.balances.refreshing" : "DashboardHeliusRings.balances.refresh"
-  );
+  // A wallet that cannot be read never leaves the hook's initial state, so it is not reading.
+  const reading = readable && state.name === "loading";
+  const refreshLabel = t("DashboardHeliusRings.balances.refresh");
 
   return (
     <Card>
@@ -74,16 +73,13 @@ export function WalletOverview({
             <Button
               variant="ghost"
               size="icon-xs"
-              disabled={reading || !readable}
+              disabled={!readable}
+              loading={reading}
               aria-label={refreshLabel}
               title={refreshLabel}
               onClick={refresh}
             >
-              {reading ? (
-                <Loader2 className="animate-spin" aria-hidden="true" />
-              ) : (
-                <RefreshCw aria-hidden="true" />
-              )}
+              <RefreshCw aria-hidden="true" />
             </Button>
           </CardAction>
         ) : null}

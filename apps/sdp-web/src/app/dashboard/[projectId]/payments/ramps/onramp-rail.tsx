@@ -37,11 +37,7 @@ function onrampPrimaryLabel(
     case simulatesDeposit(wizard, verificationUrl):
       return wizard.quoteSimulationSucceeded
         ? t("DashboardPayments.ramps.depositSimulated")
-        : wizard.quoteSimulationLoading
-          ? t("DashboardPayments.ramps.simulatingDeposit")
-          : t("DashboardPayments.ramps.simulateDeposit");
-    case wizard.hostedQuoteLoading:
-      return t("DashboardPayments.processing");
+        : t("DashboardPayments.ramps.simulateDeposit");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
     case verificationUrl !== undefined:
@@ -126,6 +122,11 @@ function onrampFrameState(
         verificationPending ||
         !wizard.canProceed ||
         (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
+    // The primary keeps its words while its request runs: the simulated pay-in, or the hosted
+    // quote that opens the provider's checkout.
+    primaryLoading: simulatesDeposit(wizard, verificationUrl)
+      ? wizard.quoteSimulationLoading
+      : wizard.hostedQuoteLoading,
     hidePrimary:
       wizard.currentStepId === "PROVIDER" &&
       !verificationUrl &&
@@ -184,6 +185,7 @@ export function OnrampRail({
       confirmCancel={frame.confirmCancel}
       completionTitle={frame.completionTitle}
       primaryDisabled={frame.primaryDisabled}
+      primaryLoading={frame.primaryLoading}
       primaryLabel={onrampPrimaryLabel(wizard, frame.verificationPending, frame.verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={onrampPrimaryAction(wizard, frame.verificationUrl)}

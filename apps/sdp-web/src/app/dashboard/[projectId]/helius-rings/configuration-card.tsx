@@ -117,11 +117,10 @@ export function RingsConfigurationCard({
             ) : null}
             <Button
               onClick={() => void save()}
-              disabled={saving || name.trim() === "" || !requiredUrlsPresent}
+              disabled={name.trim() === "" || !requiredUrlsPresent}
+              loading={saving}
             >
-              {saving
-                ? t("DashboardHeliusRings.setup.saving")
-                : t("DashboardHeliusRings.setup.save")}
+              {t("DashboardHeliusRings.setup.save")}
             </Button>
           </>
         )}

@@ -75,7 +75,8 @@ function renderCard(wallets: readonly RingsWallet[], onWalletsChanged = vi.fn(as
 }
 
 function retryButton(): HTMLButtonElement {
-  return screen.getByRole("button", { name: /^(Retry provision|Provisioning…)$/ });
+  // The name gains the spinner's "Loading" while a replay runs, so match its start.
+  return screen.getByRole("button", { name: /^Retry provision/ });
 }
 
 beforeEach(() => {
@@ -103,12 +104,13 @@ describe("PrivateWalletsCard retry provision", () => {
 
     await userEvent.setup().click(retryButton());
 
-    expect(retryButton().textContent).toBe("Provisioning…");
-    expect(retryButton().disabled).toBe(true);
+    // It keeps its words and spins, unavailable until the replay answers.
+    expect(retryButton().getAttribute("aria-busy")).toBe("true");
+    expect(retryButton().getAttribute("aria-disabled")).toBe("true");
     expect(mocks.createRingsWallet).toHaveBeenCalledTimes(1);
 
     settle?.({ wallet: { ...PENDING, status: "ready", shieldedAddress: "rings1treasury" } });
-    expect(await screen.findByRole("button", { name: "Retry provision" })).toBeTruthy();
+    await waitFor(() => expect(retryButton().getAttribute("aria-busy")).toBe("false"));
     expect(retryButton().disabled).toBe(false);
   });
 
@@ -135,6 +137,6 @@ describe("PrivateWalletsCard retry provision", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("owner unfunded");
     await waitFor(() => expect(onWalletsChanged).toHaveBeenCalledTimes(1));
-    expect(retryButton().disabled).toBe(false);
+    expect(retryButton().getAttribute("aria-busy")).toBe("false");
   });
 });
