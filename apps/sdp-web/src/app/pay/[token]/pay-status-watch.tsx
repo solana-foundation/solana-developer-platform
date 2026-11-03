@@ -8,7 +8,8 @@ import { payQueryKeys } from "@/app/pay/pay-query-key";
 
 /**
  * How often an open link is read again. The API marks a request paid within 30s of its payment
- * landing, and every read here counts against the payer's own address's limit (20 a minute).
+ * landing, and every read here counts against the payer's address's limit for link reads (20 a
+ * minute), which the API keeps apart from the wallet's `/pay/:token/tx` requests.
  */
 const PAY_WATCH_INTERVAL_MS = 10_000;
 

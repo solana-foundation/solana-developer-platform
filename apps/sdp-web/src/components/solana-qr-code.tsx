@@ -1,6 +1,7 @@
 "use client";
 
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import * as Sentry from "@sentry/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { QR_DRAW_SIZE, solanaQrOptions } from "@/lib/solana-qr";
 
@@ -26,17 +27,22 @@ export function SolanaQrCode({ url, size, label }: { url: string; size: number; 
     if (container === null) return;
 
     let active = true;
-    void import("@solana/qr-code-styling").then(({ default: QRCodeStyling }) => {
-      if (!active) return;
-      const qr = new QRCodeStyling(solanaQrOptions(url, QR_DRAW_SIZE));
-      container.replaceChildren();
-      qr.append(container);
-      // The library sizes its svg by width and height alone; a viewBox lets CSS scale it.
-      const svg = container.querySelector("svg");
-      if (svg === null) throw new Error("The QR code library drew no svg");
-      svg.setAttribute("viewBox", `0 0 ${QR_DRAW_SIZE} ${QR_DRAW_SIZE}`);
-      setDrawnUrl(url);
-    });
+    void import("@solana/qr-code-styling")
+      .then(({ default: QRCodeStyling }) => {
+        if (!active) return;
+        const qr = new QRCodeStyling(solanaQrOptions(url, QR_DRAW_SIZE));
+        container.replaceChildren();
+        qr.append(container);
+        // The library sizes its svg by width and height alone; a viewBox lets CSS scale it.
+        const svg = container.querySelector("svg");
+        if (svg === null) throw new Error("The QR code library drew no svg");
+        svg.setAttribute("viewBox", `0 0 ${QR_DRAW_SIZE} ${QR_DRAW_SIZE}`);
+        setDrawnUrl(url);
+      })
+      // A code that fails to load or draw keeps its square and is reported; the link still works.
+      .catch((cause: unknown) => {
+        if (active) Sentry.captureException(cause);
+      });
 
     return () => {
       active = false;
