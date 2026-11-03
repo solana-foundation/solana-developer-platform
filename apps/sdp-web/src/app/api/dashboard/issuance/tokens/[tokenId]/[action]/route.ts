@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 const TOKEN_POST_ACTIONS = {
@@ -33,10 +33,7 @@ function isTokenPostAction(action: string): action is TokenPostAction {
 export async function POST(request: Request, context: RouteContext) {
   const { tokenId, action } = await context.params;
   if (!isTokenPostAction(action)) {
-    return NextResponse.json(
-      { error: { message: "Token action is not supported" } },
-      { status: 404 }
-    );
+    return dashboardJson({ error: { message: "Token action is not supported" } }, { status: 404 });
   }
 
   return proxyToSdpApi({

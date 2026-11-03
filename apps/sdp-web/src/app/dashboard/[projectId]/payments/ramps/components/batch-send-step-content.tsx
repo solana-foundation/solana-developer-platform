@@ -903,12 +903,31 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
   );
 }
 
+/** Why the review is held after a send whose outcome is unknown, and the way on. */
+function OutcomeUnknownNotice() {
+  const t = useTranslations();
+  return (
+    <div role="status" className="space-y-1 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
+      <p className="font-medium text-primary">{t("DashboardPayments.batchSend.outcomeUnknown")}</p>
+      <p className="text-secondary">{t("DashboardPayments.batchSend.outcomeUnknownDescription")}</p>
+    </div>
+  );
+}
+
 export function BatchSendStepContent({ wizard }: { wizard: BatchSendWizard }) {
   if (wizard.currentStepId === "RECIPIENTS") {
     return <RecipientsStep wizard={wizard} />;
   }
   if (wizard.batchResult) {
     return <BatchResultView wizard={wizard} />;
+  }
+  if (wizard.recovering) {
+    return (
+      <div className="space-y-5">
+        <OutcomeUnknownNotice />
+        <BatchReviewView wizard={wizard} />
+      </div>
+    );
   }
   return <BatchReviewView wizard={wizard} />;
 }

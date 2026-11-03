@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   buildHomeActivityRows,
   computeTodaysVolume,
@@ -11,6 +10,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     const completeTransfers =
       transfersResult.ok && transfersResult.walletsNotLoaded === 0 && transfersResult.data;
 
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         data: {
           activityRows,
@@ -97,10 +97,7 @@ export async function GET(request: Request) {
         },
       },
       {
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 
@@ -113,17 +110,14 @@ export async function GET(request: Request) {
 
     return response;
   } catch (error) {
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         error:
           error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
       },
       {
         status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 

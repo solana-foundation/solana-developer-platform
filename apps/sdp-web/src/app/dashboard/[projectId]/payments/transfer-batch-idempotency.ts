@@ -221,6 +221,37 @@ function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest)
 }
 
 /**
+ * The batch exactly as it is sent: in the form it is keyed by, whatever form
+ * the caller passed, and always naming its payout run (a blank Reference gets
+ * the durable default). Sending the result again sends the same bytes under
+ * the same key, so the wizard holds it after a send it could not confirm.
+ */
+export function nameTransferBatchRequest(
+  request: PaymentTransferBatchRequest
+): PaymentTransferBatchRequest {
+  const unnamed = canonicalTransferBatchRequest(request);
+  return unnamed.externalId === undefined
+    ? { ...unnamed, externalId: claimDefaultTransferBatchReference(unnamed) }
+    : unnamed;
+}
+
+/**
+ * Whether a failed send may still have recorded the batch, so the only safe
+ * next step is the same request under the same key. A lost answer, a 5xx, a
+ * key still in flight or any answer the key store keeps as uncertain may have
+ * paid recipients; sdp-api answers a same-key retry from the batch's record.
+ * Any other 4xx was refused before anything was written (or answers a
+ * recorded failure, which spent the key), so the batch may be edited.
+ */
+export function isTransferBatchSendOutcomeUnknown(error: unknown): boolean {
+  if (!(error instanceof TransferBatchRequestError)) return true;
+  if (error.status < 400 || error.status >= 500) return true;
+  if (error.code === "IDEMPOTENCY_KEY_IN_FLIGHT") return true;
+  const answer = { status: error.status, replayed: error.replayed, code: error.code };
+  return uncertainMoneyAnswerMessage(answer) !== null;
+}
+
+/**
  * The idempotency key for this batch, minting and persisting one the first time.
  * The same batch rebuilt after a retry or a reload gets the SAME key.
  */
@@ -253,13 +284,7 @@ export async function sendTransferBatchUnderKey(
   request: PaymentTransferBatchRequest,
   t: Translate
 ): Promise<CreateTransferBatchResult> {
-  // Sent in the form it is keyed by, whatever form the caller passed, and
-  // always naming its payout run: a blank Reference gets the durable default.
-  const unnamed = canonicalTransferBatchRequest(request);
-  const canonical =
-    unnamed.externalId === undefined
-      ? { ...unnamed, externalId: claimDefaultTransferBatchReference(unnamed) }
-      : unnamed;
+  const canonical = nameTransferBatchRequest(request);
   const fingerprint = transferBatchRequestFingerprint(canonical);
   const { key, persisted } = store.claim(fingerprint);
   const settleKey = () => {

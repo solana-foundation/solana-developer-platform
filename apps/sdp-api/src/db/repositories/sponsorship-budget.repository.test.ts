@@ -397,7 +397,7 @@ describe("SponsorshipBudgetRepository", () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
     const input = reservationInput("reservation_usage_types");
     await expect(repository.createReservation(input)).resolves.toBe(true);
-    const usage = await repository.getWindowUsage({
+    const { usage } = await repository.loadWindowAdmissionSnapshot({
       network: input.network,
       organizationId: input.organizationId,
       projectId: input.projectId,
