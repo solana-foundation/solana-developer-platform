@@ -114,6 +114,11 @@
       "import": "./src/modal.tsx",
       "default": "./src/modal.tsx"
     },
+    "./motion": {
+      "types": "./src/motion.ts",
+      "import": "./src/motion.ts",
+      "default": "./src/motion.ts"
+    },
     "./provider-selection-card": {
       "types": "./src/provider-selection-card.tsx",
       "import": "./src/provider-selection-card.tsx",

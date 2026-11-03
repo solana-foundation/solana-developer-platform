@@ -1,11 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "./cn";
 import { useUiTranslations } from "./i18n";
 import { ModalCloseButton } from "./modal-close-button";
+import { playEntrance } from "./motion";
 import { PortalContainerProvider } from "./portal-container";
 import { useThemeScopeAttributes } from "./theme-scope";
 import { useEscapeKey } from "./use-escape-key";
@@ -44,6 +45,13 @@ const placementClassNames = {
   top: "items-start pt-[min(12dvh,6rem)]",
 } as const satisfies Record<ModalPlacement, string>;
 
+/**
+ * A dialog that opens this soon after another closed is taking its place (a loading dialog
+ * giving way to the real one), so it opens as it is: an entrance there would blink the backdrop.
+ */
+const HANDOFF_WINDOW_MS = 100;
+let lastClosedAt = Number.NEGATIVE_INFINITY;
+
 export function Modal({
   isOpen,
   ariaLabel,
@@ -60,12 +68,36 @@ export function Modal({
   const resolvedCloseLabel = closeLabel ?? t("Shared.SharedComponents.closeModal");
   const [mounted, setMounted] = useState(false);
   const [dialogNode, setDialogNode] = useState<HTMLElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const canClose = Boolean(onClose) && !closeDisabled;
   const themeScopeAttributes = useThemeScopeAttributes();
+
+  // The state re-renders the portal container; the ref reaches the entrance in the same commit.
+  const attachPanel = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    setDialogNode(node);
+  }, []);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Before the first paint, so an opening dialog never shows a frame before its entrance.
+  useLayoutEffect(() => {
+    if (!mounted || !isOpen) {
+      return;
+    }
+    const backdrop = backdropRef.current;
+    const panel = panelRef.current;
+    if (backdrop && panel && performance.now() - lastClosedAt >= HANDOFF_WINDOW_MS) {
+      playEntrance(backdrop, [{ opacity: 0 }, { opacity: 1 }]);
+      playEntrance(panel, [{ transform: "scale(0.97)" }, { transform: "none" }]);
+    }
+    return () => {
+      lastClosedAt = performance.now();
+    };
+  }, [mounted, isOpen]);
 
   useEscapeKey(isOpen && canClose, () => {
     onClose?.();
@@ -78,6 +110,7 @@ export function Modal({
   return createPortal(
     <div
       {...themeScopeAttributes}
+      ref={backdropRef}
       className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[rgba(18,18,19,0.44)]"
     >
       {onClose ? (
@@ -100,7 +133,7 @@ export function Modal({
         )}
       >
         <div
-          ref={setDialogNode}
+          ref={attachPanel}
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
