@@ -6,6 +6,7 @@ import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { changeOrganizationControl, getOrganizationControl } from "./organization-control";
@@ -29,15 +30,14 @@ const resume = (expectedVersion: number) =>
 describe("organization incident control", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await getDb(env)
-      .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status)
-      .run();
     const db = getDb(env);
-    await db
-      .prepare("INSERT INTO users (id, email, status) VALUES (?, ?, 'active')")
-      .bind(TEST_USER.id, TEST_USER.email)
-      .run();
+    await seedOrganization(db, {
+      id: TEST_ORG.id,
+      name: TEST_ORG.name,
+      slug: TEST_ORG.slug,
+      status: TEST_ORG.status,
+      creator: { id: TEST_USER.id, email: TEST_USER.email },
+    });
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
@@ -121,11 +121,13 @@ describe("organization incident control", () => {
 
   it("does not modify another organization or project controls", async () => {
     const db = getDb(env);
-    await db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES ('org_other', 'Other', 'other', 'individual', 'active')"
-      )
-      .run();
+    await seedOrganization(db, {
+      id: "org_other",
+      name: "Other",
+      slug: "other",
+      status: "active",
+      creator: organizationCreator("org_other"),
+    });
     await suspend();
     await expect(asSystem(() => getOrganizationControl(env, "org_other"))).resolves.toMatchObject({
       status: "active",
