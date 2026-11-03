@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as paymentsPageData from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   proxyToSdpApi: vi.fn(),
   proxyFailure: vi.fn(),
   createSdpApiClient: vi.fn(),
-  fetchDashboardPaymentTransfers: vi.fn(),
 }));
 
 const trace = {
@@ -20,16 +20,14 @@ vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
-  fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
-}));
-
 vi.mock("@/lib/request-tracing", () => ({
   createTimedTrace: () => trace,
   logRouteResult: vi.fn(),
 }));
 
 import { GET, POST } from "./route";
+
+const fetchDashboardPaymentTransfers = vi.spyOn(paymentsPageData, "fetchDashboardPaymentTransfers");
 
 describe("GET /api/dashboard/payments/transfers", () => {
   beforeEach(() => {
@@ -73,7 +71,7 @@ describe("GET /api/dashboard/payments/transfers", () => {
 
   it("marks the unfiltered aggregate uncacheable and traced", async () => {
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [] });
+    fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [], walletsNotLoaded: 0 });
 
     const response = await GET(unfiltered());
 
@@ -86,10 +84,11 @@ describe("GET /api/dashboard/payments/transfers", () => {
 
   it("marks an upstream failure of the aggregate uncacheable", async () => {
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
-    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+    fetchDashboardPaymentTransfers.mockResolvedValue({
       ok: false,
       status: 503,
       error: "unavailable",
+      walletsNotLoaded: null,
     });
 
     const response = await GET(unfiltered());
