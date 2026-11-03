@@ -21,6 +21,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
@@ -37,7 +38,11 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
-import { cancelSeededPaymentRequest, seedPaymentRequest } from "@/test/helpers/payment-requests";
+import {
+  cancelSeededPaymentRequest,
+  seedPaymentRequest,
+  seedPaymentRequestTransfer,
+} from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
@@ -575,6 +580,129 @@ describe("Public payment request routes", () => {
         error: { message: "Payment request is no longer payable" },
       });
       expect(sponsorship).toHaveBeenCalledTimes(1);
+    });
+
+    async function markSeededRequestPaid(request: PaymentRequestRow) {
+      const paid = await createSystemPaymentRequestsRepository(env).markPaymentRequest({
+        requestId: request.id,
+        organizationId: request.organization_id,
+        projectId: request.project_id ?? "",
+        status: "paid",
+        fulfilledByTransferId: await seedPaymentRequestTransfer(env, request),
+        paidLate: false,
+        chainRead: true,
+      });
+      expect(paid?.status).toBe("paid");
+    }
+
+    /** Another payment settles the request once `/pay` admitted it, as `method` runs. */
+    function settleDuring(
+      request: PaymentRequestRow,
+      method: "getSponsoredTransactionClaim" | "claimSponsoredTransactionWindow"
+    ) {
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          const real = repository[method].bind(repository) as (...args: unknown[]) => unknown;
+          let settled = false;
+          vi.spyOn(repository, method).mockImplementation((async (...args: unknown[]) => {
+            if (method === "getSponsoredTransactionClaim" && !settled) {
+              settled = true;
+              await markSeededRequestPaid(request);
+            }
+            const result = await real(...args);
+            if (method === "claimSponsoredTransactionWindow" && !settled) {
+              settled = true;
+              await markSeededRequestPaid(request);
+            }
+            return result;
+          }) as never);
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+    }
+
+    function stubCountedSponsorship(sign: typeof sponsorSignTestTransaction) {
+      const signAsFeePayer = vi.fn(sign);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      return signAsFeePayer;
+    }
+
+    it("refuses a paid request's claim and signature and signs nothing", async () => {
+      const sign = stubCountedSponsorship(sponsorSignTestTransaction);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      await markSeededRequestPaid(request);
+
+      expect((await postTransaction(request.public_token)).status).toBe(400);
+      expect(sign).not.toHaveBeenCalled();
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toBeNull();
+    });
+
+    it.for(["signed", "unsigned"] as const)(
+      "refuses a stored %s claim when another payment settles the request after admission",
+      async (state) => {
+        let failSign = state === "unsigned";
+        const sign = stubCountedSponsorship(async (bytes) => {
+          if (failSign) throw new Error("sponsor unavailable");
+          return sponsorSignTestTransaction(bytes);
+        });
+        const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+        expect((await postTransaction(request.public_token)).status).toBe(
+          state === "signed" ? 200 : 500
+        );
+        failSign = false;
+        settleDuring(request, "getSponsoredTransactionClaim");
+
+        const response = await postTransaction(request.public_token);
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+          error: { code: "BAD_REQUEST", message: "Payment request is no longer payable" },
+        });
+        expect(sign).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it("rereads the request before the sponsor signs and refuses one paid since its claim", async () => {
+      const sign = stubCountedSponsorship(sponsorSignTestTransaction);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      settleDuring(request, "claimSponsoredTransactionWindow");
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Payment request is no longer payable" },
+      });
+      expect(sign).not.toHaveBeenCalled();
+    });
+
+    it("refuses to store or return a signature when the request settles while the sponsor signs", async () => {
+      const sign = stubCountedSponsorship(async (bytes) => {
+        const signed = await sponsorSignTestTransaction(bytes);
+        await markSeededRequestPaid(request);
+        return signed;
+      });
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).not.toHaveProperty("transaction");
+      expect(sign).toHaveBeenCalledTimes(1);
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toMatchObject({ requestStatus: "paid", signedTransaction: null });
     });
 
     it("lets a new account claim after the window expires", async () => {
