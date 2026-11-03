@@ -2,7 +2,8 @@
 
 import { useAuth } from "@clerk/nextjs";
 import useSWR from "swr";
-import { readOrganizationsLinked } from "@/app/dashboard/organization-link-actions";
+import { z } from "zod";
+import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { organizationQueryKeys } from "@/lib/organization-query-key";
 
 const NO_ORGANIZATIONS: ReadonlySet<string> = new Set();
@@ -13,20 +14,34 @@ export interface UnlinkedOrganizations {
   isResolved: boolean;
 }
 
+export const ORGANIZATION_LINKED_PATH = "/api/dashboard/organizations/linked";
+
+const organizationLinkedSchema = z.object({ linked: z.boolean() });
+
+async function readOrganizationLinked(
+  organizationId: string,
+  getToken: ReturnType<typeof useAuth>["getToken"]
+): Promise<boolean> {
+  const token = await getToken({ organizationId });
+  if (!token) {
+    throw new Error("Failed to acquire Clerk token");
+  }
+  const response = await dashboardRequest(ORGANIZATION_LINKED_PATH, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Organization link read failed (${response.status})`);
+  }
+  return organizationLinkedSchema.parse(await response.json()).linked;
+}
+
 async function readUnlinkedOrganizations(
   organizationIds: readonly string[],
   getToken: ReturnType<typeof useAuth>["getToken"]
 ): Promise<ReadonlySet<string>> {
-  const tokens = await Promise.all(
-    organizationIds.map(async (organizationId) => {
-      const token = await getToken({ organizationId });
-      if (!token) {
-        throw new Error("Failed to acquire Clerk token");
-      }
-      return token;
-    })
+  const linked = await Promise.all(
+    organizationIds.map((organizationId) => readOrganizationLinked(organizationId, getToken))
   );
-  const linked = await readOrganizationsLinked(tokens);
   return new Set(organizationIds.filter((_, index) => !linked[index]));
 }
 

@@ -229,8 +229,11 @@ export function WorkspaceSwitcher({
   const { copied, copy, value: copiedValue } = useCopy(1200);
 
   const loadedMemberships = userMemberships.data ?? [];
+  // The dashboard renders only for an organization SDP admitted, so the active one is not asked about.
   const { unlinkedIds } = useUnlinkedOrganizations(
-    loadedMemberships.map((membership) => membership.organization.id)
+    loadedMemberships
+      .map((membership) => membership.organization.id)
+      .filter((organizationId) => organizationId !== activeOrg?.id)
   );
   // An organization this deployment does not link is another deployment's: switching to it
   // only lands on the organization picker, so it is not offered.
