@@ -819,6 +819,10 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
       redactCredentialString("token=[REDACTED], status=502"),
       "token=[REDACTED], status=502"
     );
+    assert.equal(
+      redactCredentialString('upstream said {"message":"Cookie: session=abc","status":502}'),
+      'upstream said {"message":"Cookie: [REDACTED]","status":502}'
+    );
   });
 
   it("masks to the end rather than guess where a malformed value ends", () => {

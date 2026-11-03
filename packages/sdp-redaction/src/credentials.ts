@@ -110,7 +110,12 @@ const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 // more, `%3D`, `%253D`, ...). Its value stops at `&`, so the query string
 // after it stays readable. The JSON field form is the generic field scanner's.
 const CLERK_TICKET_PATTERN = /(__clerk_ticket(?:=|%(?:25)*3D))[^&\s"'#%<>]+/gi;
-const CLERK_TICKET_VALUE_END = /[&\s"'#%<>]/;
+// Where the cookie and Clerk ticket rules end the values they redact.
+const EARLIER_RULE_VALUE_ENDS = new Map([
+  ["cookie", /[\n\r"'\\]/],
+  ["cookies", /[\n\r"'\\]/],
+  ["clerkticket", /[&\s"'#%<>]/],
+]);
 
 export function redactCredentialString(value: string): string {
   return redactString(value, 0);
@@ -366,9 +371,9 @@ function redactAssignments(text: string): string {
       continue;
     }
     const valueStart = match.index + match[0].length;
-    if (isRedactedClerkTicket(key, text, valueStart)) {
-      // The Clerk ticket rule ends its value at the query delimiter; keep the
-      // query string after it.
+    if (isRedactedByEarlierRule(key, text, valueStart)) {
+      // The cookie and Clerk ticket rules end their values at their own
+      // boundaries (a closing quote, a query delimiter); keep what follows.
       start.lastIndex = valueStart + REDACTED.length;
       continue;
     }
@@ -389,16 +394,19 @@ function redactAssignments(text: string): string {
 }
 
 /**
- * Whether `valueStart` holds a Clerk ticket that `CLERK_TICKET_PATTERN`
- * already redacted: the marker followed by a character that pattern ends its
- * value at, or the end of the text.
+ * Whether `valueStart` holds a value that `COOKIE_ASSIGNMENT_PATTERN` or
+ * `CLERK_TICKET_PATTERN` already redacted: the marker followed by a character
+ * that rule ends its value at, or the end of the text. Those rules consume
+ * whatever value they find, so text that only starts with the marker never
+ * survives them to reach this check.
  */
-function isRedactedClerkTicket(key: string, text: string, valueStart: number): boolean {
+function isRedactedByEarlierRule(key: string, text: string, valueStart: number): boolean {
+  const valueEnd = EARLIER_RULE_VALUE_ENDS.get(normalizeKey(key));
   const after = valueStart + REDACTED.length;
   return (
-    normalizeKey(key) === "clerkticket" &&
+    valueEnd !== undefined &&
     text.startsWith(REDACTED, valueStart) &&
-    (after === text.length || CLERK_TICKET_VALUE_END.test(text[after]))
+    (after === text.length || valueEnd.test(text[after]))
   );
 }
 
