@@ -7,83 +7,94 @@
  *
  * For anything crossing a telemetry or audit boundary use `scrubTelemetry` /
  * `scrubAuditMetadata` from `./scrub`, which layer the PII rules on top.
+ *
+ * A string is parsed before it is matched. Provider errors carry their bodies
+ * as strings — serialized JSON, sometimes serialized again, sometimes
+ * percent-encoded into a URL — and a pattern over the flat text only sees the
+ * shapes someone thought to write down. So a string that is a JSON document
+ * is parsed and redacted by key with the same `isCredentialKey` policy the
+ * object walker uses, and a string that carries percent-escapes is decoded and
+ * redacted again. Both steps are bounded (`MAX_NESTING`, `MAX_JSON_LENGTH`),
+ * since this runs on every log line. Text that does not parse goes through the
+ * scanners below, which also take their key decisions from `isCredentialKey`,
+ * and which mask to the end of the text when a value never closes.
  */
 
-import { isCredentialKey, REDACTED } from "./policy";
+import { isCredentialKey, isFreeTextCredentialKey, REDACTED } from "./policy";
 
-// `(?:[A-Za-z0-9]+[-_ ])*` mirrors, for the serialized-string form, the suffix
-// matching that `isCredentialKey` already does on object keys: the quoted key
-// has to *end* with a denied name, not equal one. Without it `x-api-key` — the
-// spelling that actually arrives, and exactly what a stringified
-// `request.headers` blob holds — slips past, because the closing `\1`
-// backreference anchors the alternation to the whole quoted key. The separator
-// is mandatory each repetition, so the group cannot split a run two ways and
-// the pattern stays linear.
-//
-// The pattern only finds a sensitive key and the quote that opens its value;
-// `quotedValueEnd` finds where the value closes. A quote token may carry
-// backslashes (a body serialized more than once), and the lookbehind starts a
-// token only where its backslash run starts, so a long run is scanned once.
-// Bare `seed` sits outside the suffix group: public PDA keys such as
-// `pda_seed` are not credentials under the object-key policy.
-const SENSITIVE_JSON_FIELD_START =
-  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|cookies?|passphrase|password|pem|credential|secret|token|set[-_ ]?cookie|wallet[-_ ]?passphrase|seed[-_ ]?phrase)|seed)\1\s*:\s*(\\*)(["'])/gi;
+/**
+ * How many times one string may be re-read: a JSON string inside a JSON
+ * document, or a percent-decoded copy of the text, each take one level. Past
+ * it, the scanners alone decide.
+ */
+const MAX_NESTING = 4;
+/** Longer strings are not parsed as JSON; the scanners still run on them. */
+const MAX_JSON_LENGTH = 64 * 1024;
+/** Object depth inside one parsed document; deeper values are masked whole. */
+const MAX_JSON_DEPTH = 16;
+
+const JSON_DOCUMENT_START = /^\s*["[{]/;
+const PERCENT_ESCAPE = /%[0-9A-Fa-f]{2}/;
+const PERCENT_ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/g;
+const ASCII_PERCENT_ESCAPE = /%([0-7][0-9A-Fa-f])/g;
+
+// Finds a quoted key and the colon after it; `isCredentialKey` decides whether
+// its value is masked and `fieldValueEnd` finds where that value ends. A quote
+// token may carry backslashes (a body serialized more than once), and the
+// lookbehind starts a token only where its backslash run starts, so a long run
+// is scanned once. The key is bounded, so each quote is scanned at most that
+// far.
+const QUOTED_FIELD_START = /(?<!\\)(\\*["'])([\w .-]{1,128})\1\s*:\s*/g;
 // A cookie header is a credential container, not one credential: every
 // `name=value` pair after `Cookie:` is a session, and they are separated by
-// spaces — exactly where the generic assignment pattern's value stops. Consume
-// the whole header value: to the end of the line for a raw header, to the end
-// of the containing string for one embedded in serialized data. The tempered
-// value ends at an unescaped quote that opens structure — a `,`/`}`/`]` run
-// followed either by a quoted key with a colon (`","status":502`) or by
-// nothing but structure to the end. Cookie syntax has no quoted keys, so a raw
-// header — quoted values like `session="abc", refresh="def"` included — still
-// consumes its line, and an escaped quote inside the value (`\"`) never ends
-// it. Without the boundary, redacting
-// `{"message":"Cookie: session=abc","status":502}` erased `status` and the
-// closing quotes along with the header. The token stays linear: the lookahead
-// only runs its structure scan past a quote, never per character.
+// spaces — exactly where the generic assignment value stops. Consume the whole
+// header value: to the end of the line for a raw header, to the end of the
+// containing string for one embedded in serialized data. The tempered value
+// ends at an unescaped quote that opens structure — a `,`/`}`/`]` run followed
+// either by a quoted key with a colon (`","status":502`) or by nothing but
+// structure to the end. Cookie syntax has no quoted keys, so a raw header —
+// quoted values like `session="abc", refresh="def"` included — still consumes
+// its line, and an escaped quote inside the value (`\"`) never ends it. The
+// token stays linear: the lookahead only runs its structure scan past a quote,
+// never per character.
 const COOKIE_ASSIGNMENT_PATTERN =
   /\b(cookies?)\b(\s*[:=]\s*)(?:(?!(?<!\\)["']\s*[,}\]][\s,}\]]*(?:["'][^"'\n\r]*["']\s*:|$))[^\n\r])*/gi;
-// Do not start the exact-only seed alternative after an identifier separator.
-const SENSITIVE_ASSIGNMENT_PATTERN =
-  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|pem|credential|secret|token)\b(\s*[:=]\s*)[^,\s}]+/gi;
-// The recovery-secret keys take values whose canonical form is
-// whitespace-separated — a BIP-39 mnemonic is `word word word` and a passphrase is
-// free text — so the generic rule above, whose value stops at the first
-// space, left every word after the first readable in an interpolated message:
-// `seed=word1 word2 word3` redacted to `seed=[REDACTED] word2 word3`. These
-// keys' values continue across runs of horizontal whitespace instead — a
-// double space or a tab between words is just formatting, and stopping there
-// exposed the rest of the secret (`seed=legal  winner thank` kept `winner
-// thank`) — up to a clear boundary: a comma or brace (the containing-structure
-// delimiters the generic rule also stops at), a newline (the value never
-// crosses lines), or a `name=` assignment following the value — the next
-// pair's key must not be swallowed into this redaction, both so the structure
-// after the value survives and so that pair's own value is still redacted by
-// the generic rule. Punctuation stays INSIDE the value exactly as the generic
-// rule keeps it: `password=alpha;bravo` is one value, and a `;`, `)`, `]` or
-// quote that follows a word is that word's tail while the `=` that opens the
-// next assignment is not. That boundary also has to preserve a multi-word
-// credential name whole: a word followed by a space otherwise reads as more
-// value, so `password=foo api key=SECRET` redacted `foo api` and left the
-// mangled remainder `key=SECRET` — a name no rule recognizes — readable. A
-// continuation word therefore must not OPEN a complete space-separated name
-// assignment (the two-word keys the generic and word rules recognize): the
-// lookahead at the word's start rejects it, which ends the value before the
-// name so the name's own rule redacts the pair. A word before an unknown
-// `name=` pair (`beta key=`) is still value: only complete credential names
-// are protected. Every quantified part has one forced parse — the whitespace
-// and word classes are disjoint, so their split cannot move, and both
-// lookaheads reject every shorter parse of a continuation word (a prefix is
-// followed by a word character, and a word that opens a name assignment is
-// rejected whole) — so the scan stays linear.
-const MULTI_WORD_CREDENTIAL_ASSIGNMENT = String.raw`(?:app[^\S\n\r]+secret|api[^\S\n\r]+(?:secret|key)|client[^\S\n\r]+secret|wallet[^\S\n\r]+(?:secret|passphrase)|signing[^\S\n\r]+secret|private[^\S\n\r]+key|secret[^\S\n\r]+key|access[^\S\n\r]+token|refresh[^\S\n\r]+token|id[^\S\n\r]+token|set[^\S\n\r]+cookie|seed[^\S\n\r]+(?:phrase|mnemonic))[^\S\n\r]*[:=]`;
-const SENSITIVE_WORD_ASSIGNMENT_PATTERN = new RegExp(
-  String.raw`\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[^\S\n\r]+(?!` +
-    MULTI_WORD_CREDENTIAL_ASSIGNMENT +
-    String.raw`)[^,\s}=]+(?![\w=-]))*`,
-  "gi"
-);
+// Finds a `name=value` or `name: value` assignment in free text. The name is
+// one identifier (`x-api-key`, `walletMnemonic`) or two words (`api key`,
+// `seed phrase`); `isCredentialKey` decides. Starts only at the start of an
+// identifier run, so each run is tried once and the scan stays linear.
+const ASSIGNMENT_START = /(?<![\w-])(?:([A-Za-z0-9]+[^\S\n\r]+[\w-]+)|([\w][\w-]*))(\s*[:=]\s*)/g;
+// The value of an ordinary credential assignment: one run, up to a comma,
+// whitespace or a closing brace.
+const ASSIGNMENT_VALUE = /[^,\s}]+/y;
+// A recovery secret's canonical form is whitespace-separated — a BIP-39
+// mnemonic is `word word word`, a passphrase is free text — so its value
+// continues across horizontal whitespace, one word at a time, until a comma,
+// brace, newline, a `name=` that opens the next pair, or a complete two-word
+// credential name (`api key=`), which its own rule then redacts.
+const FREE_TEXT_WORD = /[^\S\n\r]+([^,\s}=]+)/y;
+const TWO_WORD_ASSIGNMENT = /([A-Za-z0-9]+[^\S\n\r]+[A-Za-z0-9]+)[^\S\n\r]*[:=]/y;
+// Words that open a two-word credential name (`access token`, `wallet
+// passphrase`). They decide only where a free-text value ends, never whether a
+// key is a credential: that is `isCredentialKey`'s.
+const CREDENTIAL_NAME_QUALIFIERS = new Set([
+  "access",
+  "api",
+  "app",
+  "client",
+  "id",
+  "private",
+  "refresh",
+  "secret",
+  "seed",
+  "set",
+  "signing",
+  "wallet",
+]);
+// URL userinfo (`scheme://user:pass@host`) is a credential whatever the
+// scheme. The whole userinfo goes: the user half is an API key as often as a
+// name. Starts only where a scheme run starts, so the scan stays linear.
+const URL_USERINFO_PATTERN = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/?#"'<>\\]+@/g;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =
@@ -93,57 +104,194 @@ const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]+)/gi;
 // and unmatched suffixes. Keep route context without copying the bearer token.
 const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 // A Clerk invitation ticket signs its holder in, so it is a credential wherever
-// a URL carries it: plain, URL-encoded inside another parameter (once or more,
-// `%3D`, `%253D`, ...), or as a serialized JSON field.
+// a URL carries it: plain, or URL-encoded inside another parameter (once or
+// more, `%3D`, `%253D`, ...). Its value stops at `&`, so the query string
+// after it stays readable. The JSON field form is the generic field scanner's.
 const CLERK_TICKET_PATTERN = /(__clerk_ticket(?:=|%(?:25)*3D))[^&\s"'#%<>]+/gi;
-// Starts only where a backslash run starts (the lookbehind), so a long run is
-// scanned once, as SENSITIVE_JSON_FIELD_START does.
-const CLERK_TICKET_FIELD_PATTERN = /(?<!\\)(\\*["']__clerk_ticket\\*["']\s*:\s*\\*["'])[^"'\\]+/gi;
 
 export function redactCredentialString(value: string): string {
+  return redactString(value, 0);
+}
+
+function redactString(value: string, nesting: number): string {
+  if (nesting < MAX_NESTING) {
+    const document = redactJsonDocument(value, nesting);
+    if (document !== undefined) {
+      return document;
+    }
+  }
+
+  const redacted = redactText(value);
+  if (nesting >= MAX_NESTING || !PERCENT_ESCAPE.test(redacted)) {
+    return redacted;
+  }
+
+  // A credential percent-encoded into a parameter (`%22mnemonic%22%3A...`) has
+  // no key the scanners can see. Decode what is already redacted and redact
+  // again: when that finds nothing new the encoded form is kept as it was;
+  // when it finds more, the decoded, redacted form is what is logged.
+  const decoded = percentDecode(redacted);
+  if (decoded === redacted) {
+    return redacted;
+  }
+  const decodedRedacted = redactString(decoded, nesting + 1);
+  return decodedRedacted === decoded ? redacted : decodedRedacted;
+}
+
+/**
+ * Redacts a string that is a whole JSON document by key, or returns undefined
+ * when it is not one. The original text comes back when nothing was redacted,
+ * so formatting survives.
+ */
+function redactJsonDocument(value: string, nesting: number): string | undefined {
+  if (value.length > MAX_JSON_LENGTH || !JSON_DOCUMENT_START.test(value)) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  const redacted = redactJsonValue(parsed, nesting, 0);
+  return redacted === parsed ? value : JSON.stringify(redacted);
+}
+
+/** Returns `value` itself when nothing inside it changed. */
+function redactJsonValue(value: unknown, nesting: number, depth: number): unknown {
+  if (typeof value === "string") {
+    return redactString(value, nesting + 1);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (depth >= MAX_JSON_DEPTH) {
+    return REDACTED;
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map((item) => {
+      const next = redactJsonValue(item, nesting, depth + 1);
+      changed ||= next !== item;
+      return next;
+    });
+    return changed ? items : value;
+  }
+
+  let changed = false;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const next = isCredentialKey(key) ? REDACTED : redactJsonValue(item, nesting, depth + 1);
+    changed ||= next !== item;
+    result[key] = next;
+  }
+  return changed ? result : value;
+}
+
+/**
+ * Decodes every run of percent-escapes once. A run that is not valid UTF-8
+ * still has its ASCII escapes decoded, since every delimiter a credential
+ * hides behind (`"`, `:`, `=`, `&`) is ASCII.
+ */
+function percentDecode(value: string): string {
+  return value.replace(PERCENT_ESCAPE_RUN, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(ASCII_PERCENT_ESCAPE, (_escape, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16))
+      );
+    }
+  });
+}
+
+function redactText(value: string): string {
   const withoutHeaders = value
     .replace(PRIVATE_KEY_PATTERN, REDACTED)
     .replace(PAY_LINK_TOKEN_PATTERN, `/pay/${REDACTED}`)
     .replace(CLERK_TICKET_PATTERN, `$1${REDACTED}`)
-    .replace(CLERK_TICKET_FIELD_PATTERN, `$1${REDACTED}`)
+    .replace(URL_USERINFO_PATTERN, `$1${REDACTED}@`)
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );
-  return redactSensitiveJsonFields(withoutHeaders)
-    .replace(
-      COOKIE_ASSIGNMENT_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-    )
-    .replace(
-      SENSITIVE_WORD_ASSIGNMENT_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-    )
-    .replace(
-      SENSITIVE_ASSIGNMENT_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-    );
+  const withoutFields = redactQuotedFields(withoutHeaders).replace(
+    COOKIE_ASSIGNMENT_PATTERN,
+    (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+  );
+  return redactAssignments(withoutFields);
 }
 
 /**
- * Replaces the value of every quoted sensitive field with REDACTED, in one
+ * Replaces the value of every quoted credential field with REDACTED, in one
  * pass that resumes after each value it redacts.
  */
-function redactSensitiveJsonFields(text: string): string {
-  const start = new RegExp(SENSITIVE_JSON_FIELD_START);
+function redactQuotedFields(text: string): string {
+  const start = new RegExp(QUOTED_FIELD_START);
   let redacted = "";
   let copiedUpTo = 0;
   for (let match = start.exec(text); match !== null; match = start.exec(text)) {
-    const [field, keyQuote, key, valueBackslashes, valueQuote] = match;
+    const [field, keyQuote, key] = match;
+    if (!isCredentialKey(key)) {
+      continue;
+    }
     const valueStart = match.index + field.length;
-    const value = quotedValueEnd(text, valueStart, valueBackslashes.length, valueQuote);
+    const value = fieldValueEnd(text, valueStart);
     redacted +=
       text.slice(copiedUpTo, match.index) +
-      `${keyQuote}${key}${keyQuote}:${valueBackslashes}${valueQuote}${REDACTED}` +
+      `${keyQuote}${key}${keyQuote}:${value.open}${REDACTED}` +
       text.slice(value.contentEnd, value.end);
     copiedUpTo = value.end;
     start.lastIndex = value.end;
   }
   return redacted + text.slice(copiedUpTo);
+}
+
+/**
+ * Where the value of a field that starts at `from` ends: a quoted string, an
+ * array or object, or a bare scalar (`"secretKey":[12,34]`, `"pin":1234`).
+ *
+ * @returns The opening token to keep, where the content ends, and where the
+ * value's closing token ends.
+ */
+function fieldValueEnd(
+  text: string,
+  from: number
+): { open: string; contentEnd: number; end: number } {
+  let quoteAt = from;
+  while (text[quoteAt] === "\\") {
+    quoteAt += 1;
+  }
+  const quote = text[quoteAt];
+  if (quote === '"' || quote === "'") {
+    const depth = quoteAt - from;
+    return {
+      open: text.slice(from, quoteAt + 1),
+      ...quotedValueEnd(text, quoteAt + 1, depth, quote),
+    };
+  }
+
+  const first = text[from];
+  if (first === "[" || first === "{") {
+    // Bracket counting, not a parse: a value that never balances is masked to
+    // the end of the text rather than cut where the secret might continue.
+    let open = 0;
+    for (let index = from; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === "[" || char === "{") {
+        open += 1;
+      } else if ((char === "]" || char === "}") && --open === 0) {
+        return { open: "", contentEnd: index + 1, end: index + 1 };
+      }
+    }
+    return { open: "", contentEnd: text.length, end: text.length };
+  }
+
+  let end = from;
+  while (end < text.length && !/[,\s}\]"'\\]/.test(text[end] ?? "")) {
+    end += 1;
+  }
+  return { open: "", contentEnd: end, end };
 }
 
 /**
@@ -175,6 +323,88 @@ function quotedValueEnd(
     run = 0;
   }
   return { contentEnd: text.length, end: text.length };
+}
+
+/**
+ * Replaces the value of every credential assignment in free text with
+ * REDACTED, in one pass. A two-word name that is not a credential is retried
+ * by its last word, so `the seed=` is still caught.
+ */
+function redactAssignments(text: string): string {
+  const start = new RegExp(ASSIGNMENT_START);
+  let redacted = "";
+  let copiedUpTo = 0;
+  for (let match = start.exec(text); match !== null; match = start.exec(text)) {
+    const [, twoWords, oneWord, separator] = match;
+    const name = twoWords ?? oneWord ?? "";
+    const key = isCredentialKey(name) ? name : lastWord(name);
+    if (key === undefined || !isCredentialKey(key)) {
+      continue;
+    }
+    const valueStart = match.index + match[0].length;
+    if (text.startsWith(REDACTED, valueStart)) {
+      // Already redacted by an earlier rule (a cookie header, a Clerk ticket
+      // whose query string follows): keep what comes after it.
+      start.lastIndex = valueStart + REDACTED.length;
+      continue;
+    }
+    const valueEnd = isFreeTextCredentialKey(key)
+      ? freeTextValueEnd(text, valueStart)
+      : stickyEnd(ASSIGNMENT_VALUE, text, valueStart);
+    if (valueEnd === valueStart) {
+      continue;
+    }
+    redacted += text.slice(copiedUpTo, valueStart - separator.length) + separator + REDACTED;
+    copiedUpTo = valueEnd;
+    start.lastIndex = valueEnd;
+  }
+  return redacted + text.slice(copiedUpTo);
+}
+
+function lastWord(name: string): string | undefined {
+  const words = name.split(/[^\S\n\r]+/);
+  return words.length > 1 ? words[words.length - 1] : undefined;
+}
+
+function stickyEnd(pattern: RegExp, text: string, from: number): number {
+  pattern.lastIndex = from;
+  return pattern.test(text) ? pattern.lastIndex : from;
+}
+
+function freeTextValueEnd(text: string, from: number): number {
+  let end = stickyEnd(ASSIGNMENT_VALUE, text, from);
+  if (end === from) {
+    return from;
+  }
+  for (;;) {
+    FREE_TEXT_WORD.lastIndex = end;
+    const word = FREE_TEXT_WORD.exec(text);
+    if (word === null) {
+      return end;
+    }
+    const wordStart = FREE_TEXT_WORD.lastIndex - (word[1] ?? "").length;
+    if (text[FREE_TEXT_WORD.lastIndex] === "=" || opensCredentialName(text, wordStart)) {
+      return end;
+    }
+    end = FREE_TEXT_WORD.lastIndex;
+  }
+}
+
+/**
+ * Whether a complete two-word credential name (`api key=`, `wallet
+ * passphrase=`) starts at `from`. When the second word is a credential on its
+ * own (`token=`), the first word is part of the name only if it qualifies one
+ * (`access token`); otherwise it is the last word of the value before it, and
+ * `seed=... yellow token=` must not leave `yellow` readable.
+ */
+function opensCredentialName(text: string, from: number): boolean {
+  TWO_WORD_ASSIGNMENT.lastIndex = from;
+  const match = TWO_WORD_ASSIGNMENT.exec(text);
+  if (match === null || !isCredentialKey(match[1] ?? "")) {
+    return false;
+  }
+  const [first = "", second = ""] = (match[1] ?? "").split(/[^\S\n\r]+/);
+  return !isCredentialKey(second) || CREDENTIAL_NAME_QUALIFIERS.has(first.toLowerCase());
 }
 
 function isLikelyAuthToken(scheme: string, token: string): boolean {
@@ -214,7 +444,7 @@ function redactValue(value: unknown, seen: WeakSet<object>): unknown {
   }
 
   if (value instanceof URL) {
-    return value.toString();
+    return redactCredentialString(value.toString());
   }
 
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {

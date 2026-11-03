@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { redactCredentialString } from "./credentials";
+import { redactCredentialSecrets, redactCredentialString } from "./credentials";
 import {
   maskEmail,
   scrubAuditMetadata,
@@ -627,5 +627,146 @@ describe("scrubAuditMetadata", () => {
     const scrubbed = scrubAuditMetadata({ reason: "invited jane.doe@example.com by mistake" });
 
     assert.deepEqual(scrubbed, { reason: "invited j***@example.com by mistake" });
+  });
+});
+
+describe("redactCredentialString: credentials encoded inside strings", () => {
+  const mnemonic = "legal winner thank year wave sausage worth useful";
+
+  it("redacts a serialized mnemonic field in a provider error body", () => {
+    const body = JSON.stringify({ error: "invalid", wallet: { mnemonic, chainType: "solana" } });
+
+    const redacted = redactCredentialString(`Privy request failed: ${body}`);
+
+    assert.ok(!redacted.includes("legal winner"), redacted);
+    assert.ok(redacted.includes('"chainType":"solana"'), redacted);
+  });
+
+  it("redacts a mnemonic in a body that is itself a JSON document, at any nesting", () => {
+    const nested = JSON.stringify({ response: JSON.stringify({ walletMnemonic: mnemonic }) });
+
+    const redacted = redactCredentialString(nested);
+
+    assert.ok(!redacted.includes("legal winner"), redacted);
+    assert.deepEqual(JSON.parse(JSON.parse(redacted).response), { walletMnemonic: "[REDACTED]" });
+  });
+
+  it("redacts a mnemonic assignment under any credential name, not only the bare word", () => {
+    for (const key of ["mnemonic", "walletMnemonic", "wallet_mnemonic", "seed phrase"]) {
+      const redacted = redactCredentialString(`import failed: ${key}=${mnemonic}, status=400`);
+
+      assert.equal(redacted, `import failed: ${key}=[REDACTED], status=400`);
+    }
+  });
+
+  it("redacts key material whose value is not a string", () => {
+    const redacted = redactCredentialString(
+      'upstream said {"secretKey":[12,34,56],"pin":"x","ok":true}'
+    );
+
+    assert.equal(redacted, 'upstream said {"secretKey":[REDACTED],"pin":"x","ok":true}');
+    assert.equal(
+      redactCredentialString('{"secretKey":[12,34,56],"walletId":"wal_1"}'),
+      '{"secretKey":"[REDACTED]","walletId":"wal_1"}'
+    );
+  });
+
+  it("strips URL userinfo from a string and from a URL object", () => {
+    assert.equal(
+      redactCredentialString("GET https://svc-user:fake-password@rpc.example.test/v1 failed"),
+      "GET https://[REDACTED]@rpc.example.test/v1 failed"
+    );
+    assert.equal(
+      redactCredentialString("connect postgres://app:fake-password@db.internal:5432/sdp refused"),
+      "connect postgres://[REDACTED]@db.internal:5432/sdp refused"
+    );
+
+    const url = new URL("https://svc-user:fake-password@rpc.example.test/v1?cluster=devnet");
+
+    assert.equal(
+      scrubTelemetry({ url }).url,
+      "https://[REDACTED]@rpc.example.test/v1?cluster=devnet"
+    );
+    assert.equal(
+      redactCredentialSecrets({ url }).url,
+      "https://[REDACTED]@rpc.example.test/v1?cluster=devnet"
+    );
+    assert.ok(
+      !JSON.stringify(scrubTelemetry({ body: JSON.stringify({ url }) })).includes("fake-password")
+    );
+  });
+
+  it("decodes percent-encoded credentials before matching", () => {
+    const encoded = encodeURIComponent(JSON.stringify({ mnemonic, appSecret: "fake-app-secret" }));
+
+    const redacted = redactCredentialString(`callback?state=${encoded}`);
+
+    assert.ok(!redacted.includes("legal"), redacted);
+    assert.ok(!redacted.includes("fake-app-secret"), redacted);
+    assert.ok(
+      !redactCredentialString(
+        `url=${encodeURIComponent(`https://u:fake-password@h.test/`)}`
+      ).includes("fake-password")
+    );
+    assert.ok(
+      !redactCredentialString(
+        `next=${encodeURIComponent(encodeURIComponent("token=fake-token-value"))}`
+      ).includes("fake-token-value")
+    );
+  });
+
+  it("redacts a percent-encoded credential in a signer error's context", () => {
+    const error = Object.assign(new Error("Remote API error"), {
+      context: {
+        status: 400,
+        response: `{"error":"bad request","echo":"${encodeURIComponent(`"privateKey":"fake-key-material"`)}"}`,
+      },
+    });
+
+    const scrubbed = scrubError(error) as Error & { context: { status: number; response: string } };
+
+    assert.ok(!scrubbed.context.response.includes("fake-key-material"), scrubbed.context.response);
+    assert.equal(scrubbed.context.status, 400);
+  });
+
+  it("keeps ordinary fields and already-encoded text that hides nothing", () => {
+    const body = `{"walletId":"wal_1","mint":"${SOLANA_ADDRESS}","tokenName":"USD Coin","seeds":["owner"]}`;
+    const query =
+      "https://dash.example.test/cb?redirect_url=https%3A%2F%2Fdash.example.test%2Fhome";
+
+    assert.equal(redactCredentialString(body), body);
+    assert.equal(redactCredentialString(query), query);
+    assert.equal(
+      redactCredentialString("status: 502, code=upstream_error"),
+      "status: 502, code=upstream_error"
+    );
+    assert.equal(
+      redactCredentialString("see https://docs.example.test/errors"),
+      "see https://docs.example.test/errors"
+    );
+  });
+
+  it("masks to the end rather than guess where a malformed value ends", () => {
+    assert.equal(redactCredentialString('{"mnemonic":"legal winner'), '{"mnemonic":"[REDACTED]');
+    assert.equal(redactCredentialString('{"secretKey":[12,34'), '{"secretKey":[REDACTED]');
+  });
+
+  it("stays linear on long encoded and nested input", () => {
+    const payloads = [
+      "%".repeat(200_000),
+      "%41".repeat(100_000),
+      `${"https://".repeat(20_000)}x`,
+      `${"a.".repeat(100_000)}`,
+      `${"word ".repeat(40_000)}`,
+      JSON.stringify(Array.from({ length: 2_000 }, (_, i) => ({ id: i, note: "x".repeat(20) }))),
+    ];
+
+    for (const payload of payloads) {
+      const startedAt = process.hrtime.bigint();
+      redactCredentialString(payload);
+      const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+      assert.ok(elapsedMs < 1_000, `expected a linear scan, took ${elapsedMs.toFixed(0)}ms`);
+    }
   });
 });
