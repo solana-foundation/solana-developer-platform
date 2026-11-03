@@ -116,18 +116,18 @@ export function SelectExistingOrganizationPanel({
   // list is never usable mid-switch and never stays disabled after a refusal.
   const [isSwitching, startSwitch] = useTransition();
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const [refusedIds, setRefusedIds] = useState<readonly string[]>(
-    refusedOrganizationId === null ? [] : [refusedOrganizationId]
+  const [refusedIds, setRefusedIds] = useState<ReadonlySet<string>>(
+    () => new Set(refusedOrganizationId === null ? [] : [refusedOrganizationId])
   );
-  if (refusedOrganizationId !== null && !refusedIds.includes(refusedOrganizationId)) {
-    setRefusedIds([...refusedIds, refusedOrganizationId]);
+  if (refusedOrganizationId !== null && !refusedIds.has(refusedOrganizationId)) {
+    setRefusedIds(new Set([...refusedIds, refusedOrganizationId]));
   }
   const allMemberships = userMemberships.data ?? [];
   const memberships = allMemberships.filter(
-    (membership) => !refusedIds.includes(membership.organization.id)
+    (membership) => !refusedIds.has(membership.organization.id)
   );
   const invitations = (userInvitations.data ?? []).filter(
-    (invitation) => !refusedIds.includes(invitation.publicOrganizationData.id)
+    (invitation) => !refusedIds.has(invitation.publicOrganizationData.id)
   );
   // Clerk switches the client's active organization before the server's answer
   // lands, so the refused name is looked up by id rather than read from it.
