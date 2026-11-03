@@ -7,6 +7,7 @@ import { rateLimited } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";
 import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
 import {
+  ANONYMOUS_MAX_REQUESTS,
   API_KEY_PRE_READ_MAX_REQUESTS,
   anonymousFallback,
   apiKeyFloodGuardIdentifier,
@@ -15,6 +16,8 @@ import {
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
   keyedIpBackstopFallback,
   nextAdmissionAt,
+  payLinkStatusFallback,
+  payLinkStatusIdentifier,
   RATE_LIMIT_WINDOW_MS,
   skipRateLimitPaths,
 } from "@/middleware/rate-limit";
@@ -63,6 +66,7 @@ describe("Rate limiting", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     anonymousFallback.resetForTesting();
+    payLinkStatusFallback.resetForTesting();
     await clearKVStores(env);
   });
 
@@ -229,6 +233,30 @@ describe("Rate limiting", () => {
       );
 
       expect(res.status).toBe(429);
+    });
+
+    // The pay page reads its link's status again while the payer waits.
+    it("refuses a link's spent status reads and still takes its payment", async () => {
+      await seedRateLimit(env, payLinkStatusIdentifier(TEST_CLIENT_IP), ANONYMOUS_MAX_REQUESTS);
+      const headers = { "x-forwarded-for": TEST_CLIENT_IP };
+
+      const read = await app.request("/pay/pay_tok_split", { headers }, env);
+      const pay = await app.request("/pay/pay_tok_split/tx", { method: "POST", headers }, env);
+
+      expect(read.status).toBe(429);
+      expect(pay.status).not.toBe(429);
+    });
+
+    it("reads a link's status while the address's anonymous limit is spent", async () => {
+      await seedRateLimit(env, TEST_CLIENT_IP, ANONYMOUS_MAX_REQUESTS);
+
+      const res = await app.request(
+        "/pay/pay_tok_split",
+        { headers: { "x-forwarded-for": TEST_CLIENT_IP } },
+        env
+      );
+
+      expect(res.status).not.toBe(429);
     });
 
     it("still caps keyed requests at the per-IP backstop", async () => {

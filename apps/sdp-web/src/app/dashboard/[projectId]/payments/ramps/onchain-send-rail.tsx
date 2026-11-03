@@ -1,7 +1,9 @@
 "use client";
 
+import { assertNever } from "@sdp/types/payments";
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
+import { sendResultKind } from "./components/onchain-send-result-kind";
 import {
   type OnchainSendContactControls,
   OnchainSendStepContent,
@@ -22,9 +24,9 @@ function sendPrimaryLabel(
   wizard: OnchainSendWizard,
   t: ReturnType<typeof useTranslations>
 ): string {
+  // While a send runs the label stays and the button spins (`primaryLoading`), so it never
+  // changes width or reads as a different action.
   switch (true) {
-    case wizard.submitting:
-      return t("DashboardPayments.submitting");
     case wizard.isLastStep && wizard.finished:
       return t("DashboardPayments.counterparty.done");
     case wizard.isLastStep:
@@ -35,17 +37,30 @@ function sendPrimaryLabel(
 }
 
 /**
- * The final step's heading once the transfer has an outcome. The frame renders
- * it in place of "Review transfer", so a finished step has exactly one heading.
+ * The final step's heading once the transfer has an outcome: what became of it, never a
+ * success it has not had. The frame renders it in place of "Review transfer", so a finished
+ * step has exactly one heading.
  */
 function sendCompletionTitle(
   wizard: OnchainSendWizard,
   t: ReturnType<typeof useTranslations>
 ): string | undefined {
-  if (wizard.transferResult !== null) {
-    return t("DashboardPayments.onchainSend.transferSubmitted");
+  if (wizard.transferResult === null) {
+    return undefined;
   }
-  return undefined;
+  const kind = sendResultKind(wizard.transferResult);
+  switch (kind) {
+    case "failed":
+      return t("DashboardPayments.onchainSend.transferFailedTitle");
+    case "sent":
+      return t("DashboardPayments.onchainSend.transferSentTitle");
+    case "fireblocksPending":
+    case "fireblocksUnknown":
+    case "pending":
+      return t("DashboardPayments.onchainSend.transferSubmitted");
+    default:
+      return assertNever(kind);
+  }
 }
 
 export interface OnchainSendRailProps extends RailProps {
@@ -103,13 +118,18 @@ export function OnchainSendRail({
       stepIndex={preSteps.length + (wizard.finished ? wizard.stepIndex + 1 : wizard.stepIndex)}
       completionTitle={sendCompletionTitle(wizard, t)}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
+      primaryLoading={wizard.submitting}
       primaryLabel={sendPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
       onCancel={wizard.finished || wizard.submitting ? undefined : onCancel}
-      // A sent or held transfer has nothing to go back to.
-      hideSecondary={wizard.finished}
+      // A sent or held transfer has nothing to go back to, and one in flight cannot be left;
+      // while it runs the footer's left says what it is waiting on instead.
+      hideSecondary={wizard.finished || wizard.submitting}
+      footerHint={
+        wizard.submitting ? t("DashboardPayments.onchainSend.sendingAndConfirming") : undefined
+      }
       counterpartyDialog={null}
       summary={
         <WizardSummaryList

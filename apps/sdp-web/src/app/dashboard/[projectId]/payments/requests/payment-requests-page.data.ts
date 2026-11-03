@@ -11,7 +11,7 @@ import {
   type WellKnownToken,
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { dashboardFetch, dashboardRequest } from "@/lib/dashboard-fetch";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -291,6 +291,25 @@ export async function fetchPaymentRequestDetail(
   } catch (error) {
     return { status: "error", error: error instanceof Error ? error.message : undefined };
   }
+}
+
+/**
+ * One payment request read from the browser, through the dashboard's proxy, for a page watching
+ * an open request for its payment. Parsed like the server's read; a failed read throws, so the
+ * watch keeps the last answer it had.
+ *
+ * @param requestId - The request's id.
+ * @returns The request as the API holds it now.
+ */
+export async function fetchPaymentRequestFromBrowser(requestId: string): Promise<PaymentRequest> {
+  const response = await dashboardRequest(
+    `/api/dashboard/payments/requests/${encodeURIComponent(requestId)}`,
+    { method: "GET", cache: "no-store" }
+  );
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return paymentRequestDetailResponseSchema.parse(await response.json()).data;
 }
 
 /**

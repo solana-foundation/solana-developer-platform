@@ -51,10 +51,28 @@ export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIM
  * per-user limit, an API key the keyed IP backstop with the auth middleware's
  * per-key limit behind it. On every other path (`/pay` above all, which makes
  * the fee payer sign for anyone) no credential is ever checked, so none is
- * read: the anonymous limit applies whatever headers are sent, and no JWKS
+ * read: the anonymous limit applies whatever headers are sent (a payment
+ * link's status read counts in its own bucket at that limit), and no JWKS
  * verification runs.
  */
 export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
+
+/**
+ * A payment link's status read, `GET /pay/:token`, as matchesFreePath matches it: one segment,
+ * so `/pay/:token/tx` is not one. The pay page reads it again while its payer waits.
+ */
+const PAY_LINK_STATUS_PATH = "/pay/*";
+
+/**
+ * The status reads' counter: one client address, apart from its anonymous bucket, so pages
+ * polling behind one address never spend the limit the wallet's `/pay/:token/tx` requests need.
+ *
+ * @param clientIp - The proxy-verified client address, or `unknown`.
+ * @returns The counter's identifier.
+ */
+export function payLinkStatusIdentifier(clientIp: string): string {
+  return `pay-link-status:${clientIp}`;
+}
 
 /**
  * Per-key-hash flood guard the auth middleware applies before it reads the
@@ -301,6 +319,12 @@ export const anonymousFallback = new InProcessRateLimiter(
   PER_IP_FALLBACK_MAX_TRACKED
 );
 
+/** The status reads' in-process stand-in, as anonymousFallback is the anonymous limit's. */
+export const payLinkStatusFallback = new InProcessRateLimiter(
+  "pay_link_status",
+  PER_IP_FALLBACK_MAX_TRACKED
+);
+
 /**
  * Enforces an approximate sliding-window rate limit for the identifier.
  *
@@ -465,7 +489,8 @@ export async function enforceRateLimit(
  * exemption — see CLERK_USER_MAX_REQUESTS), and requests presenting an API key
  * get the high per-IP backstop (their real limit is enforced per key after
  * auth via enforceRateLimit). Everything else, any credential on any other
- * path included, gets the anonymous per-IP limit.
+ * path included, gets the anonymous per-IP limit; a payment link's status read
+ * gets the same limit in a bucket of its own.
  *
  * Both per-IP limits count in this instance's memory while the shared counter
  * store is down (keyedIpBackstopFallback, anonymousFallback), so neither runs
@@ -511,6 +536,11 @@ export function skipRateLimitPaths(...paths: string[]) {
     if (authenticatedPath && presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
+      });
+    } else if (c.req.method === "GET" && matchesFreePath(c.req.path, [PAY_LINK_STATUS_PATH])) {
+      await enforceRateLimit(c, payLinkStatusIdentifier(clientIp), ANONYMOUS_MAX_REQUESTS, {
+        metricTier: "pay_link_status",
+        fallback: payLinkStatusFallback,
       });
     } else {
       await enforceRateLimit(c, clientIp, ANONYMOUS_MAX_REQUESTS, {

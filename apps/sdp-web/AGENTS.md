@@ -27,6 +27,14 @@ live feed with an idle back-off) uses `useCadencedSWR` (`src/lib`), which
 passes SWR a number derived from the last read so only a cadence change
 restarts the timer.
 
+The public pay page (`app/pay/[token]`) reads the API's `/pay/:token` on the
+web server, whose one address every payer shares under the API's per-address
+limit for link reads (20 a minute, counted apart from the wallet's
+`/pay/:token/tx` requests). Anything that reads it again, like the page's
+status watch, calls the API from the payer's browser instead, at the public
+address from `findPublicSdpApiBaseUrl`: `SDP_API_BASE_URL` can name a host only
+the web server resolves (`http://sdp-api:8787` in Docker).
+
 Dollar totals come from `payments/payments-overview.utils.ts`:
 `resolveTotalBalance` sums held rows only and is null when nothing held has a
 price, `formatTotalBalance` shows that null as a dash, and
