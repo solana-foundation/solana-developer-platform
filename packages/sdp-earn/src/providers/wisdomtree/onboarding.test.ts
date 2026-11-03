@@ -44,7 +44,8 @@ const person: WisdomTreePersonSubmission = {
   agreement_set_version: "current",
   agreements: [{ key: "privacy", version: "current", accepted: false }],
 };
-function replies(...responses: Array<{ status: number; body: unknown }>) {
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+function replies(...responses: Array<{ status: number; body: Json }>) {
   let i = 0;
   return mock.method(globalThis, "fetch", async () => {
     const reply = responses[i++];
@@ -52,7 +53,7 @@ function replies(...responses: Array<{ status: number; body: unknown }>) {
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
 }
-const ok = (body: unknown) => ({ status: 200, body });
+const ok = (body: Json) => ({ status: 200, body });
 beforeEach(resetWisdomTreeTokenCache);
 afterEach(() => mock.restoreAll());
 
