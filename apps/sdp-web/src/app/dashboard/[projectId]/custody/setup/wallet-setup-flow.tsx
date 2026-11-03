@@ -93,33 +93,12 @@ const WALLET_PURPOSES = [
 
 type WalletPurposeOption = (typeof WALLET_PURPOSES)[number];
 
-/** `choose` lists the purposes, `fixed` sends the only one, `none` sends none (a first wallet). */
-type PurposeField = "choose" | "fixed" | "none";
-
 /**
- * How the details form handles the purpose. A provider's first wallet is always a transfer
- * wallet; after it, a purpose is a choice only when more than one is offered.
+ * A provider's first wallet is always a transfer wallet, so the summary names it and nothing
+ * asks. After it the purpose is a choice: transfer and fee payer are core, so at least two are
+ * always offered.
  */
-function resolvePurposeField(isConnected: boolean, offeredCount: number): PurposeField {
-  if (!isConnected) {
-    return "none";
-  }
-  return offeredCount > 1 ? "choose" : "fixed";
-}
-
-/** The purpose the wallet gets without a choice, which the summary names; `null` when chosen. */
-function resolveFixedPurpose(
-  field: PurposeField,
-  offered: readonly WalletPurposeOption[]
-): WalletPurposeOption | null {
-  if (field === "choose") {
-    return null;
-  }
-  if (field === "fixed") {
-    return offered[0] ?? null;
-  }
-  return WALLET_PURPOSES[0];
-}
+const FIRST_WALLET_PURPOSE = WALLET_PURPOSES[0];
 
 /** Data attributes the flow's tests and the e2e suite key off. */
 type DataAttributes = { [attribute: `data-${string}`]: string };
@@ -521,36 +500,32 @@ function WalletConnectionField({
 
 /**
  * The form a Managed setup or another wallet submits: the provider, the purpose when there is
- * one to choose (or the only one offered), and the account when there is one to choose. The
- * label joins it from outside (`WalletLabelField`).
+ * one to choose, and the account when there is one to choose. The label joins it from outside
+ * (`WalletLabelField`).
  */
 function WalletDetailsForm({
+  choosePurpose,
   connectionOptions,
   hasManagedConfig,
   onSubmit,
   providerId,
-  purposeField,
   purposes,
   showConnectionPicker,
   t,
 }: {
+  choosePurpose: boolean;
   connectionOptions: CustodyConnectionListItem[];
   hasManagedConfig: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   providerId: KnownCustodyProvider;
-  purposeField: PurposeField;
   purposes: readonly WalletPurposeOption[];
   showConnectionPicker: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const [onlyPurpose] = purposes;
   return (
     <form id={DETAILS_FORM_ID} onSubmit={onSubmit} className="space-y-6">
       <input type="hidden" name="provider" value={providerId} />
-      {purposeField === "fixed" && onlyPurpose ? (
-        <input type="hidden" name="purpose" value={onlyPurpose.value} />
-      ) : null}
-      {purposeField === "choose" ? (
+      {choosePurpose ? (
         <div className="space-y-2">
           <FieldLabel
             label={t("DashboardCustody.purpose")}
@@ -927,12 +902,13 @@ function useCreateWallet({
 interface WalletSetupModel extends SetupOptions {
   awaitingModeChoice: boolean;
   canProvisionWallet: boolean;
+  /** Another wallet picks its purpose; a first wallet's is fixed. */
+  choosePurpose: boolean;
   /** The purpose the summary names because it is not a choice; `null` while it is. */
   fixedPurpose: WalletPurposeOption | null;
   isByokDetails: boolean;
   labelMissing: boolean;
   providerEntry: CustodyProviderCatalogEntry | null;
-  purposeField: PurposeField;
   purposes: readonly WalletPurposeOption[];
   showConnectionPicker: boolean;
   showLabelField: boolean;
@@ -961,7 +937,6 @@ function resolveWalletSetupModel(input: {
   const purposes = WALLET_PURPOSES.filter((purpose) =>
     isWalletPurposeOffered(purpose.value, input.flags)
   );
-  const purposeField = resolvePurposeField(options.isConnected, purposes.length);
   // Fireblocks names no wallet at setup: its vault accounts arrive with their own names.
   const showLabelField = options.byokSetupProvider !== "fireblocks";
   const canProvisionWallet =
@@ -973,11 +948,11 @@ function resolveWalletSetupModel(input: {
     ...options,
     awaitingModeChoice: options.modeChoices !== null && options.setupMode === null,
     canProvisionWallet,
-    fixedPurpose: providerEntry === null ? null : resolveFixedPurpose(purposeField, purposes),
+    choosePurpose: options.isConnected,
+    fixedPurpose: providerEntry === null || options.isConnected ? null : FIRST_WALLET_PURPOSE,
     isByokDetails: options.byokSetupProvider !== null,
     labelMissing: showLabelField && input.walletLabel.trim().length === 0,
     providerEntry,
-    purposeField,
     purposes,
     showConnectionPicker:
       options.isConnected && options.connectionOptions.some(isSelectableConnection),
@@ -1117,6 +1092,8 @@ function WalletSetupBody({
         <div ref={revealRef}>
           {byokProvider !== null ? (
             <ByokCredentialForm
+              // A failed check's connection belongs to its provider: another starts fresh.
+              key={byokProvider}
               {...credentialFormHandlers}
               provider={byokProvider}
               formId={DETAILS_FORM_ID}
@@ -1131,7 +1108,7 @@ function WalletSetupBody({
               hasManagedConfig={model.hasManagedConfig}
               onSubmit={onDetailsSubmit}
               providerId={detailsProvider.id}
-              purposeField={model.purposeField}
+              choosePurpose={model.choosePurpose}
               purposes={model.purposes}
               showConnectionPicker={model.showConnectionPicker}
               t={t}
@@ -1232,7 +1209,10 @@ export function WalletSetupFlow({
 
   useEnterSubmitsForm();
 
+  // A changed answer unmounts the credential form, and a recovery panel goes with it: the next
+  // form starts at its fields, with the footer's primary back.
   const resetAnswerState = () => {
+    setByokInRecovery(false);
     setFireblocksReady(false);
     setErrorMessage(null);
   };

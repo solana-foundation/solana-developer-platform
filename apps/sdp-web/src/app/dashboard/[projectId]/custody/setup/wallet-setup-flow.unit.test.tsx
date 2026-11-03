@@ -2,7 +2,13 @@
 
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  InitializeCustodySetupActionResult,
+  WalletSetupActionResult,
+} from "@/app/dashboard/[projectId]/custody/actions";
+import type { PrivyByokSubmitResult } from "@/app/dashboard/[projectId]/custody/byok-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -10,30 +16,31 @@ import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navi
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 
-type SubmitResult =
-  | { status: "success"; connectionId: string }
-  | { status: "failed"; message: string };
-
 const mocks = vi.hoisted(() => ({
   projectId: "prj_test_sandbox",
-  createWallet: vi.fn(async (_formData: FormData) => ({
-    status: "success" as const,
-    walletId: "wallet_created",
-  })),
-  initialize: vi.fn(async (_formData: FormData) => ({
-    status: "success" as const,
-    walletId: "wallet_initialized",
-  })),
+  createWallet: vi.fn(
+    async (_formData: FormData): Promise<WalletSetupActionResult> => ({
+      status: "success",
+      walletId: "wallet_created",
+    })
+  ),
+  initialize: vi.fn(
+    async (_formData: FormData): Promise<InitializeCustodySetupActionResult> => ({
+      status: "success",
+      walletId: "wallet_initialized",
+    })
+  ),
   submitCredential: vi.fn(
-    async (_formData: FormData): Promise<SubmitResult> => ({
+    async (_formData: FormData): Promise<PrivyByokSubmitResult> => ({
       status: "success",
       connectionId: "conn_new",
     })
   ),
   refreshWalletInventory: vi.fn(),
-  toastSuccess: vi.fn(),
-  purposeOffered: vi.fn((_purpose: string) => true),
 }));
+
+/** What a refusal settles about the browser's key: the API answered, nothing replayed. */
+const REFUSED = { status: 422, replayed: false, code: null };
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
@@ -45,9 +52,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("sonner", () => ({
-  toast: { success: mocks.toastSuccess, error: vi.fn(), loading: vi.fn() },
-}));
 vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
   createCustodySetupWalletAction: mocks.createWallet,
   initializeCustodySetupAction: mocks.initialize,
@@ -59,12 +63,10 @@ vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
 vi.mock("@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
   useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
 }));
-// Every purpose is on offer unless a test narrows it; `wallet-purposes` pins the stable list.
-vi.mock("@/app/dashboard/[projectId]/custody/wallet-purposes", () => ({
-  isWalletPurposeOffered: (purpose: string) => mocks.purposeOffered(purpose),
-}));
 
 const { WalletSetupFlow } = await import("./wallet-setup-flow");
+// A created wallet is confirmed with a toast; no Toaster is mounted to show it.
+const toastSuccess = vi.spyOn(toast, "success").mockImplementation(() => "toast");
 
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
 type ConnectionItem = FlowProps["connections"][number];
@@ -103,6 +105,19 @@ const PRODUCTION_AVAILABILITY = availableCustodyProviders(
   })
 );
 
+const PRODUCTION_BYOK_PAIR_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: PRODUCTION_PROJECT,
+    custody: [
+      { provider: "privy", modes: ["byok"] },
+      { provider: "fireblocks", modes: ["byok"] },
+    ],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
 function renderFlow(props: Partial<FlowProps> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
@@ -119,11 +134,24 @@ function renderFlow(props: Partial<FlowProps> = {}) {
   );
 }
 
+/** The element as `type`, or the test fails: a query finds an element, not its kind. */
+function asElement<T extends Element>(element: Element | null, type: { new (): T }): T {
+  if (!(element instanceof type)) {
+    throw new Error(`Expected a ${type.name}`);
+  }
+  return element;
+}
+
 const createButton = () =>
-  screen.getByRole("button", { name: /^Create wallet/ }) as HTMLButtonElement;
+  asElement(screen.getByRole("button", { name: /^Create wallet/ }), HTMLButtonElement);
+const connectButton = () => screen.getByRole("button", { name: /^Connect and verify/ });
 const footerHint = () => document.getElementById("wallet-setup-footer-hint")?.textContent;
-const labelInput = () => screen.getByLabelText("Wallet label") as HTMLInputElement;
+const labelInput = () => asElement(screen.getByLabelText("Wallet label"), HTMLInputElement);
 const typeLabel = (value: string) => fireEvent.change(labelInput(), { target: { value } });
+const fillPrivyCredentials = () => {
+  fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+  fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+};
 
 /** The form an action received on its first call. */
 function submitted(action: { mock: { calls: [FormData][] } }): FormData {
@@ -142,7 +170,6 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mocks.projectId = "prj_test_sandbox";
-  mocks.purposeOffered.mockImplementation(() => true);
 });
 
 describe("one screen", () => {
@@ -151,7 +178,7 @@ describe("one screen", () => {
 
     expect(screen.getByRole("heading", { name: "Create wallet" })).toBeTruthy();
     expect(screen.queryByText(/Step \d of/)).toBeNull();
-    const list = document.querySelector("[data-wallet-provider-list]") as HTMLElement;
+    const list = asElement(document.querySelector("[data-wallet-provider-list]"), HTMLElement);
     const names = [...list.querySelectorAll("[data-wallet-provider]")].map((row) =>
       row.getAttribute("data-wallet-provider")
     );
@@ -237,11 +264,11 @@ describe("details", () => {
       fireEvent.click(createButton());
     });
 
-    const formData = mocks.createWallet.mock.calls[0]?.[0] as FormData;
+    const formData = submitted(mocks.createWallet);
     expect(formData.get("provider")).toBe("turnkey");
     expect(formData.get("label")).toBe("Settlement wallet");
     expect(formData.get("purpose")).toBe("transfer");
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Settlement wallet created");
+    expect(toastSuccess).toHaveBeenCalledWith("Settlement wallet created");
     expect(dashboardRouter.push).toHaveBeenCalledWith(
       "/dashboard/prj_test_sandbox/wallets/wallet_created"
     );
@@ -259,7 +286,7 @@ describe("details", () => {
     await act(async () => {
       fireEvent.click(createButton());
     });
-    const formData = mocks.initialize.mock.calls[0]?.[0] as FormData;
+    const formData = submitted(mocks.initialize);
     expect(formData.get("walletLabel")).toBe("Treasury");
     expect(formData.get("purpose")).toBeNull();
     expect(dashboardRouter.push).toHaveBeenCalledWith(
@@ -267,26 +294,12 @@ describe("details", () => {
     );
   });
 
-  it("sends the only purpose offered without asking for it", async () => {
-    mocks.purposeOffered.mockImplementation((purpose) => purpose === "transfer");
-    renderFlow({ initialProvider: "turnkey" });
-    expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
-    expect(
-      within(screen.getByRole("region", { name: "Created with" })).getByText("Transfers")
-    ).toBeTruthy();
-
-    typeLabel("Ops");
-    await act(async () => {
-      fireEvent.click(createButton());
-    });
-    expect(submitted(mocks.createWallet).get("purpose")).toBe("transfer");
-  });
-
   it("shows the API's refusal and stays on the page", async () => {
     mocks.createWallet.mockResolvedValueOnce({
       status: "error",
       message: "Provider rejected the request",
-    } as never);
+      answer: REFUSED,
+    });
     renderFlow({ initialProvider: "turnkey" });
     typeLabel("Ops");
     await act(async () => {
@@ -294,7 +307,7 @@ describe("details", () => {
     });
     expect(screen.getByRole("alert").textContent).toBe("Provider rejected the request");
     expect(dashboardRouter.push).not.toHaveBeenCalled();
-    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   // Jina (#2333): an uncertain or refused setup left the wallet inventory as it
@@ -312,7 +325,8 @@ describe("details", () => {
     mocks.initialize.mockResolvedValueOnce({
       status: "error",
       message: "Provider rejected the request",
-    } as never);
+      answer: REFUSED,
+    });
     await act(async () => {
       fireEvent.click(createButton());
     });
@@ -365,7 +379,10 @@ describe("details", () => {
   });
 
   it("points to adding a wallet when the provider was set up in the meantime", async () => {
-    mocks.initialize.mockResolvedValueOnce({ status: "provider_already_set_up" } as never);
+    mocks.initialize.mockResolvedValueOnce({
+      status: "provider_already_set_up",
+      answer: { status: 409, replayed: false, code: null },
+    });
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     typeLabel("Ops");
     await act(async () => {
@@ -390,15 +407,17 @@ describe("details", () => {
 });
 
 describe("custody modes", () => {
-  const managedAnswer = () => screen.getByRole("radio", { name: /SDP's Privy account/ });
-  const ownAnswer = () => screen.getByRole("radio", { name: /Your own Privy account/ });
+  const managedAnswer = () =>
+    asElement(screen.getByRole("radio", { name: /SDP's Privy account/ }), HTMLInputElement);
+  const ownAnswer = () =>
+    asElement(screen.getByRole("radio", { name: /Your own Privy account/ }), HTMLInputElement);
 
   it("asks whose account holds the keys, and creates nothing until it is answered", () => {
     renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
 
     expect(screen.getByRole("group", { name: "Whose Privy account holds the keys?" })).toBeTruthy();
-    expect((managedAnswer() as HTMLInputElement).checked).toBe(false);
-    expect((ownAnswer() as HTMLInputElement).checked).toBe(false);
+    expect(managedAnswer().checked).toBe(false);
+    expect(ownAnswer().checked).toBe(false);
     expect(document.getElementById("wallet-details-form")).toBeNull();
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
     typeLabel("Treasury");
@@ -423,7 +442,10 @@ describe("custody modes", () => {
     typeLabel("Ops");
     fireEvent.click(ownAnswer());
 
-    const credentialForm = document.querySelector("[data-privy-byok-form]") as HTMLFormElement;
+    const credentialForm = asElement(
+      document.querySelector("[data-privy-byok-form]"),
+      HTMLFormElement
+    );
     expect(credentialForm.id).toBe("wallet-details-form");
     // The flow's own label stands in for the form's, and submits with it.
     expect(screen.queryByLabelText("Initial wallet label")).toBeNull();
@@ -431,22 +453,21 @@ describe("custody modes", () => {
     expect(new FormData(credentialForm).get("walletLabel")).toBe("Ops");
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
-    fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+    fillPrivyCredentials();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Connect and verify/ }));
+      fireEvent.click(connectButton());
     });
     expect(submitted(mocks.submitCredential).get("walletLabel")).toBe("Ops");
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Ops created");
+    expect(toastSuccess).toHaveBeenCalledWith("Ops created");
     // The credential check settles without a wallet id, so the list is where it lands.
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
 
   it("locks the answers while a credential check is in flight", async () => {
-    let settle: (result: SubmitResult) => void = () => undefined;
+    let settle: (result: PrivyByokSubmitResult) => void = () => undefined;
     mocks.submitCredential.mockImplementationOnce(
       () =>
-        new Promise<SubmitResult>((resolve) => {
+        new Promise<PrivyByokSubmitResult>((resolve) => {
           settle = resolve;
         })
     );
@@ -454,24 +475,79 @@ describe("custody modes", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Privy/ }));
     typeLabel("Ops");
     fireEvent.click(ownAnswer());
-    fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
-    fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+    fillPrivyCredentials();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /^Connect and verify/ }));
+      fireEvent.click(connectButton());
     });
     // Switching either answer would unmount the form that holds the request's recovery.
-    expect((managedAnswer() as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("radio", { name: /Turnkey/ }) as HTMLInputElement).disabled).toBe(
-      true
-    );
+    expect(managedAnswer().disabled).toBe(true);
+    expect(
+      asElement(screen.getByRole("radio", { name: /Turnkey/ }), HTMLInputElement).disabled
+    ).toBe(true);
     expect(labelInput().disabled).toBe(true);
 
     // Settled, so no transition stays pending for the tests after this one.
     await act(async () => {
       settle({ status: "failed", message: "Those credentials did not verify." });
     });
-    expect((managedAnswer() as HTMLInputElement).disabled).toBe(false);
+    expect(managedAnswer().disabled).toBe(false);
+  });
+
+  // Greptile (#2727): a refusal's panel hides the footer's primary, and the primary stayed
+  // hidden after a changed answer mounted a fresh form.
+  it("brings Connect and verify back when an answer changes after a refused check", async () => {
+    mocks.submitCredential.mockResolvedValueOnce({
+      status: "refused",
+      message: "Privy refused these credentials.",
+      connectionId: "conn_refused",
+    });
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+    typeLabel("Ops");
+    fireEvent.click(ownAnswer());
+    fillPrivyCredentials();
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+    // The refusal's panel carries its own way forward, so the footer's goes.
+    expect(document.querySelector("[data-privy-byok-refused]")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Connect and verify/ })).toBeNull();
+
+    fireEvent.click(managedAnswer());
+    fireEvent.click(ownAnswer());
+    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(connectButton()).toBeTruthy();
+  });
+
+  // Greptile (#2727): the credential form outlived a provider change, so a failed check's
+  // connection went out with the next provider's credentials.
+  it("starts a fresh credential check when the provider changes", async () => {
+    mocks.submitCredential.mockResolvedValueOnce({
+      status: "failed",
+      message: "Those credentials did not verify.",
+      connectionId: "conn_failed",
+    });
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: PRODUCTION_BYOK_PAIR_AVAILABILITY,
+      environment: "production",
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
+    typeLabel("Ops");
+    fillPrivyCredentials();
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Fireblocks/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
+    fillPrivyCredentials();
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+    expect(
+      mocks.submitCredential.mock.calls.map(([formData]) => formData.get("connectionId"))
+    ).toEqual([null, null]);
   });
 
   it("sends a provider offered only as BYOK straight to its credential form", () => {
@@ -502,13 +578,12 @@ describe("connection picker", () => {
       label: "Production signing",
       status: "active",
       isRuntimeExecutionAllowed: true,
-      defaultCustodyWalletId: null,
       createdAt: "2026-08-10T09:00:00.000Z",
       activatedAt: "2026-08-10T09:05:00.000Z",
       lastCheck: null,
       pendingWalletLabel: null,
       ...overrides,
-    } as ConnectionItem;
+    };
   }
 
   const pickerField = () => document.querySelector('input[name="walletTarget"]');
@@ -520,7 +595,7 @@ describe("connection picker", () => {
       connections: [connection()],
     });
     expect(screen.getByText("Account")).toBeTruthy();
-    expect((pickerField() as HTMLInputElement | null)?.value ?? "").toBe("");
+    expect(asElement(pickerField(), HTMLInputElement).value).toBe("");
   });
 
   it("asks where the wallet lives instead of picking a default, and sends nothing until it does", async () => {

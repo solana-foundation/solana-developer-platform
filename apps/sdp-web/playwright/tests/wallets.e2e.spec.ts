@@ -342,7 +342,7 @@ test.describe
       const projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByRole("heading", { name: "Create wallet" })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       const setupActions = page.locator("[data-wallet-setup-flow] [data-wizard-actions]");
@@ -411,7 +411,7 @@ test.describe
 
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByRole("heading", { name: "Create wallet" })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       await expect(setupActions).toBeVisible();
@@ -501,14 +501,14 @@ test.describe
 
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByRole("heading", { name: "Create wallet" })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       await choosePrivyWithEnter();
 
       await page.setViewportSize({ width: 1280, height: 900 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByRole("heading", { name: "Create wallet" })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       await choosePrivyWithEnter();
