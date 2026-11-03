@@ -2341,7 +2341,7 @@ describe("payment transfer batches", () => {
     expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
-  it("replays the original transfer batch after its counterparty is archived", async () => {
+  it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
