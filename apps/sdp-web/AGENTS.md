@@ -27,6 +27,14 @@ live feed with an idle back-off) uses `useCadencedSWR` (`src/lib`), which
 passes SWR a number derived from the last read so only a cadence change
 restarts the timer.
 
+Dollar totals come from `payments/payments-overview.utils.ts`:
+`resolveTotalBalance` sums held rows only and is null when nothing held has a
+price, `formatTotalBalance` shows that null as a dash, and
+`UnpricedHoldingsHint` sits beside a total that leaves holdings out. Off
+mainnet the API prices no mint, so SOL arrives unpriced on devnet. Value a
+token by its market price or, for a well-known USD stablecoin, by its mint;
+never by its symbol, since anyone can mint a "USDC".
+
 Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.

@@ -26,14 +26,16 @@ function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
-function resolveFallbackUsdValue(
-  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount">
-) {
-  const normalizedToken = balance.token.trim().toUpperCase();
-  if (
-    normalizedToken !== "USDC" &&
-    !WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint.trim())?.isUsdStable
-  ) {
+/**
+ * Whether `mint` is a well-known USD stablecoin. Matched by mint, never by symbol: anyone can
+ * mint a token called "USDC".
+ */
+function isUsdStableMint(mint: string): boolean {
+  return WELL_KNOWN_TOKEN_BY_MINT.get(mint.trim())?.isUsdStable === true;
+}
+
+function resolveFallbackUsdValue(balance: Pick<CustodyWalletTokenBalance, "mint" | "uiAmount">) {
+  if (!isUsdStableMint(balance.mint)) {
     return null;
   }
 
@@ -42,13 +44,39 @@ function resolveFallbackUsdValue(
 }
 
 export function resolveUsdBalanceValue(
-  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount" | "usdValue">
+  balance: Pick<CustodyWalletTokenBalance, "mint" | "uiAmount" | "usdValue">
 ): number | null {
   if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
     return balance.usdValue;
   }
 
   return resolveFallbackUsdValue(balance);
+}
+
+/**
+ * A mint's USD price from a balance read: the market price its row carried, or a dollar for a
+ * well-known USD stablecoin, as its balance row is valued. Null when it has neither.
+ */
+export function resolveUsdUnitPrice(
+  mint: string,
+  balances: readonly CustodyWalletTokenBalance[]
+): number | null {
+  const normalizedMint = mint.trim();
+  const usdPrice = balances.find((balance) => balance.mint.trim() === normalizedMint)?.usdPrice;
+  if (typeof usdPrice === "number" && Number.isFinite(usdPrice)) {
+    return usdPrice;
+  }
+
+  return isUsdStableMint(normalizedMint) ? 1 : null;
+}
+
+/**
+ * Whether a balance row holds anything. A spent token account keeps its row at zero, and an
+ * amount that will not parse cannot be ranked or summed, so neither is a holding.
+ */
+export function isHeldBalance(balance: Pick<CustodyWalletTokenBalance, "uiAmount">): boolean {
+  const amount = Number(balance.uiAmount);
+  return Number.isFinite(amount) && amount > 0;
 }
 
 export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
@@ -225,6 +253,11 @@ export function formatCurrencyAmount(value: number | string | null, locale?: str
   }).format(numericValue);
 }
 
+/** A total from `resolveTotalBalance`: a dash where there is no dollar total, never a false $0.00. */
+export function formatTotalBalance(total: number | null, locale?: string): string {
+  return total === null ? "—" : formatCurrencyAmount(total, locale);
+}
+
 export function formatTimestamp(value: string | undefined, t: Translate, locale?: string): string {
   if (!value) {
     return t("DashboardPayments.pending");
@@ -354,48 +387,66 @@ export function resolveTransferFlow(transfer: TransferRecord): {
     : { send: cryptoLabel, receive: payoutLabel ?? fiatLabel };
 }
 
+/**
+ * The dollar total of what the balances hold. Null when nothing was read, or when every holding
+ * lacks a price feed: no dollar total exists, and $0.00 would claim an empty wallet. Rows that
+ * hold nothing are an honest $0.00. A holding with no price is left out of the sum, and
+ * `countUnpricedHoldings` says how many were.
+ */
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
   if (balances.length === 0) {
     return null;
   }
 
-  let hasNumericBalance = false;
-  const total = balances.reduce((sum, balance) => {
+  const holdings = balances.filter(isHeldBalance);
+  if (holdings.length === 0) {
+    return 0;
+  }
+
+  let hasPricedHolding = false;
+  const total = holdings.reduce((sum, balance) => {
     const usdValue = resolveUsdBalanceValue(balance);
     if (usdValue === null) {
       return sum;
     }
 
-    hasNumericBalance = true;
+    hasPricedHolding = true;
     return sum + usdValue;
   }, 0);
 
-  return hasNumericBalance ? total : null;
+  return hasPricedHolding ? total : null;
+}
+
+/** Distinct tokens held with no price feed: the holdings `resolveTotalBalance` leaves out. */
+export function countUnpricedHoldings(balances: CustodyWalletTokenBalance[]): number {
+  return new Set(
+    balances
+      .filter((balance) => isHeldBalance(balance) && resolveUsdBalanceValue(balance) === null)
+      .map((balance) => balance.mint)
+  ).size;
 }
 
 /**
- * Native SOL is a balance row like any other: wallets hold it, the API prices
- * it, and hiding it made the Available balance card disagree with the total on
- * the home page. Only balances without a resolvable USD value are dropped.
+ * The rows a balance list shows: every holding, priced or not, so the list agrees with the
+ * "Tokens held" count beside it. A row holding nothing (a spent token account) is dropped; a
+ * holding with no price feed, such as SOL off mainnet, stays and shows no dollar value.
  */
 export function normalizeAggregateBalances(
   balances: CustodyWalletTokenBalance[]
 ): CustodyWalletTokenBalance[] {
-  return balances
-    .filter((balance) => resolveUsdBalanceValue(balance) !== null)
-    .sort((left, right) => {
-      const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
-      const rightIsUsdc = right.token.trim().toUpperCase() === "USDC";
+  return balances.filter(isHeldBalance).sort((left, right) => {
+    const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
+    const rightIsUsdc = right.token.trim().toUpperCase() === "USDC";
 
-      if (leftIsUsdc && !rightIsUsdc) {
-        return -1;
-      }
-      if (!leftIsUsdc && rightIsUsdc) {
-        return 1;
-      }
+    if (leftIsUsdc && !rightIsUsdc) {
+      return -1;
+    }
+    if (!leftIsUsdc && rightIsUsdc) {
+      return 1;
+    }
 
-      return left.token.localeCompare(right.token);
-    });
+    return left.token.localeCompare(right.token);
+  });
 }
 
 export function resolveAggregateBalanceDisplayToken(

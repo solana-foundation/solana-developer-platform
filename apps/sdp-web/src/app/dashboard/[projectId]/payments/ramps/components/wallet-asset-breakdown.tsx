@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { motion } from "motion/react";
 import {
   formatCurrencyAmount,
+  isHeldBalance,
   resolveTransferTokenLabel,
   resolveUsdBalanceValue,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
@@ -17,8 +18,7 @@ interface BreakdownRow {
 
 function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
   const rows = (wallet.balances ?? []).flatMap((balance) => {
-    const amount = Number(balance.uiAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!isHeldBalance(balance)) {
       return [];
     }
     return [
@@ -26,7 +26,7 @@ function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
         token:
           resolveTransferTokenLabel(balance.mint, { [balance.mint]: balance.token }) ??
           balance.mint,
-        amount,
+        amount: Number(balance.uiAmount),
         usdValue: resolveUsdBalanceValue(balance),
       },
     ];

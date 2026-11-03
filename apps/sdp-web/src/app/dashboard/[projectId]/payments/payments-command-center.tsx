@@ -48,6 +48,7 @@ import {
 import {
   formatCurrencyAmount,
   formatTokenAmount,
+  formatTotalBalance,
   normalizeAggregateBalances,
   resolveTokenByMint,
   resolveTotalBalance,
@@ -76,6 +77,7 @@ import {
 } from "./payments-presentation";
 import { fetchRecurringPayments } from "./recurring/recurring-payments.data";
 import { fetchPaymentRequests } from "./requests/payment-requests-page.data";
+import { UnpricedHoldingsHint } from "./unpriced-holdings-hint";
 
 type ApiClientPromise = Promise<{ request: SdpApiClient["request"] }>;
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -162,13 +164,17 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
     );
   }
 
-  const balances = normalizeAggregateBalances(result.data.balances ?? []);
+  const aggregateBalances = result.data.balances ?? [];
+  const balances = normalizeAggregateBalances(aggregateBalances);
   const topBalances = selectTopAggregateBalanceRows(balances, {}).slice(0, 3);
+  // The aggregate answered, so no rows at all means nothing is held: $0.00, not a missing total.
+  const totalBalance = aggregateBalances.length === 0 ? 0 : resolveTotalBalance(aggregateBalances);
   return (
     <section className="min-w-0" data-payments-overview-section="balance">
       {heading}
-      <p className="mt-1.5 text-amount font-medium text-primary tabular-nums">
-        {formatCurrencyAmount(resolveTotalBalance(balances), locale)}
+      <p className="mt-1.5 flex items-center gap-2 text-amount font-medium text-primary tabular-nums">
+        {formatTotalBalance(totalBalance, locale)}
+        <UnpricedHoldingsHint balances={aggregateBalances} />
       </p>
       {topBalances.length > 0 ? (
         // 52px pitch: a 36px mark beside a 16px name over its 13px amount, 16px apart.
