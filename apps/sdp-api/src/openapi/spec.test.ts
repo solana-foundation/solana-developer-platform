@@ -400,6 +400,10 @@ describe("OpenAPI spec", () => {
       expect.arrayContaining(["positionId", "shares"])
     );
     expect(withdrawalBuildRequest.properties).not.toHaveProperty("strategyId");
+    expect(withdrawalBuildRequest.properties?.redemptionMode?.enum).toEqual([
+      "standard",
+      "instant",
+    ]);
 
     expect(
       JSON.stringify(

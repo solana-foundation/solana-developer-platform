@@ -290,6 +290,15 @@ const earnExternalWalletPositionLocatorSchema = z.object({
 });
 
 const earnExternalWalletWithdrawalFields = {
+  redemptionMode: z
+    .enum(EARN_PROVIDER_REDEMPTION_MODES)
+    .optional()
+    .openapi({
+      description:
+        "The redemption route to build: `standard` queues a provider-managed order for a later " +
+        "payout, `instant` redeems atomically. Defaults to `standard`; a provider without the " +
+        "requested route refuses the build.",
+    }),
   shares: earnDecimalAmountSchema.openapi({
     description: "Shares to redeem, decimal string in share units.",
     example: "10",
