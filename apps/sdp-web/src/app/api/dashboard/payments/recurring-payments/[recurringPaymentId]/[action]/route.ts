@@ -1,6 +1,6 @@
 import { PAYMENT_RECURRING_PAYMENT_ACTIONS } from "@sdp/types/payments";
-import { NextResponse } from "next/server";
 import { z } from "zod";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = {
@@ -11,7 +11,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { recurringPaymentId, action } = await context.params;
   const parsedAction = z.enum(PAYMENT_RECURRING_PAYMENT_ACTIONS).safeParse(action);
   if (!parsedAction.success) {
-    return NextResponse.json(
+    return dashboardJson(
       { error: { message: "Recurring payment action is not supported" } },
       { status: 404 }
     );
