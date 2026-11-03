@@ -115,6 +115,7 @@ describe("Payments routes — signed submission", () => {
                 projectId: TEST_PROJECT.id,
                 custodyWalletId: TEST_CUSTODY_WALLET_ID,
                 provider: "privy",
+                credential: null,
               }
             )
           : source

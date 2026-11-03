@@ -1096,6 +1096,7 @@ describe("payment transfer batches", () => {
             projectId: TEST_PROJECT.id,
             custodyWalletId: TEST_CUSTODY_WALLET_ID,
             provider: "privy",
+            credential: null,
           }
         )
       );

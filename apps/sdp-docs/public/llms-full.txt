@@ -538,6 +538,13 @@ the account and create its first wallet.
 
 ![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
 
+A connection signs only with its current credentials. If you rotate or remove
+them while a request is signing, that request returns `409` with
+`details.reason` set to `runtime_execution_unavailable`. Retry it as
+[Idempotency](/docs/developing-with-sdp/idempotency) describes for that
+operation: a transfer that recorded the failure replays it under the same
+`Idempotency-Key`, so send it again with a new key.
+
 For Managed custody, enter a **Wallet label** and click **Create wallet**.
 The first wallet is a transfer wallet.
 
