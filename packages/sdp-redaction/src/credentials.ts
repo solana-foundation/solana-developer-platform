@@ -34,6 +34,10 @@ const MAX_JSON_LENGTH = 64 * 1024;
 const MAX_JSON_DEPTH = 16;
 
 const JSON_DOCUMENT_START = /^\s*["[{]/;
+// A number `JSON.parse` may round (16+ digits, or an exponent). A document
+// that has one is left to the scanners, so reserializing it never rewrites an
+// amount or a numeric id. A match inside a string only costs the parse.
+const LOSSY_NUMBER = /\d{16}|\d[eE][+-]?\d/;
 const PERCENT_ESCAPE = /%[0-9A-Fa-f]{2}/;
 const PERCENT_ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/g;
 const ASCII_PERCENT_ESCAPE = /%([0-7][0-9A-Fa-f])/g;
@@ -42,9 +46,10 @@ const ASCII_PERCENT_ESCAPE = /%([0-7][0-9A-Fa-f])/g;
 // its value is masked and `fieldValueEnd` finds where that value ends. A quote
 // token may carry backslashes (a body serialized more than once), and the
 // lookbehind starts a token only where its backslash run starts, so a long run
-// is scanned once. The key is bounded, so each quote is scanned at most that
-// far.
-const QUOTED_FIELD_START = /(?<!\\)(\\*["'])([\w .-]{1,128})\1\s*:\s*/g;
+// is scanned once. The key has no length bound (a long prefixed key is still a
+// credential key) and stays linear: it cannot contain a quote or a backslash,
+// so a scan from one quote ends at the next.
+const QUOTED_FIELD_START = /(?<!\\)(\\*["'])([\w .-]+)\1\s*:\s*/g;
 // A cookie header is a credential container, not one credential: every
 // `name=value` pair after `Cookie:` is a session, and they are separated by
 // spaces — exactly where the generic assignment value stops. Consume the whole
@@ -152,7 +157,11 @@ function redactString(value: string, nesting: number): string {
  * so formatting survives.
  */
 function redactJsonDocument(value: string, nesting: number): string | undefined {
-  if (value.length > MAX_JSON_LENGTH || !JSON_DOCUMENT_START.test(value)) {
+  if (
+    value.length > MAX_JSON_LENGTH ||
+    !JSON_DOCUMENT_START.test(value) ||
+    LOSSY_NUMBER.test(value)
+  ) {
     return undefined;
   }
   let parsed: JsonValue;

@@ -805,6 +805,23 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     );
   });
 
+  it("redacts a quoted credential key of any length", () => {
+    const key = `${"x-".repeat(65)}api-key`;
+
+    const redacted = redactCredentialString(`upstream said {"${key}":"not-a-real-key"}`);
+
+    assert.equal(redacted, `upstream said {"${key}":"[REDACTED]"}`);
+  });
+
+  it("keeps the text of numbers JSON.parse would round", () => {
+    for (const amount of ["12345678901234567890", "1.2345678901234567e+30"]) {
+      assert.equal(
+        redactCredentialString(`{"password":"not-a-real-pass","amount":${amount}}`),
+        `{"password":"[REDACTED]","amount":${amount}}`
+      );
+    }
+  });
+
   it("masks a value that only starts with the redaction marker", () => {
     assert.equal(
       redactCredentialString("password=[REDACTED]correct horse battery staple"),
