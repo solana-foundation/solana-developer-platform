@@ -490,7 +490,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
-      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
+      "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,

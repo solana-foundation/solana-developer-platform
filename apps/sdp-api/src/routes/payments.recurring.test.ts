@@ -67,6 +67,7 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
+import * as counterpartyAccountResolution from "@/services/payments/counterparty-account-resolution";
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
@@ -3219,6 +3220,99 @@ describe("Payments routes — recurring", () => {
     }
   );
 
+  it("does not pause or sign when the recipient lookup fails", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const lookup = vi
+      .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+      .mockRejectedValueOnce(new Error("recipient database unavailable"));
+    onTestFinished(() => lookup.mockRestore());
+    const calls = recurringExecutionCallCounts();
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(response.status).toBe(500);
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+  });
+
+  it("leaves an unsigned in-flight claim recoverable, then pauses after it becomes stale", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await seedRecurringCollectionJournal({
+      stage: "claimed",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: new Date().toISOString(),
+    });
+    const archived = await app.request(
+      `/v1/counterparties/${activated.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const calls = recurringExecutionCallCounts();
+    const collect = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+    expect((await collect()).status).toBe(409);
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("active");
+    expect(await collectionAttempts(activated.subscriptionId)).toMatchObject([
+      { status: "processing" },
+    ]);
+    const staleAt = new Date(
+      Date.now() - RECURRING_PAYMENT_COLLECTION_CONFIG.staleAfterMs - 1000
+    ).toISOString();
+    await getDb(env).execute(
+      "UPDATE payment_subscription_collection_attempts SET updated_at = ? WHERE id = ?",
+      [staleAt, attemptId]
+    );
+    expect((await collect()).status).toBe(409);
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(read)).data.recurringPayment).toMatchObject({
+      status: "paused",
+      pausedReason: "destination_unavailable",
+    });
+    expect(await collectionAttempts(activated.subscriptionId)).toMatchObject([
+      { status: "failed" },
+    ]);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+    // Cancel stays available for a recipient pause and unwinds the mandate.
+    const canceled = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(canceled.status).toBe(200);
+    expect((await parseRecurringResponse(canceled)).data.recurringPayment.status).toBe("canceled");
+  });
+
   it("resumes a paused recurring payment without signing", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await pauseRecurringPayment(activated.id);
@@ -4110,6 +4204,43 @@ describe("Payments routes — recurring", () => {
     expect((await parseCollectionResponse(recovered)).data.collectionAttempt).toMatchObject({
       status: "confirmed",
       signature: signatures[2],
+    });
+    expect(poolSentSignatures()).toEqual(signatures);
+  });
+
+  it("does not retry an expired signed collection after its recipient is archived", async () => {
+    const { subscriptionId, collect } = await leaveCollectionUnanswered();
+    const row = required(
+      await getDb(env)
+        .prepare(
+          "SELECT id, counterparty_id FROM payment_recurring_payments WHERE subscription_id = ?"
+        )
+        .bind(subscriptionId)
+        .first<{ id: string; counterparty_id: string }>()
+    );
+    const archived = await app.request(
+      `/v1/counterparties/${row.counterparty_id}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const signatures = poolSentSignatures();
+    answerChainTip(SAVED_LAST_VALID_BLOCK_HEIGHT + 1);
+    expect((await collect()).status).toBe(409);
+    expect(await collectionAttempts(subscriptionId)).toMatchObject([
+      {
+        status: "failed",
+        error: "Recurring payment collection expired without landing on-chain",
+      },
+    ]);
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${row.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(read)).data.recurringPayment).toMatchObject({
+      status: "paused",
+      pausedReason: "destination_unavailable",
     });
     expect(poolSentSignatures()).toEqual(signatures);
   });

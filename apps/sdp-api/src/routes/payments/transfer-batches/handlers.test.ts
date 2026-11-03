@@ -2341,7 +2341,7 @@ describe("payment transfer batches", () => {
     expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
-  it("replays the original transfer batch for the same idempotency key and payload", async () => {
+  it("replays the original transfer batch after its counterparty is archived", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
@@ -2372,6 +2372,19 @@ describe("payment transfer batches", () => {
       { method: "POST", headers, body: requestBody },
       env
     );
+    expect(first.status).toBe(200);
+    const archived = await app.request(
+      `/v1/counterparties/${counterpartyId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: headers.Authorization,
+          "Idempotency-Key": "archive-batch-recipient",
+        },
+      },
+      env
+    );
+    expect(archived.status).toBe(204);
     const second = await app.request(
       "/v1/payments/transfer-batches",
       { method: "POST", headers, body: requestBody },

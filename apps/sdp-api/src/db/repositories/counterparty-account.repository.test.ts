@@ -1,5 +1,5 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db/client";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -74,6 +74,52 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
   }
 
   describe("archive parent", () => {
+    it("rolls the parent archive back when archiving an account fails", async () => {
+      const parent = await seedCounterparty("archive_rollback");
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: parent.id,
+        accountKind: "crypto_wallet",
+      });
+      assert(account);
+      const db = getDb(env);
+      await expect(
+        db.transaction(async (tx) => {
+          // The failing transaction also removes this test-only trigger.
+          await tx.execute(`CREATE FUNCTION refuse_account_archive() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'account archive refused'; END $$`);
+          await tx.execute(`CREATE TRIGGER refuse_account_archive
+          AFTER UPDATE ON counterparty_accounts FOR EACH ROW
+          WHEN (NEW.status = 'archived') EXECUTE FUNCTION refuse_account_archive()`);
+          await createPostgresCounterpartiesRepository(
+            asTransactionalClient(tx)
+          ).archiveCounterparty({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            counterpartyId: parent.id,
+          });
+        })
+      ).rejects.toThrow("account archive refused");
+      expect(
+        await createPostgresCounterpartiesRepository(db).getCounterpartyById({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+          status: "any",
+        })
+      ).toEqual(parent);
+      expect(
+        await repo.getCounterpartyAccountById({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+          counterpartyAccountId: account.id,
+          status: "any",
+        })
+      ).toEqual(account);
+    });
+
     it("archives every active child, preserves archived children, and leaves other parents alone", async () => {
       const parent = await seedCounterparty("archive_parent");
       const other = await seedCounterparty("other_parent");

@@ -64,7 +64,20 @@ The dashboard starts a key that holds any `execute` action on **Selected wallets
 
 ## Recurring payments outlive the key
 
-A recurring payment is collected on schedule as its own mandate, not as the key or member that activated it. SDP still checks that the payment is active, that it pays from its own source wallet, and that the organization may move money. Revoking or narrowing the key that activated it does not stop it, so rotating a key never interrupts a customer's schedule.
+A recurring payment is collected on schedule as its own mandate, not as the key
+or member that activated it. SDP checks that the payment is active, that it pays
+from its own source wallet, that its counterparty and account are active in the
+project, and that the organization may move money. Revoking or narrowing the
+key that activated it does not stop it, so rotating a key never interrupts a
+customer's schedule.
+
+Archiving the counterparty archives its active accounts too. New transfers and
+batches cannot use those accounts. Before the next new collection, an
+unavailable counterparty or account pauses the recurring payment with
+`pausedReason: "destination_unavailable"`. Work already in flight still
+recovers, and earlier requests still replay their recorded outcomes. The
+dashboard shows the pause reason and offers Cancel. Paused schedules cannot be
+edited, so cancel the schedule and create a new one with an active recipient.
 
 ## Create a key
 
