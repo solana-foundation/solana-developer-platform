@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { gotoProjectPage, provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
+import {
+  gotoProjectPage,
+  provisionLinkedOrgProjects,
+} from "@/playwright/support/local-dashboard-bootstrap";
 
 test.describe("dashboard first paint", () => {
   let projectId = "";
