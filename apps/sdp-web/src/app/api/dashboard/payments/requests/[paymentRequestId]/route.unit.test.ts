@@ -1,13 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  proxyToSdpApi: vi.fn(),
-}));
-
-vi.mock("@/lib/sdp-api", () => ({
-  proxyToSdpApi: mocks.proxyToSdpApi,
-}));
-
+import { NextResponse } from "next/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as sdpApi from "@/lib/sdp-api";
 import { GET } from "./route";
 
 function detailRequest(): Request {
@@ -15,17 +8,19 @@ function detailRequest(): Request {
 }
 
 describe("GET /api/dashboard/payments/requests/[paymentRequestId]", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("reads the request from the API", async () => {
-    mocks.proxyToSdpApi.mockResolvedValue(Response.json({ data: {} }));
+    const proxy = vi
+      .spyOn(sdpApi, "proxyToSdpApi")
+      .mockResolvedValue(NextResponse.json({ data: {} }));
     const request = detailRequest();
 
     await GET(request, { params: Promise.resolve({ paymentRequestId: "preq_1" }) });
 
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
+    expect(proxy).toHaveBeenCalledWith({
       request,
       traceSource: "route.dashboard.payment-requests.detail",
       path: "/v1/payments/requests/preq_1",
@@ -33,6 +28,8 @@ describe("GET /api/dashboard/payments/requests/[paymentRequestId]", () => {
   });
 
   it("returns 400 for a blank id without proxying", async () => {
+    const proxy = vi.spyOn(sdpApi, "proxyToSdpApi");
+
     const response = await GET(detailRequest(), {
       params: Promise.resolve({ paymentRequestId: " " }),
     });
@@ -41,6 +38,6 @@ describe("GET /api/dashboard/payments/requests/[paymentRequestId]", () => {
     await expect(response.json()).resolves.toEqual({
       error: { message: "Payment request id is required" },
     });
-    expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
+    expect(proxy).not.toHaveBeenCalled();
   });
 });

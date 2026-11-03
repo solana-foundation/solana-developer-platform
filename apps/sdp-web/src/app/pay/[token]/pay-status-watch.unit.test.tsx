@@ -11,9 +11,9 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const STATUS_URL = "https://api.test/pay/tok_1";
 
 function respondWith(status: string) {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status }), { status: 200 }));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async () => new Response(JSON.stringify({ status }), { status: 200 }));
 }
 
 function renderWatch(status: "awaiting_payment" | "paid") {
@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   resetDashboardNavigation();
 });
 
