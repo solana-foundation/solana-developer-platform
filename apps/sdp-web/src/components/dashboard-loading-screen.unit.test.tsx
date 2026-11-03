@@ -1,20 +1,8 @@
-import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { setDashboardUrl } from "@/test/dashboard-navigation";
-import { SANDBOX_PROJECT } from "@/test/projects";
+import type { DashboardFlags } from "@/flags/dashboard";
 import { getDashboardPageConfig } from "./dashboard-header";
 import { DashboardLoadingScreen } from "./dashboard-loading-screen";
-import { DashboardShell } from "./dashboard-shell";
-
-const authMock = vi.hoisted(() => ({ isLoaded: false }));
-
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: authMock.isLoaded, isSignedIn: true, orgId: "org-cold-load" }),
-  useUser: () => ({ isLoaded: authMock.isLoaded, isSignedIn: true, user: null }),
-  SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
-}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -24,41 +12,26 @@ vi.mock("@/i18n/provider", () => ({
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useOptionalDashboardWorkspace: () => undefined,
-  useDashboardWorkspace: () => ({
-    dashboardAccess: {
-      capabilities: { canReadApprovals: true, canManageOrgSettings: true },
-    },
-    selectedProjectId: "prj_test_sandbox",
-    dashboardCacheScope: { userId: "user-cold-load", orgId: "org-cold-load" },
-    isSidebarOpen: true,
-    setSidebarOpen: () => undefined,
-    isProjectSwitching: false,
-  }),
+  useDashboardWorkspace: vi.fn(),
 }));
 
-function renderColdLoad(pathname: string): string {
-  setDashboardUrl(projectHref(SANDBOX_PROJECT.id, pathname), {});
-  return renderToStaticMarkup(
-    <DashboardShell
-      flags={{
-        assetProfiles: false,
-        compliance: false,
-        custody: false,
-        dvp: false,
-        earn: false,
-        heliusRings: false,
-        issuance: false,
-        markets: false,
-        payments: true,
-        privateChannels: false,
-        releaseChannel: "experimental",
-        ramps: true,
-      }}
-    >
-      <div>settled route content</div>
-    </DashboardShell>
-  );
+const FLAGS: DashboardFlags = {
+  assetProfiles: false,
+  compliance: false,
+  custody: false,
+  dvp: false,
+  earn: false,
+  heliusRings: false,
+  issuance: false,
+  markets: false,
+  payments: true,
+  privateChannels: false,
+  releaseChannel: "experimental",
+  ramps: true,
+};
+
+function renderLoadingScreen(pathname: string): string {
+  return renderToStaticMarkup(<DashboardLoadingScreen pathname={pathname} flags={FLAGS} />);
 }
 
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
@@ -73,18 +46,17 @@ function contentWidthClassOf(markup: string): string {
   return widths[0] ?? "none found";
 }
 
-describe("dashboard cold load", () => {
-  it("paints the route's own skeleton instead of the generic silhouette", () => {
-    const markup = renderColdLoad("/dashboard");
+describe("DashboardLoadingScreen", () => {
+  it("paints the route's own skeleton", () => {
+    const markup = renderLoadingScreen("/dashboard");
 
     expect(markup).toContain("data-shell-loading-skeleton");
     expect(markup).toContain('data-loading-layout="home"');
-    expect(markup).not.toContain("data-shell-loading-generic-content");
   });
 
   it("paints a different skeleton per route rather than one shape everywhere", () => {
-    const transactions = renderColdLoad("/dashboard/payments/transactions");
-    const policies = renderColdLoad("/dashboard/policies");
+    const transactions = renderLoadingScreen("/dashboard/payments/transactions");
+    const policies = renderLoadingScreen("/dashboard/policies");
 
     expect(transactions).toContain('data-loading-layout="payments-transactions"');
     expect(transactions).not.toContain('data-loading-layout="home"');
@@ -93,8 +65,8 @@ describe("dashboard cold load", () => {
   });
 
   it("paints Helius Rings and the Members redirect with their own skeletons, not Home's", () => {
-    const helius = renderColdLoad("/dashboard/helius-rings");
-    const members = renderColdLoad("/dashboard/members");
+    const helius = renderLoadingScreen("/dashboard/helius-rings");
+    const members = renderLoadingScreen("/dashboard/members");
 
     expect(helius).toContain('data-loading-layout="helius-rings"');
     expect(helius).not.toContain('data-loading-layout="home"');
@@ -111,12 +83,12 @@ describe("dashboard cold load", () => {
     ]) {
       const settledWidth = settledContentWidthClassFor(pathname);
 
-      expect(contentWidthClassOf(renderColdLoad(pathname))).toBe(settledWidth);
+      expect(contentWidthClassOf(renderLoadingScreen(pathname))).toBe(settledWidth);
     }
   });
 
   it("pads the skeleton like the settled shell's content section", () => {
-    const markup = renderColdLoad("/dashboard");
+    const markup = renderLoadingScreen("/dashboard");
 
     expect(markup).toContain("px-3 py-5 md:p-6");
     expect(markup).not.toContain("px-6 py-8");
@@ -131,14 +103,6 @@ describe("dashboard cold load", () => {
     expect(getDashboardPageConfig("/dashboard/members", t).title).toBe(
       "Shared.dashboardShell.settings"
     );
-  });
-
-  it("uses identical frames during preparation and client authentication", () => {
-    for (const pathname of ["/dashboard", "/dashboard/payments/transactions"]) {
-      const coldLoad = renderColdLoad(pathname);
-      const preparation = renderToStaticMarkup(<DashboardLoadingScreen pathname={pathname} />);
-      expect(preparation).toBe(coldLoad);
-    }
   });
 
   it("keeps deep links route-specific and preserves a collapsed sidebar", () => {

@@ -35,7 +35,7 @@ vi.mock("sonner", () => ({
   },
 }));
 vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
+  useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
 }));
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";

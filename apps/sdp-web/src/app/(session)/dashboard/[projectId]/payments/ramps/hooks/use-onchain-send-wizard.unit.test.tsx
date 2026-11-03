@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
+  useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 

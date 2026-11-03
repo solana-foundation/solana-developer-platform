@@ -9,14 +9,13 @@ import type { ApiKeyFlash } from "./api-key-flash";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 
 interface ClerkAuthFixture {
-  isLoaded: boolean;
   sessionId: string | null;
   userId: string | null;
   orgId: string | null;
 }
 
 const clerk = vi.hoisted((): { auth: ClerkAuthFixture } => ({
-  auth: { isLoaded: true, sessionId: "sess_a", userId: "user_a", orgId: "org_a" },
+  auth: { sessionId: "sess_a", userId: "user_a", orgId: "org_a" },
 }));
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));
@@ -47,7 +46,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys`, {});
-  clerk.auth = { isLoaded: true, sessionId: "sess_a", userId: "user_a", orgId: "org_a" };
+  clerk.auth = { sessionId: "sess_a", userId: "user_a", orgId: "org_a" };
 });
 
 afterEach(() => {
@@ -86,7 +85,7 @@ describe("ApiKeyFlashSurface", () => {
     const accountA = render(ui());
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     accountA.unmount();
-    clerk.auth = { isLoaded: true, sessionId: "sess_b", userId: "user_b", orgId: "org_a" };
+    clerk.auth = { sessionId: "sess_b", userId: "user_b", orgId: "org_a" };
     render(ui());
 
     // B issues its own read instead of joining A's.
@@ -113,7 +112,7 @@ describe("ApiKeyFlashSurface", () => {
     );
     expect(await screen.findByText("API key created")).toBeTruthy();
 
-    clerk.auth = { isLoaded: true, sessionId: "sess_a", userId: "user_a", orgId: "org_b" };
+    clerk.auth = { sessionId: "sess_a", userId: "user_a", orgId: "org_b" };
     view.rerender(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApiKeyFlashSurface />
@@ -124,7 +123,7 @@ describe("ApiKeyFlashSurface", () => {
   });
 
   it("does not read the flash before Clerk has a signed-in session", () => {
-    clerk.auth = { isLoaded: true, sessionId: null, userId: null, orgId: null };
+    clerk.auth = { sessionId: null, userId: null, orgId: null };
 
     render(ui());
 

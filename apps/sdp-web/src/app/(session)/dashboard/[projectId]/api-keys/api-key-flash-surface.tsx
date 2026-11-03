@@ -53,8 +53,8 @@ function loadApiKeyFlash(scopeKey: string, flashPath: string): Promise<ApiKeyFla
 
 /** The auth scope a flash belongs to, or null until Clerk has a signed-in session. */
 function useFlashScopeKey(flashPath: string): string | null {
-  const { isLoaded, sessionId, userId, orgId } = useAuth();
-  if (!isLoaded || !sessionId || !userId) {
+  const { sessionId, userId, orgId } = useAuth();
+  if (!sessionId || !userId) {
     return null;
   }
   return JSON.stringify([sessionId, userId, orgId ?? null, flashPath]);

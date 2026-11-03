@@ -14,7 +14,7 @@ import type { RailProps } from "./ramp-action-page";
 
 const mocks = vi.hoisted(() => ({ wizard: null as OnchainSendWizard | null }));
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
+vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./hooks/use-onchain-send-wizard")>()),

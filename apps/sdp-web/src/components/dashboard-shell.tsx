@@ -428,7 +428,7 @@ export function DashboardShell({
     ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
-  const { isLoaded, isSignedIn, orgId } = useAuth();
+  const { isSignedIn, orgId } = useAuth();
   const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
@@ -647,12 +647,6 @@ export function DashboardShell({
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
-
-  if (!isLoaded) {
-    return (
-      <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
-    );
-  }
 
   if (!isSignedIn) {
     return (

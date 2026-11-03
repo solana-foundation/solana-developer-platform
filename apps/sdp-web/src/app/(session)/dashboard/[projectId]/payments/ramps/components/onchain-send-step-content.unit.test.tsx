@@ -12,7 +12,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
+vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const labeledWallet: PaymentsDashboardWallet = {

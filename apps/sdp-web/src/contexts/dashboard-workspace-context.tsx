@@ -91,10 +91,10 @@ export function DashboardWorkspaceProvider({
     selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
-      auth.isLoaded && auth.orgId && auth.userId
+      auth.orgId && auth.userId
         ? { orgId: auth.orgId, userId: auth.userId }
         : serverDashboardCacheScope,
-    [auth.isLoaded, auth.orgId, auth.userId, serverDashboardCacheScope]
+    [auth.orgId, auth.userId, serverDashboardCacheScope]
   );
   const liveDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(liveDashboardCacheScope),
@@ -108,7 +108,7 @@ export function DashboardWorkspaceProvider({
     [serverDashboardCacheScope]
   );
   const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
-  const shouldRenderScopeRefreshFallback = auth.isLoaded && !dashboardScopeIsFresh;
+  const shouldRenderScopeRefreshFallback = !dashboardScopeIsFresh;
   const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
     projectId: selectedProjectId,
   });
@@ -142,14 +142,14 @@ export function DashboardWorkspaceProvider({
   // An Organization switched in Clerk leaves this URL naming the previous
   // Organization's Project; the bare landing resolves the new one's.
   useEffect(() => {
-    if (!auth.isLoaded || liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
+    if (liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
       return;
     }
 
     startProjectSwitchTransition(() => {
       router.replace("/dashboard");
     });
-  }, [auth.isLoaded, liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
+  }, [liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
