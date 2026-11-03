@@ -1,9 +1,5 @@
 "use client";
-import {
-  assertNever,
-  isSuccessfulPaymentTransferStatus,
-  type PaymentTransferSummary,
-} from "@sdp/types/payments";
+import { assertNever, type PaymentTransferSummary } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { StatusText } from "@sdp/ui/status-text";
 import { ExternalLinkIcon } from "lucide-react";
@@ -19,26 +15,7 @@ import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-
-/**
- * What became of a sent transfer, for its heading and its message. A signature alone is not
- * success: a transfer is sent once its status says it settled, and failed whatever it carries.
- */
-export type SendResultKind =
-  | "failed"
-  | "sent"
-  | "fireblocksPending"
-  | "fireblocksUnknown"
-  | "pending";
-
-export function sendResultKind(transfer: PaymentTransferSummary): SendResultKind {
-  if (transfer.status === "failed") return "failed";
-  if (isSuccessfulPaymentTransferStatus(transfer.status)) return "sent";
-  if (transfer.fireblocks && transfer.signature === null) {
-    return transfer.fireblocks.transactionId ? "fireblocksPending" : "fireblocksUnknown";
-  }
-  return "pending";
-}
+import { sendResultKind } from "./onchain-send-result-kind";
 
 function resultMessage(transfer: PaymentTransferSummary, t: ReturnType<typeof useTranslations>) {
   const kind = sendResultKind(transfer);

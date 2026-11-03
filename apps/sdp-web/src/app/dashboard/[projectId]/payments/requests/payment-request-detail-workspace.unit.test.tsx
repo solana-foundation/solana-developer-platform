@@ -94,6 +94,22 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
     expect(read).toHaveBeenCalledWith("preq_1");
   });
 
+  it("shows a request the clock expired before anything wrote it, then stops reading", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // The API derives `expired` from the clock and leaves `updatedAt` as the last write set it.
+    const expired: PaymentRequest = { ...paymentRequest, status: "expired" };
+    const read = vi
+      .spyOn(requestsData, "fetchPaymentRequestFromBrowser")
+      .mockResolvedValue(expired);
+    renderDetail(false, "tok_1", paymentRequest);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitFor(() => expect(screen.getAllByText("Expired").length).toBeGreaterThan(0));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).toHaveBeenCalledOnce();
+  });
+
   it("reads a request that is no longer open no more", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);

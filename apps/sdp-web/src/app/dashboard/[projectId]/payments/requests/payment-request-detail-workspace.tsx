@@ -298,7 +298,8 @@ function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
       dedupingInterval: 2_000,
     }
   );
-  return data !== undefined && data.updatedAt > served.updatedAt ? data : served;
+  // A tie goes to the read: the API derives `expired` from the clock, before anything writes it.
+  return data !== undefined && data.updatedAt >= served.updatedAt ? data : served;
 }
 
 interface PaymentRequestDetailWorkspaceProps {

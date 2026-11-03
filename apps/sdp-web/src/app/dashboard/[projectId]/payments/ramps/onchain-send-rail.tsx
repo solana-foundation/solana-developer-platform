@@ -3,7 +3,7 @@
 import { assertNever } from "@sdp/types/payments";
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
-import { sendResultKind } from "./components/onchain-send-result";
+import { sendResultKind } from "./components/onchain-send-result-kind";
 import {
   type OnchainSendContactControls,
   OnchainSendStepContent,
