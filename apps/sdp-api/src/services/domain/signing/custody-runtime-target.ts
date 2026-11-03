@@ -44,7 +44,11 @@ import {
   provisionPrivyWallet,
 } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
-import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import {
+  type AdmittedSignerContext,
+  admittedSigner,
+  type SignerCredentialBinding,
+} from "@/services/domain/signing/admitted-signer";
 import {
   createFireblocksAdapterFromCredential,
   createPrivyAdapterFromCredential,
@@ -718,10 +722,19 @@ export class CustodyRuntimeTargets {
     });
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
-    const adapter =
-      target.kind === "config"
-        ? await getConfigAdapter(organizationId, target.config)
-        : await this.getConnectionAdapter(target, target.wallet);
+    let adapter: SigningPort;
+    let credential: AdmittedSignerContext["credential"];
+    if (target.kind === "config") {
+      adapter = await getConfigAdapter(organizationId, target.config);
+    } else {
+      const connection = await this.getConnectionAdapter(target, target.wallet);
+      adapter = connection.adapter;
+      // The signer re-reads this Connection's credential before each signature.
+      credential = {
+        bound: connection.credential,
+        readCurrent: () => this.readCurrentConnectionCredential(target),
+      };
+    }
     const signer = await getTransactionSigner(
       adapter,
       target.wallet,
@@ -745,6 +758,7 @@ export class CustodyRuntimeTargets {
         projectId,
         custodyWalletId,
         provider: target.provider,
+        ...(credential ? { credential } : {}),
       }
     );
   }
@@ -945,7 +959,7 @@ export class CustodyRuntimeTargets {
   private async getConnectionAdapter(
     target: ConnectionRuntimeTarget,
     wallet: RuntimeWallet
-  ): Promise<SigningPort> {
+  ): Promise<{ adapter: SigningPort; credential: SignerCredentialBinding }> {
     const row = await this.loadConnectionCredential(target);
     if (!row || !isUsableCredentialOwner(row)) {
       this.logUnavailable(target, "connection_changed");
@@ -977,9 +991,10 @@ export class CustodyRuntimeTargets {
       wallet.walletId,
       row.request_delay_ms ?? "env",
     ].join(":");
+    const credential = connectionCredentialBinding(row);
     const cached = this.adapterCache.get(cacheKey);
     if (cached) {
-      return cached;
+      return { adapter: cached, credential };
     }
 
     const secret = await this.readByokCredential(target, row);
@@ -996,7 +1011,44 @@ export class CustodyRuntimeTargets {
             requestDelayMs: row.request_delay_ms ?? undefined,
           });
     this.adapterCache.set(cacheKey, adapter);
-    return adapter;
+    return { adapter, credential };
+  }
+
+  /**
+   * The Connection's current usable credential, read before each signature by
+   * a signer built from an earlier one. No secret columns.
+   */
+  private async readCurrentConnectionCredential(
+    target: ConnectionRuntimeTarget
+  ): Promise<SignerCredentialBinding | null> {
+    const row = await this.db.queryOne<
+      Pick<
+        ConnectionCredentialRow,
+        | "connection_id"
+        | "connection_status"
+        | "last_check_status"
+        | "provider_credential_id"
+        | "credential_status"
+        | "provider_account_fingerprint"
+        | "credential_version"
+        | "secret_version_ref"
+      >
+    >(
+      `SELECT c.id AS connection_id, c.status AS connection_status, c.last_check_status,
+              c.provider_account_fingerprint,
+              pc.id AS provider_credential_id, pc.status AS credential_status,
+              pc.credential_version, pc.secret_version_ref
+       FROM custody_connections c
+       JOIN provider_credentials pc
+         ON pc.id = c.provider_credential_id
+        AND pc.project_id = c.project_id
+       WHERE c.id = ?
+         AND c.organization_id = ?
+         AND c.project_id = ?
+       LIMIT 1`,
+      [target.connectionId, target.organizationId, target.projectId]
+    );
+    return row && isUsableCredentialOwner(row) ? connectionCredentialBinding(row) : null;
   }
 
   private async loadConnectionCredential(
@@ -1532,7 +1584,26 @@ function mapConfig(row: ConfigRow, provider: CustodyProvider): SigningConfigReco
   };
 }
 
-function isUsableCredentialOwner(row: ConnectionCredentialRow): boolean {
+function connectionCredentialBinding(
+  row: Pick<
+    ConnectionCredentialRow,
+    "connection_id" | "provider_credential_id" | "credential_version" | "secret_version_ref"
+  >
+): SignerCredentialBinding {
+  return {
+    connectionId: row.connection_id,
+    providerCredentialId: row.provider_credential_id,
+    credentialVersion: row.credential_version,
+    secretVersionRef: row.secret_version_ref,
+  };
+}
+
+function isUsableCredentialOwner(
+  row: Pick<
+    ConnectionCredentialRow,
+    "connection_status" | "last_check_status" | "credential_status" | "provider_account_fingerprint"
+  >
+): boolean {
   return (
     row.connection_status === "active" &&
     row.last_check_status === "success" &&

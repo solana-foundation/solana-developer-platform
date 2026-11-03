@@ -10,8 +10,9 @@ import {
   isTransactionSendingSigner,
   type TransactionSigner,
 } from "@solana/kit";
-import { custodyPolicyRefused } from "@/lib/errors";
+import { conflict, custodyPolicyRefused } from "@/lib/errors";
 import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
+import { getLogger } from "@/runtime/logger";
 
 /**
  * Rethrows a custody signing failure, as the API's `CUSTODY_POLICY_REFUSED` when the provider's
@@ -28,12 +29,46 @@ function rethrowPolicyRefusal(error: unknown, provider: CustodyProvider): never 
   throw error;
 }
 
+/**
+ * The BYOK credential a Connection signer was built from: the Connection, the
+ * credential row it pointed at, and that credential's version and secret
+ * version.
+ */
+export interface SignerCredentialBinding {
+  connectionId: string;
+  providerCredentialId: string;
+  credentialVersion: number;
+  secretVersionRef: string | null;
+}
+
 export interface AdmittedSignerContext {
   movement: MovementId;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
   provider: CustodyProvider;
+  /**
+   * For a Connection (BYOK) wallet: the credential the signer was built from,
+   * and a read of the Connection's current usable credential (null when it has
+   * none). Managed and Config wallets omit it.
+   */
+  credential?: {
+    bound: SignerCredentialBinding;
+    readCurrent: () => Promise<SignerCredentialBinding | null>;
+  };
+}
+
+function isSameCredential(
+  bound: SignerCredentialBinding,
+  current: SignerCredentialBinding | null
+): boolean {
+  return (
+    current !== null &&
+    current.connectionId === bound.connectionId &&
+    current.providerCredentialId === bound.providerCredentialId &&
+    current.credentialVersion === bound.credentialVersion &&
+    current.secretVersionRef === bound.secretVersionRef
+  );
 }
 
 /**
@@ -53,6 +88,12 @@ export interface AdmittedSignerContext {
  * It is also where a custody provider's policy refusal becomes the API's 422
  * `CUSTODY_POLICY_REFUSED` (HOO-2333), once, for every flow that signs, with
  * the provider's `SigningError` as its cause.
+ *
+ * A Connection signer also holds the BYOK credential it was built from, and
+ * each signature checks that the Connection still uses that exact credential.
+ * A signer resolved before the tenant rotated or revoked it at SDP refuses to
+ * sign rather than keep using the old secret, which SDP cannot invalidate at
+ * the provider.
  */
 export function admittedSigner(
   signer: TransactionSigner,
@@ -60,8 +101,29 @@ export function admittedSigner(
   context: AdmittedSignerContext
 ): TransactionSigner {
   const rethrow = (error: unknown): never => rethrowPolicyRefusal(error, context.provider);
+  const assertCredentialUnchanged = async () => {
+    const credential = context.credential;
+    if (!credential) return;
+    if (isSameCredential(credential.bound, await credential.readCurrent())) return;
+    getLogger().warn(
+      {
+        organizationId: context.organizationId,
+        projectId: context.projectId,
+        provider: context.provider,
+        connectionId: credential.bound.connectionId,
+        custodyWalletId: context.custodyWalletId,
+        movement: context.movement,
+      },
+      "custody_signer_credential_changed"
+    );
+    throw conflict("Custody Connection credential changed after the signer was resolved", {
+      reason: "runtime_execution_unavailable",
+    });
+  };
   const admit = async () => {
-    assertMovementAdmitted(await decide(), {
+    // Both reads are by primary key and independent, so they run together.
+    const [decision] = await Promise.all([decide(), assertCredentialUnchanged()]);
+    assertMovementAdmitted(decision, {
       surface: "signer",
       movement: context.movement,
       organizationId: context.organizationId,
