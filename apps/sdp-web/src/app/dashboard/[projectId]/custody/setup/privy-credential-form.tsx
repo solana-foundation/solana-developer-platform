@@ -53,6 +53,7 @@ function CredentialFields({
   provider,
   appSecret,
   defaultLabel,
+  hostsWalletLabel,
   onAppSecretChange,
   onFireblocksReadyChange,
   onFireblocksPendingChange,
@@ -62,6 +63,7 @@ function CredentialFields({
   provider: ByokCustodyProvider;
   appSecret: string;
   defaultLabel: string;
+  hostsWalletLabel: boolean;
   onAppSecretChange: (value: string) => void;
   onFireblocksReadyChange: (ready: boolean) => void;
   onFireblocksPendingChange: (pending: boolean) => void;
@@ -112,7 +114,7 @@ function CredentialFields({
         </>
       )}
 
-      {provider === "privy" ? (
+      {provider === "privy" && !hostsWalletLabel ? (
         <div className="space-y-2">
           <Label htmlFor="byok-wallet-label">
             {t("DashboardCustody.providerInitialWalletLabel")}
@@ -482,6 +484,7 @@ function resolveDefaultLabel(provider: ByokCustodyProvider): string | null {
 export function ByokCredentialForm({
   provider = "privy",
   formId,
+  hostsWalletLabel = false,
   onRecoveryLockChange,
   onRecoveryChange,
   onSuccess,
@@ -492,6 +495,12 @@ export function ByokCredentialForm({
   provider?: ByokCustodyProvider;
   onReadyChange?: (ready: boolean) => void;
   formId: string;
+  /**
+   * The host renders the first wallet's label itself, joined to this form by `form={formId}`
+   * with the name `walletLabel`, so the form leaves its own out. The setup flow does: its label
+   * stays put while the custody mode changes which form it submits with.
+   */
+  hostsWalletLabel?: boolean;
   /** True while leaving this form would strand a stored credential or key. */
   onRecoveryLockChange?: (locked: boolean) => void;
   /**
@@ -504,9 +513,9 @@ export function ByokCredentialForm({
    */
   onRecoveryChange?: (inRecovery: boolean) => void;
   /**
-   * Where a completed install goes. Defaults to the wallets list, which is
-   * where the setup wizard belongs afterwards; the provider page's Add
-   * connection modal passes its own handler to land on the new connection.
+   * Where a completed install goes. Defaults to the wallets list; the setup
+   * flow passes its own handler to confirm with a toast on the way there, and
+   * the provider page's Add connection modal to land on the new connection.
    */
   onSuccess?: (connectionId: string) => void;
   /**
@@ -582,6 +591,7 @@ export function ByokCredentialForm({
           provider={provider}
           appSecret={appSecret}
           defaultLabel={defaultLabel}
+          hostsWalletLabel={hostsWalletLabel}
           onAppSecretChange={setAppSecret}
           onFireblocksReadyChange={handleReady}
           onFireblocksPendingChange={handleChildPending}

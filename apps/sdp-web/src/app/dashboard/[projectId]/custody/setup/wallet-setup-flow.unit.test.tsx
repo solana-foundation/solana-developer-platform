@@ -10,17 +10,34 @@ import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navi
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 
+type SubmitResult =
+  | { status: "success"; connectionId: string }
+  | { status: "failed"; message: string };
+
 const mocks = vi.hoisted(() => ({
   projectId: "prj_test_sandbox",
-  createWallet: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
-  initialize: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
+  createWallet: vi.fn(async (_formData: FormData) => ({
+    status: "success" as const,
+    walletId: "wallet_created",
+  })),
+  initialize: vi.fn(async (_formData: FormData) => ({
+    status: "success" as const,
+    walletId: "wallet_initialized",
+  })),
+  submitCredential: vi.fn(
+    async (_formData: FormData): Promise<SubmitResult> => ({
+      status: "success",
+      connectionId: "conn_new",
+    })
+  ),
   refreshWalletInventory: vi.fn(),
+  toastSuccess: vi.fn(),
+  purposeOffered: vi.fn((_purpose: string) => true),
 }));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-    // Issuance runs, so every purpose is on offer; `wallet-purposes` pins the stable list.
     flags: { dvp: false, issuance: true, markets: false },
     selectedProjectId: mocks.projectId,
     projects: [{ id: "prj_test_sandbox", name: "Default Sandbox Project" }],
@@ -28,16 +45,23 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("sonner", () => ({
+  toast: { success: mocks.toastSuccess, error: vi.fn(), loading: vi.fn() },
+}));
 vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
   createCustodySetupWalletAction: mocks.createWallet,
   initializeCustodySetupAction: mocks.initialize,
 }));
 vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
-  submitPrivyCredentialAction: vi.fn(),
+  submitPrivyCredentialAction: mocks.submitCredential,
   recheckPrivyCredentialAction: vi.fn(),
 }));
 vi.mock("@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
   useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
+}));
+// Every purpose is on offer unless a test narrows it; `wallet-purposes` pins the stable list.
+vi.mock("@/app/dashboard/[projectId]/custody/wallet-purposes", () => ({
+  isWalletPurposeOffered: (purpose: string) => mocks.purposeOffered(purpose),
 }));
 
 const { WalletSetupFlow } = await import("./wallet-setup-flow");
@@ -53,6 +77,16 @@ const SANDBOX_AVAILABILITY = availableCustodyProviders(
       { provider: "dfns", modes: ["managed"] },
       { provider: "privy", modes: ["managed", "byok"] },
     ],
+    compliance: [],
+    ramps: [],
+    earn: [],
+  })
+);
+
+const PRIVY_ONLY_AVAILABILITY = availableCustodyProviders(
+  projectProviderAvailability({
+    project: SANDBOX_PROJECT,
+    custody: [{ provider: "privy", modes: ["managed", "byok"] }],
     compliance: [],
     ramps: [],
     earn: [],
@@ -85,6 +119,21 @@ function renderFlow(props: Partial<FlowProps> = {}) {
   );
 }
 
+const createButton = () =>
+  screen.getByRole("button", { name: /^Create wallet/ }) as HTMLButtonElement;
+const footerHint = () => document.getElementById("wallet-setup-footer-hint")?.textContent;
+const labelInput = () => screen.getByLabelText("Wallet label") as HTMLInputElement;
+const typeLabel = (value: string) => fireEvent.change(labelInput(), { target: { value } });
+
+/** The form an action received on its first call. */
+function submitted(action: { mock: { calls: [FormData][] } }): FormData {
+  const [call] = action.mock.calls;
+  if (call === undefined) {
+    throw new Error("The action was not called");
+  }
+  return call[0];
+}
+
 beforeEach(() => {
   resetDashboardNavigation();
 });
@@ -93,56 +142,62 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mocks.projectId = "prj_test_sandbox";
+  mocks.purposeOffered.mockImplementation(() => true);
 });
 
-describe("provider step", () => {
-  it("lists the providers the project can use as radios, connected first", () => {
+describe("one screen", () => {
+  it("asks for the provider only when there is a choice, connected providers first", () => {
     renderFlow({ connectedProviders: ["dfns"] });
 
-    expect(screen.getByText("Step 1 of 2")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Which provider holds the keys?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Create wallet" })).toBeTruthy();
+    expect(screen.queryByText(/Step \d of/)).toBeNull();
     const list = document.querySelector("[data-wallet-provider-list]") as HTMLElement;
     const names = [...list.querySelectorAll("[data-wallet-provider]")].map((row) =>
       row.getAttribute("data-wallet-provider")
     );
     expect(names[0]).toBe("dfns");
     expect(new Set(names)).toEqual(new Set(["turnkey", "dfns", "privy"]));
-    for (const radio of within(list).getAllByRole("radio")) {
-      expect((radio as HTMLInputElement).disabled).toBe(false);
-    }
     expect(within(list).getAllByText("Active")).toHaveLength(1);
+    // The label is asked from the start, so choosing a provider never pops it in.
+    expect(labelInput()).toBeTruthy();
   });
 
-  it("hides a provider the project cannot use, rather than showing it disabled", () => {
+  it("opens on the only provider the project can use, with nothing to pick", () => {
     renderFlow({ custodyAvailability: PRODUCTION_AVAILABILITY, environment: "production" });
 
-    const list = document.querySelector("[data-wallet-provider-list]") as HTMLElement;
-    expect(within(list).getAllByRole("radio")).toHaveLength(1);
-    expect(screen.queryByRole("radio", { name: /Turnkey/ })).toBeNull();
-    expect(screen.queryByText("Not ready")).toBeNull();
-    expect(document.querySelector("[data-wallet-provider-setup-list]")).toBeNull();
+    expect(document.querySelector("[data-wallet-provider-list]")).toBeNull();
+    const createdWith = screen.getByRole("region", { name: "Created with" });
+    expect(within(createdWith).getByText("Privy")).toBeTruthy();
   });
 
-  it("continues only once a provider is chosen", () => {
+  it("names what is still missing beside the disabled Create wallet", () => {
     renderFlow();
-    const continueButton = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
-    expect(continueButton.disabled).toBe(true);
+    expect(createButton().disabled).toBe(true);
+    expect(createButton().getAttribute("aria-describedby")).toBe("wallet-setup-footer-hint");
+    expect(footerHint()).toBe("Choose an enabled provider to continue.");
 
     fireEvent.click(screen.getByRole("radio", { name: /Turnkey/ }));
-    expect(continueButton.disabled).toBe(false);
-    fireEvent.click(continueButton);
-    expect(screen.getByText("Step 2 of 2")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
+    expect(footerHint()).toBe("Name the wallet to continue.");
+    expect(createButton().disabled).toBe(true);
+
+    typeLabel("Settlement wallet");
+    expect(footerHint()).toBe("Turnkey creates the keys when you confirm.");
+    expect(createButton().disabled).toBe(false);
   });
 
-  it("advances with Enter from the chosen radio without creating anything", () => {
+  it("keeps Enter on a choice from creating anything, and creates once from the label", async () => {
     renderFlow();
     const turnkey = screen.getByRole("radio", { name: /Turnkey/ });
     fireEvent.click(turnkey);
+    typeLabel("Ops");
+
     fireEvent.keyDown(turnkey, { key: "Enter" });
-    expect(screen.getByText("Step 2 of 2")).toBeTruthy();
     expect(mocks.createWallet).not.toHaveBeenCalled();
-    expect(mocks.initialize).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.keyDown(labelInput(), { key: "Enter" });
+    });
+    expect(mocks.createWallet).toHaveBeenCalledTimes(1);
   });
 
   it("says so when the project can use no provider, instead of emptying the page", () => {
@@ -153,6 +208,7 @@ describe("provider step", () => {
       )
     ).toBeTruthy();
     expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
   });
 
   it("leaves for the project's wallet list from Cancel", () => {
@@ -162,66 +218,83 @@ describe("provider step", () => {
   });
 });
 
-describe("details step", () => {
-  it("states what the wallet is created with and goes back to change the provider", () => {
+describe("details", () => {
+  it("states what the wallet is created with", () => {
     renderFlow({ initialProvider: "turnkey" });
 
     const createdWith = screen.getByRole("region", { name: "Created with" });
     expect(within(createdWith).getByText("Turnkey")).toBeTruthy();
     expect(within(createdWith).getByText("Default Sandbox Project")).toBeTruthy();
     expect(within(createdWith).getByText("Sandbox · devnet")).toBeTruthy();
-    expect(screen.getByText("Turnkey creates the keys when you confirm.")).toBeTruthy();
-
-    fireEvent.click(within(createdWith).getByRole("button", { name: "Change" }));
-    expect(screen.getByText("Step 1 of 2")).toBeTruthy();
-    expect((screen.getByRole("radio", { name: /Turnkey/ }) as HTMLInputElement).checked).toBe(true);
+    // The provider is chosen on this screen, so the summary has no way back to it.
+    expect(within(createdWith).queryByRole("button", { name: "Change" })).toBeNull();
   });
 
-  it("creates an additional wallet with its label and purpose, then returns to the list", async () => {
+  it("creates another wallet with its label and purpose, then opens it with a toast", async () => {
     renderFlow({ initialProvider: "turnkey" });
-    const create = screen.getByRole("button", { name: "Create wallet" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(true);
-
-    fireEvent.change(screen.getByLabelText("Wallet label"), {
-      target: { value: "Settlement wallet" },
-    });
-    expect(create.disabled).toBe(false);
+    typeLabel("Settlement wallet");
     await act(async () => {
-      fireEvent.click(create);
+      fireEvent.click(createButton());
     });
 
     const formData = mocks.createWallet.mock.calls[0]?.[0] as FormData;
     expect(formData.get("provider")).toBe("turnkey");
     expect(formData.get("label")).toBe("Settlement wallet");
     expect(formData.get("purpose")).toBe("transfer");
-    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Settlement wallet created");
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/wallets/wallet_created"
+    );
+    // The action revalidated the wallet pages; refreshing this one would only re-run its reads.
+    expect(dashboardRouter.refresh).not.toHaveBeenCalled();
   });
 
-  it("fixes the first wallet on a provider as a transfer wallet", async () => {
+  it("fixes a first wallet as a transfer wallet in the summary, with no picker", async () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    expect(screen.getByRole("button", { name: /first wallet is a transfer wallet/ })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
+    const createdWith = screen.getByRole("region", { name: "Created with" });
+    expect(within(createdWith).getByText("Transfers")).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Treasury" } });
+    typeLabel("Treasury");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     const formData = mocks.initialize.mock.calls[0]?.[0] as FormData;
     expect(formData.get("walletLabel")).toBe("Treasury");
     expect(formData.get("purpose")).toBeNull();
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/wallets/wallet_initialized"
+    );
   });
 
-  it("shows the API's refusal and stays on the step", async () => {
+  it("sends the only purpose offered without asking for it", async () => {
+    mocks.purposeOffered.mockImplementation((purpose) => purpose === "transfer");
+    renderFlow({ initialProvider: "turnkey" });
+    expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "Created with" })).getByText("Transfers")
+    ).toBeTruthy();
+
+    typeLabel("Ops");
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+    expect(submitted(mocks.createWallet).get("purpose")).toBe("transfer");
+  });
+
+  it("shows the API's refusal and stays on the page", async () => {
     mocks.createWallet.mockResolvedValueOnce({
       status: "error",
       message: "Provider rejected the request",
     } as never);
     renderFlow({ initialProvider: "turnkey" });
-    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    typeLabel("Ops");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(screen.getByRole("alert").textContent).toBe("Provider rejected the request");
     expect(dashboardRouter.push).not.toHaveBeenCalled();
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
   });
 
   // Jina (#2333): an uncertain or refused setup left the wallet inventory as it
@@ -229,9 +302,9 @@ describe("details step", () => {
   it("refreshes the wallet inventory after an uncertain or refused setup and points to the list", async () => {
     mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Unsure" } });
+    typeLabel("Unsure");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("alert").textContent).toMatch(/Check your wallet list first/);
@@ -241,7 +314,7 @@ describe("details step", () => {
       message: "Provider rejected the request",
     } as never);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(2);
     expect(dashboardRouter.push).not.toHaveBeenCalled();
@@ -250,11 +323,9 @@ describe("details step", () => {
   it("keeps the form and the key when the answer is lost, so Create wallet again resends the same key", async () => {
     mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    fireEvent.change(screen.getByLabelText("Wallet label"), {
-      target: { value: "Lost answer treasury" },
-    });
+    typeLabel("Lost answer treasury");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(screen.getByRole("alert").textContent).toMatch(
       /couldn't confirm whether the wallet was created/
@@ -262,24 +333,24 @@ describe("details step", () => {
     expect(dashboardRouter.push).not.toHaveBeenCalled();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     const [first, retry] = mocks.initialize.mock.calls.map(([form]) => form);
     expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
     expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
     expect(mocks.createWallet).not.toHaveBeenCalled();
-    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/wallets/wallet_initialized"
+    );
   });
 
   it("gives the same setup in another project its own key, so it never settles this one's", async () => {
     mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const submit = async () => {
       renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-      fireEvent.change(screen.getByLabelText("Wallet label"), {
-        target: { value: "Per-project treasury" },
-      });
+      typeLabel("Per-project treasury");
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+        fireEvent.click(createButton());
       });
       cleanup();
     };
@@ -296,9 +367,9 @@ describe("details step", () => {
   it("points to adding a wallet when the provider was set up in the meantime", async () => {
     mocks.initialize.mockResolvedValueOnce({ status: "provider_already_set_up" } as never);
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    typeLabel("Ops");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(screen.getByRole("alert").textContent).toBe(
       "This provider is already set up. Add a wallet instead."
@@ -319,12 +390,88 @@ describe("details step", () => {
 });
 
 describe("custody modes", () => {
-  it("asks how a provider offered both ways is set up, and shows nothing else until it is chosen", () => {
-    renderFlow({ connectedProviders: [], initialProvider: "privy" });
+  const managedAnswer = () => screen.getByRole("radio", { name: /SDP's Privy account/ });
+  const ownAnswer = () => screen.getByRole("radio", { name: /Your own Privy account/ });
 
-    expect(screen.getByLabelText("Custody mode")).toBeTruthy();
+  it("asks whose account holds the keys, and creates nothing until it is answered", () => {
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+
+    expect(screen.getByRole("group", { name: "Whose Privy account holds the keys?" })).toBeTruthy();
+    expect((managedAnswer() as HTMLInputElement).checked).toBe(false);
+    expect((ownAnswer() as HTMLInputElement).checked).toBe(false);
     expect(document.getElementById("wallet-details-form")).toBeNull();
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
+    typeLabel("Treasury");
+    expect(footerHint()).toBe("Choose whose Privy account holds the keys.");
+    expect(createButton().disabled).toBe(true);
+  });
+
+  it("sets SDP's account up with the label typed before the answer", async () => {
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+    typeLabel("Treasury");
+    fireEvent.click(managedAnswer());
+
+    expect(createButton().disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+    expect(submitted(mocks.initialize).get("walletLabel")).toBe("Treasury");
+  });
+
+  it("swaps in the credential form for the project's own account, keeping the label", async () => {
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+    typeLabel("Ops");
+    fireEvent.click(ownAnswer());
+
+    const credentialForm = document.querySelector("[data-privy-byok-form]") as HTMLFormElement;
+    expect(credentialForm.id).toBe("wallet-details-form");
+    // The flow's own label stands in for the form's, and submits with it.
+    expect(screen.queryByLabelText("Initial wallet label")).toBeNull();
+    expect(labelInput().value).toBe("Ops");
+    expect(new FormData(credentialForm).get("walletLabel")).toBe("Ops");
+    expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+    fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Connect and verify/ }));
+    });
+    expect(submitted(mocks.submitCredential).get("walletLabel")).toBe("Ops");
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Ops created");
+    // The credential check settles without a wallet id, so the list is where it lands.
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
+  it("locks the answers while a credential check is in flight", async () => {
+    let settle: (result: SubmitResult) => void = () => undefined;
+    mocks.submitCredential.mockImplementationOnce(
+      () =>
+        new Promise<SubmitResult>((resolve) => {
+          settle = resolve;
+        })
+    );
+    renderFlow({ connectedProviders: [], custodyAvailability: SANDBOX_AVAILABILITY });
+    fireEvent.click(screen.getByRole("radio", { name: /Privy/ }));
+    typeLabel("Ops");
+    fireEvent.click(ownAnswer());
+    fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+    fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^Connect and verify/ }));
+    });
+    // Switching either answer would unmount the form that holds the request's recovery.
+    expect((managedAnswer() as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("radio", { name: /Turnkey/ }) as HTMLInputElement).disabled).toBe(
+      true
+    );
+    expect(labelInput().disabled).toBe(true);
+
+    // Settled, so no transition stays pending for the tests after this one.
+    await act(async () => {
+      settle({ status: "failed", message: "Those credentials did not verify." });
+    });
+    expect((managedAnswer() as HTMLInputElement).disabled).toBe(false);
   });
 
   it("sends a provider offered only as BYOK straight to its credential form", () => {
@@ -334,17 +481,16 @@ describe("custody modes", () => {
       environment: "production",
       initialProvider: "privy",
     });
-    expect(screen.getByRole("heading", { name: "Provider details" })).toBeTruthy();
     expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
-    expect(screen.queryByLabelText("Custody mode")).toBeNull();
-    // The credential form owns its submit; the footer offers no second one.
-    expect(screen.queryByRole("button", { name: "Create wallet" })).toBeNull();
+    expect(document.querySelector("[data-wallet-mode-list]")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Connect and verify/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
   });
 
   it("sets a Managed-only provider up with the wallet details", () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
-    expect(screen.queryByLabelText("Custody mode")).toBeNull();
+    expect(document.querySelector("[data-wallet-mode-list]")).toBeNull();
+    expect(document.getElementById("wallet-details-form")).toBeTruthy();
   });
 });
 
@@ -383,9 +529,9 @@ describe("connection picker", () => {
       connectedProviders: ["privy"],
       connections: [connection()],
     });
-    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    typeLabel("Ops");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      fireEvent.click(createButton());
     });
     expect(screen.getByRole("alert").textContent).toBe(
       "Choose the account the wallet is created in."
@@ -400,7 +546,7 @@ describe("connection picker", () => {
       connections: [connection({ status: "pending" })],
     });
     expect(pickerField()).toBeNull();
-    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
+    expect(document.getElementById("wallet-details-form")).toBeTruthy();
   });
 
   // A BYOK-only project has no Managed config, so nothing is connected; the active connection
@@ -417,7 +563,7 @@ describe("connection picker", () => {
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
   });
 
-  // Connections belong to one provider; switching on step 1 must not carry them over.
+  // Connections belong to one provider; switching provider must not carry them over.
   it("ignores connections belonging to another provider", () => {
     renderFlow({
       connectedProviders: ["turnkey"],
