@@ -40,6 +40,9 @@ export async function assertVaultDepositEligible(
       {
         ...customerScope,
         environment: runtime.environment,
+        // The onboarding tables are provider-scoped: another provider's
+        // verification of the same wallet never satisfies this gate.
+        provider: client.provider,
       },
       input.owner
     );

@@ -22,7 +22,7 @@ claim a production Moderator trading launch.
   deployments. Local/self-hosted testing can use a separate 32-byte base64
   `EARN_ONBOARDING_ENCRYPTION_KEY`, like the SPC credential cipher. Never reuse
   custody or SPC key material. The KMS transport uses the existing transport keys.
-- Run migrations 0207 and 0208 before deploying the writer. They add tables,
+- Run migrations 0213 and 0214 before deploying the writer. They add tables,
   composite parent FKs and forced RLS; the previous API revision is compatible.
 - Use a sandbox project and sandbox provider credentials for laptop testing.
   Connect onboarding sandbox works independently of Solana; it does not make

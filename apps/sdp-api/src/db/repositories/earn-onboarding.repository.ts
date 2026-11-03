@@ -1,12 +1,15 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { COUNTERPARTY_ENTITY_TYPES, type CounterpartyEntityType } from "@sdp/types/counterparties";
 import { EARN_ONBOARDING_STATES } from "@sdp/types/earn-onboarding";
+import { EARN_PROVIDERS, type EarnProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 
 export interface EarnOnboardingScope {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
+  /** Which provider's onboarding the row belongs to, so integrations stay independent. */
+  provider: EarnProviderId;
   counterpartyId: string;
 }
 export const earnOnboardingCustomerSchema = z.object({
@@ -15,6 +18,8 @@ export const earnOnboardingCustomerSchema = z.object({
   project_id: z.string(),
   environment: z.enum(SDP_ENVIRONMENTS),
   counterparty_id: z.string(),
+  // A retired provider's row still reads; writes take a live `EarnProviderId`.
+  provider: z.enum(EARN_PROVIDERS),
   entity_type: z.enum(COUNTERPARTY_ENTITY_TYPES),
   moderator_guid: z.uuid(),
   organization_guid: z.uuid().nullable(),

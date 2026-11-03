@@ -1,11 +1,21 @@
+import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { wisdomTreeFundByMint, wisdomTreeFundsForCluster } from "@sdp/types/wisdomtree-programs";
+import type { SdpEarnError } from "#/errors";
 import { StubEarnClient } from "#/providers/stub";
 import type {
   EarnDeclaredStrategySupport,
   EarnDepositEligibility,
   EarnDepositEligibilityInput,
   EarnDepositEligibilityProvider,
+  EarnOnboardingApplicationResult,
+  EarnOnboardingCorrectionAnswer,
+  EarnOnboardingCustomerDetail,
+  EarnOnboardingDocumentReference,
+  EarnOnboardingForm,
+  EarnOnboardingModerator,
+  EarnOnboardingProvider,
+  EarnOnboardingRegistrationScope,
   EarnRuntimeContext,
   ProviderStrategySnapshot,
 } from "#/types";
@@ -14,6 +24,7 @@ import {
   listWisdomTreeProducts,
   WISDOMTREE_DEPOSIT_INELIGIBLE_REASON,
 } from "./connect";
+import { wisdomTreeOnboardingClient } from "./onboarding";
 
 /**
  * WisdomTree Connect vault-infra client — catalogue plus the deposit-eligibility
@@ -44,7 +55,10 @@ import {
  * routes measured, snapshots carry no `currentApy` and the dashboard renders
  * "—" — the Kamino-devnet rule: a missing rate beats a fabricated one.
  */
-export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositEligibilityProvider {
+export class WisdomTreeEarnClient
+  extends StubEarnClient
+  implements EarnDepositEligibilityProvider, EarnOnboardingProvider
+{
   readonly provider = "wisdomtree" as const;
   readonly depositEligibilityCustomerScope = {
     required: true,
@@ -54,6 +68,76 @@ export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositE
     sourceKinds: ["rwa"],
     depositTokens: ["USDC"],
   };
+
+  /**
+   * The KYC/KYB capability adapter, composed rather than re-implemented: the
+   * wire client owns every Connect vocabulary choice, and the capability
+   * forwards to the ONE shared instance so a test spy observes every call.
+   */
+  private readonly onboarding = wisdomTreeOnboardingClient;
+
+  getOnboardingModerator(ctx: EarnRuntimeContext): Promise<EarnOnboardingModerator> {
+    return this.onboarding.getOnboardingModerator(ctx);
+  }
+
+  getOnboardingForm(
+    ctx: EarnRuntimeContext,
+    entityType: CounterpartyEntityType
+  ): Promise<EarnOnboardingForm> {
+    return this.onboarding.getOnboardingForm(ctx, entityType);
+  }
+
+  onboardingApplicationFields(entityType: CounterpartyEntityType): ReadonlySet<string> {
+    return this.onboarding.onboardingApplicationFields(entityType);
+  }
+
+  saveOnboardingApplication(
+    ctx: EarnRuntimeContext,
+    submission: {
+      entityType: CounterpartyEntityType;
+      application: Record<string, unknown>;
+      documents?: Record<string, EarnOnboardingDocumentReference>;
+      linkedOrganizationGuid?: string | null;
+    }
+  ): Promise<EarnOnboardingApplicationResult> {
+    return this.onboarding.saveOnboardingApplication(ctx, submission);
+  }
+
+  getOnboardingCustomerDetail(
+    ctx: EarnRuntimeContext,
+    input: { entityType: CounterpartyEntityType; reference: string }
+  ): Promise<EarnOnboardingCustomerDetail> {
+    return this.onboarding.getOnboardingCustomerDetail(ctx, input);
+  }
+
+  uploadOnboardingDocument(
+    ctx: EarnRuntimeContext,
+    document: { documentType: string; file: File }
+  ): Promise<EarnOnboardingDocumentReference> {
+    return this.onboarding.uploadOnboardingDocument(ctx, document);
+  }
+
+  answerOnboardingCorrection(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; reasonId: number; answer: EarnOnboardingCorrectionAnswer }
+  ): Promise<void> {
+    return this.onboarding.answerOnboardingCorrection(ctx, input);
+  }
+
+  registerOnboardingWallet(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; owner: string }
+  ): Promise<void> {
+    return this.onboarding.registerOnboardingWallet(ctx, input);
+  }
+
+  walletRegistrationMessage(scope: EarnOnboardingRegistrationScope, owner: string): Uint8Array {
+    return this.onboarding.walletRegistrationMessage(scope, owner);
+  }
+
+  onboardingRecoveryReferences(error: SdpEarnError): EarnOnboardingApplicationResult {
+    return this.onboarding.onboardingRecoveryReferences(error);
+  }
 
   /**
    * The shelf. Production only: WisdomTree deploys on Solana mainnet

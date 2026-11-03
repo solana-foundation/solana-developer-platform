@@ -1,3 +1,4 @@
+import { wisdomTreeOnboardingClient } from "@sdp/earn/providers/wisdomtree/onboarding";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -7,7 +8,6 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { wisdomTreeOnboardingProvider } from "./handlers";
 
 const bindings = {
   ...env,
@@ -72,16 +72,16 @@ beforeEach(async () => {
     )
     .bind(TEST_ORG.id)
     .run();
-  vi.spyOn(wisdomTreeOnboardingProvider, "getModerator").mockResolvedValue({
+  vi.spyOn(wisdomTreeOnboardingClient, "getModerator").mockResolvedValue({
     guid: moderatorGuid,
     client_organizations: [],
   });
-  vi.spyOn(wisdomTreeOnboardingProvider, "getBusinessForm").mockResolvedValue({
+  vi.spyOn(wisdomTreeOnboardingClient, "getBusinessForm").mockResolvedValue({
     can_create: true,
     submission_template: {},
     sections: [],
   });
-  vi.spyOn(wisdomTreeOnboardingProvider, "saveBusiness").mockResolvedValue({
+  vi.spyOn(wisdomTreeOnboardingClient, "saveBusiness").mockResolvedValue({
     organization_guid: childGuid,
     echoed_secret: "DO-NOT-PERSIST",
   });
@@ -104,7 +104,7 @@ describe("Earn onboarding HTTP boundary", () => {
       bindings
     );
     expect(response.status, await response.clone().text()).toBe(400);
-    expect(wisdomTreeOnboardingProvider.saveBusiness).not.toHaveBeenCalled();
+    expect(wisdomTreeOnboardingClient.saveBusiness).not.toHaveBeenCalled();
   });
   it("replays a safe response and never stores the applicant or echoed provider data", async () => {
     const first = await post("cp_http", application, "create-http");
@@ -113,7 +113,7 @@ describe("Earn onboarding HTTP boundary", () => {
     expect(replay.status).toBe(200);
     expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await replay.text()).not.toMatch(/DO-NOT-PERSIST|tax_id/);
-    expect(wisdomTreeOnboardingProvider.saveBusiness).toHaveBeenCalledTimes(1);
+    expect(wisdomTreeOnboardingClient.saveBusiness).toHaveBeenCalledTimes(1);
     const rows = await db.prepare("SELECT * FROM idempotency_keys").all();
     expect(JSON.stringify(rows)).not.toMatch(/DO-NOT-PERSIST|tax_id/);
   });
@@ -127,7 +127,7 @@ describe("Earn onboarding HTTP boundary", () => {
         .run()
     ).rejects.toThrow();
     expect((await post("cp_missing", application, "owned-replay")).status).toBe(404);
-    expect(wisdomTreeOnboardingProvider.saveBusiness).toHaveBeenCalledTimes(1);
+    expect(wisdomTreeOnboardingClient.saveBusiness).toHaveBeenCalledTimes(1);
   });
   it("keeps the 1 MiB body limit on every ordinary API route", async () => {
     const res = await app.request(
@@ -142,7 +142,7 @@ describe("Earn onboarding HTTP boundary", () => {
     expect(res.status).toBe(413);
   });
   it("accepts a document above 1 MiB only on the document route and returns a scoped ID", async () => {
-    vi.spyOn(wisdomTreeOnboardingProvider, "uploadDocument").mockResolvedValue({
+    vi.spyOn(wisdomTreeOnboardingClient, "uploadDocument").mockResolvedValue({
       blob_path: "private/blob.pdf",
       original_filename: "sensitive.pdf",
     });
