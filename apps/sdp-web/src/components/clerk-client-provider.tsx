@@ -1,6 +1,7 @@
 "use client";
 
 import { ClerkProvider } from "@clerk/nextjs";
+import { ui } from "@clerk/ui";
 import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
 
@@ -18,6 +19,8 @@ export function ClerkClientProvider({ children }: { children: ReactNode }) {
 
   return (
     <ClerkProvider
+      ui={ui}
+      prefetchUI={false}
       appearance={{
         cssLayerName: "clerk",
         elements: {

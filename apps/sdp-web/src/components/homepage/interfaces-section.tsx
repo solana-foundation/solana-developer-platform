@@ -5,7 +5,9 @@ import shared from "./homepage.module.css";
 import type { HomepageLinks } from "./homepage-links";
 import styles from "./interfaces/interfaces.module.css";
 import { InterfacesConsole } from "./interfaces/interfaces-console";
+import { INTERFACE_SNIPPETS } from "./interfaces/snippets";
 import { MoreLink } from "./more-link";
+import { isComingSoon } from "./release-gate";
 import { Rise } from "./rise";
 
 type ReferenceKey = "openapi" | "llms" | "docs";
@@ -21,6 +23,9 @@ function referenceLinks(links: HomepageLinks): { key: ReferenceKey; href: string
 
 export async function InterfacesSection({ links }: { links: HomepageLinks }) {
   const t = await getTranslations();
+  const comingSoonModes = INTERFACE_SNIPPETS.filter(
+    (snippet) => snippet.gate !== undefined && isComingSoon(snippet.gate)
+  ).map((snippet) => snippet.mode);
 
   return (
     <section id="interfaces" data-ground="paper" className={cn(shared.paper, styles.section)}>
@@ -43,6 +48,8 @@ export async function InterfacesSection({ links }: { links: HomepageLinks }) {
         <InterfacesConsole
           modesLabel={t("Homepage.interfaces.modes")}
           responseLabel={t("Homepage.interfaces.response")}
+          comingSoonModes={comingSoonModes}
+          comingSoonLabel={t("Homepage.comingSoon")}
           copy={{
             execute: {
               title: t("Homepage.interfaces.execute.title"),

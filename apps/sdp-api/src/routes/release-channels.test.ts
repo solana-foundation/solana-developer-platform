@@ -16,6 +16,10 @@ const MODULE_PROBES = {
   custody: [["GET", "/v1/wallets"]],
   payments: [["GET", "/v1/payments/transfers"]],
   recurring_payments: [["GET", "/v1/payments/recurring-payments"]],
+  subscriptions: [
+    ["GET", "/v1/payments/subscription-plans"],
+    ["POST", "/v1/payments/subscriptions"],
+  ],
   ramps: [
     ["GET", "/v1/payments/ramps/onramp/currency"],
     ["POST", "/webhooks/payments/ramps/sandbox/moonpay"],
@@ -99,6 +103,20 @@ describe("release channels at the API", () => {
       { ...baseEnv, SDP_RELEASE_CHANNEL: "stable", TRUST_PROXY_HEADERS: "true" }
     );
     expect([403, 429]).not.toContain(response.status);
+  });
+
+  it("stable: serves recurring payments and their collection attempts", async () => {
+    const app = createApp({
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
+    });
+    const stableEnv = { ...baseEnv, SDP_RELEASE_CHANNEL: "stable", TRUST_PROXY_HEADERS: "true" };
+    for (const path of [
+      "/v1/payments/recurring-payments",
+      "/v1/payments/recurring-payments/prp_1/collection-attempts",
+    ]) {
+      const response = await app.request(path, { headers: nextClientHeaders() }, stableEnv);
+      expect([403, 429]).not.toContain(response.status);
+    }
   });
 
   it.each(SDP_MODULES)(

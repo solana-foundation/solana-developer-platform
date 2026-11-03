@@ -11,6 +11,7 @@ const GATED_SURFACE_MODULES = {
   privacy: "private_channels",
   compliance: "compliance",
   ramps: "ramps",
+  subscriptions: "subscriptions",
 } as const satisfies Record<string, SdpModule>;
 
 export type GatedSurface = keyof typeof GATED_SURFACE_MODULES;
