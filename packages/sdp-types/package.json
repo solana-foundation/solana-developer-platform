@@ -258,6 +258,11 @@
       "types": "./src/mainnet-access.ts",
       "import": "./src/mainnet-access.ts",
       "default": "./src/mainnet-access.ts"
+    },
+    "./sdp-terms-text": {
+      "types": "./src/sdp-terms-text.ts",
+      "import": "./src/sdp-terms-text.ts",
+      "default": "./src/sdp-terms-text.ts"
     }
   },
   "scripts": {
