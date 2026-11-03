@@ -9,7 +9,7 @@ browser reads SDP's own route.
 
 | Step     | Where                                                                 | Does                                                                                                     |
 | -------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Hook     | `apps/sdp-web/src/app/dashboard/[projectId]/overview-network.data.ts` | `useOverviewNetwork`: SWR, refetch every 5 min, last snapshot kept in local storage for an instant paint |
+| Hook     | `apps/sdp-web/src/app/(session)/dashboard/[projectId]/overview-network.data.ts` | `useOverviewNetwork`: SWR, refetch every 5 min, last snapshot kept in local storage for an instant paint |
 | Proxy    | `apps/sdp-web/src/app/api/dashboard/network/route.ts`                 | `proxyToSdpApi` to the route below                                                                       |
 | Route    | `apps/sdp-api/src/routes/internal-network/`                           | `GET /internal/dashboard/network`, Clerk sessions only, outside OpenAPI                                  |
 | Service  | `apps/sdp-api/src/services/network/network.service.ts`                | Joins the readings cache and the health cache into one snapshot                                          |

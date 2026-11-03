@@ -9,8 +9,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import {
   DashboardHeaderAction,
   DashboardTopBar,

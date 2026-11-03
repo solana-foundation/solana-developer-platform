@@ -2,12 +2,12 @@ import {
   DEFAULT_ISSUANCE_LIST_QUERY,
   InvalidIssuanceSearchEncodingError,
   parseIssuanceListRequestQuery,
-} from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
+} from "@/app/(session)/dashboard/[projectId]/issuance/issuance-list-query";
 import {
   attachIssuanceAssetProfiles,
   fetchIssuanceTokensPage,
   type IssuanceTokensPage,
-} from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
+} from "@/app/(session)/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { assetProfiles } from "@/flags";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace } from "@/lib/request-tracing";

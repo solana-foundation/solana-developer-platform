@@ -74,7 +74,7 @@ for ramp providers (`integrate-ramp-provider`).
 
    ```bash
    MAX_HITS=200 "$SCAN" dvp \
-     "apps/sdp-web/src/app/dashboard/[projectId]/markets/markets-route-skeletons.tsx" > /tmp/dvp-scan.txt
+     "apps/sdp-web/src/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons.tsx" > /tmp/dvp-scan.txt
    ```
 
    A count is a lead, not a finding. Mark each hit drift, exempt (cite the

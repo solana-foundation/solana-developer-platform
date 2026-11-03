@@ -4,7 +4,7 @@ import * as clerk from "@clerk/nextjs";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ProjectNotFound from "@/app/dashboard/[projectId]/not-found";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import * as quickStart from "@/components/dashboard-quick-start";
 import { DashboardShell } from "@/components/dashboard-shell";

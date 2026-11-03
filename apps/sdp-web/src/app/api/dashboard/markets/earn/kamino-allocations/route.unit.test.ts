@@ -11,7 +11,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
-import { kaminoVaultAllocationsBatchSchema } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
+import { kaminoVaultAllocationsBatchSchema } from "@/app/(session)/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
 import * as sdpApi from "@/lib/sdp-api";
 import { resetAllowedVaultsForTests } from "./kamino-allocations-store";
 import { GET } from "./route";
