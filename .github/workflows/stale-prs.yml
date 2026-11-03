@@ -1,0 +1,46 @@
+name: Stale PRs
+
+# Closes pull requests with no activity for two weeks: labelled `stale` after
+# seven idle days, closed seven days later unless someone pushes, comments or
+# reviews. Issues are left alone; work is tracked in Linear.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stale-prs
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      # Its run state lives in the Actions cache.
+      actions: write
+      # Labels and comments on PRs go through the issues API.
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mark and close stale PRs
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 7
+          days-before-pr-close: 7
+          stale-pr-label: stale
+          # release-please's PR waits for the next release by design.
+          exempt-pr-labels: "keep-open,autorelease: pending"
+          stale-pr-message: >
+            This PR has had no activity for 7 days and will close in 7 more.
+            Push, comment or review to keep it open, or add the `keep-open`
+            label if it is waiting on something outside the PR.
+          close-pr-message: >
+            Closed after 14 days without activity. Reopen it, or open a new
+            PR from the branch, when the work picks up again.
+          operations-per-run: 100
