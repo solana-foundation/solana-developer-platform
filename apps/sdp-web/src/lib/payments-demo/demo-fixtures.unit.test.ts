@@ -162,13 +162,12 @@ vi.mock("@/lib/dashboard-page-trace", () => ({
     run({ trace: harness.trace, apiClient: harness.apiClient }),
 }));
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ userId: "user_demo", orgId: "org_demo" }),
+  auth: async () => ({ orgId: "org_demo" }),
 }));
 vi.mock("@/i18n/server", () => ({
   getTranslations: async () => (key: string) => key,
   getRequestLocale: async () => "en",
 }));
-vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 // The screens themselves are client components; the tests read the props the pages hand them.
 vi.mock(
   "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-workspace",
