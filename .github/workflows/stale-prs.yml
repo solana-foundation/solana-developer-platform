@@ -34,8 +34,8 @@ jobs:
           days-before-pr-stale: 7
           days-before-pr-close: 7
           stale-pr-label: stale
-          # release-please's PR waits for the next release by design.
-          exempt-pr-labels: "keep-open,autorelease: pending"
+          # The release workflow labels its PR `keep-open` (release-flow.mjs).
+          exempt-pr-labels: keep-open
           stale-pr-message: >
             This PR has had no activity for 7 days and will close in 7 more.
             Push, comment or review to keep it open, or add the `keep-open`
