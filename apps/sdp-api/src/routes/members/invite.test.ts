@@ -55,7 +55,7 @@ let sandboxProjectId: string;
 
 async function invite(email: string): Promise<Response> {
   return app.request(
-    "/v1/members/invite",
+    "/v1/members/invitations",
     {
       method: "POST",
       headers: clerkHeaders(adminToken, sandboxProjectId),
@@ -88,7 +88,7 @@ function seedPendingInvitation(id: string, email: string, expiresInDays: number)
   });
 }
 
-describe("POST /v1/members/invite", () => {
+describe("POST /v1/members/invitations", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     const db = getDb(env);

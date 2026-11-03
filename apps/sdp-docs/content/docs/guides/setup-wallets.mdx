@@ -62,9 +62,9 @@ balance. Open it to see its details.
 
 #### 1. Initialize the provider from the dashboard
 
-Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
+Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/managed-signing/initialize-with-wallet` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
 
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
+Production projects use BYOK only. `POST /v1/wallets/managed-signing/initialize-with-wallet` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
 export IDEMPOTENCY_KEY=$(uuidgen)

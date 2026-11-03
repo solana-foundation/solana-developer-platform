@@ -17,6 +17,7 @@ The hosted platform is available at https://platform.solana.com and the public d
 - `apps/sdp-api`: Node.js API deployed to Cloud Run, OpenAPI source, route handlers, Postgres/Redis integrations
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
+- `apps/sdp-cli`: `sdp` command-line client; projects, organizations, members, invitations, API keys, wallets, counterparties, accounts, transfers, transfer batches, payment requests, payment links, recurring payments, subscription plans, subscriptions, on-ramps, off-ramps, transaction history, Earn, DvP, issuance, asset profiles, Private Channels, Helius Rings, compliance, Places and Address Lookup, dashboard custody setup, dashboard network data, webhook ingress, health, API discovery, and onboarding status commands and shared API transport (see its README)
 - `packages/sdp-types`: shared runtime types and product constants
 - `packages/sdp-earn`: Earn catalogue and provider integrations for non-custodial vault and yield-token strategies; see its README
 - `packages/sdp-api-integration`: maintainer-oriented integration test harness
@@ -64,6 +65,10 @@ Useful local URLs:
 Local runs every module (`SDP_RELEASE_CHANNEL=experimental` in `apps/sdp-api/.env.local`). To see what production runs, set it to `stable` and restart; see [Release Channel](apps/sdp-api/README.md#release-channel-which-modules-run).
 
 Some provider-backed features require separate vendor credentials, such as custody providers, compliance providers, fiat ramps, dashboard auth, and integration tests.
+
+## CLI
+
+Run `pnpm cli --help` to explore the `sdp` command-line client, covering projects, organizations, members, invitations, API keys, wallets, counterparties, accounts, transfers, transfer batches, payment requests, payment links, recurring payments, subscription plans, subscriptions, on-ramps, off-ramps, transaction history, Earn, DvP, issuance, asset profiles, Private Channels, Helius Rings, compliance, Places and Address Lookup, dashboard custody setup, dashboard network data, webhook ingress, health, API discovery, and onboarding status. See [CLI usage and authentication](apps/sdp-cli/README.md).
 
 ## Checks
 

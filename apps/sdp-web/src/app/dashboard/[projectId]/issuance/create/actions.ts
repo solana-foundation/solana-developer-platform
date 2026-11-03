@@ -46,7 +46,7 @@ export async function saveIssuanceDraft(
         tokenId: null,
       };
     }
-    const response = await client.request("/v1/issuance/asset-profiles", {
+    const response = await client.request("/v1/issuance/tokens/create-with-asset-profile", {
       method: "POST",
       body: JSON.stringify(payload),
     });

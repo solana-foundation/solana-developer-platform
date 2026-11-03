@@ -1315,7 +1315,8 @@ function aggregateBody(world: DemoWorld) {
 
 function walletsRoute(rest: string[], params: URLSearchParams, world: DemoWorld) {
   if (rest.length === 0) return walletsBody(world, params);
-  if (rest.length === 1 && rest[0] === "aggregate") return aggregateBody(world);
+  if (rest.length === 2 && rest[0] === "balances" && rest[1] === "aggregate")
+    return aggregateBody(world);
   return undefined;
 }
 
@@ -1554,7 +1555,7 @@ function requestBody(world: DemoWorld, requestId: string) {
   return request ? { data: withoutLinkToken(request) } : undefined;
 }
 
-/** `GET /v1/payments/requests/:id/link`; a demo link never opens on the public pay page. */
+/** `GET /v1/payments/requests/:id/link-token`; a demo link never opens on the public pay page. */
 function requestLinkBody(world: DemoWorld, requestId: string) {
   const request = world.requests.find((candidate) => candidate.id === requestId);
   return request ? { data: { id: request.id, publicToken: request.publicToken } } : undefined;
@@ -1614,7 +1615,7 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
         return undefined;
     }
   }
-  if (collection === "requests" && child === "link") return requestLinkBody(world, id);
+  if (collection === "requests" && child === "link-token") return requestLinkBody(world, id);
   if (collection === "subscriptions" && child === "collection-attempts") {
     return collectionAttemptsBody(world, id, params);
   }

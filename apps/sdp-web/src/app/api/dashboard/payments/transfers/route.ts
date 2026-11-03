@@ -89,6 +89,6 @@ export async function POST(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.payments.transfers.post",
-    path: "/v1/payments/transfers",
+    path: "/v1/payments/transfers/execute",
   });
 }

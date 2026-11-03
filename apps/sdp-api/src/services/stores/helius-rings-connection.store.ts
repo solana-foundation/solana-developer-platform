@@ -1,7 +1,6 @@
+import type { HeliusRingsConnectionStatus } from "@sdp/types/helius-rings";
 import type { DatabaseExecutor } from "@/db/client";
 import type { StoredCredentialSecret } from "@/services/credential-secret-store";
-
-export type HeliusRingsConnectionStatus = "active" | "failed" | "deactivated";
 
 export interface HeliusRingsConnectionRow {
   id: string;

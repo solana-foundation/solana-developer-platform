@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { z } from "zod";
 
 import { healthReadyResponseSchema, healthResponseSchema } from "@/openapi/schemas/health";
 import { jsonContent } from "./helpers";
@@ -11,6 +12,7 @@ export function registerHealthPaths(registry: OpenAPIRegistry) {
     summary: "Health check",
     operationId: "healthCheck",
     description: "Returns service health and build metadata.",
+    security: [],
     responses: {
       200: {
         description: "Service is healthy",
@@ -26,16 +28,17 @@ export function registerHealthPaths(registry: OpenAPIRegistry) {
     summary: "Readiness check",
     operationId: "healthReadiness",
     description: "Performs readiness checks for downstream dependencies.",
+    security: [],
     responses: {
       200: {
         description: "Service is ready",
-        content: jsonContent(healthReadyResponseSchema),
+        content: jsonContent(healthReadyResponseSchema.extend({ status: z.literal("ready") })),
       },
       503: {
         description: "Service is not ready",
         // Its own example: the schema's field examples describe a ready instance.
         content: jsonContent(
-          healthReadyResponseSchema.openapi({
+          healthReadyResponseSchema.extend({ status: z.literal("not_ready") }).openapi({
             example: {
               status: "not_ready",
               timestamp: "2025-01-01T00:00:00.000Z",

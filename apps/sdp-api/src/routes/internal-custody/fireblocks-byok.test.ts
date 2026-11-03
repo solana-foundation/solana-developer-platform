@@ -83,7 +83,11 @@ async function connect(projectId = PROJECT_ID) {
   const submitted = await request("/provider-credentials", body, projectId);
   expect(submitted.status, await submitted.clone().text()).toBe(201);
   const { data } = await submitted.json();
-  const completed = await request(`/connections/${data.connectionId}/complete`, {}, projectId);
+  const completed = await request(
+    `/connections/${data.connectionId}/complete-installation`,
+    {},
+    projectId
+  );
   expect(completed.status).toBe(200);
   expect((await completed.json()).data.completion.status).toBe("success");
   return z
@@ -167,9 +171,9 @@ describe("Fireblocks BYOK lifecycle", () => {
     for (const [path, payload] of [
       ["/fireblocks/csr", undefined],
       ["/fireblocks/csr", {}],
-      ["/fireblocks/vaults", discoveryFields],
+      ["/fireblocks/vaults/discover", discoveryFields],
       ["/provider-credentials", body],
-      [`/connections/${pendingId}/complete`, {}],
+      [`/connections/${pendingId}/complete-installation`, {}],
       [
         `/provider-credentials/${connected.providerCredential.id}/rotate`,
         { provider: "fireblocks", fields: registration },
@@ -187,7 +191,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       )
     ).toEqual(before);
     // Channel changes must leave cancellation available for existing installations.
-    expect((await request(`/connections/${pendingId}/cancel`, {})).status).toBe(200);
+    expect((await request(`/connections/${pendingId}/cancel-installation`, {})).status).toBe(200);
   });
 
   it("encrypts credentials, attaches the vault with one read and replays completion", async () => {
@@ -226,7 +230,10 @@ describe("Fireblocks BYOK lifecycle", () => {
         [fields.signingKeyId]
       )
     ).toEqual({ encrypted_private_key: null });
-    const replay = await request(`/connections/${connected.connectionId}/complete`, {});
+    const replay = await request(
+      `/connections/${connected.connectionId}/complete-installation`,
+      {}
+    );
     expect(replay.status).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(1);
     const listed = await request("/connections?provider=fireblocks");
@@ -276,7 +283,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("denied", { status: 401 }));
     const created = (await (await request("/provider-credentials", body)).json()).data;
-    const checked = await request(`/connections/${created.connectionId}/complete`, {});
+    const checked = await request(`/connections/${created.connectionId}/complete-installation`, {});
     expect((await checked.json()).data.completion).toMatchObject({
       status: "failed",
       code: "invalid_credentials",
@@ -338,7 +345,7 @@ describe("Fireblocks BYOK lifecycle", () => {
     expect(rotation.rotation.status).toBe("success");
     expect(rotation.providerCredential.provider).toBe("fireblocks");
     const rolledBack = await request(
-      `/provider-credentials/${rotation.providerCredential.id}/rollback`,
+      `/provider-credentials/${rotation.providerCredential.id}/rollback-rotation`,
       {}
     );
     expect(rolledBack.status).toBe(200);
@@ -667,14 +674,16 @@ describe("Fireblocks vault discovery and selection", () => {
       });
     });
     const input = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    const result = await request("/fireblocks/vaults", input);
+    const result = await request("/fireblocks/vaults/discover", input);
     expect(result.status).toBe(200);
     expect(result.headers.get("Cache-Control")).toBe("no-store");
     expect((await result.json()).data).toEqual({
       vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
       nextCursor: "page&2",
     });
-    expect((await request("/fireblocks/vaults", { ...input, after: "page&2" })).status).toBe(200);
+    expect(
+      (await request("/fireblocks/vaults/discover", { ...input, after: "page&2" })).status
+    ).toBe(200);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(new URL(String(fetch.mock.calls[1]?.[0])).searchParams.get("after")).toBe("page&2");
     expect(
@@ -688,14 +697,14 @@ describe("Fireblocks vault discovery and selection", () => {
   it("refuses cross-project and expired discovery before calling Fireblocks", async () => {
     const fetch = providerResponse();
     const input = { apiKey: fields.apiKey, signingKeyId: fields.signingKeyId };
-    expect((await request("/fireblocks/vaults", input, `${PROJECT_ID}_production`)).status).toBe(
-      404
-    );
+    expect(
+      (await request("/fireblocks/vaults/discover", input, `${PROJECT_ID}_production`)).status
+    ).toBe(404);
     await getDb(env).execute(
       "UPDATE fireblocks_csr_requests SET expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?",
       [fields.signingKeyId]
     );
-    expect((await request("/fireblocks/vaults", input)).status).toBe(404);
+    expect((await request("/fireblocks/vaults/discover", input)).status).toBe(404);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -703,7 +712,7 @@ describe("Fireblocks vault discovery and selection", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("upstream secret body", { status: 401 })
     );
-    const response = await request("/fireblocks/vaults", {
+    const response = await request("/fireblocks/vaults/discover", {
       apiKey: fields.apiKey,
       signingKeyId: fields.signingKeyId,
     });
@@ -748,7 +757,7 @@ describe("Fireblocks vault discovery and selection", () => {
         providerCredential: z.object({ id: z.string() }),
       })
       .parse((await submitted.json()).data);
-    const completed = await request(`/connections/${data.connectionId}/complete`, {});
+    const completed = await request(`/connections/${data.connectionId}/complete-installation`, {});
     expect((await completed.json()).data.completion.status).toBe("success");
     return data;
   }
@@ -841,7 +850,7 @@ describe("Fireblocks vault discovery and selection", () => {
         return Response.json({ addresses: [{ address: ADDRESS }] });
       });
       const failed = await request(
-        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        `/provider-credentials/${rotated.providerCredential.id}/rollback-rotation`,
         {}
       );
       expect(failed.status).toBe(httpStatus === 500 ? 503 : 409);
@@ -853,7 +862,7 @@ describe("Fireblocks vault discovery and selection", () => {
         })
       );
       const retry = await request(
-        `/provider-credentials/${rotated.providerCredential.id}/rollback`,
+        `/provider-credentials/${rotated.providerCredential.id}/rollback-rotation`,
         {}
       );
       expect(retry.status).toBe(200);
@@ -908,7 +917,7 @@ describe("Fireblocks vault discovery and selection", () => {
         return Response.json({ addresses: [{ address: ADDRESS }] });
       });
       const response = await request(
-        `/provider-credentials/${currentId}/${action}`,
+        `/provider-credentials/${currentId}/${action === "rollback" ? "rollback-rotation" : action}`,
         action === "rotate" ? replacement : {}
       );
       expect(response.status).toBe(409);
@@ -926,7 +935,7 @@ describe("Fireblocks vault discovery and selection", () => {
     const submitted = await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey);
     expect(submitted.status).toBe(201);
     const { connectionId } = (await submitted.json()).data;
-    const complete = await request(`/connections/${connectionId}/complete`, {});
+    const complete = await request(`/connections/${connectionId}/complete-installation`, {});
     expect((await complete.json()).data.completion.status).toBe("success");
     expect(fetch).toHaveBeenCalledTimes(4);
     const wallets = await getDb(env).queryMany(
@@ -937,7 +946,9 @@ describe("Fireblocks vault discovery and selection", () => {
       { wallet_id: "fb_0", public_key: ADDRESS, label: "Treasury", purpose: "transfer" },
       { wallet_id: "fb_7", public_key: OTHER_ADDRESS, label: "Operations", purpose: "transfer" },
     ]);
-    expect((await request(`/connections/${connectionId}/complete`, {})).status).toBe(200);
+    expect((await request(`/connections/${connectionId}/complete-installation`, {})).status).toBe(
+      200
+    );
     expect(
       (await request("/provider-credentials", payload, PROJECT_ID, idempotencyKey)).status
     ).toBe(201);
@@ -964,7 +975,7 @@ describe("Fireblocks vault discovery and selection", () => {
       selectedVaultResponses(status);
       const submitted = await request("/provider-credentials", selectedPayload());
       const { connectionId } = (await submitted.json()).data;
-      const result = await request(`/connections/${connectionId}/complete`, {});
+      const result = await request(`/connections/${connectionId}/complete-installation`, {});
       expect((await result.json()).data.completion).toMatchObject({
         status: "failed",
         code: "invalid_credentials",
@@ -993,7 +1004,7 @@ describe("Fireblocks vault discovery and selection", () => {
       "ALTER TABLE custody_wallets ADD CONSTRAINT sdp_test_fail_second_vault CHECK (wallet_id <> 'fb_7')"
     );
     try {
-      const result = await request(`/connections/${connectionId}/complete`, {});
+      const result = await request(`/connections/${connectionId}/complete-installation`, {});
       expect(result.status, await result.clone().text()).toBe(409);
       expect(
         await db.queryMany("SELECT id FROM custody_wallets WHERE custody_connection_id = ?", [
@@ -1011,7 +1022,7 @@ describe("Fireblocks vault discovery and selection", () => {
       new Date(Date.now() - 10 * 60_000).toISOString(),
       connectionId,
     ]);
-    const retry = await request(`/connections/${connectionId}/complete`, {});
+    const retry = await request(`/connections/${connectionId}/complete-installation`, {});
     expect(retry.status, await retry.clone().text()).toBe(200);
     expect((await retry.json()).data.completion.status).toBe("success");
     expect(
@@ -1028,7 +1039,7 @@ describe("Fireblocks vault discovery and selection", () => {
     const submitted = await request("/provider-credentials", selectedPayload(["7", "0"]));
     expect(submitted.status).toBe(201);
     const { connectionId } = (await submitted.json()).data;
-    const completed = await request(`/connections/${connectionId}/complete`, {});
+    const completed = await request(`/connections/${connectionId}/complete-installation`, {});
     expect(completed.status, await completed.clone().text()).toBe(409);
     expect(
       await getDb(env).queryOne(

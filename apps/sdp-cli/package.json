@@ -1,0 +1,38 @@
+{
+  "name": "@sdp/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "sdp": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24.22.1"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/cli.js",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check --files-max-size=16777216 src/",
+    "test": "node --import tsx --test src/*.test.ts",
+    "commands:generate": "tsx src/generate-command-reference.ts",
+    "commands:check": "tsx src/generate-command-reference.ts --check"
+  },
+  "dependencies": {
+    "@sdp/types": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-draft-04": "1.0.0",
+    "ajv-formats": "3.0.1",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  },
+  "imports": {
+    "#package": "./package.json"
+  }
+}

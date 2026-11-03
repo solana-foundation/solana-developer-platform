@@ -15,6 +15,7 @@ import { valueGates } from "@/openapi/release-channel-values";
 import routeActionsJson from "@/openapi/route-actions.generated.json";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
 import type { RouteOwner } from "@/routes/route-modules";
+import { findShadowingRoutePaths } from "./lib/route-shadowing";
 
 type GeneratedPlaygroundOperation = PlaygroundEndpoint & {
   releaseModule: RouteOwner;
@@ -28,47 +29,8 @@ const outputPath = path.resolve(
   "../../../packages/sdp-api-catalog/src/generated/playground-catalog.json"
 );
 
-/** A route's segments, with either parameter syntax represented by null. */
-function routeSegments(template: string): (string | null)[] {
-  return template
-    .split("/")
-    .map((segment) => (segment.startsWith("{") || segment.startsWith(":") ? null : segment));
-}
-
-/** A `route-actions.generated.json` key, `METHOD /path`. */
-function parseRouteOperation(operation: string): { method: string; path: string } {
-  const match = /^([A-Z]+) (\/\S*)$/.exec(operation);
-  if (match === null) {
-    throw new Error(`route-actions.generated.json has a malformed operation: ${operation}`);
-  }
-  const [, method, path] = match;
-  if (method === undefined || path === undefined) {
-    throw new Error(`route-actions.generated.json has a malformed operation: ${operation}`);
-  }
-  return { method, path };
-}
-
-/** Literal routes that the API would match before a parameter in this operation's path. */
 function shadowingRoutes(method: ApiMethod, template: string): string[] {
-  const own = routeSegments(template);
-  return Object.keys(routeActionsJson)
-    .map(parseRouteOperation)
-    .filter((route) => route.method === method)
-    .map((route) => route.path)
-    .filter((routePath) => {
-      const theirs = routeSegments(routePath);
-      if (theirs.length !== own.length) return false;
-      let literalOverParameter = false;
-      for (const [index, segment] of own.entries()) {
-        const other = theirs[index];
-        if (segment !== null && other !== null && segment !== other) return false;
-        if (segment === null && other !== null) literalOverParameter = true;
-        if (segment !== null && other === null) return false;
-      }
-      return literalOverParameter;
-    })
-    .map((routePath) => routePath.replace(/:[^/]+/g, "{_}"))
-    .sort();
+  return findShadowingRoutePaths(method, template, Object.keys(routeActionsJson));
 }
 
 function generateCatalog(): string {

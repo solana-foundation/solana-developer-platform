@@ -274,7 +274,7 @@ function balance(mint: string, amount: string, decimals = 6) {
 
 function getReconciliation() {
   return app.request(
-    "/v1/earn/vault-share-reconciliation",
+    "/v1/earn/positions/provider-signed/share-reconciliation-report",
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -301,7 +301,7 @@ beforeEach(async () => {
   getSplTokenBalances.mockResolvedValue([]);
 });
 
-describe("GET /v1/earn/vault-share-reconciliation", () => {
+describe("GET /v1/earn/positions/provider-signed/share-reconciliation-report", () => {
   it("surfaces a catalogued share balance that has no recorded claim behind it", async () => {
     const strategy = await seedStrategy();
     getSplTokenBalances.mockResolvedValue([balance(SHARE_MINT_CATALOGUED, "500")]);

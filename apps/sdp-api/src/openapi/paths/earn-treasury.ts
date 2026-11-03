@@ -53,7 +53,7 @@ export function registerEarnTreasuryPaths(
       body?: z.ZodType;
       query?: Query;
       params?: Query;
-      idempotency?: "required" | "either";
+      idempotency?: "required" | "either" | "optional";
       signs?: true;
       created?: boolean;
       description?: string;
@@ -62,7 +62,7 @@ export function registerEarnTreasuryPaths(
     const headers =
       options.idempotency === "required"
         ? projectScopeWithRequiredIdempotencyHeaders
-        : options.idempotency === "either"
+        : options.idempotency === "either" || options.idempotency === "optional"
           ? projectScopeWithIdempotencyHeaders
           : projectScopeHeaders;
     registry.registerPath({
@@ -73,14 +73,15 @@ export function registerEarnTreasuryPaths(
       tags: ["Earn"],
       security,
       description:
-        (options.description ??
-          `Tenant-scoped Treasury operation. Requires earn:${method === "get" || path.endsWith("preview") || path.includes("previews") || path.endsWith("options") ? "read" : "write"}.`) +
+        (options.description ?? "Tenant-scoped Earn treasury operation.") +
         (options.idempotency
           ? " A new intentional operation needs a new Idempotency-Key, even with identical terms. Retrying an uncertain operation must reuse its key and exact payload."
           : "") +
         (options.idempotency === "either"
           ? " Supply exactly one UUIDv4 key, through Idempotency-Key or body requestId."
-          : ""),
+          : options.idempotency === "optional"
+            ? " An optional UUIDv4 key may be supplied through Idempotency-Key or body requestId, never both."
+            : ""),
       request: {
         headers,
         ...(options.params ? { params: options.params } : {}),
@@ -108,7 +109,7 @@ export function registerEarnTreasuryPaths(
   const programWithdrawal = envelope({ withdrawal: earnPortfolioWithdrawalSchema });
   route(
     "get",
-    "movements",
+    "treasury/movements",
     "listEarnMovements",
     "List all scoped Earn movements",
     envelope({ movements: z.array(earnMovementSchema), ...pageFields }),
@@ -116,9 +117,9 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "vault-deposits",
+    "deposits/execute",
     "createEarnVaultDeposit",
-    "Deposit from a custody wallet",
+    "Deposit from a connected wallet",
     deposit,
     {
       body: requests.earnVaultDepositSchema
@@ -130,25 +131,25 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "vault-deposits",
+    "deposits/provider-signed",
     "listEarnVaultDeposits",
-    "List custody deposits",
+    "List wallet deposits",
     envelope({ deposits: z.array(earnVaultDepositRecordSchema), ...pageFields }),
     { query: requests.earnVaultDepositsQuerySchema }
   );
   route(
     "get",
-    "vault-deposits/{movementId}",
+    "deposits/provider-signed/{movementId}",
     "getEarnVaultDeposit",
-    "Read one custody deposit",
+    "Read one wallet deposit",
     depositRecord,
     { params: requests.earnVaultDepositParamsSchema }
   );
   route(
     "get",
-    "vault-positions",
+    "positions/provider-signed",
     "listEarnVaultPositions",
-    "List live custody positions",
+    "List live wallet positions",
     envelope({
       positions: z.array(earnVaultPositionSchema),
       balanceReadContext: earnBalanceReadContextSchema.optional(),
@@ -157,14 +158,14 @@ export function registerEarnTreasuryPaths(
     {
       query: requests.earnVaultPositionsQuerySchema,
       description:
-        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
+        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible wallet movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
     }
   );
   route(
     "post",
-    "vault-withdrawals",
+    "withdrawals/execute",
     "createEarnVaultWithdrawal",
-    "Withdraw from a custody position",
+    "Withdraw from a wallet position",
     withdrawal,
     {
       body: requests.earnVaultWithdrawalSchema
@@ -176,49 +177,49 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "vault-withdrawals",
+    "withdrawals/provider-signed",
     "listEarnVaultWithdrawals",
-    "List custody withdrawals",
+    "List wallet withdrawals",
     envelope({ withdrawals: z.array(earnVaultWithdrawalSchema), ...pageFields }),
     { query: requests.earnVaultWithdrawalsQuerySchema }
   );
   route(
     "get",
-    "vault-withdrawals/{movementId}",
+    "withdrawals/provider-signed/{movementId}",
     "getEarnVaultWithdrawal",
-    "Read one custody withdrawal",
+    "Read one wallet withdrawal",
     withdrawal,
     { params: requests.earnVaultWithdrawalParamsSchema }
   );
   route(
     "post",
-    "vault-withdrawal-previews",
+    "withdrawals/provider-signed/preview",
     "createEarnVaultWithdrawalPreview",
-    "Preview a custody withdrawal",
+    "Preview a wallet withdrawal",
     earnVaultWithdrawalPreviewResponse,
     { body: requests.earnVaultWithdrawalPreviewSchema }
   );
   route(
     "post",
-    "vault-withdrawal-options",
+    "withdrawals/provider-signed/options",
     "getEarnVaultWithdrawalOptions",
-    "Discover custody withdrawal routes",
+    "Discover wallet withdrawal routes",
     earnVaultWithdrawalOptionsResponse,
     { body: requests.earnVaultWithdrawalOptionsSchema }
   );
   route(
     "post",
-    "vault-queued-withdrawal-previews",
+    "withdrawal-requests/provider-signed/preview",
     "createEarnVaultQueuedWithdrawalPreview",
-    "Preview a queued custody withdrawal",
+    "Preview a queued wallet withdrawal",
     earnVaultQueuedWithdrawalPreviewResponse,
     { body: requests.earnVaultQueuedWithdrawalPreviewSchema }
   );
   route(
     "post",
-    "vault-withdrawal-requests",
+    "withdrawal-requests/execute",
     "createEarnVaultWithdrawalRequest",
-    "Request a queued custody withdrawal",
+    "Request a queued wallet withdrawal",
     earnExternalWalletWithdrawalRequestResponse,
     {
       body: z
@@ -235,23 +236,23 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "vault-withdrawal-requests",
+    "withdrawal-requests/provider-signed",
     "listEarnVaultWithdrawalRequests",
-    "List custody withdrawal requests",
+    "List wallet withdrawal requests",
     earnExternalWalletWithdrawalRequestsResponse,
     { query: requests.earnVaultWithdrawalRequestsQuerySchema }
   );
   route(
     "get",
-    "vault-withdrawal-requests/{withdrawalRequestId}",
+    "withdrawal-requests/provider-signed/{withdrawalRequestId}",
     "getEarnVaultWithdrawalRequest",
-    "Read a custody withdrawal request",
+    "Read a wallet withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     { params: requests.earnVaultWithdrawalRequestParamsSchema }
   );
   route(
     "post",
-    "vault-withdrawal-requests/{withdrawalRequestId}/cancel",
+    "withdrawal-requests/{withdrawalRequestId}/cancel/execute",
     "cancelEarnVaultWithdrawalRequest",
     "Recover a cancelable withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
@@ -264,38 +265,49 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "programs",
+    "portfolio-accounts",
     "listEarnPrograms",
-    "List provider-managed programs",
+    "List provider portfolio accounts",
     envelope({ programs: z.array(earnProgramSchema), ...listFields }),
     { query: requests.earnProgramsListQuerySchema }
   );
-  route("post", "programs", "createEarnProgram", "Create a provider-managed program", program, {
-    body: requests.earnProgramCreateSchema,
-    idempotency: "either",
-    created: true,
-  });
+  route(
+    "post",
+    "portfolio-accounts",
+    "createEarnProgram",
+    "Create a provider portfolio account",
+    program,
+    {
+      body: requests.earnProgramCreateSchema,
+      idempotency: "either",
+      created: true,
+    }
+  );
   route(
     "get",
-    "programs/{programId}",
+    "portfolio-accounts/{programId}",
     "getEarnProgram",
-    "Read a provider-managed program",
+    "Read a provider portfolio account",
     program,
     { params: requests.earnProgramParamsSchema }
   );
   route(
     "put",
-    "programs/{programId}",
+    "portfolio-accounts/{programId}/allocation",
     "retargetEarnProgram",
-    "Change a program's allocation",
+    "Change a portfolio account's allocation",
     program,
-    { params: requests.earnProgramParamsSchema, body: requests.earnProgramRetargetSchema }
+    {
+      params: requests.earnProgramParamsSchema,
+      body: requests.earnProgramRetargetSchema,
+      idempotency: "optional",
+    }
   );
   route(
     "get",
-    "programs/{programId}/deposits",
+    "portfolio-accounts/{programId}/deposits",
     "listEarnProgramDeposits",
-    "List program deposits",
+    "List portfolio-account deposits",
     envelope({
       deposits: z.array(earnPortfolioDepositSchema),
       nextCursor: z.string().nullable(),
@@ -304,17 +316,17 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "post",
-    "programs/{programId}/withdrawal-preview",
+    "portfolio-accounts/{programId}/withdrawals/preview",
     "previewEarnProgramWithdrawal",
-    "Preview a program withdrawal or read liquidity",
+    "Preview a portfolio-account withdrawal or read liquidity",
     envelope({ preview: earnProgramWithdrawalPreviewSchema }),
     { params: requests.earnProgramParamsSchema, body: requests.earnProgramWithdrawalPreviewSchema }
   );
   route(
     "post",
-    "programs/{programId}/withdrawals",
+    "portfolio-accounts/{programId}/withdrawals/execute",
     "createEarnProgramWithdrawal",
-    "Withdraw from a provider-managed program",
+    "Withdraw from a provider portfolio account",
     programWithdrawal,
     {
       params: requests.earnProgramParamsSchema,
@@ -325,9 +337,9 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "programs/{programId}/withdrawals",
+    "portfolio-accounts/{programId}/withdrawals",
     "listEarnProgramWithdrawals",
-    "List recorded program withdrawals",
+    "List recorded portfolio-account withdrawals",
     envelope({ withdrawals: z.array(earnProgramWithdrawalRecordSchema), ...listFields }),
     {
       params: requests.earnProgramParamsSchema,
@@ -336,9 +348,9 @@ export function registerEarnTreasuryPaths(
   );
   route(
     "get",
-    "programs/{programId}/withdrawals/{withdrawalRef}",
+    "portfolio-accounts/{programId}/withdrawals/{withdrawalRef}",
     "getEarnProgramWithdrawal",
-    "Read a program withdrawal",
+    "Read a portfolio-account withdrawal",
     programWithdrawal,
     { params: requests.earnProgramWithdrawalParamsSchema }
   );

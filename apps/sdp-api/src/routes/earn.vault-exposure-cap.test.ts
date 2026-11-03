@@ -288,7 +288,7 @@ function recordOwnDeposit(strategy: EarnStrategyRow, requestId: string) {
 
 function post(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
   const requestBody =
-    path === "vault-deposits" || path === "external-wallet/deposit-transactions"
+    path === "deposits/execute" || path === "deposits/build-unsigned-transaction"
       ? { minSharesOut: "1", ...body }
       : body;
   return app.request(
@@ -414,7 +414,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING);
 
     const res = await post(
-      "vault-deposits",
+      "deposits/execute",
       { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" },
       "capped-deposit"
     );
@@ -446,7 +446,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     const strategy = await seedStrategy();
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING);
 
-    const res = await post("external-wallet/deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: WALLET_ADDRESS,
       amount: "10",
@@ -471,7 +471,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, "4999990");
 
     const res = await post(
-      "vault-deposits",
+      "deposits/execute",
       { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" },
       "at-cap-deposit"
     );
@@ -493,14 +493,14 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     const recorded = await recordOwnDeposit(strategy, "deposit-at-cap");
     const body = { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" };
 
-    const replay = await post("vault-deposits", body, "deposit-at-cap");
+    const replay = await post("deposits/execute", body, "deposit-at-cap");
     expect(replay.status).toBe(200);
     expect(await replay.json()).toMatchObject({
       data: { movementId: recorded.movement.id, replayed: true },
     });
 
     await expectRedactedCapRefusal(
-      await post("vault-deposits", body, "deposit-past-cap"),
+      await post("deposits/execute", body, "deposit-past-cap"),
       strategy.provider_reference
     );
     expect(depositIntoVault).not.toHaveBeenCalled();
@@ -512,7 +512,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
     vaultDirectClientOverride.current = quoteCapableClient();
 
-    const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const text = await res.text();
@@ -532,7 +532,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     vaultDirectClientOverride.current = quoteCapableClient();
 
     for (let i = 0; i < 3; i += 1) {
-      const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+      const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
       expect(res.status).toBe(200);
     }
     // Every evaluation ran; the aggregate itself was read once (the TTL is
@@ -540,7 +540,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     // wired into the request path).
     expect(evaluatedEvents()).toHaveLength(3);
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
-    const cached = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const cached = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
     expect(
       ((await cached.json()) as { data: { blockingIssues: unknown[] } }).data.blockingIssues
     ).toEqual([{ code: "PROVIDER_ISSUE", message: "From the provider" }]);
@@ -558,7 +558,7 @@ describe("vault exposure cap (ADR 0004 layer 1): shadow mode", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING);
 
     const res = await post(
-      "vault-deposits",
+      "deposits/execute",
       { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" },
       "shadow-deposit"
     );
@@ -583,7 +583,7 @@ describe("vault exposure cap (ADR 0004 layer 1): shadow mode", () => {
     const strategy = await seedStrategy();
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING);
 
-    const res = await post("external-wallet/deposit-transactions", {
+    const res = await post("deposits/build-unsigned-transaction", {
       strategyId: strategy.id,
       ownerAddress: WALLET_ADDRESS,
       amount: "10",
@@ -600,7 +600,7 @@ describe("vault exposure cap (ADR 0004 layer 1): shadow mode", () => {
     await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
     vaultDirectClientOverride.current = quoteCapableClient();
 
-    const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
+    const res = await post("deposits/preview", { strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { blockingIssues: unknown[] } };
@@ -621,7 +621,7 @@ describe("vault exposure cap (ADR 0004 layer 1): fail closed", () => {
       exposureReadFailure.current = new Error("ledger unavailable");
 
       const deposit = await post(
-        "vault-deposits",
+        "deposits/execute",
         { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" },
         "unreadable-deposit"
       );
@@ -629,7 +629,7 @@ describe("vault exposure cap (ADR 0004 layer 1): fail closed", () => {
       expect(await deposit.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
       expect(depositIntoVault).not.toHaveBeenCalled();
 
-      const build = await post("external-wallet/deposit-transactions", {
+      const build = await post("deposits/build-unsigned-transaction", {
         strategyId: strategy.id,
         ownerAddress: WALLET_ADDRESS,
         amount: "10",
@@ -657,13 +657,13 @@ describe("vault exposure cap (ADR 0004 layer 1): fail closed", () => {
     exposureReadFailure.current = new Error("ledger unavailable");
     const body = { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" };
 
-    const replay = await post("vault-deposits", body, "recorded-deposit");
+    const replay = await post("deposits/execute", body, "recorded-deposit");
     expect(replay.status).toBe(200);
     expect(await replay.json()).toMatchObject({
       data: { movementId: recorded.movement.id, replayed: true },
     });
 
-    const fresh = await post("vault-deposits", body, "new-deposit");
+    const fresh = await post("deposits/execute", body, "new-deposit");
     expect(fresh.status).toBe(503);
     expect(depositIntoVault).not.toHaveBeenCalled();
   });

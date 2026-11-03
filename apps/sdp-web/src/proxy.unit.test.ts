@@ -133,7 +133,9 @@ describe("rejectCrossSiteWrite", () => {
   it("gates playground writes but not routes outside the BFF", () => {
     expect(
       rejectCrossSiteWrite(
-        write("/api/playground/v1/payments/transfers", { origin: "https://attacker.example" })
+        write("/api/playground/v1/payments/transfers/execute", {
+          origin: "https://attacker.example",
+        })
       )?.status
     ).toBe(403);
     expect(

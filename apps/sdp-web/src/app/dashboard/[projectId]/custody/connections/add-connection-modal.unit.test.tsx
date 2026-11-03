@@ -51,7 +51,8 @@ function mockApi() {
     );
   vi.stubGlobal("fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
     if (String(url).endsWith("/custody/provider-credentials")) return submit(init);
-    if (String(url).endsWith("/custody/connections/cconn_new/complete")) return complete();
+    if (String(url).endsWith("/custody/connections/cconn_new/complete-installation"))
+      return complete();
     throw new Error(`Unexpected API request: ${url}`);
   });
   return { submit, complete };

@@ -1,6 +1,8 @@
 import { COUNTRY_CODES } from "@sdp/types/countries";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { MAINNET_ACCESS_STATES } from "@sdp/types/mainnet-access";
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
+import { COMPLIANCE_PROVIDERS, EARN_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 import {
@@ -43,6 +45,20 @@ const organizationSettingsSchema = z
           "Read-only. An allowlist recorded before this setting was enforced, retained for reference and never applied. Send it back as `allowedIpAddresses` to put it into effect, which validates it first.",
         example: ["203.0.113.0/24"],
       }),
+    providerOverrides: z
+      .object({
+        custody: z.partialRecord(z.enum(CUSTODY_PROVIDERS), z.boolean()).optional(),
+        compliance: z.partialRecord(z.enum(COMPLIANCE_PROVIDERS), z.boolean()).optional(),
+        ramps: z.partialRecord(z.enum(RAMP_PROVIDERS), z.boolean()).optional(),
+        earn: z.partialRecord(z.enum(EARN_PROVIDERS), z.boolean()).optional(),
+      })
+      .strict()
+      .optional()
+      .openapi({ description: "Read-only provider entitlement overrides." }),
+    enableProductionProject: z
+      .boolean()
+      .optional()
+      .openapi({ description: "Read-only production-project entitlement." }),
     customRateLimits: z
       .object({
         requestsPerMinute: z.number().int().positive().optional().openapi({
@@ -89,6 +105,25 @@ export const organizationSchema = z
     }),
   })
   .openapi({ description: "Organization record." });
+
+const providerAvailabilityEntrySchema = z.object({
+  entitled: z.boolean(),
+  configured: z.boolean(),
+  enabled: z.boolean(),
+});
+
+/** The existing internal organization view includes every known provider. */
+export const organizationProviderAccessResponseSchema = z
+  .object({
+    tier: z.enum(ORGANIZATION_TIERS),
+    providers: z.object({
+      custody: z.record(z.enum(CUSTODY_PROVIDERS), providerAvailabilityEntrySchema),
+      compliance: z.record(z.enum(COMPLIANCE_PROVIDERS), providerAvailabilityEntrySchema),
+      ramps: z.record(z.enum(RAMP_PROVIDERS), providerAvailabilityEntrySchema),
+      earn: z.record(z.enum(EARN_PROVIDERS), providerAvailabilityEntrySchema),
+    }),
+  })
+  .openapi({ description: "Organization provider entitlements and deployment configuration." });
 
 export const userSchema = z
   .object({

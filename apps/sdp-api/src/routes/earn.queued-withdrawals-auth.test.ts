@@ -16,7 +16,7 @@ beforeEach(async () => {
 describe("queued withdrawal route auth", () => {
   it("refuses a presented invalid credential on route discovery", async () => {
     const response = await app.request(
-      "/v1/earn/external-wallet/withdrawal-options",
+      "/v1/earn/withdrawals/caller-signed/options",
       {
         method: "POST",
         headers: {
@@ -32,7 +32,7 @@ describe("queued withdrawal route auth", () => {
 
   it("requires a credential for discovery, request builds and tenant reads", async () => {
     const discovery = await app.request(
-      "/v1/earn/external-wallet/withdrawal-options",
+      "/v1/earn/withdrawals/caller-signed/options",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -43,7 +43,7 @@ describe("queued withdrawal route auth", () => {
     expect(discovery.status).toBe(401);
 
     const requestBuild = await app.request(
-      "/v1/earn/external-wallet/withdrawal-request-transactions",
+      "/v1/earn/withdrawal-requests/build-unsigned-transaction",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -59,7 +59,7 @@ describe("queued withdrawal route auth", () => {
     expect(requestBuild.status).toBe(401);
 
     const cancelBuild = await app.request(
-      "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -70,14 +70,14 @@ describe("queued withdrawal route auth", () => {
     expect(cancelBuild.status).toBe(401);
 
     const externalHistory = await app.request(
-      `/v1/earn/external-wallet/withdrawal-requests?ownerAddress=${OWNER}`,
+      `/v1/earn/withdrawal-requests/caller-signed?ownerAddress=${OWNER}`,
       {},
       env
     );
     expect(externalHistory.status).toBe(401);
 
     const custodyOptions = await app.request(
-      "/v1/earn/vault-withdrawal-options",
+      "/v1/earn/withdrawals/provider-signed/options",
       {
         method: "POST",
         headers: { "content-type": "application/json" },

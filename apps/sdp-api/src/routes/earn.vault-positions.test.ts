@@ -176,7 +176,7 @@ async function createPosition(params: {
 
 function getPositions(query = "") {
   return app.request(
-    `/v1/earn/vault-positions${query}`,
+    `/v1/earn/positions/provider-signed${query}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -184,7 +184,7 @@ function getPositions(query = "") {
 
 function listDeposits(query = "") {
   return app.request(
-    `/v1/earn/vault-deposits${query}`,
+    `/v1/earn/deposits/provider-signed${query}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -192,7 +192,7 @@ function listDeposits(query = "") {
 
 function getDeposit(movementId: string) {
   return app.request(
-    `/v1/earn/vault-deposits/${encodeURIComponent(movementId)}`,
+    `/v1/earn/deposits/provider-signed/${encodeURIComponent(movementId)}`,
     { headers: { Authorization: `Bearer ${API_KEY.raw}` } },
     env
   );
@@ -235,7 +235,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("GET /v1/earn/vault-positions", () => {
+describe("GET /v1/earn/positions/provider-signed", () => {
   it.each(["veda", "kamino", "ondo", "hastra", "jupiter_lend", "wisdomtree"])(
     "does not constrain an unrelated %s position after a Kamino deposit",
     async (provider) => {
@@ -321,7 +321,7 @@ describe("GET /v1/earn/vault-positions", () => {
   it("rejects a foreign movement before any status or provider RPC read", async () => {
     const created = await createPosition({});
     const response = await requestAsProduction(
-      `/v1/earn/vault-positions?afterMovementIds=${created.movement.id}`
+      `/v1/earn/positions/provider-signed?afterMovementIds=${created.movement.id}`
     );
     expect(response.status).toBe(404);
     expect(signatureStatuses).not.toHaveBeenCalled();
@@ -329,9 +329,9 @@ describe("GET /v1/earn/vault-positions", () => {
   });
 
   it.each([
-    ["position list", "/v1/earn/vault-positions", 200],
-    ["deposit list", "/v1/earn/vault-deposits", 200],
-    ["deposit request-id lookup", "/v1/earn/vault-deposits?requestId=project-scope", 200],
+    ["position list", "/v1/earn/positions/provider-signed", 200],
+    ["deposit list", "/v1/earn/deposits/provider-signed", 200],
+    ["deposit request-id lookup", "/v1/earn/deposits/provider-signed?requestId=project-scope", 200],
   ])("hides another project's resource from the %s", async (_name, path, status) => {
     await createPosition({ requestId: "project-scope" });
     const response = await requestAsProduction(path);
@@ -342,7 +342,7 @@ describe("GET /v1/earn/vault-positions", () => {
   it("404s another project's deposit", async () => {
     const created = await createPosition({});
     expect(
-      (await requestAsProduction(`/v1/earn/vault-deposits/${created.movement.id}`)).status
+      (await requestAsProduction(`/v1/earn/deposits/provider-signed/${created.movement.id}`)).status
     ).toBe(404);
   });
 
@@ -658,7 +658,7 @@ describe("GET /v1/earn/vault-positions", () => {
  * hide that position's deposits too. Testing them apart is how the two drift.
  */
 
-describe("GET /v1/earn/vault-deposits/:movementId", () => {
+describe("GET /v1/earn/deposits/provider-signed/:movementId", () => {
   it("reports the recorded deposit so an unconfirmed signature stays answerable", async () => {
     const created = await createPosition({ providerReference: "vault_read_own" });
 
@@ -785,7 +785,7 @@ describe("GET /v1/earn/vault-deposits/:movementId", () => {
  * in-flight deposits after losing local state, and — via `?requestId=` — find a
  * deposit by the Idempotency-Key the caller kept.
  */
-describe("GET /v1/earn/vault-deposits", () => {
+describe("GET /v1/earn/deposits/provider-signed", () => {
   it("returns this workspace's deposits newest first", async () => {
     const first = await createPosition({ providerReference: "vault_list_1" });
     const second = await createPosition({ providerReference: "vault_list_2" });

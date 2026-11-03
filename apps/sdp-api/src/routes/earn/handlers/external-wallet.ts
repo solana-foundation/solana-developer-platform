@@ -158,7 +158,7 @@ const inFlightExternalWalletPortfolios = new Map<
 >();
 
 /**
- * GET /v1/earn/external-wallet/positions/summary: complete live portfolio for
+ * GET /v1/earn/positions/caller-signed/project-summary: complete live portfolio for
  * one partner project, grouped by strategy and by token.
  *
  * The claim table is keyset-paged to the end before any total is returned. A
@@ -262,7 +262,7 @@ async function loadExternalWalletPortfolio(
 }
 
 /**
- * GET /v1/earn/external-wallet/positions?ownerAddress=…: one end user's
+ * GET /v1/earn/positions/caller-signed?ownerAddress=…: one end user's
  * holdings. The owner is a REQUIRED query filter, the same addressing every
  * per-owner read on this surface uses (see the movements list for the original
  * reasoning).
@@ -357,7 +357,7 @@ function cursorStrictlyPrecedes(next: VaultPositionCursor, before: VaultPosition
 }
 
 /**
- * GET /v1/earn/external-wallet/movements: one end user's activity, newest
+ * GET /v1/earn/movements/caller-signed: one end user's activity, newest
  * first, in the ledger's own vocabulary (PRO-1772).
  *
  * The read the cross-provider feed structurally cannot serve: its vault arm
@@ -443,7 +443,7 @@ function requirePositionTokenMint(position: EarnPositionRow): string {
 }
 
 /**
- * GET /v1/earn/external-wallet/movements/:movementId: poll one movement to a
+ * GET /v1/earn/movements/caller-signed/:movementId: poll one movement to a
  * terminal state, with a scoped, fail-soft read-through of its exact Solana
  * signature — the same interactive fast path the treasury detail reads take.
  *
@@ -489,7 +489,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
 }
 
 /**
- * GET /v1/earn/external-wallet/earnings?ownerAddress=…: balance and total
+ * GET /v1/earn/earnings/caller-signed?ownerAddress=…: balance and total
  * earned for one end user, grouped by deposit token (PRO-1772).
  *
  * `earned` is live current value, plus the observed token payouts of
@@ -751,7 +751,7 @@ export async function resolveExternalWalletExit(
 }
 
 /**
- * POST /v1/earn/external-wallet/deposit-transactions — build one unsigned deposit
+ * POST /v1/earn/deposits/build-unsigned-transaction — build one unsigned deposit
  * transaction for an external wallet.
  *
  * MONEY-IN GATES preserve the custody deposit order (routes/earn/CLAUDE.md,
@@ -897,10 +897,10 @@ function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDe
 }
 
 /**
- * POST /v1/earn/external-wallet/withdrawal-transactions — build one unsigned exit
+ * POST /v1/earn/withdrawals/build-unsigned-transaction — build one unsigned exit
  * transaction for an external-wallet position.
  *
- * ADR 0002 exit safety, the same strongest form as `POST /vault-withdrawals`:
+ * ADR 0002 exit safety, the same strongest form as `POST /withdrawals/execute`:
  * no surfacing, entitlement, availability, or environment capability gate.
  * The caller names its position, which carries the vault, owner, and mints.
  * Capability (501, inside the service) is the only provider-shaped refusal
@@ -960,7 +960,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 }
 
 /**
- * POST /v1/earn/external-wallet/withdrawal-previews: quote one caller-owned
+ * POST /v1/earn/withdrawals/caller-signed/preview: quote one caller-owned
  * exit without applying a custody wallet scope. The position's exact project
  * scope is the authorization boundary, matching the external build route.
  *
@@ -1000,7 +1000,7 @@ export async function createEarnExternalWalletWithdrawalPreview(
 }
 
 /**
- * POST /v1/earn/external-wallet/deposits — submit the signed deposit transaction.
+ * POST /v1/earn/deposits/submit-signed-transaction — submit the signed deposit transaction.
  *
  * `Idempotency-Key` is REQUIRED, exactly as on the custody vault routes and
  * for the same reason: the chain has no request dedupe, and the recorded
@@ -1075,7 +1075,7 @@ export async function createEarnExternalWalletDeposit(
   return success(c, response);
 }
 
-/** POST /v1/earn/external-wallet/withdrawals — submit the signed exit transaction. */
+/** POST /v1/earn/withdrawals/submit-signed-transaction — submit the signed exit transaction. */
 export async function createEarnExternalWalletWithdrawal(
   c: ValidatedBodyContext<typeof earnExternalWalletSubmitSchema>
 ) {

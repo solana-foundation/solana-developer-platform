@@ -30,6 +30,7 @@ import {
   updateAuthorityRequestSchema,
   updateTokenRequestSchema,
 } from "@/openapi/schemas/issuance";
+import { legacyDeployTokenSchema } from "@/routes/issuance/schemas";
 import {
   DOCS_GROUP,
   errorResponses,
@@ -296,6 +297,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Get public token metadata JSON",
     operationId: "getTokenMetadataJson",
+    security: [],
     description:
       "Public, unauthenticated endpoint serving the SDP-hosted Token-2022 / " +
       "Metaplex fungible-compatible metadata JSON for a deployed token. This is " +
@@ -440,12 +442,12 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Deploy token",
     operationId: "deployToken",
-    description: "Deploys the token to Solana using custody signing.",
+    description: "Deploys the token to Solana using the connected provider for signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -468,19 +470,20 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare token deploy transaction",
     operationId: "prepareDeployToken",
     description:
-      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm and prepare-metadata.",
+      "Builds an unsigned deploy transaction for client-side signing. A signing wallet is required: the body's `signingWalletId`, else the token's `signingWalletId`. The request is rejected with 400 when neither is set; an API key is never asked for a default wallet. The resolved wallet is pinned on the token for deploy/confirm-submitted-transaction and deploy/metadata/build-unsigned-transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      body: { required: true, content: jsonContent(legacyDeployTokenSchema) },
     },
     responses: {
       200: {
@@ -493,13 +496,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
-    summary: "Confirm non-custodial deploy",
+    summary: "Confirm a caller-signed deployment",
     operationId: "confirmDeploy",
     description:
-      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+      "Records the mint after the client signs and submits a prepared deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -522,19 +525,20 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+    path: "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
-      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
+      "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm-submitted-transaction to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/build-unsigned-transaction (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: z.object({
         tokenId: tokenIdParamSchema,
       }),
+      body: { required: true, content: jsonContent(legacyDeployTokenSchema) },
     },
     responses: {
       200: {
@@ -547,7 +551,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/mint/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare mint transaction",
@@ -576,12 +580,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/mint",
+    path: "/v1/issuance/tokens/{tokenId}/mint/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute mint",
     operationId: "executeMint",
-    description: "Mints tokens using custody signing and submission.",
+    description:
+      "Mints tokens by requesting a signature from the connected provider, then submitting the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -604,7 +609,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/burn/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare burn transaction",
@@ -633,12 +638,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/burn",
+    path: "/v1/issuance/tokens/{tokenId}/burn/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute burn",
     operationId: "executeBurn",
-    description: "Burns tokens using custody signing and submission.",
+    description:
+      "Burns tokens by requesting a signature from the connected provider, then submitting the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -661,7 +667,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/seize/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare seize transaction",
@@ -689,7 +695,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/seize",
+    path: "/v1/issuance/tokens/{tokenId}/seize/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute seize",
@@ -717,7 +723,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare force burn transaction",
@@ -745,7 +751,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/force-burn",
+    path: "/v1/issuance/tokens/{tokenId}/force-burn/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute force burn",
@@ -773,7 +779,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/authority/prepare",
+    path: "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Prepare authority update",
@@ -801,12 +807,12 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/authority",
+    path: "/v1/issuance/tokens/{tokenId}/authority/update/execute",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Execute authority update",
     operationId: "executeUpdateAuthority",
-    description: "Updates token authorities using custody signing.",
+    description: "Updates token authorities using the connected provider for signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -885,7 +891,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/freeze",
+    path: "/v1/issuance/tokens/{tokenId}/freeze-account",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Freeze account",
@@ -913,7 +919,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/unfreeze",
+    path: "/v1/issuance/tokens/{tokenId}/unfreeze-account",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Unfreeze account",
@@ -941,7 +947,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/frozen",
+    path: "/v1/issuance/tokens/{tokenId}/frozen-accounts",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "List frozen accounts",
@@ -969,12 +975,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist",
+    path: "/v1/issuance/tokens/{tokenId}/control-list",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "List token allowlist",
+    summary: "List token control list",
     operationId: "listTokenAllowlist",
-    description: "Lists allowlist entries for a token.",
+    description:
+      "Lists control-list entries for a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -999,10 +1006,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+    path: "/v1/issuance/tokens/{tokenId}/control-list/labels",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "List token allowlist labels",
+    summary: "List token control-list labels",
     operationId: "listTokenAllowlistLabels",
     description:
       "Lists the distinct labels used across a token's active control-list entries, for building a label filter.",
@@ -1024,12 +1031,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist",
+    path: "/v1/issuance/tokens/{tokenId}/control-list",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "Add token allowlist entry",
+    summary: "Add token control-list entry",
     operationId: "addTokenAllowlistEntry",
-    description: "Adds an allowlist entry for a token.",
+    description:
+      "Adds a control-list entry for a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1052,12 +1060,13 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
+    path: "/v1/issuance/tokens/{tokenId}/control-list/{entryId}",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
-    summary: "Remove token allowlist entry",
+    summary: "Remove token control-list entry",
     operationId: "removeTokenAllowlistEntry",
-    description: "Removes an allowlist entry from a token.",
+    description:
+      "Removes a control-list entry from a token, using its configured allowlist or blocklist mode.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1090,7 +1099,12 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
   const envelope = (inner: z.ZodTypeAny, name: string) =>
     z.object({ data: inner, meta: z.record(z.string(), z.unknown()).optional() }).openapi(name);
   const holdersResponse = envelope(
-    z.object({ holders: z.array(z.record(z.string(), z.unknown())) }),
+    z.object({
+      holders: z.array(z.record(z.string(), z.unknown())),
+      total: z.number().int().nonnegative(),
+      page: z.number().int().positive(),
+      pageSize: z.number().int().positive(),
+    }),
     "HoldersResponse"
   );
   const holderResponse = envelope(
@@ -1100,14 +1114,21 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/issuance/tokens/{tokenId}/holders",
+    path: "/v1/issuance/tokens/{tokenId}/holder-enrollments",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
-    summary: "List verified holders",
+    summary: "List holder enrollments",
     operationId: "listHolders",
     description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
     security: [{ apiKeyAuth: [] }],
-    request: { headers: projectScopeHeaders, params: z.object({ tokenId: tokenIdParamSchema }) },
+    request: {
+      headers: projectScopeHeaders,
+      params: z.object({ tokenId: tokenIdParamSchema }),
+      query: z.object({
+        page: pageQuerySchema.optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      }),
+    },
     responses: {
       200: { description: "Enrolled holders", content: jsonContent(holdersResponse) },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
@@ -1116,10 +1137,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/issuance/tokens/{tokenId}/holders",
+    path: "/v1/issuance/tokens/{tokenId}/holder-enrollments",
     tags: ["Issuance"],
     [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
-    summary: "Enroll a verified holder",
+    summary: "Enroll a holder",
     operationId: "enrollHolder",
     description:
       "Registers a wallet for this asset (upserts its KYC identity + an active enrollment).",

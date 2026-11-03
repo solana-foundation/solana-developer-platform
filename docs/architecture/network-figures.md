@@ -11,7 +11,7 @@ browser reads SDP's own route.
 | -------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Hook     | `apps/sdp-web/src/app/dashboard/[projectId]/overview-network.data.ts` | `useOverviewNetwork`: SWR, refetch every 5 min, last snapshot kept in local storage for an instant paint |
 | Proxy    | `apps/sdp-web/src/app/api/dashboard/network/route.ts`                 | `proxyToSdpApi` to the route below                                                                       |
-| Route    | `apps/sdp-api/src/routes/internal-network/`                           | `GET /internal/dashboard/network`, Clerk sessions only, outside OpenAPI                                  |
+| Route    | `apps/sdp-api/src/routes/internal-network/`                           | `GET /internal/dashboard/network`, Clerk sessions only, internal OpenAPI only                            |
 | Service  | `apps/sdp-api/src/services/network/network.service.ts`                | Joins the readings cache and the health cache into one snapshot                                          |
 | Recipes  | `apps/sdp-api/src/services/network/network-snapshot.ts`               | `NETWORK_READINGS`: each reading's inputs and same-day math                                              |
 | Client   | `apps/sdp-api/src/lib/data-api/`                                      | Reads `/v1/metrics?provider=preferred`, validates it, indexes it by metric and closed UTC day            |

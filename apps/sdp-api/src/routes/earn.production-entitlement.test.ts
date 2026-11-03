@@ -211,8 +211,8 @@ describe.each([
   ["a production API key", "api_key"],
   ["a Clerk member on the production project", "clerk"],
 ] as const)("Earn without the production entitlement, as %s (APE-351)", (_label, actor) => {
-  it("still answers GET /v1/earn/vault-positions", async () => {
-    const res = await request(actor, "GET", "/v1/earn/vault-positions");
+  it("still answers GET /v1/earn/positions/provider-signed", async () => {
+    const res = await request(actor, "GET", "/v1/earn/positions/provider-signed");
     expect(res.status).toBe(200);
   });
 
@@ -220,7 +220,7 @@ describe.each([
     const positionId = await seedProductionPosition();
     const scopes = recordCallScopes(withdrawFromVault);
 
-    const res = await request(actor, "POST", "/v1/earn/vault-withdrawals", {
+    const res = await request(actor, "POST", "/v1/earn/withdrawals/execute", {
       positionId,
       shares: "10",
     });

@@ -92,7 +92,7 @@ const fireblocksCredentialSetupSchema = privyCredentialSetupBaseSchema
         new Set(input.fireblocksVaultAccountIds).size === input.fireblocksVaultAccountIds.length),
     "Select distinct vaults including the connection's signing vault"
   );
-const custodyCredentialSetupSchema = z.discriminatedUnion("provider", [
+export const custodyCredentialSetupSchema = z.discriminatedUnion("provider", [
   privyCredentialSetupSchema,
   fireblocksCredentialSetupSchema,
 ]);

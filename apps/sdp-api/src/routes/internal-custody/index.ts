@@ -44,9 +44,8 @@ import {
   ProviderCredentialStore,
 } from "@/services/stores/provider-credential.store";
 import type { Env } from "@/types/env";
+import { connectionParamsSchema, credentialParamsSchema } from "./schemas";
 
-const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
-const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();
 const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
@@ -199,7 +198,7 @@ internalCustody.get("/connections/:connectionId", requireAction("wallets.configu
 });
 
 internalCustody.get(
-  "/connections/:connectionId/provider-credential",
+  "/connections/:connectionId/provider-credential/lifecycle",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -261,7 +260,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/provider-credentials/:credentialId/rollback",
+  "/provider-credentials/:credentialId/rollback-rotation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = credentialParamsSchema.safeParse(c.req.param());
@@ -287,7 +286,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/connections/:connectionId/complete",
+  "/connections/:connectionId/complete-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());
@@ -299,7 +298,7 @@ internalCustody.post(
 );
 
 internalCustody.post(
-  "/connections/:connectionId/cancel",
+  "/connections/:connectionId/cancel-installation",
   requireAction("wallets.configure"),
   async (c) => {
     const params = connectionParamsSchema.safeParse(c.req.param());

@@ -306,7 +306,9 @@ export async function fetchPaymentRequestLinkToken(
   requestId: string
 ): Promise<{ ok: true; publicToken: string | null } | { ok: false; error: string | undefined }> {
   try {
-    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}/link`);
+    const response = await request(
+      `/v1/payments/requests/${encodeURIComponent(requestId)}/link-token`
+    );
     if (response.status === 403) return { ok: true, publicToken: null };
     if (!response.ok) return { ok: false, error: await response.text() };
     const json = paymentRequestLinkResponseSchema.parse(await response.json());

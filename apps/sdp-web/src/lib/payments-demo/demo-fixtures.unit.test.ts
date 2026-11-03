@@ -287,7 +287,7 @@ describe("paymentsDemoBody pass-through", () => {
   it.each([
     "/v1/projects",
     "/v1/onboarding/status",
-    "/v1/organizations/org_1/provider-access",
+    "/v1/organizations/org_1/provider-availability",
     "/v1/organizations/org_1/members?page=1",
     "/v1/rpc/connections",
     "/v1/rpc/connections/rpc_1/usage",
@@ -295,7 +295,7 @@ describe("paymentsDemoBody pass-through", () => {
     "/v1/policies",
     "/v1/counterparties/cpty_real",
     "/v1/counterparties/cpty_real/accounts?pageSize=100",
-    "/v1/counterparties/metadata",
+    "/v1/counterparties/field-options",
     "/v1/payments/transfers/xfr_real",
     "/v1/payments/transfer-batches/batch_real",
     "/v1/payments/recurring-payments/prp_real",

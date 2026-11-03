@@ -14,16 +14,7 @@ import {
   testRingsConnection,
 } from "@/services/helius-rings/connection.service";
 import type { Env } from "@/types/env";
-
-const connectionInputSchema = z.strictObject({
-  name: z.string().trim().min(1).max(100),
-  solanaRpcUrl: z.string().trim().url().max(2048),
-  indexerUrl: z.string().trim().url().max(2048),
-  proverUrl: z.string().trim().url().max(2048),
-  ringRpcUrl: z.string().trim().url().max(2048).optional(),
-  allowInsecureHttp: z.boolean().default(false),
-});
-const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
+import { connectionInputSchema, connectionParamsSchema } from "./schemas";
 
 export const internalHeliusRings = new Hono<{ Bindings: Env }>();
 internalHeliusRings.use("*", requireModule("helius_rings"));

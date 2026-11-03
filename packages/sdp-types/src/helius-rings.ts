@@ -56,3 +56,8 @@ export const HELIUS_RINGS_OPERATION_TYPES = [
 ] as const;
 
 export type HeliusRingsOperationType = (typeof HELIUS_RINGS_OPERATION_TYPES)[number];
+
+/** Every status a Rings connection row can carry (the store's CHECK constraint set). */
+export const HELIUS_RINGS_CONNECTION_STATUSES = ["active", "failed", "deactivated"] as const;
+
+export type HeliusRingsConnectionStatus = (typeof HELIUS_RINGS_CONNECTION_STATUSES)[number];

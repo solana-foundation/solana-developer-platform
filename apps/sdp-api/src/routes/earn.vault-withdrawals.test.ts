@@ -90,7 +90,7 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => {
 });
 
 /**
- * `POST /v1/earn/vault-withdrawals` and its reads — the gates, the exit-safety
+ * `POST /v1/earn/withdrawals/execute` and its reads — the gates, the exit-safety
  * ASYMMETRY, and the signed-movement read contract.
  *
  * The deliberate contrast with `earn.vault.test.ts` (the deposit route) is the
@@ -364,7 +364,7 @@ function postVaultWithdrawal(
 ) {
   const key = options.idempotencyKey === undefined ? crypto.randomUUID() : options.idempotencyKey;
   return app.request(
-    "/v1/earn/vault-withdrawals",
+    "/v1/earn/withdrawals/execute",
     {
       method: "POST",
       headers: {
@@ -380,7 +380,7 @@ function postVaultWithdrawal(
 
 function getWithdrawal(pathSuffix: string, apiKey = TEST_API_KEY.raw) {
   return app.request(
-    `/v1/earn/vault-withdrawals${pathSuffix}`,
+    `/v1/earn/withdrawals/provider-signed${pathSuffix}`,
     { headers: { Authorization: `Bearer ${apiKey}` } },
     env
   );
@@ -412,7 +412,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("POST /v1/earn/vault-withdrawals — custody release channel", () => {
+describe("POST /v1/earn/withdrawals/execute — custody release channel", () => {
   it("refuses an out-of-channel wallet before signing a withdrawal", async () => {
     await seedAuth();
     await useConnectionWallet();
@@ -509,7 +509,7 @@ describe("vault exits outside the key's wallet scope", () => {
     const before = await exitRows();
 
     const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
+      "/v1/earn/withdrawal-requests/execute",
       {
         method: "POST",
         headers: {
@@ -617,7 +617,7 @@ describe("vault exits outside the key's wallet scope", () => {
     const before = await exitRows();
 
     const response = await app.request(
-      `/v1/earn/vault-withdrawal-requests/${input.requestId}/cancel`,
+      `/v1/earn/withdrawal-requests/${input.requestId}/cancel/execute`,
       {
         method: "POST",
         headers: {
@@ -638,7 +638,7 @@ describe("vault exits outside the key's wallet scope", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — request validation", () => {
+describe("POST /v1/earn/withdrawals/execute — request validation", () => {
   it("requires an Idempotency-Key header, because the chain has no dedupe of its own", async () => {
     await seedAuth();
     const positionId = await seedPosition();
@@ -760,7 +760,7 @@ describe("POST /v1/earn/vault-withdrawals — request validation", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
+describe("POST /v1/earn/withdrawals/execute — exit safety (ADR 0002)", () => {
   it("withdraws WITHOUT entitlement, surfacing, or a catalogue row", async () => {
     // Everything the deposit route requires is deliberately absent here: the
     // org has no earn provider override, `earn_strategies` holds no row for
@@ -924,7 +924,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — response shape", () => {
+describe("POST /v1/earn/withdrawals/execute — response shape", () => {
   it("serves one movement with its transaction signature", async () => {
     await seedAuth();
     const positionId = await seedPosition();
@@ -1000,7 +1000,7 @@ describe("POST /v1/earn/vault-withdrawals — response shape", () => {
   });
 });
 
-describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
+describe("GET /v1/earn/withdrawals/provider-signed — recorded movements", () => {
   it("404s another project's withdrawal", async () => {
     await seedAuth();
     const { recorded } = await recordWithdrawal({ requestId: "vw-project-scope" });
@@ -1192,7 +1192,7 @@ describe("GET /v1/earn/vault-withdrawals — recorded movements", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
+describe("POST /v1/earn/withdrawals/execute — the exit slippage floor", () => {
   it("passes the caller's minAmountOut through to the service verbatim", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "veda" });
@@ -1244,16 +1244,16 @@ describe("POST /v1/earn/vault-withdrawals — the exit slippage floor", () => {
 });
 
 /**
- * `POST /v1/earn/vault-withdrawal-previews` — the exit quote. EXIT gates only:
+ * `POST /v1/earn/withdrawals/provider-signed/preview` — the exit quote. EXIT gates only:
  * position scoping (404) and capability (501), nothing money-in-shaped — plus
  * `wallets:read`, which is not a money-in gate: it backs the binding check the
  * read scopes through, and for a key with no wallet bindings that check is a
  * documented no-op.
  */
-describe("POST /v1/earn/vault-withdrawal-previews", () => {
+describe("POST /v1/earn/withdrawals/provider-signed/preview", () => {
   function postVaultWithdrawalPreview(body: Record<string, unknown>) {
     return app.request(
-      "/v1/earn/vault-withdrawal-previews",
+      "/v1/earn/withdrawals/provider-signed/preview",
       {
         method: "POST",
         headers: {
@@ -1346,7 +1346,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
     });
 
     const res = await app.request(
-      "/v1/earn/vault-withdrawal-previews",
+      "/v1/earn/withdrawals/provider-signed/preview",
       {
         method: "POST",
         headers: {
@@ -1365,7 +1365,7 @@ describe("POST /v1/earn/vault-withdrawal-previews", () => {
   });
 });
 
-describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () => {
+describe("POST /v1/earn/withdrawals/execute: audit ledger parity (PRO-1866)", () => {
   function auditRows() {
     return getDb(env)
       .prepare(
@@ -1466,13 +1466,13 @@ describe("POST /v1/earn/vault-withdrawals: audit ledger parity (PRO-1866)", () =
   });
 });
 
-describe("POST /v1/earn/vault-withdrawal-requests: a par request", () => {
+describe("POST /v1/earn/withdrawal-requests/provider-signed: a par request", () => {
   it("refuses a request naming both shares and a held intermediate amount", async () => {
     await seedAuth();
     const positionId = await seedPosition({ provider: "hastra" });
 
     const response = await app.request(
-      "/v1/earn/vault-withdrawal-requests",
+      "/v1/earn/withdrawal-requests/execute",
       {
         method: "POST",
         headers: {

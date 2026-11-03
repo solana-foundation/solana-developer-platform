@@ -3405,8 +3405,8 @@ describe("Payments routes — recurring", () => {
   });
 
   it.each([
-    ["prepare-resume", {}],
-    ["prepare-collection", { receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }],
+    ["resume/build-unsigned-transaction", {}],
+    ["collect/build-unsigned-transaction", { receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }],
   ] as const)(
     "refuses the standalone %s route for a recurring payment's subscription",
     async (route, body) => {
@@ -4201,7 +4201,7 @@ describe("Payments routes — recurring", () => {
       });
 
     const preparePromise = app.request(
-      `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
+      `/v1/payments/subscriptions/${subscriptionId}/authorize/build-unsigned-transaction`,
       {
         method: "POST",
         headers: RECURRING_HEADERS,

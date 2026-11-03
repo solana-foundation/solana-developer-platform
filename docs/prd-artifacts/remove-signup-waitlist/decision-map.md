@@ -48,7 +48,7 @@ Launch-critical changes:
 - disable Clerk's signup restriction in the production Clerk instance
 - stop deriving provider access from organization tier
 - keep self-hosted behavior: configured providers are usable unless explicitly disabled
-- leave the local `/admin/allowlist` cleanup for later; it is not the provisioning gate and must not
+- leave the local `/admin/onboarding-allowlist` cleanup for later; it is not the provisioning gate and must not
   be confused with product-level token allowlists
 
 ## #2: How should provider availability be represented?

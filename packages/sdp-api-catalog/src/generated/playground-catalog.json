@@ -26,7 +26,7 @@
         "operationId": "initializeWalletSigning",
         "title": "Initialize wallet signing",
         "method": "POST",
-        "path": "/v1/wallets/initialize",
+        "path": "/v1/wallets/managed-signing/initialize-with-wallet",
         "pathFields": [],
         "bodyFields": [
           {
@@ -40,9 +40,15 @@
           }
         ],
         "expectedResponse": {
-          "configId": "cfg_example",
-          "publicKey": "So11111111111111111111111111111111111111112",
-          "walletId": "privy_wallet_123"
+          "data": {
+            "configId": "cfg_example",
+            "publicKey": "So11111111111111111111111111111111111111112",
+            "walletId": "privy_wallet_123"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         },
         "releaseModule": "custody",
         "shadowedBy": []
@@ -235,9 +241,9 @@
       {
         "id": "list-wallet-configs",
         "operationId": "listWalletConfigs",
-        "title": "List wallet signing configs",
+        "title": "List managed signing configurations",
         "method": "GET",
-        "path": "/v1/wallets/configs",
+        "path": "/v1/wallets/managed-signing/configurations",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -266,7 +272,7 @@
         "operationId": "aggregateWalletBalances",
         "title": "Aggregate wallet balances",
         "method": "GET",
-        "path": "/v1/wallets/aggregate?provider={provider}",
+        "path": "/v1/wallets/balances/aggregate?provider={provider}",
         "pathFields": [
           {
             "key": "provider",
@@ -362,7 +368,13 @@
         ],
         "bodyFields": [],
         "expectedResponse": {
-          "publicKey": "So11111111111111111111111111111111111111112"
+          "data": {
+            "publicKey": "So11111111111111111111111111111111111111112"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
         },
         "releaseModule": "custody",
         "shadowedBy": []
@@ -458,7 +470,7 @@
           }
         },
         "releaseModule": "custody",
-        "shadowedBy": ["/v1/wallets/aggregate", "/v1/wallets/configs", "/v1/wallets/public-key"]
+        "shadowedBy": ["/v1/wallets/public-key"]
       },
       {
         "id": "update-wallet",
@@ -565,9 +577,9 @@
       {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
-        "title": "Execute transfer (custody)",
+        "title": "Execute a provider-signed transfer",
         "method": "POST",
-        "path": "/v1/payments/transfers",
+        "path": "/v1/payments/transfers/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1107,7 +1119,7 @@
         "operationId": "createPaymentTransferBatch",
         "title": "Create transfer batch",
         "method": "POST",
-        "path": "/v1/payments/transfer-batches",
+        "path": "/v1/payments/transfer-batches/execute",
         "pathFields": [],
         "bodyFields": [
           {
@@ -1120,6 +1132,140 @@
             "required": true
           }
         ],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpacct_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "pay",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 5000,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "rampsMemo": {
+                  "invoice": "INV-123",
+                  "po": "PO-9"
+                },
+                "amount": "100.00",
+                "provider": "moonpay",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "providerReference": "ramp_quote_example",
+                "deliveryMode": "session_widget",
+                "fiatCurrency": "USD",
+                "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
+                "fiatPayout": {
+                  "amount": "20.82",
+                  "currency": "USD",
+                  "reportedAt": "2025-01-02T00:00:00.000Z"
+                },
+                "deliveryMismatch": {
+                  "reason": "amount_mismatch",
+                  "checkedAt": "2025-01-02T00:00:00.000Z",
+                  "reportedAmount": "20",
+                  "observedAmount": "0.5"
+                },
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "retry-payment-transfer-batch",
+        "operationId": "retryPaymentTransferBatch",
+        "title": "Retry a transfer batch's failed recipients",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches/{batchId}/retry",
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
         "expectedResponse": {
           "data": {
             "batch": {
@@ -1343,140 +1489,6 @@
             "pageSize": 1,
             "hasMore": false,
             "requestId": "req_example"
-          }
-        },
-        "releaseModule": "payments",
-        "shadowedBy": []
-      },
-      {
-        "id": "retry-payment-transfer-batch",
-        "operationId": "retryPaymentTransferBatch",
-        "title": "Retry a transfer batch's failed recipients",
-        "method": "POST",
-        "path": "/v1/payments/transfer-batches/{batchId}/retry",
-        "pathFields": [
-          {
-            "key": "batchId",
-            "label": "{batchId}",
-            "description": "Transfer batch identifier.",
-            "defaultValue": "xbatch_example",
-            "required": true
-          }
-        ],
-        "bodyFields": [],
-        "expectedResponse": {
-          "data": {
-            "batch": {
-              "id": "xbatch_example",
-              "organizationId": "org_example",
-              "projectId": "prj_example",
-              "externalId": "payroll_2026_06_30",
-              "sourceCustodyWalletId": "cwlt_example",
-              "sourceProviderWalletId": "privy_wallet_123",
-              "sourceAddress": "So11111111111111111111111111111111111111112",
-              "token": "SOL",
-              "status": "processing",
-              "totalAmount": "1000.00",
-              "recipientCount": 20,
-              "transactionCount": 1,
-              "createdAt": "2025-01-01T00:00:00.000Z",
-              "updatedAt": "2025-01-01T00:00:00.000Z"
-            },
-            "recipients": [
-              {
-                "id": "_example",
-                "batchId": "batch_example",
-                "transferId": "xfr_example",
-                "externalId": "payroll_row_001",
-                "counterpartyId": "cpty_example",
-                "counterpartyAccountId": "cpacct_example",
-                "destination": "So11111111111111111111111111111111111111112",
-                "amount": "100.00",
-                "status": "pending",
-                "error": "example",
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "updatedAt": "2025-01-01T00:00:00.000Z"
-              }
-            ],
-            "transfers": [
-              {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
-                "id": "xfr_example",
-                "organizationId": "org_example",
-                "custodyWalletId": "cwlt_example",
-                "providerWalletId": "privy_wallet_123",
-                "projectId": "prj_example",
-                "type": "transfer",
-                "kind": "pay",
-                "direction": "outbound",
-                "status": "confirmed",
-                "signature": "sig_example",
-                "serializedTx": "base64_tx_example",
-                "slot": 123456,
-                "blockTime": "2025-01-01T00:00:00.000Z",
-                "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
-                "error": "Signature failed",
-                "initiatedBy": {
-                  "type": "api_key"
-                },
-                "source": "So11111111111111111111111111111111111111112",
-                "destination": "So11111111111111111111111111111111111111112",
-                "rampsMemo": {
-                  "invoice": "INV-123",
-                  "po": "PO-9"
-                },
-                "amount": "100.00",
-                "provider": "moonpay",
-                "counterpartyId": "cpty_example",
-                "counterpartyDisplayName": "Acme Studio",
-                "providerReference": "ramp_quote_example",
-                "deliveryMode": "session_widget",
-                "fiatCurrency": "USD",
-                "fiatAmount": "100.00",
-                "settlement": {
-                  "provider": "moonpay",
-                  "status": "completed",
-                  "transactionId": "transaction_example",
-                  "baseCurrencyCode": "example",
-                  "baseCurrencyAmount": 1,
-                  "quoteCurrencyCode": "example",
-                  "quoteCurrencyAmount": 1,
-                  "feeAmount": 1,
-                  "extraFeeAmount": 1,
-                  "networkFeeAmount": 1,
-                  "areFeesIncluded": false,
-                  "usdRate": 1
-                },
-                "fiatPayout": {
-                  "amount": "20.82",
-                  "currency": "USD",
-                  "reportedAt": "2025-01-02T00:00:00.000Z"
-                },
-                "deliveryMismatch": {
-                  "reason": "amount_mismatch",
-                  "checkedAt": "2025-01-02T00:00:00.000Z",
-                  "reportedAmount": "20",
-                  "observedAmount": "0.5"
-                },
-                "risk": {
-                  "provider": "trm",
-                  "score": "0.12",
-                  "level": "low",
-                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
-                },
-                "createdAt": "2025-01-01T00:00:00.000Z",
-                "updatedAt": "2025-01-02T00:00:00.000Z"
-              }
-            ]
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
           }
         },
         "releaseModule": "payments",
@@ -2498,7 +2510,7 @@
         "operationId": "preparePaymentSubscriptionPlanCreate",
         "title": "Prepare subscription plan creation",
         "method": "POST",
-        "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
+        "path": "/v1/payments/subscription-plans/{planId}/create/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "planId",
@@ -2823,7 +2835,7 @@
         "operationId": "preparePaymentSubscriptionAuthorization",
         "title": "Prepare subscription authorization",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/authorize/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2888,7 +2900,7 @@
         "operationId": "preparePaymentSubscriptionCancel",
         "title": "Prepare subscription cancellation",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/cancel/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -2951,7 +2963,7 @@
         "operationId": "preparePaymentSubscriptionResume",
         "title": "Prepare subscription resume",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/resume/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3014,7 +3026,7 @@
         "operationId": "preparePaymentSubscriptionCollection",
         "title": "Prepare subscription collection",
         "method": "POST",
-        "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+        "path": "/v1/payments/subscriptions/{subscriptionId}/collect/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "subscriptionId",
@@ -3242,7 +3254,7 @@
         "operationId": "listPaymentOnrampCurrencies",
         "title": "List on-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/onramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/onramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
           {
             "key": "source",
@@ -3479,7 +3491,7 @@
         "operationId": "listPaymentOfframpCurrencies",
         "title": "List off-ramp currency support",
         "method": "GET",
-        "path": "/v1/payments/ramps/offramp/currency?source={source}&dest={dest}&provider={provider}",
+        "path": "/v1/payments/ramps/offramp/supported-pairs?source={source}&dest={dest}&provider={provider}",
         "pathFields": [
           {
             "key": "source",
@@ -3714,9 +3726,9 @@
       {
         "id": "create-payment-onramp-quote",
         "operationId": "createPaymentOnrampQuote",
-        "title": "Create on-ramp quote",
+        "title": "Start on-ramp",
         "method": "POST",
-        "path": "/v1/payments/ramps/onramp/quote",
+        "path": "/v1/payments/ramps/onramp/start",
         "pathFields": [],
         "bodyFields": [
           {
@@ -3912,7 +3924,7 @@
         "operationId": "getCounterpartyFieldOptions",
         "title": "Get counterparty field options",
         "method": "GET",
-        "path": "/v1/counterparties/metadata",
+        "path": "/v1/counterparties/field-options",
         "pathFields": [],
         "bodyFields": [],
         "expectedResponse": {
@@ -4085,7 +4097,7 @@
           }
         },
         "releaseModule": "payments",
-        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/metadata"]
+        "shadowedBy": ["/v1/counterparties/accounts", "/v1/counterparties/field-options"]
       },
       {
         "id": "update-counterparty",
@@ -4161,7 +4173,7 @@
         "operationId": "getCounterpartyRequirements",
         "title": "Get counterparty ramp requirements",
         "method": "GET",
-        "path": "/v1/counterparties/{counterpartyId}/requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
+        "path": "/v1/counterparties/{counterpartyId}/ramp-requirements?provider={provider}&direction={direction}&assetRail={assetRail}&fiatCurrency={fiatCurrency}&destinationCustodyWalletId={destinationCustodyWalletId}",
         "pathFields": [
           {
             "key": "counterpartyId",
@@ -4370,7 +4382,7 @@
           {
             "key": "destinationCustodyWalletId",
             "label": "destinationCustodyWalletId",
-            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "description": "Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
             "required": false
           }
@@ -6864,7 +6876,7 @@
         "operationId": "deployToken",
         "title": "Deploy token",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -6961,7 +6973,7 @@
         "operationId": "prepareDeployToken",
         "title": "Prepare token deploy transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -6971,7 +6983,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"feePayment\": \"sponsored\"\n}",
+            "required": true
+          }
+        ],
         "expectedResponse": {
           "data": {
             "transaction": {
@@ -7003,9 +7025,9 @@
       {
         "id": "confirm-deploy",
         "operationId": "confirmDeploy",
-        "title": "Confirm non-custodial deploy",
+        "title": "Confirm a caller-signed deployment",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm-submitted-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7102,7 +7124,7 @@
         "operationId": "prepareDeployMetadata",
         "title": "Prepare metadata-URI follow-up transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
+        "path": "/v1/issuance/tokens/{tokenId}/deploy/metadata/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7112,7 +7134,17 @@
             "required": true
           }
         ],
-        "bodyFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"feePayment\": \"sponsored\"\n}",
+            "required": true
+          }
+        ],
         "expectedResponse": {
           "data": {
             "transaction": {
@@ -7141,7 +7173,7 @@
         "operationId": "prepareMint",
         "title": "Prepare mint transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7209,7 +7241,7 @@
         "operationId": "executeMint",
         "title": "Execute mint",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/mint",
+        "path": "/v1/issuance/tokens/{tokenId}/mint/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7266,7 +7298,7 @@
         "operationId": "prepareBurn",
         "title": "Prepare burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7333,7 +7365,7 @@
         "operationId": "executeBurn",
         "title": "Execute burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/burn",
+        "path": "/v1/issuance/tokens/{tokenId}/burn/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7389,7 +7421,7 @@
         "operationId": "prepareSeize",
         "title": "Prepare seize transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7456,7 +7488,7 @@
         "operationId": "executeSeize",
         "title": "Execute seize",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/seize",
+        "path": "/v1/issuance/tokens/{tokenId}/seize/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7512,7 +7544,7 @@
         "operationId": "prepareForceBurn",
         "title": "Prepare force burn transaction",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7579,7 +7611,7 @@
         "operationId": "executeForceBurn",
         "title": "Execute force burn",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/force-burn",
+        "path": "/v1/issuance/tokens/{tokenId}/force-burn/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7635,7 +7667,7 @@
         "operationId": "prepareUpdateAuthority",
         "title": "Prepare authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority/prepare",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/build-unsigned-transaction",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7702,7 +7734,7 @@
         "operationId": "executeUpdateAuthority",
         "title": "Execute authority update",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/authority",
+        "path": "/v1/issuance/tokens/{tokenId}/authority/update/execute",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7870,7 +7902,7 @@
         "operationId": "freezeAccount",
         "title": "Freeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/freeze",
+        "path": "/v1/issuance/tokens/{tokenId}/freeze-account",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7918,7 +7950,7 @@
         "operationId": "unfreezeAccount",
         "title": "Unfreeze account",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/unfreeze",
+        "path": "/v1/issuance/tokens/{tokenId}/unfreeze-account",
         "pathFields": [
           {
             "key": "tokenId",
@@ -7966,7 +7998,7 @@
         "operationId": "listFrozenAccounts",
         "title": "List frozen accounts",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/frozen?page={page}&pageSize={pageSize}",
+        "path": "/v1/issuance/tokens/{tokenId}/frozen-accounts?page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8021,9 +8053,9 @@
       {
         "id": "list-token-allowlist",
         "operationId": "listTokenAllowlist",
-        "title": "List token allowlist",
+        "title": "List token control list",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist?page={page}&pageSize={pageSize}&search={search}&label={label}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list?page={page}&pageSize={pageSize}&search={search}&label={label}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8091,9 +8123,9 @@
       {
         "id": "add-token-allowlist-entry",
         "operationId": "addTokenAllowlistEntry",
-        "title": "Add token allowlist entry",
+        "title": "Add token control-list entry",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8138,9 +8170,9 @@
       {
         "id": "list-token-allowlist-labels",
         "operationId": "listTokenAllowlistLabels",
-        "title": "List token allowlist labels",
+        "title": "List token control-list labels",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/labels",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/labels",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8167,9 +8199,9 @@
       {
         "id": "remove-token-allowlist-entry",
         "operationId": "removeTokenAllowlistEntry",
-        "title": "Remove token allowlist entry",
+        "title": "Remove token control-list entry",
         "method": "DELETE",
-        "path": "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
+        "path": "/v1/issuance/tokens/{tokenId}/control-list/{entryId}?signingCustodyWalletId={signingCustodyWalletId}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8188,7 +8220,7 @@
           {
             "key": "signingCustodyWalletId",
             "label": "signingCustodyWalletId",
-            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.",
             "defaultValue": "cwlt_example",
             "required": false
           }
@@ -8201,9 +8233,9 @@
       {
         "id": "list-holders",
         "operationId": "listHolders",
-        "title": "List verified holders",
+        "title": "List holder enrollments",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments?page={page}&pageSize={pageSize}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8211,12 +8243,29 @@
             "description": "Token identifier.",
             "defaultValue": "tok_example",
             "required": true
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number (1-based).",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "required": false,
+            "valueType": "number"
           }
         ],
         "bodyFields": [],
         "expectedResponse": {
           "data": {
-            "holders": [{}]
+            "holders": [{}],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
           },
           "meta": {}
         },
@@ -8226,9 +8275,9 @@
       {
         "id": "enroll-holder",
         "operationId": "enrollHolder",
-        "title": "Enroll a verified holder",
+        "title": "Enroll a holder",
         "method": "POST",
-        "path": "/v1/issuance/tokens/{tokenId}/holders",
+        "path": "/v1/issuance/tokens/{tokenId}/holder-enrollments",
         "pathFields": [
           {
             "key": "tokenId",

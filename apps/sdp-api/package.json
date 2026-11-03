@@ -47,7 +47,9 @@
     "test:coverage": "vitest run --coverage",
     "start": "node dist/server.js",
     "route-actions:generate": "tsx scripts/generate-route-actions.ts",
-    "route-actions:check": "tsx scripts/generate-route-actions.ts --check"
+    "route-actions:check": "tsx scripts/generate-route-actions.ts --check",
+    "cli:generate": "tsx scripts/generate-cli-contract.ts",
+    "cli:check": "tsx scripts/generate-cli-contract.ts --check"
   },
   "dependencies": {
     "@clerk/backend": "3.26.2",

@@ -7,7 +7,7 @@ export async function GET(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.counterparty.requirements",
-    path: `/v1/counterparties/${encodeURIComponent(counterpartyId)}/requirements${new URL(request.url).search}`,
+    path: `/v1/counterparties/${encodeURIComponent(counterpartyId)}/ramp-requirements${new URL(request.url).search}`,
   });
 }
 
@@ -16,6 +16,6 @@ export async function POST(request: Request, context: RouteContext) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.counterparty.requirements.submit",
-    path: `/v1/counterparties/${encodeURIComponent(counterpartyId)}/requirements`,
+    path: `/v1/counterparties/${encodeURIComponent(counterpartyId)}/ramp-requirements/check`,
   });
 }

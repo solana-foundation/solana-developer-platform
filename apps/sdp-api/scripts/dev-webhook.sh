@@ -25,7 +25,7 @@ else
 fi
 
 echo "${dim}Register provider webhooks against:${reset}" >&2
-echo "${dim}  Clerk  ${base_url}/webhooks/clerk/link-orgs${reset}" >&2
+echo "${dim}  Clerk  ${base_url}/webhooks/clerk${reset}" >&2
 echo "${dim}  Ramps  ${base_url}/webhooks/payments/ramps/sandbox/<provider>${reset}" >&2
 
 exec ngrok http ${WEBHOOK_INGEST_DOMAIN:+--url="${WEBHOOK_INGEST_DOMAIN}"} "${port}"

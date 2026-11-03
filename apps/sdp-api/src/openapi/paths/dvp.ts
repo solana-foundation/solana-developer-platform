@@ -12,11 +12,12 @@
 
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { errorResponseSchema } from "@/openapi/schemas/base";
+import { errorResponseSchema, successResponseSchema } from "@/openapi/schemas/base";
 import {
   createDvpTradeRequestSchema,
   dvpCloseRefusalErrorResponseSchema,
   dvpLegRefusalErrorResponseSchema,
+  dvpMintInspectionSchema,
   dvpTradeIdParamSchema,
   fundDvpTradeRequestSchema,
   listDvpTradesQuerySchema,
@@ -41,13 +42,38 @@ const tradeIdPathParams = z.object({ tradeId: dvpTradeIdParamSchema });
 
 export function registerDvpPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
+    method: "get",
+    path: "/v1/dvp/mints/{mint}",
+    tags: [DVP_TAG],
+    summary: "Inspect a DvP mint",
+    operationId: "inspectDvpMint",
+    description:
+      "Reads a mint's owning token program, decimals, inline metadata, and DvP eligibility. Unknown decimals remain null; an upstream read failure is an error rather than a negative eligibility result. Invalid addresses or accounts that are not mints return 404. This route has the same authentication, project scope, and feature gates as other DvP reads.",
+    security: [{ apiKeyAuth: [] }],
+    request: { headers: projectScopeHeaders, params: z.object({ mint: z.string().min(1) }) },
+    responses: {
+      200: {
+        description: "Mint inspection",
+        content: jsonContent(
+          successResponseSchema(
+            z.object({
+              mint: dvpMintInspectionSchema,
+            })
+          )
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 500, 502]),
+    },
+  });
+
+  registry.registerPath({
     method: "post",
     path: "/v1/dvp/trades",
     tags: [DVP_TAG],
     summary: "Create a DvP trade",
     operationId: "createDvpTrade",
     description:
-      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Send an Idempotency-Key: a retry after an ambiguous broadcast returns the original trade, because without one the retry draws a fresh nonce and creates a SECOND trade at a different address while the first sits on chain with a published escrow nobody is watching. Only the SDP custody wallet signs: the counterparty signs nothing here and needs no integration, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
+      "Creates a delivery-versus-payment trade on chain and returns the escrow addresses to publish. Send an Idempotency-Key: a retry after an ambiguous broadcast returns the original trade, because without one the retry draws a fresh nonce and creates a SECOND trade at a different address while the first sits on chain with a published escrow nobody is watching. Creation requires no counterparty signature and commits neither leg's funds, so a created trade is a proposal rather than an agreement. It is also permissionless on chain — anyone can create a trade naming anyone, and the economic terms are not part of the account address, so whoever funds a leg must verify the stored terms first. Returns 403 when DvP is not enabled for the environment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -104,7 +130,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "Fund your leg of a DvP trade",
     operationId: "fundDvpTrade",
     description:
-      "Moves your side of the trade from its custody wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of funding again. Requires `dvp.execute`; a caller without it is refused with 403 INSUFFICIENT_PERMISSIONS before anything is signed. The transfer runs immediately and only ever sends what is still outstanding.",
+      "Moves your side of the trade from its connected wallet into that leg's escrow. The counterparty needs nothing from this endpoint — they fund their own leg with an ordinary TransferChecked to the escrow address, which is the whole of their integration. The amount is the trade's, not a parameter: over-funding is a settlement risk, because settlement refunds the surplus and on a transfer-hook mint that refund can revert the whole settlement. Refuses a leg that is already funded, and refuses a frozen escrow with the reason rather than letting the transfer bounce; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of funding again. Requires `dvp.execute`; a caller without it is refused with 403 INSUFFICIENT_PERMISSIONS before anything is signed. The transfer runs immediately and only ever sends what is still outstanding.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,
@@ -125,7 +151,7 @@ export function registerDvpPaths(registry: OpenAPIRegistry) {
     summary: "Reclaim your leg of a DvP trade",
     operationId: "reclaimDvpTrade",
     description:
-      "Moves whatever your side's escrow holds back to the custody wallet at that side's party address, creating its token account first if needed. The trade stays open and the leg can be funded again. Works before and after expiry. Only the leg's own party can reclaim, so a counterparty's leg is theirs to pull back. Refuses a closed trade, an empty escrow, a leg whose funding is still in flight, and a transfer-hook mint; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of reclaiming again. Requires only `dvp.manage`, not `dvp.execute`: this is the party's way back out of an escrow, and a key that can no longer fund must still be able to recover the deposit.",
+      "Moves whatever your side's escrow holds back to the connected wallet at that side's party address, creating its token account first if needed. The trade stays open and the leg can be funded again. Works before and after expiry. Only the leg's own party can reclaim, so a counterparty's leg is theirs to pull back. Refuses a closed trade, an empty escrow, a leg whose funding is still in flight, and a transfer-hook mint; each refusal names its reason in error.details.reason. Send an Idempotency-Key: a retry with the same key returns the first request's result instead of reclaiming again. Requires only `dvp.manage`, not `dvp.execute`: this is the party's way back out of an escrow, and a key that can no longer fund must still be able to recover the deposit.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeWithIdempotencyHeaders,

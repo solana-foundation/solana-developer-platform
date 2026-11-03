@@ -46,7 +46,7 @@ function activeKnownProviders(configs: readonly CustodyConfigSummary[]): KnownCu
 async function getCustodyConfigs(
   request: SdpApiClient["request"]
 ): Promise<{ configs: CustodyConfigSummary[] }> {
-  const res = await request("/v1/wallets/configs");
+  const res = await request("/v1/wallets/managed-signing/configurations");
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`SDP API request failed (${res.status}): ${body}`);

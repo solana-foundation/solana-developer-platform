@@ -58,7 +58,7 @@ it("an HTTP retry after lost submit responses preserves one deposit intent", asy
           },
         });
       }
-      if (path.endsWith("/deposit-transactions")) {
+      if (path.endsWith("/deposits/build-unsigned-transaction")) {
         builds += 1;
         return Response.json({
           data: {
@@ -72,7 +72,7 @@ it("an HTTP retry after lost submit responses preserves one deposit intent", asy
           },
         });
       }
-      if (path.endsWith("/deposits")) {
+      if (path.endsWith("/deposits/submit-signed-transaction")) {
         submitCalls += 1;
         const key = new Headers(init?.headers).get("Idempotency-Key");
         if (!key) throw new Error("Missing submit key");

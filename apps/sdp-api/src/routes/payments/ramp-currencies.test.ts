@@ -40,9 +40,13 @@ function buildApp(environment: "sandbox" | "production" = "sandbox") {
     await next();
   });
 
-  app.get("/v1/payments/ramps/onramp/currency", requireAction("onramp.read"), listOnrampCurrencies);
   app.get(
-    "/v1/payments/ramps/offramp/currency",
+    "/v1/payments/ramps/onramp/supported-pairs",
+    requireAction("onramp.read"),
+    listOnrampCurrencies
+  );
+  app.get(
+    "/v1/payments/ramps/offramp/supported-pairs",
     requireAction("offramp.read"),
     listOfframpCurrencies
   );
@@ -69,7 +73,7 @@ function sortedProvidersFromPairs(pairs: readonly CurrencyPair[]): string[] {
 describe("ramp currency provider details", () => {
   it("returns on-ramp providerDetails keyed by the providers present in source and dest filtered pairs", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana",
+      "/v1/payments/ramps/onramp/supported-pairs?source=USD&dest=usdc.solana",
       {},
       env
     );
@@ -87,7 +91,7 @@ describe("ramp currency provider details", () => {
 
   it("narrows on-ramp providerDetails when the provider query filter is present", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana&provider=stripe",
+      "/v1/payments/ramps/onramp/supported-pairs?source=USD&dest=usdc.solana&provider=stripe",
       {},
       env
     );
@@ -101,7 +105,7 @@ describe("ramp currency provider details", () => {
 
   it("returns off-ramp providerDetails keyed by the providers present in source and dest filtered pairs", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD",
+      "/v1/payments/ramps/offramp/supported-pairs?source=usdc.solana&dest=USD",
       {},
       env
     );
@@ -114,7 +118,7 @@ describe("ramp currency provider details", () => {
 
   it("narrows off-ramp providerDetails when the provider query filter is present", async () => {
     const response = await buildApp().request(
-      "/v1/payments/ramps/offramp/currency?source=usdc.solana&dest=USD&provider=moonpay",
+      "/v1/payments/ramps/offramp/supported-pairs?source=usdc.solana&dest=USD&provider=moonpay",
       {},
       env
     );
@@ -129,7 +133,7 @@ describe("ramp currency provider details", () => {
   it("omits un-surfaced providers from listings even when the support matrix includes them", async () => {
     for (const direction of ["onramp", "offramp"] as const) {
       const response = await buildApp().request(
-        `/v1/payments/ramps/${direction}/currency`,
+        `/v1/payments/ramps/${direction}/supported-pairs`,
         {},
         env
       );

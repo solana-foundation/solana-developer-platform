@@ -307,7 +307,7 @@ async function requestEarnAsClerk(
   );
 }
 
-const PROGRAMS_PATH = "/v1/earn/programs";
+const PROGRAMS_PATH = "/v1/earn/portfolio-accounts";
 const programPath = (programId: string, suffix: string) => `${PROGRAMS_PATH}/${programId}${suffix}`;
 
 const createProgramBody = (extra: Record<string, unknown>) => ({
@@ -402,7 +402,7 @@ afterEach(async () => {
   await clearKVStores(env);
 });
 
-describe("Earn program — POST /programs (create) and PUT /programs/:id (re-target)", () => {
+describe("Earn program — POST /portfolio-accounts (create) and PUT /portfolio-accounts/:id/allocation (re-target)", () => {
   it("creates a program, then re-targets that program in place", async () => {
     await seedAuth({ entitleGround: true });
     await seedUpshiftStrategy({ environment: "sandbox" });
@@ -447,7 +447,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -492,7 +492,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
         requestId: retargetRequestId,
@@ -520,7 +520,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
     const headerKey = "retarget-9f2b";
     const retargeted = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       { allocations: VALID_ALLOCATIONS },
       { "Idempotency-Key": headerKey }
     );
@@ -531,7 +531,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const both = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       { allocations: VALID_ALLOCATIONS, requestId: crypto.randomUUID() },
       { "Idempotency-Key": headerKey }
     );
@@ -547,7 +547,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const unentitled = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -564,7 +564,7 @@ describe("Earn program — POST /programs (create) and PUT /programs/:id (re-tar
 
     const noCredentials = await requestEarn(
       "PUT",
-      programPath(reseeded.id, ""),
+      programPath(reseeded.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -1041,13 +1041,13 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
 
     const createdA = await requestEarn(
       "POST",
-      programPath(a.id, "/withdrawals"),
+      programPath(a.id, "/withdrawals/execute"),
       withdrawalBody({ requestId: crypto.randomUUID() }),
       {}
     );
     const createdB = await requestEarn(
       "POST",
-      programPath(b.id, "/withdrawals"),
+      programPath(b.id, "/withdrawals/execute"),
       withdrawalBody({ requestId: crypto.randomUUID() }),
       {}
     );
@@ -1090,13 +1090,13 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     const shared = "00000000-0000-4000-8000-000000000000";
     const fromA = await requestEarn(
       "POST",
-      programPath(a.id, "/withdrawals"),
+      programPath(a.id, "/withdrawals/execute"),
       withdrawalBody({ requestId: shared }),
       {}
     );
     const fromB = await requestEarn(
       "POST",
-      programPath(b.id, "/withdrawals"),
+      programPath(b.id, "/withdrawals/execute"),
       withdrawalBody({ requestId: shared }),
       {}
     );
@@ -1125,7 +1125,7 @@ describe("Earn programs — many per (organization, environment) (PRO-1670)", ()
     });
     await requestEarn(
       "POST",
-      programPath(b.id, "/withdrawals"),
+      programPath(b.id, "/withdrawals/execute"),
       withdrawalBody({ requestId: crypto.randomUUID() }),
       {}
     );
@@ -1280,7 +1280,7 @@ describe("Earn program — live reads", () => {
   it.each<[string, string, string, Record<string, unknown> | undefined]>([
     ["program", "GET", "", undefined],
     ["deposits", "GET", "/deposits", undefined],
-    ["withdrawal preview", "POST", "/withdrawal-preview", { amountUsd: "25.50", token: "usdc" }],
+    ["withdrawal preview", "POST", "/withdrawals/preview", { amountUsd: "25.50", token: "usdc" }],
   ])("404s another project's program on %s", async (_name, method, suffix, body) => {
     await seedAuth({ entitleGround: true });
     const program = await seedProgramWallet({});
@@ -1432,7 +1432,7 @@ describe("Earn program — un-surfaced provider", () => {
 
     const retarget = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: VALID_ALLOCATIONS,
       },
@@ -1443,7 +1443,7 @@ describe("Earn program — un-surfaced provider", () => {
 
     const withdrawal = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       {
         requestId: "0a1f4c2e-9b6d-4e83-8a11-5c7d2e9f4b60",
         amountUsd: "25.50",
@@ -1463,7 +1463,7 @@ describe("Earn program — un-surfaced provider", () => {
 
     const res = await requestEarn(
       "PUT",
-      programPath(program.id, ""),
+      programPath(program.id, "/allocation"),
       {
         allocations: [
           { token: "usdc", entries: [{ yieldSourceId: "not-in-catalogue", pct: 100 }] },
@@ -1493,7 +1493,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const previewRes = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       {
         amountUsd: "25.50",
         token: "usdc",
@@ -1511,7 +1511,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const withdrawalRes = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       {
         requestId: "5b0e0c9a-7f3d-4a21-9c46-2f8ab1d5e740",
         amountUsd: "25.50",
@@ -1555,7 +1555,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawal-preview"),
+        programPath(program.id, "/withdrawals/preview"),
         {
           token: "usdc",
         },
@@ -1582,7 +1582,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         {
           requestId: "0b1f2c3d-4e5a-4b6c-8d9e-0f1a2b3c4d5e",
           token: "usdc",
@@ -1603,7 +1603,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawal-preview"),
+        programPath(program.id, "/withdrawals/preview"),
         {
           token: "usdc",
         },
@@ -1636,13 +1636,13 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const callerKey = "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d";
       const first = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({ requestId: callerKey }),
         {}
       );
       const retry = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({ requestId: callerKey }),
         {}
       );
@@ -1676,7 +1676,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const shared = "00000000-0000-4000-8000-000000000000";
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({ requestId: shared }),
         {}
       );
@@ -1702,7 +1702,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
       const headers = { "Idempotency-Key": "checkout-9f2b" };
       const first = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({}),
         headers
       );
@@ -1715,7 +1715,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const retry = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({}),
         headers
       );
@@ -1742,12 +1742,22 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
         .spyOn(portfolioClient, "createPortfolioWithdrawal")
         .mockResolvedValue(WITHDRAWAL);
 
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody({}), {
-        "Idempotency-Key": "payout-a",
-      });
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), withdrawalBody({}), {
-        "Idempotency-Key": "payout-b",
-      });
+      await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals/execute"),
+        withdrawalBody({}),
+        {
+          "Idempotency-Key": "payout-a",
+        }
+      );
+      await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals/execute"),
+        withdrawalBody({}),
+        {
+          "Idempotency-Key": "payout-b",
+        }
+      );
 
       const [a, b] = createWithdrawal.mock.calls;
       expect(required(required(a)[1]).requestId).not.toBe(required(required(b)[1]).requestId);
@@ -1762,7 +1772,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({ requestId: "0d7fbb1e-9b26-4b8f-8f5e-2a1f4a3b6c9d" }),
         { "Idempotency-Key": "checkout-9f2b" }
       );
@@ -1780,7 +1790,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
       const res = await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         withdrawalBody({}),
         {}
       );
@@ -1797,7 +1807,7 @@ describe("Earn program — withdrawals (ADR 0002 exit safety)", () => {
 
     const res = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       {
         amountUsd: "10.00",
         token: "usdc",
@@ -1844,7 +1854,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
     const res = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       createBody({}),
       {}
     );
@@ -1881,7 +1891,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
     const first = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       createBody({}),
       {}
     );
@@ -1889,7 +1899,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
     const conflicting = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       createBody({ amountUsd: "11.00" }),
       {}
     );
@@ -1911,14 +1921,14 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
 
     const first = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       createBody({ amountUsd: "10.00" }),
       {}
     );
 
     const retry = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       createBody({ amountUsd: "10" }),
       {}
     );
@@ -1940,7 +1950,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       completedAt: "2026-08-11T05:00:00.000Z",
     });
 
-    await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
+    await requestEarn("POST", programPath(program.id, "/withdrawals/execute"), createBody({}), {});
     const res = await requestEarn(
       "GET",
       programPath(program.id, `/withdrawals/${WITHDRAWAL.withdrawalRef}`),
@@ -2042,7 +2052,7 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
     expect(getWithdrawal).not.toHaveBeenCalled();
   });
 
-  describe("GET /programs/:programId/withdrawals — the ledger list", () => {
+  describe("GET /portfolio-accounts/:programId/withdrawals — the ledger list", () => {
     it("returns the house list envelope from the ledger, newest first", async () => {
       await seedAuth({ entitleGround: true });
       const program = await seedProgramWallet({});
@@ -2051,13 +2061,13 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
         .mockResolvedValueOnce({ ...WITHDRAWAL, withdrawalRef: "wd_b", status: "completed" });
       await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         createBody({ requestId: crypto.randomUUID(), amountUsd: "10.00" }),
         {}
       );
       await requestEarn(
         "POST",
-        programPath(program.id, "/withdrawals"),
+        programPath(program.id, "/withdrawals/execute"),
         createBody({ requestId: crypto.randomUUID(), amountUsd: "20.00" }),
         {}
       );
@@ -2108,7 +2118,12 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       await seedAuth({ entitleGround: true });
       const program = await seedProgramWallet({});
       vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
+      await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals/execute"),
+        createBody({}),
+        {}
+      );
 
       env.UPSHIFT_SANDBOX_API_KEY = undefined;
       const live = await requestEarn("GET", programPath(program.id, ""), undefined, {});
@@ -2138,7 +2153,12 @@ describe("Earn program — withdrawal ledger (PRO-1628)", () => {
       await seedClerkAuth();
       const program = await seedProgramWallet({});
       vi.spyOn(portfolioClient, "createPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
-      await requestEarn("POST", programPath(program.id, "/withdrawals"), createBody({}), {});
+      await requestEarn(
+        "POST",
+        programPath(program.id, "/withdrawals/execute"),
+        createBody({}),
+        {}
+      );
 
       const res = await requestEarnAsClerk(
         "GET",
@@ -2226,7 +2246,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     const res = await requestAsWalletScopedKey(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       withdrawBody({})
     );
 
@@ -2247,7 +2267,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     const res = await requestAsWalletScopedKey(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       { token: "usdc" }
     );
 
@@ -2262,7 +2282,7 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
 
     const res = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       withdrawBody({ requestId: "1d7f9a30-4c21-4f0e-9f66-2b8a51c7e0d4" }),
       {}
     );
@@ -2281,10 +2301,20 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     vi.spyOn(portfolioClient, "getPortfolioWithdrawal").mockResolvedValue(WITHDRAWAL);
     const body = withdrawBody({ requestId: "b5a0c9e2-8d14-4b73-9c5f-0e6a2d8f4713" });
 
-    const first = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
+    const first = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals/execute"),
+      body,
+      {}
+    );
     expect(first.status).toBe(201);
 
-    const retried = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
+    const retried = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals/execute"),
+      body,
+      {}
+    );
     expect(retried.status).toBe(200);
 
     expect(createWithdrawal).toHaveBeenCalledTimes(1);
@@ -2300,8 +2330,8 @@ describe("Earn program — withdrawal authorization (HOO-1559)", () => {
     const body = withdrawBody({ requestId: "c9d3e5a1-7b24-4f68-a0c2-3e5b7d9f1a46" });
 
     const responses = await Promise.all([
-      requestEarn("POST", programPath(program.id, "/withdrawals"), body, {}),
-      requestEarn("POST", programPath(program.id, "/withdrawals"), body, {}),
+      requestEarn("POST", programPath(program.id, "/withdrawals/execute"), body, {}),
+      requestEarn("POST", programPath(program.id, "/withdrawals/execute"), body, {}),
     ]);
 
     expect(responses.map((response) => response.status).sort()).not.toContain(409);
@@ -2351,7 +2381,7 @@ describe("Earn program — metered quotas", () => {
 
     const liquidity = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawal-preview"),
+      programPath(program.id, "/withdrawals/preview"),
       {
         token: "usdc",
       },
@@ -2362,7 +2392,7 @@ describe("Earn program — metered quotas", () => {
 
     const withdrawal = await requestEarn(
       "POST",
-      programPath(program.id, "/withdrawals"),
+      programPath(program.id, "/withdrawals/execute"),
       {
         requestId: "2e8b1f47-5c93-4a2d-8e16-9d4f0a7b3c25",
         amountUsd: "25.50",
@@ -2389,7 +2419,12 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
       destinationAddress: SOLANA_DESTINATION,
     };
 
-    const res = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
+    const res = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals/execute"),
+      body,
+      {}
+    );
     expect(res.status).toBe(201);
 
     const movement = await getDb(env)
@@ -2417,7 +2452,12 @@ describe("Earn program: withdrawal audit parity (PRO-1866)", () => {
     });
     expect(feed.some((entry) => entry.resourceId === required(movement).id)).toBe(true);
 
-    const replay = await requestEarn("POST", programPath(program.id, "/withdrawals"), body, {});
+    const replay = await requestEarn(
+      "POST",
+      programPath(program.id, "/withdrawals/execute"),
+      body,
+      {}
+    );
     expect(replay.status).toBe(200);
     await expect(auditRows()).resolves.toHaveLength(1);
   });

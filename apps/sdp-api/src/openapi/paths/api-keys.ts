@@ -29,7 +29,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "List API keys",
     operationId: "listApiKeys",
-    description: "Lists API keys for the authenticated organization.",
+    description: "Lists API keys in the selected project of the authenticated organization.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -49,7 +49,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Create API key",
     operationId: "createApiKey",
-    description: "Creates a new API key. The full key is returned once.",
+    description: "Creates a new API key in the selected project. The full key is returned once.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -73,7 +73,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Get API key",
     operationId: "getApiKey",
-    description: "Gets API key details by id.",
+    description: "Gets API key details by id within the selected project.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -96,7 +96,8 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Update API key",
     operationId: "updateApiKey",
-    description: "Updates API key attributes. Use null to clear optional fields.",
+    description:
+      "Updates API key attributes in the selected project. Use null to clear optional fields.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -123,7 +124,8 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
     tags: ["API Keys"],
     summary: "Rotate API key",
     operationId: "rotateApiKey",
-    description: "Rotates an API key and returns the new key plus the old key grace period.",
+    description:
+      "Rotates an API key in the selected project. The new key is returned once, with the old key rotation deadline. An already-rotated key returns 409 and names its existing replacement.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -140,7 +142,7 @@ export function registerApiKeyPaths(registry: OpenAPIRegistry) {
         description: "API key rotated",
         content: jsonContent(apiKeyRotateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

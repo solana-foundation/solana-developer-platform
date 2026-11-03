@@ -46,7 +46,7 @@ describe("custody setup page", () => {
       organization: { id: "org_test" },
     });
     mocks.projectRequest.mockImplementation(async (path: string) => {
-      if (path === "/v1/wallets/configs") {
+      if (path === "/v1/wallets/managed-signing/configurations") {
         return Response.json({ data: { configs: [] } });
       }
       if (path.startsWith("/internal/dashboard/custody/connections?")) {

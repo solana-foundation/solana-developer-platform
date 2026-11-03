@@ -11,8 +11,9 @@ export function registerOnboardingPaths(registry: OpenAPIRegistry) {
     tags: ["Onboarding"],
     summary: "Get onboarding status",
     operationId: "getOnboardingStatus",
-    description: "Returns whether the active Clerk organization is linked.",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Reads the active Clerk organization's SDP link and onboarding setup. Requires a Clerk session with an organization claim and usable email, even when that Clerk organization has not been linked to SDP. API keys are not accepted. No project selection or tenant action is required. An unlinked organization returns linked: false with organization and setup null. A linked organization returns its details and default sandbox project's custody setup, including canManage. The API enforces active membership or a valid pending invitation. This read never provisions an organization, advances setup, or polls for linkage.",
+    security: [{ clerkBearerAuth: [] }],
     responses: {
       200: {
         description: "Onboarding status",

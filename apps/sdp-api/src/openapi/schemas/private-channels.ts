@@ -3,6 +3,7 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUS_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPE_VALUES,
   PRIVATE_CHANNEL_EVENT_TYPES,
+  type PrivateChannelPrincipalDto,
 } from "@sdp/types/private-channels";
 import { z } from "zod";
 import { privateChannelTransferAmountSchema } from "@/lib/private-channel-transfer-amount";
@@ -253,7 +254,7 @@ export const privateChannelDepositSchema = z
     instanceId: z.string(),
     organizationId: z.string(),
     projectId: z.string(),
-    walletId: z.string().openapi({ description: "Custody wallet the deposit is signed from." }),
+    walletId: z.string().openapi({ description: "Connected wallet the deposit is signed from." }),
     depositor: solanaAddressSchema,
     recipient: solanaAddressSchema.openapi({
       description: "Address credited in the channel (defaults to the depositor).",
@@ -288,7 +289,7 @@ export const privateChannelDepositListSchema = z.object({
 export const createPrivateChannelDepositBodySchema = z
   .object({
     walletId: z.string().min(1).openapi({
-      description: "Source custody wallet (walletId or public key).",
+      description: "Source connected wallet (walletId or public key).",
       example: "wlt_…",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
@@ -319,13 +320,11 @@ export const privateChannelDepositIdParamSchema = z.object({
 export const privateChannelVerifiedWalletSchema = z
   .object({
     id: z.string().openapi({ example: "pcvw_9f1c..." }),
-    walletId: z
-      .string()
-      .openapi({ description: "SDP managed custody wallet id.", example: "wallet_123" }),
+    walletId: z.string().openapi({ description: "Connected wallet ID.", example: "wallet_123" }),
     pubkey: solanaAddressSchema,
     verifiedAt: z.string(),
   })
-  .openapi({ description: "A custody wallet verified with the connected SPC instance." });
+  .openapi({ description: "A connected wallet verified with the connected SPC instance." });
 
 export const privateChannelVerifiedWalletListSchema = z.object({
   wallets: z.array(privateChannelVerifiedWalletSchema),
@@ -337,7 +336,7 @@ export const privateChannelVerifyWalletParamSchema = z.object({
     .min(1)
     .openapi({
       param: { name: "walletId", in: "path" },
-      description: "SDP managed custody wallet id to verify.",
+      description: "Connected wallet ID to verify.",
       example: "wallet_123",
     }),
 });
@@ -369,7 +368,7 @@ export const privateChannelWithdrawalSchema = z
     projectId: z.string(),
     walletId: z
       .string()
-      .openapi({ description: "Custody wallet whose channel-chain balance is burned." }),
+      .openapi({ description: "Connected wallet whose channel-chain balance is burned." }),
     owner: solanaAddressSchema.openapi({
       description: "Channel-chain address whose token balance is burned.",
     }),
@@ -405,7 +404,7 @@ export const privateChannelWithdrawalListSchema = z.object({
 export const createPrivateChannelWithdrawalBodySchema = z
   .object({
     walletId: z.string().min(1).openapi({
-      description: "Custody wallet to burn from (walletId or public key).",
+      description: "Connected wallet to burn from (walletId or public key).",
       example: "wlt_…",
     }),
     amount: withOpenApi(privateChannelTransferAmountSchema, {
@@ -440,7 +439,7 @@ export const privateChannelTransferSchema = z
     projectId: z.string(),
     instanceId: z.string(),
     channelId: z.string(),
-    walletId: z.string().openapi({ description: "Custody wallet used to sign the transfer." }),
+    walletId: z.string().openapi({ description: "Connected wallet used to sign the transfer." }),
     sender: solanaAddressSchema,
     recipient: solanaAddressSchema,
     mint: solanaAddressSchema,
@@ -469,7 +468,7 @@ const privateChannelTransferRecipientSchema = z
     id: z.string().openapi({ description: "Opaque verified-wallet id." }),
     pubkey: solanaAddressSchema,
     walletName: z.string().nullable().openapi({
-      description: "User-assigned custody wallet name, when available.",
+      description: "User-assigned connected wallet name, when available.",
     }),
     privateChannelUserId: z.string().openapi({
       description: "Opaque private-channel principal id that owns this verified wallet.",
@@ -490,7 +489,7 @@ export const privateChannelTransferRecipientListSchema = z.object({
 export const createPrivateChannelTransferBodySchema = z
   .object({
     walletId: z.string().min(1).openapi({
-      description: "Verified SDP custody wallet controlled by the project's default principal.",
+      description: "Verified connected wallet controlled by the project's default principal.",
       example: "wallet_123",
     }),
     recipientVerifiedWalletId: z.string().min(1).openapi({
@@ -630,4 +629,28 @@ export const privateChannelEventsQuerySchema = z.object({
       param: { name: "before", in: "query" },
       description: "Opaque pagination cursor from a previous response's nextCursor.",
     }),
+});
+
+/** Existing internal project identities; never SDP members or SPC credentials. */
+export const privateChannelPrincipalSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isDefault: z.boolean(),
+  status: z.enum(["active", "disabled"]),
+  verifiedWalletCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  channels: z.array(z.object({ id: z.string(), name: z.string(), isDefault: z.boolean() })),
+}) satisfies z.ZodType<PrivateChannelPrincipalDto>;
+
+export const privateChannelPrincipalIdParamSchema = z.object({
+  principalId: z.string().min(1),
+});
+
+/** The current membership handler returns its persisted, snake-case row. */
+export const privateChannelMembershipSchema = z.object({
+  id: z.string(),
+  channel_id: z.string(),
+  private_channel_user_id: z.string(),
+  added_by: z.string().nullable(),
+  added_at: z.string(),
 });

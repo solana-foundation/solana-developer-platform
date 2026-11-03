@@ -241,14 +241,14 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const wallet = await createFundedIntegrationWallet({ label: "Jupiter treasury" });
     await fundUsdt(wallet.publicKey);
 
-    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+    const depositPreview = await post<DepositPreview>("/v1/earn/deposits/preview", {
       strategyId,
       amount: DEPOSIT_AMOUNT,
     });
     expect(depositPreview.blockingIssues).toEqual([]);
     const minSharesOut = floorFromQuote(depositPreview.sharesOut, depositPreview.shareDecimals);
 
-    await expectSlippageRefusal("/v1/earn/vault-deposits", {
+    await expectSlippageRefusal("/v1/earn/deposits/execute", {
       strategyId,
       custodyWalletId: wallet.id,
       amount: DEPOSIT_AMOUNT,
@@ -256,7 +256,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     });
 
     const deposited = await post<EarnVaultDeposit>(
-      "/v1/earn/vault-deposits",
+      "/v1/earn/deposits/execute",
       {
         strategyId,
         custodyWalletId: wallet.id,
@@ -270,24 +270,27 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const holding = await waitForShares(wallet.publicKey, false);
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
-    const withdrawalPreview = await post<WithdrawalPreview>("/v1/earn/vault-withdrawal-previews", {
-      positionId: deposited.positionId,
-      shares: holding?.shares ?? "0",
-    });
+    const withdrawalPreview = await post<WithdrawalPreview>(
+      "/v1/earn/withdrawals/provider-signed/preview",
+      {
+        positionId: deposited.positionId,
+        shares: holding?.shares ?? "0",
+      }
+    );
     expect(withdrawalPreview.blockingIssues).toEqual([]);
     const minAmountOut = floorFromQuote(
       withdrawalPreview.assetsOut,
       withdrawalPreview.assetDecimals
     );
 
-    await expectSlippageRefusal("/v1/earn/vault-withdrawals", {
+    await expectSlippageRefusal("/v1/earn/withdrawals/execute", {
       positionId: deposited.positionId,
       shares: holding?.shares ?? "0",
       minAmountOut: "1000000",
     });
 
     const withdrawn = await post<EarnVaultWithdrawalResponse>(
-      "/v1/earn/vault-withdrawals",
+      "/v1/earn/withdrawals/execute",
       {
         positionId: deposited.positionId,
         shares: holding?.shares ?? "0",
@@ -305,7 +308,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     await fundSol(ownerAddress);
     await fundUsdt(ownerAddress);
 
-    const depositPreview = await post<DepositPreview>("/v1/earn/vault-deposit-previews", {
+    const depositPreview = await post<DepositPreview>("/v1/earn/deposits/preview", {
       strategyId,
       amount: DEPOSIT_AMOUNT,
     });
@@ -313,11 +316,11 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     const minSharesOut = floorFromQuote(depositPreview.sharesOut, depositPreview.shareDecimals);
 
     const depositBuild = await post<EarnExternalWalletDepositTransactionResponse>(
-      "/v1/earn/external-wallet/deposit-transactions",
+      "/v1/earn/deposits/build-unsigned-transaction",
       { strategyId, ownerAddress, amount: DEPOSIT_AMOUNT, minSharesOut }
     );
     const depositResult = await post<EarnExternalWalletDepositResponse>(
-      "/v1/earn/external-wallet/deposits",
+      "/v1/earn/deposits/submit-signed-transaction",
       {
         transactionId: depositBuild.transaction.transactionId,
         signedTransaction: await signBuilt(depositBuild.transaction.transaction, ownerKeyPair),
@@ -330,7 +333,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     expect(Number(holding?.shares ?? "0")).toBeGreaterThan(0);
 
     const withdrawalPreview = await post<WithdrawalPreview>(
-      "/v1/earn/external-wallet/withdrawal-previews",
+      "/v1/earn/withdrawals/caller-signed/preview",
       { positionId: depositResult.deposit.positionId, shares: holding?.shares ?? "0" }
     );
     expect(withdrawalPreview.blockingIssues).toEqual([]);
@@ -340,7 +343,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
     );
 
     const withdrawalBuild = await post<EarnExternalWalletWithdrawalTransactionResponse>(
-      "/v1/earn/external-wallet/withdrawal-transactions",
+      "/v1/earn/withdrawals/build-unsigned-transaction",
       {
         positionId: depositResult.deposit.positionId,
         shares: holding?.shares ?? "0",
@@ -348,7 +351,7 @@ describe.skipIf(!ENABLED)("Jupiter Lend USDT through both SDP Earn products", ()
       }
     );
     const withdrawalResult = await post<EarnExternalWalletWithdrawalResponse>(
-      "/v1/earn/external-wallet/withdrawals",
+      "/v1/earn/withdrawals/submit-signed-transaction",
       {
         transactionId: withdrawalBuild.transaction.transactionId,
         signedTransaction: await signBuilt(withdrawalBuild.transaction.transaction, ownerKeyPair),

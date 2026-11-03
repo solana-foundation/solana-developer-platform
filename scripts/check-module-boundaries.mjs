@@ -46,6 +46,12 @@ const MODULE_METADATA = [
     ],
   },
   {
+    name: "@sdp/cli",
+    directory: "apps/sdp-cli",
+    purpose: "SDP command-line client, generated API contracts, and command composition.",
+    allowedDependencies: ["@sdp/types"],
+  },
+  {
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",

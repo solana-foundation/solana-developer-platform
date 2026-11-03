@@ -22,7 +22,10 @@ import {
   privateChannelInstanceSchema,
   privateChannelInstanceUpdateSchema,
   privateChannelListSchema,
+  privateChannelMembershipSchema,
   privateChannelOverviewSchema,
+  privateChannelPrincipalIdParamSchema,
+  privateChannelPrincipalSchema,
   privateChannelProbeBodySchema,
   privateChannelProbeResultSchema,
   privateChannelSchema,
@@ -42,6 +45,10 @@ import {
   privateChannelWithdrawalSchema,
 } from "@/openapi/schemas/private-channels";
 import {
+  addPrincipalMembershipBodySchema,
+  createPrincipalBodySchema,
+} from "@/routes/private-channels/schemas";
+import {
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -53,10 +60,12 @@ const TAG = "Private Channels";
 export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Get the active Private Channels instance for the project",
     operationId: "getPrivateChannelInstance",
+    description:
+      "Reads the active instance for the selected project, or null when disconnected. Requires Private Channels to be enabled in the environment.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -72,16 +81,16 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "patch",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Update the active Private Channels instance",
     operationId: "updatePrivateChannelInstance",
     description:
       "Server-probes the proposed gateway, auth service, and escrow deployment before replacing the active instance configuration.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(privateChannelInstanceUpdateSchema) },
+      body: { required: true, content: jsonContent(privateChannelInstanceUpdateSchema) },
     },
     responses: {
       200: {
@@ -96,16 +105,17 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection/connect",
     tags: [TAG],
     summary: "Connect a Private Channels instance",
     operationId: "connectPrivateChannelInstance",
     description:
       "Server-probes both the gateway (/health + /ready) and the chain RPC (getVersion) before persisting. Returns 409 with `requiresReactivateConfirmation` if the gateway URL matches a previously-connected inactive row.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       body: {
+        required: true,
         content: jsonContent(privateChannelInstanceInputSchema),
       },
     },
@@ -126,6 +136,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Post-connect instance overview (gateway health + chain reads)",
     operationId: "getPrivateChannelOverview",
+    description:
+      "Reads the active instance and a current gateway, managed RPC, escrow deployment, and auth-service snapshot.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -146,11 +158,13 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/instance/disconnect",
+    path: "/v1/private-channels/instance-connection/disconnect",
     tags: [TAG],
     summary: "Disconnect the active Private Channels instance",
     operationId: "disconnectPrivateChannelInstance",
-    security: [{ apiKeyAuth: [] }],
+    description:
+      "Marks the active instance inactive while retaining its configuration and history. Reconnecting an inactive same-gateway row requires explicit confirmReactivate acknowledgement.",
+    security: [{ clerkBearerAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -165,12 +179,12 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/private-channels/instance",
+    path: "/v1/private-channels/instance-connection",
     tags: [TAG],
     summary: "Delete the active Private Channels instance",
     operationId: "deletePrivateChannelInstance",
     description: "Hard-deletes the active row. Downstream FKs cascade.",
-    security: [{ apiKeyAuth: [] }],
+    security: [{ clerkBearerAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
       200: {
@@ -183,7 +197,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "post",
-    path: "/v1/private-channels/probe",
+    path: "/v1/private-channels/instance-connection/probe",
     tags: [TAG],
     summary: "Probe a candidate SPC configuration",
     operationId: "probePrivateChannelConnection",
@@ -192,7 +206,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(privateChannelProbeBodySchema) },
+      body: { required: true, content: jsonContent(privateChannelProbeBodySchema) },
     },
     responses: {
       200: {
@@ -205,7 +219,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/health",
+    path: "/v1/private-channels/instance-connection/check-gateway-health",
     tags: [TAG],
     summary: "Probe a candidate gateway's health",
     operationId: "getPrivateChannelHealth",
@@ -243,7 +257,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/tokens",
+    path: "/v1/private-channels/token-eligibility",
     tags: [TAG],
     summary: "List token eligibility for the active instance",
     operationId: "listPrivateChannelTokenEligibility",
@@ -267,11 +281,11 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a deposit into the channel escrow",
     operationId: "createPrivateChannelDeposit",
     description:
-      "Builds, server-signs, and broadcasts an escrow deposit from a custody wallet to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Accepts a Clerk JWT or an API key. The source `walletId` must be a custody wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and `recipient` must be an address verified on it. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original deposit without a second escrow transfer, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source custody wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new custody signature.",
+      "Builds an escrow deposit from a connected wallet, requests signing through its provider, and broadcasts it to the instance chain (devnet), crediting `recipient` (defaults to the depositor) in the channel. Returns the deposit with its current status (submitted/confirmed, or failed). The credit (`credited`) is detected asynchronously via the gateway balance. Accepts a Clerk JWT or an API key. The source `walletId` must be a connected wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and `recipient` must be an address verified on it. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original deposit without a second escrow transfer, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source connected wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new provider signature.",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { content: jsonContent(createPrivateChannelDepositBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelDepositBodySchema) },
     },
     responses: {
       200: {
@@ -325,11 +339,11 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a withdrawal from the channel balance",
     operationId: "createPrivateChannelWithdrawal",
     description:
-      "Server-signs a burn of the custody wallet's channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Accepts a Clerk JWT or an API key. The burn owner named by `walletId` must be a custody wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and the balance is checked before the burn is broadcast. The `Idempotency-Key` header is REQUIRED: a burn cannot be undone, so an identical retry returns the original withdrawal, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source custody wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new custody signature.",
+      "Requests signing through the connected wallet's provider for a burn of its channel-chain balance and broadcasts it to the gateway; the operator later releases the matching real USDC on devnet to `destination` (defaults to the owner). Returns the withdrawal with its current status (submitted/burn_confirmed, or failed). The release (`released`) is detected asynchronously from the devnet release on the instance ATA. Accepts a Clerk JWT or an API key. The burn owner named by `walletId` must be a connected wallet enrolled under the project's Private Channels principal on this instance (and, for a wallet-scoped API key, one the key is bound to), and the balance is checked before the burn is broadcast. The `Idempotency-Key` header is REQUIRED: a burn cannot be undone, so an identical retry returns the original withdrawal, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source connected wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new provider signature.",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
-      body: { content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelWithdrawalBodySchema) },
     },
     responses: {
       200: {
@@ -405,12 +419,12 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "Create a verified principal-to-principal channel transfer",
     operationId: "createPrivateChannelTransfer",
     description:
-      "Accepts a Clerk JWT or an API key (a wallet-scoped key must be bound to the source wallet). Server-signs with the project's default principal's verified SDP custody wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the caller. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original transfer instead of spending the balance again, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source custody wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new custody signature.",
+      "Accepts a Clerk JWT or an API key (a wallet-scoped key must be bound to the source wallet). Requests signing through the provider for the project's default principal's verified connected wallet and sends only to an opaque verified-wallet recipient returned by the channel recipient endpoint. Records the transfer as `pending` before broadcast, `submitted` once SPC accepts it, then `confirmed` once a signature-status read shows it executed. `failed` covers preparation errors, ingress rejection and execution errors, and may be retried by the caller. Returns once the confirm read resolves; a transfer still `submitted` in the response means that read returned no verdict. The `Idempotency-Key` header is REQUIRED: an identical retry returns the original transfer instead of spending the balance again, while reusing the key for a different request returns 409. New execution requires `private_channels.execute`, re-read at execution, authorization for one unambiguous source connected wallet, and runtime admission before signing setup or an SPC session. Every POST, including a matching replay, requires current `private_channels.execute` and authorization for the original source. A matching recorded result returns without a new signer or runtime admission; read-only access remains on the history GET endpoints. Separately authorized recovery of an abandoned operation may update its recorded state without a new provider signature.",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeWithRequiredIdempotencyHeaders,
       params: privateChannelTransferChannelIdParamSchema,
-      body: { content: jsonContent(createPrivateChannelTransferBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelTransferBodySchema) },
     },
     responses: {
       200: {
@@ -495,7 +509,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
-      body: { content: jsonContent(createPrivateChannelBodySchema) },
+      body: { required: true, content: jsonContent(createPrivateChannelBodySchema) },
     },
     responses: {
       201: {
@@ -512,6 +526,8 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     tags: [TAG],
     summary: "Get a channel",
     operationId: "getPrivateChannel",
+    description:
+      "Reads one logical channel in the active project instance; a channel from another instance is not found.",
     security: [{ apiKeyAuth: [] }],
     request: { headers: projectScopeHeaders, params: privateChannelIdParamSchema },
     responses: {
@@ -548,12 +564,12 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/events/references",
+    path: "/v1/private-channels/events/reference-labels",
     tags: [TAG],
     summary: "List display-name references for events",
     operationId: "listPrivateChannelEventReferences",
     description:
-      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, custody wallet labels (by pubkey and wallet id), principal names (by private-channel-principal id), issued-token symbols (by mint address), and instance gateway URLs. Channels, principals, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets.read` action and selected-wallet scope as the custody endpoints.",
+      "Flat id→name dictionary for enriching Private Channels event feeds: channel names, connected wallet labels (by pubkey and wallet id), principal names (by private-channel-principal id), issued-token symbols (by mint address), and instance gateway URLs. Channels, principals, and instances follow the same viewer rules as the events feed. Token symbols are project-wide, and wallet labels follow the same `wallets.read` action and selected-wallet scope as the wallet endpoints.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -606,12 +622,12 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "get",
-    path: "/v1/private-channels/wallets",
+    path: "/v1/private-channels/verified-wallets",
     tags: [TAG],
     summary: "List the project's verified wallets",
     operationId: "listPrivateChannelVerifiedWallets",
     description:
-      "Lists custody wallets that have completed SPC verification for the project's default principal.",
+      "Lists connected wallets that have completed SPC verification for the project's default principal.",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: { headers: projectScopeHeaders },
     responses: {
@@ -627,15 +643,15 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/private-channels/wallets/{walletId}/verify",
     tags: [TAG],
-    summary: "Verify a custody wallet with the SPC auth service",
+    summary: "Verify a connected wallet with the SPC auth service",
     operationId: "verifyPrivateChannelWallet",
     description:
-      "Runs the SPC challenge → sign → verify handshake for a custody wallet (any SDP provider), then records the verification for the selected project principal (or the default principal when omitted). Requires current `private_channels.execute` and authorization for the specific custody wallet. The exact wallet is admitted before an SPC session or challenge is created. Each request signs a fresh challenge; the resulting verification record is idempotent per (principal, instance, wallet).",
+      "Runs the SPC challenge → sign → verify handshake for a connected wallet (any SDP provider), then records the verification for the selected project principal (or the default principal when omitted). Requires current `private_channels.execute` and authorization for the specific connected wallet. The exact wallet is admitted before an SPC session or challenge is created. Each request signs a fresh challenge; the resulting verification record is idempotent per (principal, instance, wallet).",
     security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
     request: {
       headers: projectScopeHeaders,
       params: privateChannelVerifyWalletParamSchema,
-      body: { content: jsonContent(privateChannelVerifyWalletBodySchema) },
+      body: { required: true, content: jsonContent(privateChannelVerifyWalletBodySchema) },
     },
     responses: {
       200: {
@@ -650,7 +666,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
 
   registry.registerPath({
     method: "delete",
-    path: "/v1/private-channels/wallets/{pubkey}",
+    path: "/v1/private-channels/verified-wallets/{pubkey}",
     tags: [TAG],
     summary: "Revoke a verified wallet",
     operationId: "deletePrivateChannelVerifiedWallet",
@@ -664,6 +680,116 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(successResponseSchema(z.object({ deleted: z.boolean() }))),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500, 503]),
+    },
+  });
+
+  // These mounted routes remain internal along with this entire family.
+  registry.registerPath({
+    method: "get",
+    path: "/v1/private-channels/principals",
+    tags: [TAG],
+    summary: "List project Private Channels principals",
+    operationId: "listPrivateChannelPrincipals",
+    description:
+      "Lists business participants and their channel memberships on the active instance. May provision the default principal and channel membership if missing. These identities are not SDP users; SPC credentials are never returned.",
+    security: [{ apiKeyAuth: [] }, { clerkBearerAuth: [] }],
+    request: { headers: projectScopeHeaders },
+    responses: {
+      200: {
+        description: "Project principals",
+        content: jsonContent(
+          successResponseSchema(z.object({ principals: z.array(privateChannelPrincipalSchema) }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [401, 403, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/private-channels/principals",
+    tags: [TAG],
+    summary: "Create a Private Channels principal",
+    operationId: "createPrivateChannelPrincipal",
+    description:
+      "Provisions a named project-scoped SPC business participant on the active instance. Requires a member session with private_channels.configure; API keys cannot configure principals.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      body: { required: true, content: jsonContent(createPrincipalBodySchema) },
+    },
+    responses: {
+      200: {
+        description: "Created principal",
+        content: jsonContent(
+          successResponseSchema(z.object({ principal: privateChannelPrincipalSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/private-channels/principals/{principalId}",
+    tags: [TAG],
+    summary: "Disable a Private Channels principal",
+    operationId: "disablePrivateChannelPrincipal",
+    description:
+      "Disables a project principal, revokes its verified wallets, and removes its channel memberships. The default principal cannot be disabled. The row and history are retained.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { headers: projectScopeHeaders, params: privateChannelPrincipalIdParamSchema },
+    responses: {
+      200: {
+        description: "Disabled principal",
+        content: jsonContent(successResponseSchema(z.object({ disabled: z.literal(true) }))),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/private-channels/channels/{channelId}/principal-memberships",
+    tags: [TAG],
+    summary: "Add a principal to a private channel",
+    operationId: "addPrivateChannelPrincipalMembership",
+    description:
+      "Grants an active principal on the project's active instance access to a channel on that instance. Returns the existing persisted membership when already attached. No idempotency header is supported.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelTransferChannelIdParamSchema,
+      body: { required: true, content: jsonContent(addPrincipalMembershipBodySchema) },
+    },
+    responses: {
+      200: {
+        description: "Channel membership",
+        content: jsonContent(
+          successResponseSchema(z.object({ membership: privateChannelMembershipSchema }))
+        ),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+    },
+  });
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/private-channels/channels/{channelId}/principal-memberships/{principalId}",
+    tags: [TAG],
+    summary: "Remove a principal from a private channel",
+    operationId: "removePrivateChannelPrincipalMembership",
+    description:
+      "Removes a project principal's channel membership on the active instance. This does not disable the principal or revoke its verified wallets.",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: privateChannelTransferChannelIdParamSchema.extend(
+        privateChannelPrincipalIdParamSchema.shape
+      ),
+    },
+    responses: {
+      200: {
+        description: "Removed membership",
+        content: jsonContent(successResponseSchema(z.object({ removed: z.literal(true) }))),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }
