@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import {
@@ -97,6 +98,7 @@ async function proveDashboardHydrated(page: Page, projectName: string): Promise<
 
 test.describe("GCP dev dashboard read-only smoke", () => {
   let fixture: ReadOnlyFixture;
+  let releaseChannel: SdpReleaseChannel;
 
   test.beforeAll(async ({ browser }) => {
     const env = getE2EEnv();
@@ -111,10 +113,8 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     // Issuance answers 403 outside its release channel (stage on `beta`), so it is
     // read and required only where the API serves it.
-    const issuanceServed = isModuleServed(
-      await fetchApiReleaseChannel(env.sdpApiBaseUrl),
-      "issuance"
-    );
+    releaseChannel = await fetchApiReleaseChannel(env.sdpApiBaseUrl);
+    const issuanceServed = isModuleServed(releaseChannel, "issuance");
     const readIssuanceTransactions = async (api: LocalApiClient, path: string) =>
       issuanceServed ? api.get<TokenTransactionListItem[]>(path) : [];
     fixture = await provisionWithAdminSession(browser, async (session) => {
@@ -344,5 +344,17 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     expect(batchBalanceRequests).toHaveLength(1);
     expect(legacyBalanceRequests).toEqual([]);
     capture.assertClean();
+  });
+
+  test("marks the beta deployment, and only it, beside the organization", async ({ page }) => {
+    await gotoProjectPage(page, fixture.project.id, "/dashboard");
+    await assertExactIdentityAndProject(page, fixture);
+    // Beta shares sign-in with production, so the switcher says which deployment this is.
+    const betaMark = page.getByText("Beta", { exact: true });
+    if (releaseChannel === "beta") {
+      await expect(betaMark.first()).toBeVisible();
+    } else {
+      await expect(betaMark).toHaveCount(0);
+    }
   });
 });

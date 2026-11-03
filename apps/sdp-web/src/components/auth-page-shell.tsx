@@ -1,8 +1,11 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
+import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { externalLinkProps } from "@/components/homepage/homepage-links";
+import { deploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 
 type AuthPageAction = {
@@ -19,6 +22,8 @@ export async function AuthPageShell({
   children: ReactNode;
 }) {
   const t = await getTranslations();
+  // Beta shares sign-in with production, so its sign-in and onboarding pages say which one this is.
+  const isBeta = deploymentReleaseChannel() === "beta";
 
   return (
     <main
@@ -47,7 +52,9 @@ export async function AuthPageShell({
             <span className="w-min text-nav font-medium leading-none text-primary">
               {t("Shared.authShell.productName")}
             </span>
+            {isBeta ? <Badge variant="info">{t("Shared.SharedComponents.betaBadge")}</Badge> : null}
           </div>
+          {isBeta ? <Callout variant="info">{t("Shared.authShell.betaNotice")}</Callout> : null}
           {children}
         </div>
       </div>
