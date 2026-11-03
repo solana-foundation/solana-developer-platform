@@ -30,6 +30,44 @@ function batchPrimaryLabel(wizard: BatchSendWizard, t: ReturnType<typeof useTran
   }
 }
 
+/**
+ * The footer's extra action: the history while a send is held (disabled while
+ * Check status runs, so the held review is never left mid-request), Retry for
+ * a result with failed recipients, or none.
+ */
+function BatchFooterAction({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  switch (true) {
+    case wizard.recovering && wizard.submitting:
+      return (
+        <Button type="button" variant="outline" disabled>
+          {t("DashboardPayments.batchSend.viewTransactions")}
+        </Button>
+      );
+    case wizard.recovering:
+      return (
+        <Button asChild variant="outline">
+          <Link href={wizard.transactionsHref}>
+            {t("DashboardPayments.batchSend.viewTransactions")}
+          </Link>
+        </Button>
+      );
+    case Boolean(wizard.batchResult) && wizard.failedRecipientCount > 0:
+      return (
+        <Button
+          type="button"
+          variant="outline"
+          loading={wizard.retrying}
+          onClick={() => void wizard.retryFailedRecipients()}
+        >
+          {t("DashboardPayments.batchSend.retryFailedRecipients")}
+        </Button>
+      );
+    default:
+      return null;
+  }
+}
+
 export function BatchSendRail({
   wallets,
   walletsError,
@@ -75,24 +113,7 @@ export function BatchSendRail({
           ? t("DashboardPayments.batchSend.addRowsHint")
           : undefined
       }
-      footerActions={
-        wizard.recovering ? (
-          <Button asChild variant="outline">
-            <Link href={wizard.transactionsHref}>
-              {t("DashboardPayments.batchSend.viewTransactions")}
-            </Link>
-          </Button>
-        ) : finished && wizard.failedRecipientCount > 0 ? (
-          <Button
-            type="button"
-            variant="outline"
-            loading={wizard.retrying}
-            onClick={() => void wizard.retryFailedRecipients()}
-          >
-            {t("DashboardPayments.batchSend.retryFailedRecipients")}
-          </Button>
-        ) : null
-      }
+      footerActions={<BatchFooterAction wizard={wizard} />}
       counterpartyDialog={null}
     >
       <BatchSendStepContent wizard={wizard} />

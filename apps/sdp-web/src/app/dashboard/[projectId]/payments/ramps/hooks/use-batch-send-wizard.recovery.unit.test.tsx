@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { resetTransferBatchIdempotencyStateForTests } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
@@ -16,11 +18,8 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), loading: vi.fn(() => "toast-id"), success: vi.fn(), warning: vi.fn() },
-}));
 
-const MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const BATCH_PATH = "/api/dashboard/payments/transfers/batch";
 
 const wallets: PaymentsDashboardWallet[] = [
@@ -112,12 +111,14 @@ async function openReview(result: Wizard) {
   expect(result.current.canProceed).toBe(true);
 }
 
+const sentBatchSchema = z.object({ externalId: z.string().optional() }).passthrough();
+
 function batchSends() {
   return fetchMock.mock.calls
     .filter(([input, init]) => String(input) === BATCH_PATH && init?.method === "POST")
     .map(([, init]) => ({
       key: new Headers(init?.headers).get("Idempotency-Key"),
-      body: JSON.parse(String(init?.body)) as { externalId?: string },
+      body: sentBatchSchema.parse(JSON.parse(String(init?.body))),
     }));
 }
 
