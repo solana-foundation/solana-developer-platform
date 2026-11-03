@@ -232,7 +232,8 @@ function releaseCommitForVersion(version) {
     "log",
     "--format=%H",
     "--extended-regexp",
-    `--grep=^chore\\(main\\): release ${escapeRegExp(version)}$`,
+    // A merge-queue squash may append the pull request number.
+    `--grep=^chore\\(main\\): release ${escapeRegExp(version)}( \\(#[0-9]+\\))?$`,
     "-1",
   ]);
 

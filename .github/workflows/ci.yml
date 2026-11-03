@@ -5,6 +5,8 @@ permissions:
 
 on:
   pull_request:
+  # The merge queue runs the full suite, as a push to main does.
+  merge_group:
   push:
     branches:
       - main
