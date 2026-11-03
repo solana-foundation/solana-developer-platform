@@ -50,12 +50,12 @@ export interface AdmittedSignerContext {
   /**
    * For a Connection (BYOK) wallet: the credential the signer was built from,
    * and a read of the Connection's current usable credential (null when it has
-   * none). Managed and Config wallets omit it.
+   * none). Null for Managed and Config wallets.
    */
-  credential?: {
+  credential: {
     bound: SignerCredentialBinding;
     readCurrent: () => Promise<SignerCredentialBinding | null>;
-  };
+  } | null;
 }
 
 function isSameCredential(

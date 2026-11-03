@@ -723,7 +723,7 @@ export class CustodyRuntimeTargets {
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
     let adapter: SigningPort;
-    let credential: AdmittedSignerContext["credential"];
+    let credential: AdmittedSignerContext["credential"] = null;
     if (target.kind === "config") {
       adapter = await getConfigAdapter(organizationId, target.config);
     } else {
@@ -758,7 +758,7 @@ export class CustodyRuntimeTargets {
         projectId,
         custodyWalletId,
         provider: target.provider,
-        ...(credential ? { credential } : {}),
+        credential,
       }
     );
   }

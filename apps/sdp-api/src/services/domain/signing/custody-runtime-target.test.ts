@@ -1147,6 +1147,7 @@ describe("CustodyRuntimeTargets", () => {
     it("leaves a Config wallet's signer without a credential fence", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
       const connection = await seedConnection(DEFAULT_CONNECTION);
+      // SAFETY: the config adapter factory's signer is a partial signer.
       const signer = (await new CustodyRuntimeTargets(
         getDb(env),
         env,

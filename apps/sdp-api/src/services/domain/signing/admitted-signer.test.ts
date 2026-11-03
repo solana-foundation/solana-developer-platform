@@ -28,6 +28,7 @@ const CONTEXT = {
   projectId: "prj_admitted_signer",
   custodyWalletId: "cwlt_admitted_signer",
   provider: "privy",
+  credential: null,
 } as const;
 
 const ADMITTED: MoneyAdmissionDecision = { admitted: true };
