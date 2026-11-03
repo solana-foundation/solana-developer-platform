@@ -586,7 +586,7 @@ describe("Public payment request routes", () => {
       const paid = await createSystemPaymentRequestsRepository(env).markPaymentRequest({
         requestId: request.id,
         organizationId: request.organization_id,
-        projectId: request.project_id ?? "",
+        projectId: request.project_id,
         status: "paid",
         fulfilledByTransferId: await seedPaymentRequestTransfer(env, request),
         paidLate: false,
@@ -605,20 +605,24 @@ describe("Public payment request routes", () => {
         .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
         .mockImplementation((bindings) => {
           const repository = systemRepository(bindings);
-          const real = repository[method].bind(repository) as (...args: unknown[]) => unknown;
-          let settled = false;
-          vi.spyOn(repository, method).mockImplementation((async (...args: unknown[]) => {
-            if (method === "getSponsoredTransactionClaim" && !settled) {
-              settled = true;
-              await markSeededRequestPaid(request);
-            }
-            const result = await real(...args);
-            if (method === "claimSponsoredTransactionWindow" && !settled) {
-              settled = true;
-              await markSeededRequestPaid(request);
-            }
-            return result;
-          }) as never);
+          if (method === "getSponsoredTransactionClaim") {
+            const read = repository.getSponsoredTransactionClaim.bind(repository);
+            vi.spyOn(repository, "getSponsoredTransactionClaim").mockImplementationOnce(
+              async (requestId) => {
+                await markSeededRequestPaid(request);
+                return read(requestId);
+              }
+            );
+          } else {
+            const claim = repository.claimSponsoredTransactionWindow.bind(repository);
+            vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementationOnce(
+              async (params) => {
+                const claimed = await claim(params);
+                await markSeededRequestPaid(request);
+                return claimed;
+              }
+            );
+          }
           return repository;
         });
       onTestFinished(() => factory.mockRestore());
@@ -684,6 +688,40 @@ describe("Public payment request routes", () => {
       expect(await response.json()).toMatchObject({
         error: { message: "Payment request is no longer payable" },
       });
+      expect(sign).not.toHaveBeenCalled();
+    });
+
+    it("serves the payer's claim another of its posts signed before this one's sign-time read", async () => {
+      const sign = stubCountedSponsorship(sponsorSignTestTransaction);
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          const claim = repository.claimSponsoredTransactionWindow.bind(repository);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementationOnce(
+            async (params) => {
+              const claimed = await claim(params);
+              await systemRepository(bindings).storeSponsoredTransactionSignature({
+                requestId: params.requestId,
+                account: params.account,
+                unsignedTransaction: params.unsignedTransaction,
+                signedTransaction: "c2lnbmVkLWVsc2V3aGVyZQ==",
+              });
+              return claimed;
+            }
+          );
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(200);
+      expect(sponsoredTransactionResponseSchema.parse(await response.json()).transaction).toBe(
+        "c2lnbmVkLWVsc2V3aGVyZQ=="
+      );
       expect(sign).not.toHaveBeenCalled();
     });
 

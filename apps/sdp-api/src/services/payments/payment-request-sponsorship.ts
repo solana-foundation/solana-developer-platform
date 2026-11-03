@@ -3,7 +3,11 @@ import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { isPaymentRequestPayableAt, type PaymentRequestStatus } from "@sdp/types/payments";
+import {
+  isPayablePaymentRequestStatus,
+  isPaymentRequestPayableAt,
+  type PaymentRequestStatus,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
@@ -79,7 +83,7 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * that loaded the claim: the payable snapshot `/pay` started from can be stale by then.
  */
 function assertClaimRequestAwaitingPayment(claim: { requestStatus: PaymentRequestStatus }): void {
-  if (claim.requestStatus !== "awaiting_payment") {
+  if (!isPayablePaymentRequestStatus(claim.requestStatus)) {
     throw badRequest("Payment request is no longer payable");
   }
 }
@@ -210,10 +214,13 @@ export async function issuePaymentRequestTransaction(
     if (
       current === null ||
       current.account !== payer ||
-      current.unsignedTransaction !== unsignedBase64 ||
-      current.signedTransaction !== null
+      current.unsignedTransaction !== unsignedBase64
     ) {
       throw rateLimited("This payment request's sponsored transaction was superseded; retry");
+    }
+    // A concurrent post from the same payer already signed these bytes: serve them.
+    if (current.signedTransaction !== null) {
+      return { kind: "signed", transaction: current.signedTransaction };
     }
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     // The intent is durable before signAsFeePayer reserves budget and Kora
