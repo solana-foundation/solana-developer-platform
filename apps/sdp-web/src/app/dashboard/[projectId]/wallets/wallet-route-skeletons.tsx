@@ -75,14 +75,30 @@ function WalletCardSkeleton() {
   );
 }
 
+/**
+ * The Wallets list's toolbar row in the header's tab row, held while the list loads and in the
+ * states that draw no toolbar (no wallets, a failed read). On a phone, where the tabs are
+ * hidden, the row is the toolbar's alone, so a row that came and went would move the page.
+ *
+ * @param props.loading - A pulse while the list loads; after, an empty hold of the same height.
+ * @returns The hold, portalled into the header's tab row.
+ */
+export function WalletsToolbarRowHold({ loading }: { loading: boolean }) {
+  return (
+    <DashboardHeaderTabsTrailing>
+      {loading ? (
+        <SkeletonBlock className="h-7 w-24" />
+      ) : (
+        <span aria-hidden="true" className="block h-7" />
+      )}
+    </DashboardHeaderTabsTrailing>
+  );
+}
+
 export function WalletsOverviewSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
-      {/* The list sets its toolbar in the header's tab row, the row's only content on a phone,
-          where the tabs are hidden; held here, the row is its height before the list lands. */}
-      <DashboardHeaderTabsTrailing>
-        <SkeletonBlock className="h-7 w-24" />
-      </DashboardHeaderTabsTrailing>
+      <WalletsToolbarRowHold loading />
       <LoadingRegion layout="wallets-overview">
         <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid-skeleton>
           {FOUR_ITEMS.map((item) => (

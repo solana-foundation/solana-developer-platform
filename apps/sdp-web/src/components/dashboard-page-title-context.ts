@@ -10,6 +10,8 @@ export interface DashboardPageTitleOverride {
   mark?: ReactNode;
   /** The page's own actions, before the route's header action (a wallet's favorite star). */
   actions?: ReactNode;
+  /** Shown even on a route that hides its title, as a missing page has to say what happened. */
+  alwaysVisible?: true;
 }
 
 /**

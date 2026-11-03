@@ -3,6 +3,7 @@ import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { ReactNode } from "react";
+import { RECENT_DEPOSIT_COLUMN_WIDTHS } from "@/app/dashboard/[projectId]/payments/ramps/components/recent-deposit-columns";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 
 const TABLE_ROW_IDS = [
@@ -238,22 +239,6 @@ export function PaymentsPayPageSkeleton() {
   );
 }
 
-/**
- * The address tab while its wallets load, cut to the settled panel: the address card (the code
- * on top on a phone, on the right from sm) and its three 40px fact rows. The route skeleton and
- * the panel's own loading pass both draw it, so Deposit settles without a jump.
- */
-/**
- * Recent deposits' columns in the flow's 660px column, as the design starts them: Amount at
- * 136px, Contact at 319, Created at 577. The settled table and its skeleton both read them.
- */
-export const RECENT_DEPOSIT_COLUMN_WIDTHS = [
-  "w-[19.5%]",
-  "w-[26.5%]",
-  "w-[37.75%]",
-  "w-[16.25%]",
-] as const;
-
 // Each bar sits on its cell's text line, so a row is as tall as a settled one, and gives way to
 // its column, so the table is no wider.
 const RECENT_DEPOSIT_CELL_SKELETONS = [
@@ -297,8 +282,10 @@ export function RecentDepositsTableSkeleton() {
 }
 
 /**
- * Deposit's address tab while its wallets load, block for block: the address card, the facts,
- * the watching line and the recent deposits, each at the settled panel's height.
+ * Deposit's address tab while its wallets load, block for block: the address card (the code on
+ * top on a phone, on the right from sm), the facts, the watching line and the recent deposits,
+ * each at the settled panel's height. The route skeleton and the panel's own loading pass both
+ * draw it, so Deposit settles without a jump.
  */
 export function DepositAddressSkeleton() {
   return (

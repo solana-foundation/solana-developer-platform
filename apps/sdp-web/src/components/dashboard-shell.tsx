@@ -502,6 +502,8 @@ export function DashboardShell({
       ? pageTitleOverride
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
+  // A page can insist on its title where the route hides it: a missing page has to say so.
+  const titleAlwaysVisible = activeTitleOverride?.alwaysVisible === true;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
@@ -829,7 +831,7 @@ export function DashboardShell({
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop
+                        pageConfig.flushTopOnDesktop && !titleAlwaysVisible
                           ? "pt-6 md:pt-0"
                           : stacksBackAboveTitle
                             ? "pt-6 md:pt-10"
@@ -855,11 +857,13 @@ export function DashboardShell({
                         <DashboardTopBar
                           setMobileSidebarOpen={setMobileSidebarOpen}
                           titleVisibility={
-                            pageConfig.hideTitle
-                              ? "screen-reader-only"
-                              : pageConfig.hideTitleOnMobile
-                                ? "desktop-only"
-                                : "visible"
+                            titleAlwaysVisible
+                              ? "visible"
+                              : pageConfig.hideTitle
+                                ? "screen-reader-only"
+                                : pageConfig.hideTitleOnMobile
+                                  ? "desktop-only"
+                                  : "visible"
                           }
                           title={pageTitle}
                           titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}

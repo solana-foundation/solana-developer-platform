@@ -3,6 +3,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import ProjectNotFound from "@/app/dashboard/[projectId]/not-found";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import * as quickStart from "@/components/dashboard-quick-start";
 import { DashboardShell } from "@/components/dashboard-shell";
@@ -137,5 +138,17 @@ describe("dashboard shell page frame", () => {
     expect(named?.querySelector("h1")?.textContent).toBe("Treasury");
     expect(named?.querySelector("[data-real-mark]")).not.toBeNull();
     expect(named?.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it.each([
+    // New draft hides its title, since the flow names itself in its step header.
+    ["a route that hides its title", `${PROJECT}/issuance/create`],
+    ["an address no route matches", `${PROJECT}/no-such-page`],
+  ])("shows a missing page's title on %s", async (_label, url) => {
+    await renderAt(url, <ProjectNotFound />);
+
+    const titles = [...container.querySelectorAll("h1")];
+    expect(titles.map((title) => title.textContent)).toEqual(["Page not found"]);
+    expect(titles[0]?.className).not.toContain("sr-only");
   });
 });

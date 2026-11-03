@@ -36,7 +36,6 @@ import {
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   DepositAddressSkeleton,
-  RECENT_DEPOSIT_COLUMN_WIDTHS,
   RecentDepositsTableSkeleton,
 } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -45,6 +44,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { RECENT_DEPOSIT_COLUMN_WIDTHS } from "./recent-deposit-columns";
 
 const RECENT_DEPOSIT_COUNT = 5;
 // How often the recent deposits re-read while the page is open; the "watching" line is true

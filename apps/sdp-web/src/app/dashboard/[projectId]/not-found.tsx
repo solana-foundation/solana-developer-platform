@@ -19,7 +19,7 @@ export default function ProjectNotFound() {
   const href = useProjectHref();
   return (
     <>
-      <DashboardPageTitle title={t("NotFound.title")} />
+      <DashboardPageTitle title={t("NotFound.title")} alwaysVisible />
       <ListEmptyState
         message={t("NotFound.description")}
         action={
