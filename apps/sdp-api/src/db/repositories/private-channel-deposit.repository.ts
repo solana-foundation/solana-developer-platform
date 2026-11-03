@@ -1,9 +1,9 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   PrivateChannelDeposit,
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelDepositId(): string {
   return `dep_${crypto.randomUUID()}`;
@@ -79,10 +79,6 @@ export interface UpdateDepositInput {
   expectedSignatureAbsent?: boolean;
 }
 
-export interface PrivateChannelDepositRepositoryContext {
-  db: RepositoryDbClient;
-}
-
 export interface PrivateChannelDepositRepository {
   createDeposit(input: CreateDepositInput): Promise<PrivateChannelDepositRow | null>;
   updateDeposit(input: UpdateDepositInput): Promise<PrivateChannelDepositRow | null>;
@@ -101,10 +97,13 @@ export interface PrivateChannelDepositRepository {
   /** Opportunistic sweep of non-terminal deposits for a project. */
   listNonTerminalByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
   /**
-   * Global sweep of non-terminal deposits, oldest-updated first. Used by the
-   * cron reconciler; `limit` caps the per-tick work.
+   * Sweep of non-terminal deposits on projects in `environment`, oldest-updated
+   * first. Used by the cron reconciler; `limit` caps the per-tick work.
    */
-  listNonTerminal(limit: number): Promise<PrivateChannelDepositRow[]>;
+  listNonTerminal(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PrivateChannelDepositRow[]>;
   /** Delete guard: an instance can't be deleted while deposits are in flight. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
   /**

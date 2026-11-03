@@ -1,10 +1,17 @@
+import { COUNTRY_CODES } from "@sdp/types/countries";
+import { MAINNET_ACCESS_STATES } from "@sdp/types/mainnet-access";
 import { ORGANIZATION_STATUSES, ORGANIZATION_TIERS } from "@sdp/types/organizations";
+import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { z } from "zod";
 import {
-  acceptSchema as acceptSchemaBase,
   inviteSchema as inviteSchemaBase,
+  updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
-import { updateOrgSchema as updateOrgSchemaBase } from "@/routes/organizations/schemas";
+import { requestMainnetAccessSchema as requestMainnetAccessSchemaBase } from "@/routes/organization-mainnet-access/schemas";
+import {
+  createOrganizationSchema as createOrganizationSchemaBase,
+  updateOrgSchema as updateOrgSchemaBase,
+} from "@/routes/organizations/schemas";
 import {
   invitationIdSchema,
   isoDateTimeSchema,
@@ -14,15 +21,11 @@ import {
   withOpenApi,
 } from "./base";
 
-export const organizationSettingsSchema = z
+const organizationSettingsSchema = z
   .object({
     defaultEnvironment: z.enum(["sandbox", "production"]).optional().openapi({
       description: "Default environment for new resources.",
       example: "production",
-    }),
-    webhookSecret: z.string().optional().openapi({
-      description: "Webhook signing secret.",
-      example: "whsec_example",
     }),
     allowedIpAddresses: z
       .array(z.string())
@@ -53,6 +56,11 @@ export const organizationSettingsSchema = z
       })
       .optional()
       .openapi({ description: "Custom rate limit overrides." }),
+    alertEmails: z.boolean().optional().openapi({
+      description:
+        "Whether organization admins are emailed when money moves in a mainnet project or the organization's members, API keys, custody or mainnet access change. Unset means true. Turning it off is itself emailed to the admins.",
+      example: true,
+    }),
   })
   .strict()
   .openapi({ description: "Organization-level settings." });
@@ -90,11 +98,11 @@ export const userSchema = z
   })
   .openapi({ description: "User summary." });
 
-export const organizationMemberSchema = z
+const organizationMemberSchema = z
   .object({
     id: memberIdParamSchema,
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Organization member role.", example: "member" }),
     status: z
       .enum(["active", "suspended", "removed"])
@@ -112,7 +120,28 @@ export const organizationMemberSchema = z
   })
   .openapi({ description: "Organization member record." });
 
-export const invitationSchema = z
+export const memberRoleSchema = z
+  .object({
+    memberId: memberIdParamSchema,
+    userId: userIdSchema,
+    organizationId: orgIdParamSchema,
+    role: z.enum(ORGANIZATION_ROLES).openapi({
+      description: "The Organization Role, held only by SDP and read on every request.",
+      example: "member",
+    }),
+  })
+  .openapi({ description: "A membership in the authenticated organization and its role." });
+
+export const updateMemberRoleRequestSchema = updateMemberRoleSchemaBase
+  .extend({
+    role: withOpenApi(updateMemberRoleSchemaBase.shape.role, {
+      description: "The member's new Organization Role.",
+      example: "admin",
+    }),
+  })
+  .openapi({ description: "Update member role request body." });
+
+const invitationSchema = z
   .object({
     id: invitationIdSchema,
     email: z
@@ -120,7 +149,7 @@ export const invitationSchema = z
       .email()
       .openapi({ description: "Invitee email.", example: "dev@example.com" }),
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Role offered to the invitee.", example: "member" }),
     expiresAt: isoDateTimeSchema.openapi({
       description: "Invitation expiration timestamp.",
@@ -140,7 +169,7 @@ export const listMembersQuerySchema = z.object({
   }),
 });
 
-export const pendingInvitationSchema = z
+const pendingInvitationSchema = z
   .object({
     id: invitationIdSchema,
     email: z
@@ -148,7 +177,7 @@ export const pendingInvitationSchema = z
       .email()
       .openapi({ description: "Invitee email.", example: "dev@example.com" }),
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Role offered to the invitee.", example: "member" }),
     status: z.literal("pending").openapi({ description: "Invitation status.", example: "pending" }),
     createdAt: isoDateTimeSchema.openapi({
@@ -159,17 +188,12 @@ export const pendingInvitationSchema = z
       description: "Invitation expiration timestamp.",
       example: "2025-02-01T00:00:00.000Z",
     }),
-    acceptUrl: z.string().url().nullable().openapi({
-      description:
-        "Clerk's shareable acceptance link, for an invitee whose email never arrived. Null when Clerk could not be reached.",
-      example: "https://accounts.example.com/accept?__clerk_ticket=example",
-    }),
   })
   .openapi({
     description: "Pending invitation, returned only to callers holding `members.manage`.",
   });
 
-export const listMembersMetaSchema = z
+const listMembersMetaSchema = z
   .object({
     total: z.number().int().nonnegative().openapi({
       description:
@@ -208,6 +232,25 @@ export const inviteMemberResponseSchema = z
   })
   .openapi({ description: "Invitation details." });
 
+export const createOrganizationRequestSchema = createOrganizationSchemaBase
+  .extend({
+    name: withOpenApi(createOrganizationSchemaBase.shape.name, {
+      description: "The new organization's name.",
+      example: "Example Org",
+    }),
+  })
+  .openapi({ description: "Create organization request body." });
+
+export const createOrganizationResponseSchema = z
+  .object({
+    organization: organizationSchema,
+    clerkOrganizationId: z.string().openapi({
+      description: "The Clerk organization the dashboard makes active for the session.",
+      example: "org_2example",
+    }),
+  })
+  .openapi({ description: "The created organization." });
+
 export const updateOrganizationRequestSchema = updateOrgSchemaBase
   .extend({
     name: withOpenApi(updateOrgSchemaBase.shape.name, {
@@ -237,15 +280,39 @@ export const inviteMemberRequestSchema = inviteSchemaBase
   })
   .openapi({ description: "Invite member request body." });
 
-export const acceptInvitationRequestSchema = acceptSchemaBase
-  .extend({
-    token: withOpenApi(acceptSchemaBase.shape.token, {
-      description: "Invitation token from email.",
-      example: "invitation_token",
+export const requestMainnetAccessRequestSchema = requestMainnetAccessSchemaBase.openapi(
+  "RequestMainnetAccessRequest",
+  {
+    description:
+      "The organization's self-declared jurisdiction (its primary registered geography for business) and the SDP Terms and Conditions version the admin read and accepted.",
+    example: { countryCode: "US", termsVersion: "2026-10-placeholder", acceptTerms: true },
+  }
+);
+
+export const mainnetAccessSchema = z
+  .object({
+    state: z.enum(MAINNET_ACCESS_STATES).openapi({
+      description:
+        "`approved` once an operator enables production for the organization; `pending` after a request; otherwise `not_requested`.",
     }),
-    name: withOpenApi(acceptSchemaBase.shape.name, {
-      description: "Optional name to set for the user.",
-      example: "Example User",
+    available: z.boolean().openapi({
+      description:
+        "Whether this deployment takes requests. While false, a request or resend is refused with 503.",
     }),
+    countryCode: z.enum(COUNTRY_CODES).nullable(),
+    request: z
+      .object({
+        requestedAt: isoDateTimeSchema,
+        requestedByUserId: userIdSchema,
+        termsVersion: z.string().openapi({
+          description:
+            "The SDP Terms and Conditions version the requester accepted with the request.",
+        }),
+        notified: z.boolean().openapi({
+          description: "False until the SDP alias received the request; `POST …/notify` sends it.",
+        }),
+      })
+      .nullable(),
+    contactEmail: z.string().nullable(),
   })
-  .openapi({ description: "Accept invitation request body." });
+  .openapi("MainnetAccess", { description: "The organization's mainnet access request." });

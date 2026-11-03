@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
@@ -15,7 +15,7 @@ import {
 // the stages createApp was given, not the manifest (ADR 0005).
 
 const moonpayInBetaApp = createApp({
-  rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+  rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
 });
 
 const providerAccessSchema = z.object({

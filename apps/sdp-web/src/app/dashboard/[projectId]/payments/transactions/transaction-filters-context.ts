@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { TransactionFilters } from "./transactions-query";
+import type { TransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 
 export interface TransactionContextValue {
   filters: TransactionFilters;

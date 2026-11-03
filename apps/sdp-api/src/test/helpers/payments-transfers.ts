@@ -15,7 +15,6 @@ import { env } from "@/test/helpers/env";
 import {
   seedCachedKey,
   TEST_API_KEY,
-  TEST_CONFIG_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_USER,
@@ -96,7 +95,7 @@ function paymentsRepository() {
   return createPostgresPaymentsRepository(db, scope);
 }
 
-export async function findTransferRow(id: string): Promise<PaymentTransferRow | null> {
+async function findTransferRow(id: string): Promise<PaymentTransferRow | null> {
   return paymentsRepository().getTransferById({
     transferId: id,
     organizationId: TEST_ORG.id,
@@ -124,20 +123,6 @@ export async function listTransferRows(): Promise<PaymentTransferRow[]> {
     offset: 0,
   });
   return result.rows;
-}
-
-export async function seedCustodyWalletFixture(params: {
-  id: string;
-  walletId: string;
-  publicKey: string;
-  label: string;
-}): Promise<void> {
-  await getDb(env)
-    .prepare(`INSERT INTO custody_wallets
-         (id, custody_config_id, wallet_id, public_key, label, purpose, status)
-       VALUES (?, ?, ?, ?, ?, 'transfer', 'active')`)
-    .bind(params.id, TEST_CONFIG_ID, params.walletId, params.publicKey, params.label)
-    .run();
 }
 
 /**

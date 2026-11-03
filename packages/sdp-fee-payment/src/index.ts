@@ -33,21 +33,46 @@ export const KORA_ENV_KEYS = {
   },
 } as const satisfies Record<SolanaCluster, Record<string, keyof FeePaymentEnv>>;
 
+/** What the boot check demands beyond a whole URL pair. */
+export interface KoraBootRequirements {
+  /**
+   * Every configured cluster also names its Cloud Run audience, so the adapter always sends an
+   * identity token. Managed stage and prod set this; dev and local reach Kora without one.
+   */
+  requireCloudRunAudience?: boolean;
+}
+
 /**
  * Boot check: each cluster's Kora is configured whole or not at all. The sponsor signs through
  * `KORA_<CLUSTER>_URL` and the budget prices and settles through `KORA_<CLUSTER>_RPC_URL`, so one
- * without the other refuses to start instead of failing sponsored requests after a deploy.
+ * without the other refuses to start instead of failing sponsored requests after a deploy. With
+ * `requireCloudRunAudience`, a cluster whose URL is set without `KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE`
+ * refuses too: without it the adapter calls Kora with no identity token.
  *
  * @param env - Process environment naming each cluster's Kora.
- * @throws Error naming the missing key when a cluster sets exactly one of the two.
+ * @param requirements - What a configured cluster must also name.
+ * @throws Error naming the missing key when a cluster sets exactly one of the two, or sets its URL
+ *   without the audience `requireCloudRunAudience` demands.
  */
-export function assertKoraConfigured(env: FeePaymentEnv): void {
+export function assertKoraConfigured(
+  env: FeePaymentEnv,
+  requirements: KoraBootRequirements = {}
+): void {
   for (const [cluster, envKeys] of Object.entries(KORA_ENV_KEYS)) {
     const serviceUrl = env[envKeys.serviceUrl]?.trim();
     const upstreamRpcUrl = env[envKeys.upstreamRpcUrl]?.trim();
     if (Boolean(serviceUrl) !== Boolean(upstreamRpcUrl)) {
       const missingEnvKey = serviceUrl ? envKeys.upstreamRpcUrl : envKeys.serviceUrl;
       throw new Error(`Kora is half-configured for ${cluster}: set ${missingEnvKey}`);
+    }
+    if (
+      serviceUrl &&
+      requirements.requireCloudRunAudience &&
+      !env[envKeys.identityTokenAudience]?.trim()
+    ) {
+      throw new Error(
+        `Kora for ${cluster} has no Cloud Run audience: set ${envKeys.identityTokenAudience}`
+      );
     }
   }
 }

@@ -67,7 +67,7 @@ export async function insertSecretRetirement(
 // that COMMITS a reference to a version cancels the obligation to destroy it, atomically.
 // That is what lets the obligation be recorded before the reference exists — the only
 // ordering in which a rejected write cannot leave a credential nobody knows about.
-export async function deleteSecretRetirement(
+async function deleteSecretRetirement(
   exec: Pick<AppDb, "prepare">,
   secretVersionRef: string
 ): Promise<boolean> {
@@ -75,33 +75,6 @@ export async function deleteSecretRetirement(
     .prepare(
       `DELETE FROM secret_retirements
         WHERE secret_version_ref = ?
-        RETURNING secret_version_ref`
-    )
-    .bind(secretVersionRef)
-    .first<{ secret_version_ref: string }>();
-  return Boolean(row);
-}
-
-/**
- * Cancel an obligation ONLY while no sweeper has taken it — the other half of
- * `claimRetirement`.
- *
- * `attempt_count` counts sweeper attempts, so zero means no sweeper has ever
- * acted on this version and the version is certainly still there. A non-zero
- * count means one is already committed to destroying it (or has), and a
- * transaction about to reference the version must not proceed: it would commit
- * live rows pointing at a secret that is being destroyed out from under them.
- *
- * @returns Whether the obligation was cancelled. False means "do not commit".
- */
-export async function cancelUnclaimedSecretRetirement(
-  exec: Pick<AppDb, "prepare">,
-  secretVersionRef: string
-): Promise<boolean> {
-  const row = await exec
-    .prepare(
-      `DELETE FROM secret_retirements
-        WHERE secret_version_ref = ? AND attempt_count = 0
         RETURNING secret_version_ref`
     )
     .bind(secretVersionRef)

@@ -24,28 +24,10 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 // sit on both sides of that route boundary.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function shortenAddress(address: string, lead = 5, tail = 4): string {
+function shortenAddress(address: string, lead = 5, tail = 4): string {
   return address.length > lead + tail + 3
     ? `${address.slice(0, lead)}…${address.slice(-tail)}`
     : address;
-}
-
-// SDP ids are a type prefix plus a uuid ("tok_5485045c-16e5-48c9-851f-e7e7814b487e"),
-// so shortening one like an address spends the whole lead on characters every id of
-// that type shares. Keep the prefix whole — it says what the id names — and take the
-// middle out of the uuid instead: the first group, which is what anyone reads to tell
-// two ids apart, plus a tail to check a copied value against.
-const PREFIXED_ID_LEAD = 8;
-const PREFIXED_ID_TAIL = 4;
-
-export function shortenPrefixedId(
-  id: string,
-  lead = PREFIXED_ID_LEAD,
-  tail = PREFIXED_ID_TAIL
-): string {
-  const prefixEnd = id.indexOf("_") + 1;
-  const prefix = id.slice(0, prefixEnd);
-  return `${prefix}${shortenAddress(id.slice(prefixEnd), lead, tail)}`;
 }
 
 // A `managed` badge spends its detail line on "Provider · key", so the key is
@@ -293,9 +275,8 @@ function WalletLinkAnchor({
 
 // ── Compact ──────────────────────────────────────────────────────────────────
 // Provider mark, name line, then a detail line carrying the shortened key with an
-// inline copy. Built to the 24px mark / 28px text rhythm the AuthoritiesGlyph tile
-// already uses, so it drops into a hero tile without growing the grid — and it is
-// narrow enough to sit inside the authority popovers too.
+// inline copy. Built to a 24px mark / 28px text rhythm, narrow enough to sit inside
+// the authority popovers.
 
 const WARNING_MARK = (
   <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-warning-border bg-warning-bg text-warning">

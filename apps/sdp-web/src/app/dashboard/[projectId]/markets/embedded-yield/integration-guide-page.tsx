@@ -1,7 +1,6 @@
 import { EarnIntegrationGuide } from "@/app/dashboard/[projectId]/markets/earn/earn-integration-guide";
 import { loadEarnProviderAccess } from "@/app/dashboard/[projectId]/markets/earn/earn-provider-access.server";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
-import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 
 /**
  * The body shared by the two Embedded Yield guide routes (`configure` and
@@ -21,7 +20,6 @@ export async function EarnIntegrationGuidePage({
   return (
     <EarnIntegrationGuide
       apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-      earnHref={DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}
       providerAccess={providerAccess}
       strategyId={typeof strategy === "string" && strategy !== "" ? strategy : undefined}
     />

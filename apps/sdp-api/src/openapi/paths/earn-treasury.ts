@@ -54,6 +54,7 @@ export function registerEarnTreasuryPaths(
       query?: Query;
       params?: Query;
       idempotency?: "required" | "either";
+      signs?: true;
       created?: boolean;
       description?: string;
     } = {}
@@ -91,7 +92,12 @@ export function registerEarnTreasuryPaths(
         ...(options.created
           ? { 201: { description: "Created", content: jsonContent(response) } }
           : {}),
-        ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 501, 503]),
+        ...errorResponses(
+          errorResponseSchema,
+          options.signs
+            ? [400, 401, 403, 404, 409, 422, 429, 500, 501, 503]
+            : [400, 401, 403, 404, 409, 429, 500, 501, 503]
+        ),
       },
     });
   }
@@ -119,6 +125,7 @@ export function registerEarnTreasuryPaths(
         .omit({ requestId: true })
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
+      signs: true,
     }
   );
   route(
@@ -164,6 +171,7 @@ export function registerEarnTreasuryPaths(
         .omit({ requestId: true })
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
+      signs: true,
     }
   );
   route(
@@ -222,6 +230,7 @@ export function registerEarnTreasuryPaths(
         )
         .openapi({ not: { required: ["requestId"] } }),
       idempotency: "required",
+      signs: true,
     }
   );
   route(
@@ -250,6 +259,7 @@ export function registerEarnTreasuryPaths(
       params: requests.earnVaultWithdrawalRequestParamsSchema,
       body: requests.earnVaultWithdrawalRequestCancelSchema.omit({ requestId: true }),
       idempotency: "required",
+      signs: true,
     }
   );
   route(

@@ -123,7 +123,8 @@
       "notProvisioned": "This wallet has no shielded identity yet, so there is nothing to read. Provision it first.",
       "paused": "This wallet is paused, so its balance cannot be read: the keys published for its owner are not the ones this deployment derives. Re-key it to publish the derived keys and make it usable again, at the cost of anything the published keys hold.",
       "empty": "0",
-      "readFailed": "The shielded balance could not be read. Retry shortly."
+      "readFailed": "The shielded balance could not be read. Retry shortly.",
+      "readOnly": "Shielded balances are read through a wallet sync, which read-only access can't run."
     },
     "activity": {
       "title": "Activity",

@@ -31,6 +31,36 @@ describe("DetailList", () => {
     expect(markup).toMatch(/<dd class="[^"]*min-w-0 truncate[^"]*">/);
   });
 
+  it("wraps a value the reader must see whole, and keeps the label's width", () => {
+    const markup = renderToStaticMarkup(
+      <DetailList variant="summary">
+        <DetailRow fit="wrap" label="Strategy">
+          Steakhouse USDC Prime Treasury Vault
+        </DetailRow>
+      </DetailList>
+    );
+
+    expect(markup).toMatch(/<dt class="[^"]*shrink-0[^"]*">/);
+    expect(markup).toMatch(/<dd class="[^"]*break-words[^"]*">/);
+    expect(markup).not.toContain("truncate");
+  });
+
+  it("keeps a figure whole on one line and wraps its label instead", () => {
+    // A digit pushed onto the next line misreads as another figure, so the label gives way.
+    const markup = renderToStaticMarkup(
+      <DetailList variant="summary">
+        <DetailRow fit="figure" label="Minimum shares received">
+          123333332.334332
+        </DetailRow>
+      </DetailList>
+    );
+
+    expect(markup).toMatch(/<dt class="[^"]*min-w-0[^"]*">/);
+    expect(markup).toMatch(/<dd class="shrink-0 whitespace-nowrap[^"]*">123333332.334332<\/dd>/);
+    expect(markup).not.toContain("truncate");
+    expect(markup).not.toContain("break-words");
+  });
+
   it("passes the caller's classes to the list", () => {
     const markup = renderToStaticMarkup(
       <DetailList className="mt-6">

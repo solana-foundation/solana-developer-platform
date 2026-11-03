@@ -6,8 +6,8 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
-import { EARN_ANONYMOUS_RPC_QUOTA } from "@/routes/earn";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -333,7 +333,7 @@ function submitResult(overrides: Record<string, unknown> = {}) {
 function post(
   path: string,
   body: Record<string, unknown>,
-  options: { idempotencyKey?: string | null; apiKey?: string | null; ip?: string } = {}
+  options: { idempotencyKey?: string | null; apiKey?: string; ip?: string } = {}
 ) {
   const requestBody = path === "deposit-transactions" ? { minSharesOut: "1", ...body } : body;
   return app.request(
@@ -341,9 +341,7 @@ function post(
     {
       method: "POST",
       headers: {
-        ...(options.apiKey === null
-          ? {}
-          : { Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}` }),
+        Authorization: `Bearer ${options.apiKey ?? TEST_API_KEY.raw}`,
         "Content-Type": "application/json",
         ...(options.idempotencyKey == null ? {} : { "Idempotency-Key": options.idempotencyKey }),
         ...(options.ip === undefined ? {} : { "X-Forwarded-For": options.ip }),
@@ -391,51 +389,9 @@ afterEach(() => {
 });
 
 describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates", () => {
-  it("builds anonymously without tenant context or sponsorship", async () => {
-    const strategy = await seedStrategy();
-
-    const res = await post(
-      "deposit-transactions",
-      {
-        strategyId: strategy.id,
-        ownerAddress: OWNER,
-        amount: "25",
-      },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { transaction: { ownerAddress: OWNER, amount: "25", sponsored: false } },
-    });
-    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
-    expect(input).not.toHaveProperty("organizationId");
-    expect(input).not.toHaveProperty("projectId");
-    expect(input).not.toHaveProperty("feePayer");
-  });
-
-  it("builds anonymously against the shelf the strategy names, not the deployment", async () => {
-    // A keyless caller has no project, so the row it named decides: a
-    // production strategy builds on mainnet from any deployment (PRO-1998).
-    const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
-
-    const res = await post(
-      "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25", minSharesOut: "1" },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(200);
-    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ environment: "production", provider: "kamino" })
-    );
-    const input = buildExternalWalletDepositTransaction.mock.calls[0]?.[1];
-    expect(input).not.toHaveProperty("organizationId");
-  });
-
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy();
 
     const res = await post("deposit-transactions", {
@@ -457,13 +413,15 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect.objectContaining({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        environment: "sandbox",
         provider: "kamino",
         providerReference: strategy.provider_reference,
         ownerAddress: OWNER,
         amount: "25",
       })
     );
+    expect(scopes).toEqual([
+      expect.objectContaining({ projectId: TEST_PROJECT.id, environment: "sandbox" }),
+    ]);
   });
 
   it("404s an unknown strategy", async () => {
@@ -515,9 +473,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       });
 
       expect(res.status).toBe(200);
-      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]).not.toHaveProperty(
-        "feePayer"
-      );
+      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]?.feePayer).toBeUndefined();
       const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
       expect(body.data.transaction).not.toHaveProperty("feePayer");
     });
@@ -532,26 +488,6 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
         amount: "25",
       });
       expect(res.status).toBe(400);
-      expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
-    });
-
-    it("refuses a separate fee payer on an anonymous build", async () => {
-      const strategy = await seedStrategy();
-      const res = await post(
-        "deposit-transactions",
-        {
-          strategyId: strategy.id,
-          ownerAddress: OWNER,
-          feePayer: FEE_PAYER,
-          amount: "25",
-        },
-        { apiKey: null }
-      );
-
-      expect(res.status).toBe(400);
-      await expect(res.json()).resolves.toMatchObject({
-        error: { message: expect.stringContaining("API key") },
-      });
       expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
     });
   });
@@ -866,6 +802,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
     const missingFloor = await post(
       "deposit-transactions",
@@ -893,8 +830,9 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(200);
     expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ environment: "production", provider: "kamino", minSharesOut: "1" })
+      expect.objectContaining({ provider: "kamino", minSharesOut: "1" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
@@ -919,6 +857,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy({
       provider: "jupiter_lend",
       providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -951,12 +890,9 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(200);
     expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "jupiter_lend",
-        minSharesOut: "24.9",
-      })
+      expect.objectContaining({ provider: "jupiter_lend", minSharesOut: "24.9" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 });
 
@@ -994,6 +930,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(submitExternalWalletDeposit);
     const key = crypto.randomUUID();
     const res = await post(
       "deposits",
@@ -1012,117 +949,19 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
       expect.objectContaining({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        environment: "sandbox",
         transactionId: "earn_ext_tx",
         signedTransaction: "AQ==",
         requestId: key,
       })
     );
+    expect(scopes).toEqual([
+      expect.objectContaining({ projectId: TEST_PROJECT.id, environment: "sandbox" }),
+    ]);
   });
 });
 
 describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", () => {
-  it("builds an anonymous exit from global strategy metadata", async () => {
-    const strategy = await seedStrategy();
-
-    const res = await post(
-      "withdrawal-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: {
-        transaction: {
-          strategyId: strategy.id,
-          ownerAddress: OWNER,
-          shares: "10",
-          sponsored: false,
-        },
-      },
-    });
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        positionId: null,
-        vaultAddress: strategy.provider_reference,
-        ownerAddress: OWNER,
-        tokenMint: USDC_MINT,
-        shareMint: SHARE_MINT,
-        shareAtaRentFunder: null,
-      })
-    );
-    const input = buildExternalWalletWithdrawalTransaction.mock.calls[0]?.[1];
-    expect(input).not.toHaveProperty("organizationId");
-    expect(input).not.toHaveProperty("projectId");
-  });
-
-  it("quotes an anonymous exit from the same global strategy locator", async () => {
-    const strategy = await seedStrategy();
-
-    const res = await post(
-      "withdrawal-previews",
-      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { strategyId: strategy.id, assetsOut: "9.95", assetDecimals: 6 },
-    });
-    expect(quoteVaultWithdrawal).toHaveBeenCalledWith(expect.anything(), {
-      providerReference: strategy.provider_reference,
-      shares: "10",
-    });
-  });
-
-  it("keeps anonymous previews and exits available after catalogue delisting", async () => {
-    const strategy = await seedStrategy();
-    await createPostgresEarnRepository(getDb(env)).deprecateUnlistedStrategies({
-      provider: "kamino",
-      environment: "sandbox",
-      listedProviderReferences: ["another-vault"],
-    });
-
-    const preview = await post(
-      "withdrawal-previews",
-      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
-      { apiKey: null }
-    );
-    const exit = await post(
-      "withdrawal-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
-      { apiKey: null }
-    );
-
-    expect(preview.status).toBe(200);
-    expect(exit.status).toBe(200);
-    expect(buildExternalWalletWithdrawalTransaction).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        vaultAddress: strategy.provider_reference,
-        tokenMint: USDC_MINT,
-        shareMint: SHARE_MINT,
-        ownerAddress: OWNER,
-      })
-    );
-  });
-
-  it("does not let an anonymous caller resolve a tenant position id", async () => {
-    await seedAuth();
-    const positionId = await seedExternalWalletPosition();
-    const res = await post(
-      "withdrawal-transactions",
-      { positionId, shares: "10" },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(400);
-    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
-  });
-
-  it("keeps the authenticated exit body position-based", async () => {
+  it("refuses an exit body that names a strategy instead of a position", async () => {
     await seedAuth();
     const strategy = await seedStrategy();
     const res = await post("withdrawal-transactions", {
@@ -1234,21 +1073,6 @@ describe("POST /v1/earn/external-wallet/withdrawal-transactions — scoping", ()
     expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
   });
 
-  it("enforces the withdrawal floor on an anonymous build", async () => {
-    const strategy = await seedStrategy({ provider: "jupiter_lend" });
-    const res = await post(
-      "withdrawal-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, shares: "10" },
-      { apiKey: null }
-    );
-
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({
-      error: { message: expect.stringContaining("minAmountOut") },
-    });
-    expect(buildExternalWalletWithdrawalTransaction).not.toHaveBeenCalled();
-  });
-
   it("builds the same exit once the caller supplies the policy floor", async () => {
     await seedAuth();
     const positionId = await seedExternalWalletPosition({ provider: "jupiter_lend" });
@@ -1338,51 +1162,6 @@ describe("metered quotas (PRO-1994): the deposit build is metered, the exit neve
     // The org pool is shared: malformed requests must not be able to drain it.
     expect(await readRateLimitCount(env, ACTOR_SCOPE)).toBe(0);
     expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(0);
-  });
-
-  it("meters the anonymous build by client address, not by the org's exhausted pool", async () => {
-    const strategy = await seedStrategy();
-    await seedRateLimit(env, `metered:earn-provider-read:org:${TEST_ORG.id}`, 1000);
-
-    const res = await post(
-      "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
-      { apiKey: null, ip: "203.0.113.7" }
-    );
-    expect(res.status).toBe(200);
-    // The client ADDRESS paid one charge from its own counter — the "by
-    // client address" half of this contract, which a bare 200 would never
-    // prove.
-    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.7")).toBe(1);
-    // ...and the org pool the exhausted keys share was not touched.
-    expect(await readRateLimitCount(env, `metered:earn-provider-read:org:${TEST_ORG.id}`)).toBe(
-      1000
-    );
-
-    // Once THAT address reaches its own ceiling, the meter refuses it without
-    // paying for the RPC probe.
-    await seedRateLimit(
-      env,
-      "metered:earn-rpc:anonymous:ip:203.0.113.7",
-      EARN_ANONYMOUS_RPC_QUOTA.maxRequests(env)
-    );
-    const refused = await post(
-      "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
-      { apiKey: null, ip: "203.0.113.7" }
-    );
-    expect(refused.status).toBe(429);
-    expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
-    expect(buildExternalWalletDepositTransaction).toHaveBeenCalledTimes(1);
-
-    // The CONTRAST: a different address meters independently of the exhausted one.
-    const otherAddress = await post(
-      "deposit-transactions",
-      { strategyId: strategy.id, ownerAddress: OWNER, amount: "25" },
-      { apiKey: null, ip: "203.0.113.8" }
-    );
-    expect(otherAddress.status).toBe(200);
-    expect(await readRateLimitCount(env, "metered:earn-rpc:anonymous:ip:203.0.113.8")).toBe(1);
   });
 
   it("never lets an exhausted quota stand between the owner and its exit", async () => {

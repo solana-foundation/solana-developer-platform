@@ -97,13 +97,13 @@ Which provider choices should a newly created organization be able to use?
 
 Recommended launch classification, using today's lower-exposure set as the baseline:
 
-| Family | Generally available | Manual onboarding |
-| --- | --- | --- |
-| Custody/signing | Privy, Coinbase CDP, Para, Turnkey | Fireblocks, Dfns, IBM Digital Asset Haven, Anchorage, Utila |
-| RPC | Default RPC, Alchemy, Helius, QuickNode, Triton, Validation Cloud | None |
-| Compliance | None | Range, Elliptic, TRM, Chainalysis |
-| Ramps | MoonPay, Stripe | None |
-| Payments add-ons | None pending contract review | Kora fee payment, MagicBlock private payments |
+| Family           | Generally available                                               | Manual onboarding                                           |
+| ---------------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| Custody/signing  | Privy, Coinbase CDP, Para, Turnkey                                | Fireblocks, Dfns, IBM Digital Asset Haven, Anchorage, Utila |
+| RPC              | Default RPC, Alchemy, Helius, QuickNode, Triton, Validation Cloud | None                                                        |
+| Compliance       | None                                                              | Range, Elliptic, TRM, Chainalysis                           |
+| Ramps            | MoonPay, Stripe                                                   | None                                                        |
+| Payments add-ons | None pending contract review                                      | Kora fee payment, MagicBlock private payments               |
 
 Notes:
 

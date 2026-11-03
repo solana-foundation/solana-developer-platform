@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import type { Env } from "@/types/env";
@@ -48,7 +48,7 @@ describe("OpenAPI response delivery", () => {
   });
 
   it("lets the real app pretty-print /openapi.json without a stale body length", async () => {
-    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
     const response = await app.request("http://local.test/openapi.json?pretty", {}, appEnv);
 
     expect(response.status).toBe(200);

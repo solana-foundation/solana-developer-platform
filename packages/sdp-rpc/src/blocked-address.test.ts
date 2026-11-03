@@ -60,6 +60,42 @@ describe("assertReachableTenantEndpoint", () => {
     assertUnreachable("https://[::ffff:7f00:1]/rpc");
   });
 
+  it("refuses the deprecated IPv4-compatible and IPv4-translated spellings", () => {
+    for (const address of [
+      "::127.0.0.1",
+      "::7f00:1",
+      "::a9fe:a9fe",
+      "::10.0.0.5",
+      "::ffff:0:127.0.0.1",
+      "::ffff:0:7f00:1",
+      "0:0:0:0:0:0:127.0.0.1",
+    ]) {
+      assert.equal(isBlockedAddress(address), true, address);
+    }
+    assertUnreachable("https://[::127.0.0.1]/rpc");
+    assertUnreachable("https://[::a9fe:a9fe]/rpc");
+  });
+
+  it("refuses NAT64 addresses embedding a private or metadata IPv4 target", () => {
+    for (const address of [
+      "64:ff9b::7f00:1",
+      "64:ff9b::127.0.0.1",
+      "64:ff9b::a9fe:a9fe",
+      "64:ff9b::10.0.0.5",
+      "64:ff9b::192.168.1.10",
+    ]) {
+      assert.equal(isBlockedAddress(address), true, address);
+    }
+    assertUnreachable("https://[64:ff9b::7f00:1]/rpc");
+  });
+
+  it("allows embedded-IPv4 spellings of public addresses", () => {
+    for (const address of ["::808:808", "::ffff:0:808:808", "64:ff9b::808:808"]) {
+      assert.equal(isBlockedAddress(address), false, address);
+    }
+    assert.doesNotThrow(() => assertReachableTenantEndpoint("https://[64:ff9b::808:808]/rpc"));
+  });
+
   it("allows a routable IPv6 endpoint and a routable IPv4-mapped one", () => {
     assert.doesNotThrow(() => assertReachableTenantEndpoint("https://[2606:4700::1111]/rpc"));
     assert.doesNotThrow(() => assertReachableTenantEndpoint("https://[::ffff:8.8.8.8]/rpc"));

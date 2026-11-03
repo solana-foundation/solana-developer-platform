@@ -37,19 +37,21 @@ export interface EarnRuntimeEnvironment {
    */
   WISDOMTREE_API_KEY?: string;
   WISDOMTREE_SANDBOX_API_KEY?: string;
-  SOLANA_RPC_URL?: string;
-  /**
-   * Per-cluster overrides for on-chain catalogue reads, same keys the API's
-   * execution path reads (`resolveClusterRpcUrl`). See `resolveCatalogueRpcUrl`
-   * in ./solana-rpc for why a single process endpoint is not enough.
-   */
-  SOLANA_DEVNET_RPC_URL?: string;
-  SOLANA_MAINNET_RPC_URL?: string;
 }
 
 export interface EarnRuntimeContext {
   env: EarnRuntimeEnvironment;
   environment: SdpEnvironment;
+  /**
+   * The endpoint an on-chain CATALOGUE read of `cluster` uses, or null when the
+   * deployment has none for it. The API answers from that cluster's managed
+   * RPC pool and never from a process default, so a catalogue pass walking
+   * both environments in one process can never read one cluster for the other
+   * (see `resolveCatalogueRpcUrl` in ./solana-rpc). Absent outside the
+   * catalogue sync: quotes and builds take their endpoint from the executing
+   * client's injected resolver instead.
+   */
+  catalogueRpcUrl?: (cluster: SolanaCluster) => string | null;
 }
 
 /**

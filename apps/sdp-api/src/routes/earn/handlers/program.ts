@@ -2,6 +2,7 @@ import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { notImplemented } from "@sdp/earn/errors";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
 import type { EarnPortfolioWalletProvider } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   EarnPortfolioAllocationInput,
   EarnPortfolioWalletSnapshot,
@@ -36,11 +37,10 @@ import {
   resolveIdempotencyReplay,
 } from "@/lib/idempotency";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, earnRuntime, getEarnRepository } from "@/routes/earn/context";
+import { type AppContext, getEarnRepository } from "@/routes/earn/context";
 import {
   type earnProgramCreateSchema,
   earnProgramDepositsQuerySchema,
@@ -53,6 +53,7 @@ import {
   earnProgramWithdrawalsListQuerySchema,
 } from "@/routes/earn/schemas";
 import { getLogger } from "@/runtime/logger";
+import { earnRuntime } from "@/services/earn/runtime";
 import { resolveEarnProviderClient } from "@/services/earn-provider-registry";
 import {
   applyEarnWithdrawalObservationByReference,
@@ -124,7 +125,7 @@ async function loadProgramState(
   client: EarnPortfolioWalletProvider,
   providerWalletRef: string
 ): Promise<{ wallet: EarnPortfolioWalletSnapshot; portfolioYield?: EarnPortfolioYield }> {
-  const runtime = earnRuntime(c);
+  const runtime = earnRuntime(c.env);
   const [wallet, yieldResult] = await Promise.all([
     client.getPortfolioWallet(runtime, { providerWalletRef }),
     client.getPortfolioYield(runtime, { providerWalletRef }).catch((error: unknown) => {
@@ -166,7 +167,7 @@ function requirePortfolioClient(provider: string): EarnPortfolioWalletProvider {
 async function requireProgram(c: AppContext, programId: string): Promise<EarnProviderWalletRow> {
   const row = await getEarnRepository(c).getProviderWalletById({
     organizationId: getAuth(c).organizationId,
-    environment: resolveSdpEnvironment(c),
+    environment: currentClusterScope().environment,
     walletId: programId,
   });
 
@@ -224,7 +225,7 @@ async function assertKnownYieldSources(
   }
 
   const repo = getEarnRepository(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const known = new Set<string>();
   const pageSize = 200;
   // The repository has no provider filter, so page the (small) environment
@@ -386,7 +387,7 @@ const LIST_LIVE_READ_CONCURRENCY = 8;
 
 export const listEarnPrograms = async (c: AppContext) => {
   const query = parseQuery(c, earnProgramsListQuerySchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const testMode = environment === "sandbox";
 
   if (query.provider) {
@@ -452,7 +453,7 @@ export const createEarnProgram = async (
   const body = c.req.valid("json");
   const client = requirePortfolioClient(body.provider);
   const auth = getAuth(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
 
   // Money-in gate: release channel, surfacing, entitlement and credentials.
   // A new position is the only program route that checks surfacing; re-target
@@ -473,7 +474,7 @@ export const createEarnProgram = async (
   });
 
   const repo = getEarnRepository(c);
-  const createdWallet = await client.createPortfolioWallet(earnRuntime(c), {
+  const createdWallet = await client.createPortfolioWallet(earnRuntime(c.env), {
     label: body.label ?? defaultProgramLabel(auth.organizationId, environment, requestId),
     allocations: body.allocations,
     requestId,
@@ -564,7 +565,7 @@ export const retargetEarnProgram = async (
     "apply the strategy change twice"
   );
 
-  await client.updatePortfolioStrategy(earnRuntime(c), {
+  await client.updatePortfolioStrategy(earnRuntime(c.env), {
     providerWalletRef: row.provider_wallet_ref,
     allocations: body.allocations,
     // Derived against the program wallet like the withdrawal path, so one
@@ -602,10 +603,13 @@ export const listEarnProgramDeposits = async (c: AppContext) => {
   const { row, client, testMode } = await requireProgramContext(c, programId);
   assertEarnProviderConfigured(c.env, client.provider, testMode);
 
-  const response: EarnProgramDepositsResponse = await client.listPortfolioDeposits(earnRuntime(c), {
-    providerWalletRef: row.provider_wallet_ref,
-    ...(query.cursor !== undefined && { cursor: query.cursor }),
-  });
+  const response: EarnProgramDepositsResponse = await client.listPortfolioDeposits(
+    earnRuntime(c.env),
+    {
+      providerWalletRef: row.provider_wallet_ref,
+      ...(query.cursor !== undefined && { cursor: query.cursor }),
+    }
+  );
 
   return success(c, response);
 };
@@ -640,7 +644,7 @@ export const previewEarnProgramWithdrawal = async (
 
   assertProgramKeyIsNotWalletScoped(c, "read Earn program withdrawal liquidity");
 
-  const preview = await client.previewPortfolioWithdrawal(earnRuntime(c), {
+  const preview = await client.previewPortfolioWithdrawal(earnRuntime(c.env), {
     providerWalletRef: row.provider_wallet_ref,
     // Absent = the liquidity read (PRO-1675). Spread rather than passed as
     // `undefined` so the provider contract sees a field that is genuinely not
@@ -796,7 +800,7 @@ async function serveEarnProgramWithdrawalReplay(
   intent: EarnMovementRow,
   providerReference: string
 ) {
-  const withdrawal = await resolved.client.getPortfolioWithdrawal(earnRuntime(c), {
+  const withdrawal = await resolved.client.getPortfolioWithdrawal(earnRuntime(c.env), {
     providerWalletRef: resolved.row.provider_wallet_ref,
     withdrawalRef: providerReference,
   });
@@ -872,7 +876,7 @@ export const createEarnProgramWithdrawal = async (
       intentRow = await ledger.createCustodialMovement({
         organizationId: auth.organizationId,
         projectId: auth.projectId,
-        environment: resolveSdpEnvironment(c),
+        environment: currentClusterScope().environment,
         providerWalletId: row.id,
         provider: client.provider,
         amountRequestedUsd: body.amountUsd,
@@ -915,7 +919,7 @@ export const createEarnProgramWithdrawal = async (
   // crash-window replay whose provider call never landed): drive the provider
   // with the SAME derived id — it replays a seen key and first-sends an unseen
   // one, so this can never double-pay.
-  const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c), {
+  const withdrawal = await client.createPortfolioWithdrawal(earnRuntime(c.env), {
     providerWalletRef: row.provider_wallet_ref,
     requestId,
     amountUsd: body.amountUsd,
@@ -1006,7 +1010,7 @@ export const getEarnProgramWithdrawal = async (c: AppContext) => {
     throw notFound("Earn withdrawal");
   }
 
-  const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c), {
+  const withdrawal = await client.getPortfolioWithdrawal(earnRuntime(c.env), {
     providerWalletRef: row.provider_wallet_ref,
     withdrawalRef,
   });

@@ -4,11 +4,10 @@
 
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import type { Action } from "@sdp/types/actions";
-import type { CountryCode } from "@sdp/types/countries";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID, type CustodyProvider } from "@sdp/types/custody";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
 import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 
 export type ErrorCode =
   | "BAD_REQUEST"
@@ -26,8 +25,6 @@ export type ErrorCode =
   | "REVOKED_API_KEY"
   | "INSUFFICIENT_PERMISSIONS"
   | "OPERATION_NOT_ALLOWED"
-  | "INVALID_INVITATION"
-  | "EXPIRED_INVITATION"
   | "INVALID_TOKEN"
   // Token issuance errors
   | "TOKEN_NOT_FOUND"
@@ -46,13 +43,14 @@ export type ErrorCode =
   | "ACCOUNT_NOT_FROZEN"
   | "MAX_SUPPLY_EXCEEDED"
   | "SOLANA_RPC_ERROR"
-  | "SOLANA_RPC_TIMEOUT"
+  | "RPC_UNAVAILABLE"
   | "CUSTODY_ERROR"
   // Transaction errors
   | "TRANSACTION_FAILED"
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
+  | "CUSTODY_POLICY_REFUSED"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_RESPONSE_INVALID"
@@ -60,10 +58,20 @@ export type ErrorCode =
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
   | "VAULT_EXPOSURE_CAP"
+  // Native SOL sent to an account that does not exist (HOO-2375)
+  | "AMOUNT_BELOW_RENT_MINIMUM"
+  // A batch's externalId names a payout run another batch already sent (HOO-2335)
+  | "TRANSFER_BATCH_RUN_EXISTS"
+  // A transfer batch retry that sends nothing (HOO-2343)
+  | "TRANSFER_BATCH_NOTHING_TO_RETRY"
+  | "TRANSFER_BATCH_RETRY_CLAIMED"
+  | "TRANSFER_BATCH_DESTINATION_CHANGED"
+  // A recipient token account whose rent exceeds the sponsor's per-transaction cap (HOO-2024)
+  | "SPONSORED_RENT_OVER_CAP"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
-export interface ApiError {
+interface ApiError {
   code: ErrorCode;
   message: string;
   details?: Record<string, unknown>;
@@ -89,8 +97,6 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   REVOKED_API_KEY: 401,
   INSUFFICIENT_PERMISSIONS: 403,
   OPERATION_NOT_ALLOWED: 403,
-  INVALID_INVITATION: 400,
-  EXPIRED_INVITATION: 400,
   INVALID_TOKEN: 401,
   // Token issuance errors
   TOKEN_NOT_FOUND: 404,
@@ -109,7 +115,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   ACCOUNT_NOT_FROZEN: 400,
   MAX_SUPPLY_EXCEEDED: 400,
   SOLANA_RPC_ERROR: 502,
-  SOLANA_RPC_TIMEOUT: 504,
+  RPC_UNAVAILABLE: 503,
   CUSTODY_ERROR: 502,
   // Transaction errors
   TRANSACTION_FAILED: 400,
@@ -118,6 +124,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
+  // Policy refusals need a policy review or request change before retrying.
+  CUSTODY_POLICY_REFUSED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   // 502, never 503: the provider answered success, so the action may have
@@ -127,6 +135,16 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP: 409,
+  // 409, never stored under an Idempotency-Key: the request is well-formed, and
+  // the same request is admissible once the address is funded.
+  AMOUNT_BELOW_RENT_MINIMUM: 409,
+  // 409, never stored: the existing batch is in details.batchId.
+  TRANSFER_BATCH_RUN_EXISTS: 409,
+  // 409, never stored: each retry refusal sends nothing.
+  TRANSFER_BATCH_NOTHING_TO_RETRY: 409,
+  TRANSFER_BATCH_RETRY_CLAIMED: 409,
+  TRANSFER_BATCH_DESTINATION_CHANGED: 409,
+  SPONSORED_RENT_OVER_CAP: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -152,8 +170,6 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   REVOKED_API_KEY: "API key has been revoked",
   INSUFFICIENT_PERMISSIONS: "Insufficient permissions for this action",
   OPERATION_NOT_ALLOWED: "Operation not allowed for this API key",
-  INVALID_INVITATION: "Invalid invitation token",
-  EXPIRED_INVITATION: "Invitation has expired",
   INVALID_TOKEN: "Invalid or expired token",
   // Token issuance errors
   TOKEN_NOT_FOUND: "Token not found",
@@ -173,13 +189,15 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   ACCOUNT_NOT_FROZEN: "Account is not frozen",
   MAX_SUPPLY_EXCEEDED: "Operation would exceed maximum supply",
   SOLANA_RPC_ERROR: "Error communicating with Solana RPC",
-  SOLANA_RPC_TIMEOUT: "The RPC upstream did not answer in time; the request's outcome is unknown",
+  RPC_UNAVAILABLE: "Solana RPC is unavailable; details.reason says why",
   CUSTODY_ERROR: "Custody provider error",
   // Transaction errors
   TRANSACTION_FAILED: "Transaction failed",
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
+  CUSTODY_POLICY_REFUSED:
+    "Your custody provider refused to sign this request because of a wallet policy. Review the wallet's policy or adjust the request before retrying.",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
@@ -189,6 +207,17 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP:
     "This deposit would take SDP's total holdings in the vault past its exposure cap",
+  AMOUNT_BELOW_RENT_MINIMUM:
+    "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
+  TRANSFER_BATCH_RUN_EXISTS:
+    "A different transfer batch with this externalId already exists for this source wallet",
+  TRANSFER_BATCH_NOTHING_TO_RETRY: "This transfer batch has no failed recipients to retry",
+  TRANSFER_BATCH_RETRY_CLAIMED:
+    "Another retry of this transfer batch claimed its failed recipients first",
+  TRANSFER_BATCH_DESTINATION_CHANGED:
+    "A failed recipient's counterparty account changed its address since the batch was sent",
+  SPONSORED_RENT_OVER_CAP:
+    "A recipient's token account would cost more rent than the sponsor funds in one transaction",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
@@ -208,8 +237,13 @@ export class AppError extends Error {
   public readonly statusCode: number;
   public readonly details?: Record<string, unknown>;
 
-  constructor(code: ErrorCode, message?: string, details?: Record<string, unknown>) {
-    super(message || DEFAULT_ERROR_MESSAGES[code]);
+  constructor(
+    code: ErrorCode,
+    message?: string,
+    details?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message || DEFAULT_ERROR_MESSAGES[code], options);
     this.code = code;
     this.statusCode = ERROR_STATUS_CODES[code];
     this.details = details;
@@ -251,10 +285,6 @@ export function unauthorized(message?: string): AppError {
   return new AppError("UNAUTHORIZED", message);
 }
 
-export function insufficientPermissions(message?: string): AppError {
-  return new AppError("INSUFFICIENT_PERMISSIONS", message);
-}
-
 /**
  * The refusal for a caller that lacks an action: what `requireAction` answers,
  * and what a waist or handler check of the same action must answer too.
@@ -288,6 +318,20 @@ export function conflict(message?: string, details?: Record<string, unknown>): A
 /** A signed transaction whose blockhash window closed before submission. */
 export function transactionExpired(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("TRANSACTION_EXPIRED", message, details);
+}
+
+/**
+ * A signing call the custody provider's own policy declined (HOO-2333).
+ * The shared custody signer raises it for every flow that signs.
+ *
+ * @param cause - The provider's refusal, kept for logs; its wording never reaches the response.
+ * @param provider - The provider resolved for this custody wallet.
+ * @returns The 422 `CUSTODY_POLICY_REFUSED` error.
+ */
+export function custodyPolicyRefused(cause: Error, provider: CustodyProvider): AppError {
+  const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
+  const message = `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`;
+  return new AppError("CUSTODY_POLICY_REFUSED", message, undefined, { cause });
 }
 
 export function rateLimited(message?: string): AppError {
@@ -335,6 +379,31 @@ export function vaultExposureCapExceeded(
   return new AppError("VAULT_EXPOSURE_CAP", message, details);
 }
 
+/**
+ * Native SOL recipients whose address holds no account and whose amount is
+ * below the rent-exempt minimum (HOO-2375): the chain refuses such a transfer
+ * in preflight, and its whole transaction with it.
+ */
+export function amountBelowRentMinimum(
+  message?: string,
+  details?: Record<string, unknown>
+): AppError {
+  return new AppError("AMOUNT_BELOW_RENT_MINIMUM", message, details);
+}
+
+/**
+ * A recipient whose token account rent alone exceeds the sponsor's per-transaction outflow cap
+ * (Kora `max_allowed_lamports`, HOO-2024): no chunk could carry it, so the batch is refused
+ * before anything is stored or sent. Creating the recipient's token account first clears it.
+ */
+export function sponsoredRentOverCap(details?: Record<string, unknown>): AppError {
+  return new AppError(
+    "SPONSORED_RENT_OVER_CAP",
+    "A recipient's token account would cost more rent than the sponsor funds in one transaction; create the recipient's token account first",
+    details
+  );
+}
+
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {
   return new AppError("PROVIDER_UNAVAILABLE", message, details);
 }
@@ -358,14 +427,6 @@ export function unsupportedRampCorridor(
   );
 }
 
-export function unsupportedCounterparty(
-  provider: RampProviderId,
-  direction: RampDirection,
-  reason: string
-): CounterpartyRequirements {
-  return { provider, direction, status: "unsupported", reason };
-}
-
 export function counterpartyNotProvisioned(
   provider: RampProviderId,
   direction: RampDirection,
@@ -376,45 +437,4 @@ export function counterpartyNotProvisioned(
     `Counterparty is not provisioned for ${provider} ${direction}. Complete the counterparty requirements (POST /counterparties/:counterpartyId/requirements) before requesting a quote.`,
     { ...details, provider, direction }
   );
-}
-
-/**
- * Creates the error returned when more than one active external account matches a payout corridor.
- *
- * @param provider - Ramp provider owning the external accounts.
- * @param fiatCurrency - Fiat currency of the payout corridor.
- * @param destinationCountry - Destination country of the payout corridor.
- * @returns A bad-request error describing the ambiguous corridor.
- */
-export function counterpartyExternalAccountAmbiguous(
-  provider: RampProviderId,
-  fiatCurrency: string,
-  destinationCountry: CountryCode
-): AppError {
-  return badRequest(
-    `Counterparty has multiple active ${provider} external accounts for ${fiatCurrency} to ${destinationCountry}; explicit external-account selection is required.`
-  );
-}
-
-/**
- * Resolves a promise whose expected miss is signalled by throwing a specific
- * error class.
- *
- * @param promise - The in-flight operation.
- * @param expected - The error class that represents an expected miss.
- * @returns The result, or null when the operation threw an instance of
- *   `expected`; any other error rethrows.
- */
-export async function nullOnExpected<T>(
-  promise: Promise<T>,
-  expected: new (message?: string) => Error
-): Promise<T | null> {
-  try {
-    return await promise;
-  } catch (err) {
-    if (err instanceof expected) {
-      return null;
-    }
-    throw err;
-  }
 }

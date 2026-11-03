@@ -1,9 +1,20 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getSignatureStatuses, getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
+import {
+  type ClosedUnpaidPaymentRequestStatus,
+  isClosedUnpaidPaymentRequestStatus,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, type Signature, signature } from "@solana/kit";
+import {
+  type Address,
+  isSolanaError,
+  type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION,
+  signature,
+} from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -25,10 +36,11 @@ import {
   createTransactionalPaymentRequestsRepository,
   createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, internalError, rateLimited } from "@/lib/errors";
+import { AppError, internalError, rateLimited, solanaRpcError } from "@/lib/errors";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import {
   type PaymentRequestTransferFields,
@@ -44,8 +56,41 @@ const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
 const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set([
   "Transaction not found",
   "Transaction meta missing",
+  "Transaction decode failed",
 ]);
 const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
+
+/**
+ * How far below the confirmed block height a sponsored transaction's last valid block height
+ * may sit and still count as able to land.
+ */
+const SPONSORED_CLAIM_BLOCK_MARGIN = 150n;
+
+/**
+ * The live-claim floor: the lowest last valid block height a sponsored transaction may hold and
+ * still land, the confirmed height less a margin. Every hold on a live claim reads it here: the
+ * hot lane, the expiry lane and a cancel. A lagging node reads a lower height, so a hold lasts
+ * longer, which is the safe direction.
+ *
+ * @returns The height below which a sponsored transaction can no longer land.
+ * @throws AppError `SOLANA_RPC_ERROR` when the cluster answers with a persistent Solana error; an
+ *   SDP RPC error or a transient one passes through, for the API's `503 RPC_UNAVAILABLE`.
+ */
+export async function readLiveClaimFloor(): Promise<bigint> {
+  let blockHeight: bigint;
+  try {
+    blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+  } catch (error) {
+    rethrowRpcUnavailable(error);
+    if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
+    logEvent("warn", {
+      event: "payment_requests.claim_floor_read_failed",
+      ...describeError(error),
+    });
+    throw solanaRpcError("Could not read the cluster's block height; retry");
+  }
+  return blockHeight - SPONSORED_CLAIM_BLOCK_MARGIN;
+}
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -82,9 +127,43 @@ const NOT_STUCK: StuckSignature = { signature: null, since: null };
 
 interface SignatureScanOutcome {
   cursor: Signature | null;
-  exhausted: boolean;
+  progress: Signature | null;
+  scannedAll: boolean;
   found: FoundPayment | null;
   stuck: StuckSignature;
+  hadRetry: boolean;
+}
+
+function trackUnreadableCandidate(
+  row: PaymentRequestRow,
+  candidate: SignatureInfo,
+  reason: string,
+  stuck: StuckSignature
+): StuckSignature {
+  // Keep the first unresolved candidate as the late-watch sentinel. Newer
+  // unreadable signatures remain behind the safe cursor and get another scan.
+  if (stuck.signature !== null && stuck.signature !== candidate.signature) {
+    return stuck;
+  }
+  const since =
+    stuck.signature === candidate.signature && stuck.since !== null
+      ? Date.parse(stuck.since)
+      : Number.NaN;
+  if (Number.isNaN(since)) {
+    return { signature: candidate.signature, since: new Date().toISOString() };
+  }
+  if (Date.now() - since < UNREADABLE_SIGNATURE_GIVE_UP_MS) {
+    return stuck;
+  }
+  if (row.status === "awaiting_payment") {
+    logEvent("warn", {
+      event: "payment_requests.signature_unreadable",
+      payment_request_id: row.id,
+      signature: candidate.signature,
+      reason,
+    });
+  }
+  return stuck;
 }
 
 const transferExpectationSchema = z.discriminatedUnion("kind", [
@@ -95,7 +174,7 @@ type TransferExpectation = z.infer<typeof transferExpectationSchema>;
 
 interface PaidTransition {
   row: PaymentRequestRow;
-  from: "awaiting_payment" | "expired" | null;
+  from: "awaiting_payment" | ClosedUnpaidPaymentRequestStatus | null;
 }
 
 interface PaymentRequestKey {
@@ -208,23 +287,39 @@ export async function closeLapsedPaymentRequest(
   }
 }
 
-export async function checkExpiredPaymentRequestForLatePayment(
+/**
+ * The late-payment watch over a request that closed without a payment, expired or canceled: a
+ * payer who signed before it closed can still land the transfer, and that money is recorded.
+ *
+ * @param env - The bindings.
+ * @param row - The closed request.
+ * @returns The row after the check and how the check ended.
+ */
+export async function checkClosedPaymentRequestForLatePayment(
   env: Env,
   row: PaymentRequestRow
 ): Promise<PaymentRequestCheck> {
-  if (row.status !== "expired" || row.custody_wallet_id === null) {
+  if (!isClosedUnpaidPaymentRequestStatus(row.status) || row.custody_wallet_id === null) {
     return skippedCheck(row);
   }
   return settleIfPaid(env, row, row.custody_wallet_id, await findValidPayment(env, row));
 }
 
-function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean {
-  if (expiresAt === null) {
+/**
+ * Whether a payment landed after the request closed: past its expiry, or after its cancel.
+ * Without a block time, a close already in the past counts as late.
+ *
+ * @param blockTime - The payment's block time in seconds, when the chain reported one.
+ * @param closedAt - When the request closed or closes; null for one that never expires.
+ * @returns True when the payment landed after `closedAt`.
+ */
+function isPaidLate(blockTime: bigint | null, closedAt: string | null): boolean {
+  if (closedAt === null) {
     return false;
   }
   return blockTime !== null
-    ? Number(blockTime) * 1000 > Date.parse(expiresAt)
-    : isPaymentRequestExpired(expiresAt);
+    ? Number(blockTime) * 1000 > Date.parse(closedAt)
+    : isPaymentRequestExpired(closedAt);
 }
 
 async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<PaymentSearchResult> {
@@ -237,6 +332,8 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
     before: row.signature_scan_before,
+    progress: row.signature_scan_progress,
+    cycleHadRetry: row.signature_scan_cycle_had_retry,
     stuckSignature: row.signature_scan_stuck_signature,
     stuckSince: row.signature_scan_stuck_since,
   };
@@ -254,27 +351,44 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
     await advanceSignatureScan(env, row, from, { ...from, before: resumeBefore.signature });
     return { kind: "pending" };
   }
-  const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), {
-    signature: from.stuckSignature,
-    since: from.stuckSince,
-  });
-  await advanceSignatureScan(env, row, from, {
-    cursor: scan.cursor ?? from.cursor,
-    before: scan.exhausted ? null : from.before,
-    stuckSignature: scan.stuck.signature,
-    stuckSince: scan.stuck.since,
-  });
+  const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), from);
   if (scan.found !== null) {
+    // Leave the scan position retryable until the transfer and paid transition commit.
     return { kind: "paid", found: scan.found };
   }
-  return scan.exhausted && from.before === null ? { kind: "none" } : { kind: "pending" };
+  const cycleFinished = scan.scannedAll && from.before === null;
+  const cycleHadRetry = from.cycleHadRetry || scan.hadRetry;
+  const hasUnresolved = cycleHadRetry || scan.stuck.signature !== null;
+  const cleanSegment = scan.scannedAll && !hasUnresolved;
+  const latestProgress = scan.progress ?? from.progress;
+  const to: SignatureScanPosition = {
+    cursor: cleanSegment ? (latestProgress ?? from.cursor) : (scan.cursor ?? from.cursor),
+    before: scan.scannedAll ? null : from.before,
+    progress: cycleFinished || cleanSegment ? null : latestProgress,
+    cycleHadRetry: cycleFinished ? false : cycleHadRetry,
+    stuckSignature: cleanSegment ? null : scan.stuck.signature,
+    stuckSince: cleanSegment ? null : scan.stuck.since,
+  };
+  await advanceSignatureScan(env, row, from, to);
+  // A complete pass can close an expired request after an hour. The safe cursor
+  // stays behind every unreadable candidate, so the late watch can retry them.
+  const stuckSince = to.stuckSince === null ? Number.NaN : Date.parse(to.stuckSince);
+  const agedUnresolved =
+    hasUnresolved &&
+    !Number.isNaN(stuckSince) &&
+    Date.now() - stuckSince >= UNREADABLE_SIGNATURE_GIVE_UP_MS;
+  if (cycleFinished && agedUnresolved && isPaymentRequestExpired(row.expires_at)) {
+    return { kind: "none" };
+  }
+  return cycleFinished && !hasUnresolved ? { kind: "none" } : { kind: "pending" };
 }
 
 async function fetchUnscannedSignatures(
   reference: Address,
   from: SignatureScanPosition
 ): Promise<{ newestFirst: SignatureInfo[]; truncated: boolean }> {
-  const until = from.cursor === null ? undefined : signature(from.cursor);
+  const checkedThrough = from.progress ?? from.cursor;
+  const until = checkedThrough === null ? undefined : signature(checkedThrough);
   const newestFirst: SignatureInfo[] = [];
   let before = from.before === null ? undefined : signature(from.before);
   for (let pages = 0; pages < MAX_SIGNATURE_PAGES; pages++) {
@@ -298,59 +412,61 @@ async function evaluateOldestFirst(
   row: PaymentRequestRow,
   expected: PaymentRequestTransferFields,
   oldestFirst: readonly SignatureInfo[],
-  stuckFrom: StuckSignature
+  from: SignatureScanPosition
 ): Promise<SignatureScanOutcome> {
   let cursor: Signature | null = null;
-  let contiguous = true;
+  let progress: Signature | null = null;
   let verified = 0;
-  let stuck = stuckFrom;
+  let stuck: StuckSignature = { signature: from.stuckSignature, since: from.stuckSince };
+  let hadRetry = false;
+  let contiguous = stuck.signature === null && !from.cycleHadRetry;
   for (const candidate of oldestFirst) {
     let verdict: CandidateVerdict = { kind: "rejected" };
     if (candidate.err === null) {
       if (verified >= VERIFY_BUDGET) {
-        return { cursor, exhausted: false, found: null, stuck };
+        return { cursor, progress, scannedAll: false, found: null, stuck, hadRetry };
       }
       verified++;
       verdict = await judgeCandidate(expected, candidate);
     }
-    if (verdict.kind === "retry" && contiguous) {
-      const stuckSince =
-        stuck.signature === candidate.signature && stuck.since !== null
-          ? Date.parse(stuck.since)
-          : Number.NaN;
-      if (Number.isNaN(stuckSince)) {
-        stuck = { signature: candidate.signature, since: new Date().toISOString() };
-      } else if (Date.now() - stuckSince >= UNREADABLE_SIGNATURE_GIVE_UP_MS) {
-        logEvent("warn", {
-          event: "payment_requests.signature_unreadable",
-          payment_request_id: row.id,
-          signature: candidate.signature,
-          reason: verdict.reason,
-        });
-        verdict = { kind: "rejected" };
-        stuck = NOT_STUCK;
-      }
-    } else if (verdict.kind !== "retry" && candidate.signature === stuck.signature) {
+    if (verdict.kind === "retry") {
+      hadRetry = true;
+      contiguous = false;
+      stuck = trackUnreadableCandidate(row, candidate, verdict.reason, stuck);
+    } else if (candidate.signature === stuck.signature) {
       stuck = NOT_STUCK;
+      if (!hadRetry && !from.cycleHadRetry && from.progress === null) contiguous = true;
     }
     switch (verdict.kind) {
       case "paid":
-        return { cursor, exhausted: false, found: verdict.found, stuck: NOT_STUCK };
+        return {
+          cursor,
+          progress,
+          scannedAll: false,
+          found: verdict.found,
+          stuck: NOT_STUCK,
+          hadRetry,
+        };
       case "retry":
-        contiguous = false;
         break;
       case "rejected":
-        if (contiguous) {
-          cursor = candidate.signature;
-        }
+        if (contiguous) cursor = candidate.signature;
         break;
       default: {
         const unreachable: never = verdict;
         throw internalError(`Unhandled candidate verdict ${String(unreachable)}`);
       }
     }
+    progress = candidate.signature;
   }
-  return { cursor, exhausted: contiguous, found: null, stuck };
+  return {
+    cursor,
+    progress,
+    scannedAll: true,
+    found: null,
+    stuck,
+    hadRetry,
+  };
 }
 
 async function judgeCandidate(
@@ -373,6 +489,9 @@ async function judgeCandidate(
   try {
     validated = await validatePaymentRequestTransfer(candidate.signature, expected);
   } catch (err) {
+    if (isSolanaError(err, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION)) {
+      return { kind: "retry", reason: "unsupported_transaction_version" };
+    }
     if (!(err instanceof ValidateTransferError)) {
       throw err;
     }
@@ -438,6 +557,8 @@ async function advanceSignatureScan(
   if (
     from.cursor === to.cursor &&
     from.before === to.before &&
+    from.progress === to.progress &&
+    from.cycleHadRetry === to.cycleHadRetry &&
     from.stuckSignature === to.stuckSignature &&
     from.stuckSince === to.stuckSince
   ) {
@@ -458,7 +579,6 @@ async function settlePaymentRequest(
 ): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
-  const paidLate = isPaidLate(found.blockTime, row.expires_at);
   const audit = createSystemAuditService(env);
   const settle = () =>
     audit.logSystemWithin(async (db) => {
@@ -474,7 +594,7 @@ async function settlePaymentRequest(
         row,
         key,
         transfer.id,
-        paidLate
+        found.blockTime
       );
       return {
         entry: transition.from === null ? null : settlementAuditEntry(transition, transfer, found),
@@ -491,19 +611,32 @@ async function settlePaymentRequest(
   }
 }
 
+/**
+ * Move a request to paid by its settling transfer, from whichever state it is in when the
+ * payment is found: open, or closed without a payment. A closed one is paid late when the
+ * payment landed after it closed: past `expires_at` for an expired one, after `canceled_at` for
+ * a canceled one, which keeps who canceled it.
+ *
+ * @param requestsRepo - The settlement transaction's repository.
+ * @param row - The request as the check read it.
+ * @param key - The request and its tenant.
+ * @param transferId - The settling transfer.
+ * @param blockTime - The payment's block time in seconds, when the chain reported one.
+ * @returns The row after the transition, and the status it left; null when none moved.
+ */
 async function transitionToPaid(
   requestsRepo: PaymentRequestsRepository,
   row: PaymentRequestRow,
   key: PaymentRequestKey,
   transferId: string,
-  paidLate: boolean
+  blockTime: bigint | null
 ): Promise<PaidTransition> {
-  const paid = { ...key, fulfilledByTransferId: transferId, paidLate };
+  const settlement = { ...key, fulfilledByTransferId: transferId };
   if (row.status === "awaiting_payment") {
     const settled = await requestsRepo.markPaymentRequest({
-      ...paid,
+      ...settlement,
       status: "paid",
-      canceledBy: null,
+      paidLate: isPaidLate(blockTime, row.expires_at),
       chainRead: true,
     });
     if (settled) {
@@ -511,13 +644,33 @@ async function transitionToPaid(
     }
   }
   const current = await reread(requestsRepo, key);
-  if (current.status !== "expired") {
-    return { row: current, from: null };
+  switch (current.status) {
+    case "expired": {
+      const converted = await requestsRepo.markExpiredPaymentRequestPaid({
+        ...settlement,
+        paidLate: isPaidLate(blockTime, current.expires_at),
+      });
+      return converted
+        ? { row: converted, from: "expired" }
+        : { row: await reread(requestsRepo, key), from: null };
+    }
+    case "canceled": {
+      const converted = await requestsRepo.markCanceledPaymentRequestPaid({
+        ...settlement,
+        paidLate: isPaidLate(blockTime, current.canceled_at),
+      });
+      return converted
+        ? { row: converted, from: "canceled" }
+        : { row: await reread(requestsRepo, key), from: null };
+    }
+    case "awaiting_payment":
+    case "paid":
+      return { row: current, from: null };
+    default: {
+      const unreachable: never = current.status;
+      throw internalError(`Unhandled payment request status ${String(unreachable)}`);
+    }
   }
-  const converted = await requestsRepo.markExpiredPaymentRequestPaid(paid);
-  return converted
-    ? { row: converted, from: "expired" }
-    : { row: await reread(requestsRepo, key), from: null };
 }
 
 function settlementAuditEntry(
@@ -559,7 +712,6 @@ async function markExpired(
       ...key,
       status: "expired",
       fulfilledByTransferId: null,
-      canceledBy: null,
       paidLate: false,
       chainRead,
     });

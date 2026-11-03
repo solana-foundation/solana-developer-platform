@@ -194,7 +194,7 @@ export function summarizeGrants(
 }
 
 /** Whether any grant lets the key move money or sign (an `execute` action). */
-export function grantsIncludeExecute(grants: readonly Action[]): boolean {
+function grantsIncludeExecute(grants: readonly Action[]): boolean {
   return grants.some((grant) => actionVerbOf(grant) === "execute");
 }
 

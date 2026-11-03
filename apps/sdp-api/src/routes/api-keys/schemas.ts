@@ -11,7 +11,7 @@ const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
  * An API key's grants: known actions only (an unknown string is a 400, never
  * silently dropped), none an API key may never hold, each at most once.
  */
-export const apiKeyGrantsSchema = z
+const apiKeyGrantsSchema = z
   .array(z.enum(ACTIONS))
   .max(ACTIONS.length)
   .superRefine((grants, ctx) => {
@@ -53,13 +53,13 @@ const retiredApiKeyFields = {
 };
 
 /** The most custody wallets one key may list. */
-export const API_KEY_MAX_SIGNING_WALLETS = 100;
+const API_KEY_MAX_SIGNING_WALLETS = 100;
 
 /**
  * The custody wallets a selected key may sign with: exact `GET /v1/wallets`
  * ids (`cwlt_...`), never provider wallet ids (APE-390), each at most once.
  */
-export const apiKeyWalletIdsSchema = z
+const apiKeyWalletIdsSchema = z
   .array(z.string().trim().min(1))
   .max(API_KEY_MAX_SIGNING_WALLETS)
   .refine((ids) => new Set(ids).size === ids.length, {

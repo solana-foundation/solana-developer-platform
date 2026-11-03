@@ -4,6 +4,7 @@ import { DEFAULT_ISSUANCE_LIST_QUERY } from "./issuance/issuance-list-query";
 import { issuanceQueryKeys } from "./issuance/issuance-query-key";
 import { earnQueryKeys } from "./markets/earn/earn-query-key";
 import { paymentsQueryKeys } from "./payments/payments-query-key";
+import { membersQueryKeys } from "./settings/members-query-key";
 
 const plainKeys = [
   paymentsQueryKeys.actionCounterparties(),
@@ -37,6 +38,7 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [paymentsQueryKeys.batchEstimate({ serializedRequest: '{"a":1}' }), ['{"a":1}']],
   [paymentsQueryKeys.transactionFilterOptions({ projectId: "prj_1" }), ["prj_1"]],
   [custodyQueryKeys.walletActivity({ walletId: "wal_1" }), ["wal_1"]],
+  [membersQueryKeys.memberApiKeys({ memberId: "mem_1" }), ["mem_1"]],
   [custodyQueryKeys.walletBalances({ walletId: "wal_3", readAt: 1 }), ["wal_3", 1]],
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],

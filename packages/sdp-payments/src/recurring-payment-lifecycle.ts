@@ -1,4 +1,6 @@
 import {
+  isCancelingRecurringPaymentStatus,
+  isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRecurringPaymentLifecycleOperation,
   type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentTransitionResult,
@@ -45,30 +47,29 @@ export function isRecurringPaymentOperationStale(input: {
   return Number.isFinite(updatedAt) && Number.isFinite(staleBefore) && updatedAt <= staleBefore;
 }
 
-export function getRecurringPaymentLifecycleStatuses(
-  operation: RecurringPaymentLifecycleOperation
-): {
-  processingStatus: PaymentRecurringPaymentStatus;
-  claimableStatus: PaymentRecurringPaymentStatus;
-  finalStatus: PaymentRecurringPaymentStatus;
-} {
-  return RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation];
-}
-
-export function decideRecurringPaymentLifecycleTransition(input: {
-  operation: RecurringPaymentLifecycleOperation;
+/**
+ * Where a cancel stands for a schedule in `status`: already canceled, in flight (recoverable once
+ * stale), claimable from a running or paused schedule, or invalid.
+ *
+ * @param input.status - The schedule's status.
+ * @param input.updatedAt - When it last changed, for the stale window.
+ * @param input.nowIso - Now.
+ * @returns The cancel's transition.
+ */
+export function decideRecurringPaymentCancelTransition(input: {
   status: PaymentRecurringPaymentStatus;
   updatedAt: string;
   nowIso: string;
 }): RecurringPaymentTransition {
-  const { claimableStatus, finalStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
-    input.operation
-  );
-  if (input.status === finalStatus) return "already_final";
-  if (input.status === processingStatus) {
+  if (input.status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus) {
+    return "already_final";
+  }
+  if (isCancelingRecurringPaymentStatus(input.status)) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
-  return input.status === claimableStatus ? "claimable" : "invalid";
+  return isRecurringPaymentLifecycleClaimableStatus("cancel", input.status)
+    ? "claimable"
+    : "invalid";
 }
 
 export function decideRecurringPaymentActivationTransition(input: {

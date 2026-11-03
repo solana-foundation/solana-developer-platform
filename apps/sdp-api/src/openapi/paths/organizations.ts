@@ -1,11 +1,40 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
-import { updateOrganizationRequestSchema } from "@/openapi/schemas/organizations";
+import {
+  createOrganizationRequestSchema,
+  requestMainnetAccessRequestSchema,
+  updateOrganizationRequestSchema,
+} from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent } from "./helpers";
-import { organizationResponse } from "./responses";
+import {
+  createOrganizationResponse,
+  mainnetAccessResponse,
+  organizationResponse,
+} from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations",
+    tags: ["Organizations"],
+    summary: "Create organization",
+    operationId: "createOrganization",
+    description:
+      "Creates the caller's organization and makes them its admin, with a Sandbox and a Production project. Called with a signed-in Clerk session that has no active organization. A person creates one organization: repeating the request with the same name finishes or returns it, and another name is refused (409).",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      body: { required: true, content: jsonContent(createOrganizationRequestSchema) },
+    },
+    responses: {
+      201: {
+        description: "Organization created",
+        content: jsonContent(createOrganizationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 409, 429, 500]),
+    },
+  });
+
   registry.registerPath({
     method: "get",
     path: "/v1/organizations/{orgId}",
@@ -55,23 +84,53 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "delete",
-    path: "/v1/organizations/{orgId}",
+    method: "get",
+    path: "/v1/organizations/{orgId}/mainnet-access",
     tags: ["Organizations"],
-    summary: "Delete organization",
-    operationId: "deleteOrganization",
-    description: "Soft deletes the organization and revokes all API keys.",
+    summary: "Get mainnet access",
+    operationId: "getMainnetAccess",
+    description:
+      "Returns where the organization's mainnet access stands, with its declared jurisdiction and Terms and Conditions acceptance, and whether this deployment takes requests. A signed-in admin only, never an API key.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { params: z.object({ orgId: orgIdParamSchema }) },
+    responses: {
+      200: { description: "Mainnet access", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations/{orgId}/mainnet-access",
+    tags: ["Organizations"],
+    summary: "Request mainnet access",
+    operationId: "requestMainnetAccess",
+    description:
+      "Records the organization's jurisdiction and its acceptance of the current SDP Terms and Conditions, and asks SDP to enable mainnet. Once per organization; an operator approves it. A signed-in admin only, never an API key. Refused with 409 once the organization asked, when mainnet is already enabled, or when the terms version is not the current one. If the email to SDP fails, the request stays recorded and `POST …/notify` sends it.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      params: z.object({
-        orgId: orgIdParamSchema,
-      }),
+      params: z.object({ orgId: orgIdParamSchema }),
+      body: { required: true, content: jsonContent(requestMainnetAccessRequestSchema) },
     },
     responses: {
-      204: {
-        description: "Organization deleted",
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      201: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500, 503]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations/{orgId}/mainnet-access/notify",
+    tags: ["Organizations"],
+    summary: "Send a mainnet access request again",
+    operationId: "notifyMainnetAccess",
+    description:
+      "Sends the organization's recorded request to SDP when its email did not go out. Changes nothing else. A signed-in admin only, never an API key. Refused with 409 when the organization has not asked or its request was already sent.",
+    security: [{ clerkBearerAuth: [] }],
+    request: { params: z.object({ orgId: orgIdParamSchema }) },
+    responses: {
+      200: { description: "Request sent", content: jsonContent(mainnetAccessResponse) },
+      ...errorResponses(errorResponseSchema, [401, 403, 409, 500, 503]),
     },
   });
 }

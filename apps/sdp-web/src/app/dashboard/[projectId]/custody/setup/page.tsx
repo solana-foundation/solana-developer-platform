@@ -7,7 +7,6 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -15,10 +14,10 @@ import { fetchProjectProviderAvailability } from "@/lib/provider-availability.se
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
+  requestMemberRole,
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
-import { CurrentCustodySetupPage as RedesignCurrentCustodySetupPage } from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 interface CustodySetupPageProps {
@@ -59,8 +58,8 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { userId, orgId, orgRole } = await auth();
+export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -74,7 +73,7 @@ async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
 
   // The custody reads below are `custody:admin`, so a member would hit a 403 on
   // each one. Send them to the provider page, which names the role they need.
-  if (!resolveDashboardAccess(orgRole).capabilities.canManageCustody) {
+  if (!resolveDashboardAccess(await requestMemberRole()).capabilities.canManageCustody) {
     redirect(
       await requestProjectHref(
         initialProvider === null
@@ -133,5 +132,3 @@ async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
     />
   );
 }
-
-export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage, "wallets");

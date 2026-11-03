@@ -38,7 +38,7 @@ const setAddAccountOpen = vi.fn();
 const baseWizard = {
   summaryDetails: [],
   stepIndex: 0,
-  currentStepId: "DESTINATION",
+  currentStepId: "DETAILS",
   isLastStep: false,
   canProceed: false,
   readySubmission: null,
@@ -75,7 +75,7 @@ function wrapper({ children }: { children: ReactNode }) {
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={null}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: false,
           compliance: false,
@@ -99,8 +99,8 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderStep(wizard: OnchainSendWizard) {
-  return render(<OnchainSendStepContent wizard={wizard} counterpartyName="Ada Trading" />, {
+function renderStep(wizard: OnchainSendWizard, counterpartyName = "Ada Trading") {
+  return render(<OnchainSendStepContent wizard={wizard} counterpartyName={counterpartyName} />, {
     wrapper,
   });
 }
@@ -115,15 +115,10 @@ describe("OnchainSendStepContent", () => {
     const user = userEvent.setup();
     renderStep(baseWizard);
 
-    expect(screen.getByRole("button", { name: "Destination account" })).toHaveProperty(
-      "disabled",
-      true
-    );
-    expect(screen.getByRole("button", { name: /Add Solana address/ }).textContent).toContain(
-      "Ada Trading has no Solana address on file yet."
-    );
+    expect(screen.getByRole("button", { name: "Destination" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("No Solana address on file")).toBeDefined();
 
-    await user.click(screen.getByRole("button", { name: /Add Solana address/ }));
+    await user.click(screen.getByRole("button", { name: "Add a Solana address" }));
 
     expect(setAddAccountOpen).toHaveBeenCalledWith(true);
   });
@@ -147,18 +142,15 @@ describe("OnchainSendStepContent", () => {
 
     expect(screen.getByRole("button", { name: "Source wallet" })).toHaveProperty("disabled", false);
     expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveProperty("value", "2");
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", false);
-    expect(screen.getByRole("textbox", { name: "Memo (optional)" })).toHaveProperty(
-      "value",
-      "Invoice 7"
-    );
-    expect(screen.queryByText("25.5 USDC")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("textbox", { name: "Memo" })).toHaveProperty("value", "Invoice 7");
+    expect(screen.queryByText("25.5 USDC available")).not.toBeNull();
   });
 
   it("hides balance and disables assets until a wallet is selected", () => {
     renderStep({ ...baseWizard, currentStepId: "DETAILS" });
 
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", true);
     expect(screen.queryByText(/USDC/)).toBeNull();
     expect(screen.queryByText("This wallet has no assets available to send.")).toBeNull();
   });
@@ -172,18 +164,12 @@ describe("OnchainSendStepContent", () => {
       fields: { ...baseWizard.fields, walletId: labeledWallet.id },
     });
 
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", true);
     expect(screen.queryByText("This wallet has no assets available to send.")).not.toBeNull();
   });
 
   it("shows empty review fallbacks and omits a blank memo", () => {
-    render(
-      <OnchainSendStepContent
-        wizard={{ ...baseWizard, currentStepId: "REVIEW" }}
-        counterpartyName=""
-      />,
-      { wrapper }
-    );
+    renderStep({ ...baseWizard, currentStepId: "REVIEW" }, "");
 
     expect(screen.queryByText(/^0$/)).not.toBeNull();
     expect(screen.getAllByText("—")).toHaveLength(3);
@@ -251,4 +237,35 @@ describe("OnchainSendStepContent", () => {
       );
     }
   );
+  it("explains Fireblocks approval and vault fees and links to the pending transaction", () => {
+    renderStep({
+      ...baseWizard,
+      currentStepId: "REVIEW",
+      selectedWallet: {
+        ...labeledWallet,
+        provider: "fireblocks",
+        custodyConfigId: undefined,
+        custodyConnectionId: "cconn_fireblocks",
+      },
+      transferResult: {
+        id: "xfr_fireblocks",
+        custodyWalletId: labeledWallet.id,
+        providerWalletId: "fb_0",
+        status: "processing",
+        signature: null,
+        rampsMemo: {},
+        fireblocks: {
+          transactionId: "fireblocks-proposal",
+          status: "PENDING_AUTHORIZATION",
+          subStatus: null,
+        },
+      },
+    });
+    expect(screen.getByText(/Payment submitted to Fireblocks/)).toBeTruthy();
+    expect(screen.getByText(/Your source vault pays the network fee in SOL/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View transaction" }).getAttribute("href")).toContain(
+      "/payments/transactions/xfr_fireblocks"
+    );
+    expect(screen.queryByText("Your transfer was sent successfully.")).toBeNull();
+  });
 });

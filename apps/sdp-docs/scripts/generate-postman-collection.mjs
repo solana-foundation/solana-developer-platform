@@ -2,11 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NON_FINAL_MONEY_MOVEMENT_STATUSES } from "@sdp/types/payments";
-import {
-  getPrimaryTagName,
-  isPublicOperation,
-  POSTMAN_COLLECTION_FILENAME,
-} from "./lib/public-openapi.mjs";
+import { getOperationFamily, POSTMAN_COLLECTION_FILENAME } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -293,7 +289,7 @@ function idempotencyKeyEvents() {
   ];
 }
 
-function getRequestBody(spec, operation, preferredExampleName) {
+function getRequestBody(spec, operation) {
   const jsonBody = operation.requestBody?.content?.["application/json"];
   if (!jsonBody) {
     return undefined;
@@ -301,7 +297,7 @@ function getRequestBody(spec, operation, preferredExampleName) {
 
   const example =
     jsonBody.example ??
-    getNamedExampleValue(jsonBody.examples, preferredExampleName) ??
+    getNamedExampleValue(jsonBody.examples) ??
     buildExampleFromSchema(spec, jsonBody.schema);
 
   return {
@@ -319,21 +315,7 @@ function buildRequestUrl(baseUrl, routePath) {
   return `${baseUrl}${routePath.replace(/\{([^}]+)\}/g, "{{$1}}")}`;
 }
 
-function allowsAnonymousAccess(security) {
-  return (
-    Array.isArray(security) &&
-    security.some(
-      (requirement) =>
-        requirement &&
-        typeof requirement === "object" &&
-        !Array.isArray(requirement) &&
-        Object.keys(requirement).length === 0
-    )
-  );
-}
-
 function createRequestItem(spec, baseUrl, routePath, method, operation) {
-  const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
     header: getRequestHeaders(operation, routePath, method),
@@ -341,14 +323,7 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
     description: operation.description || operation.summary || "",
   };
 
-  // Collection auth is inherited by default. Optional-auth operations must
-  // override it so the placeholder API key does not turn a valid anonymous
-  // request into an INVALID_API_KEY response.
-  if (allowsAnonymous) {
-    request.auth = { type: "noauth" };
-  }
-
-  const body = getRequestBody(spec, operation, allowsAnonymous ? "anonymous" : undefined);
+  const body = getRequestBody(spec, operation);
   if (body) {
     request.body = body;
   }
@@ -375,14 +350,11 @@ function toPostmanCollection(spec) {
 
     for (const method of HTTP_METHODS) {
       const operation = pathItem[method];
-      if (!operation || typeof operation !== "object" || !isPublicOperation(operation)) {
+      if (!operation || typeof operation !== "object") {
         continue;
       }
 
-      const tagName = getPrimaryTagName(operation);
-      if (!tagName) {
-        continue;
-      }
+      const tagName = getOperationFamily(operation, `${method.toUpperCase()} ${routePath}`);
 
       if (!folders.has(tagName)) {
         folders.set(tagName, []);
@@ -424,7 +396,7 @@ function toPostmanCollection(spec) {
       },
       {
         key: "sdpApiKey",
-        value: "sk_test_your_api_key",
+        value: "sf_your_api_key",
         type: "string",
       },
     ],

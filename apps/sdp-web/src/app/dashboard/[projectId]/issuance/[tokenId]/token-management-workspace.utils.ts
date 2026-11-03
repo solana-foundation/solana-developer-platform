@@ -211,26 +211,6 @@ export function formatDate(value: string | null | undefined, locale: AppLocale):
   });
 }
 
-/** Full date + time, e.g. "Jul 21, 2026, 3:45 PM" — used in the audit table. */
-export function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = parseActivityDate(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString(locale, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 /**
  * Compact activity timestamp: just the time when the event happened today,
  * otherwise the short date. Keeps the recent-activity preview scannable.
@@ -377,7 +357,7 @@ export function getRemainingMintableSupply(token: {
   return formatBaseUnitsAsTokenAmount(remaining, token.decimals);
 }
 
-export function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
+function hasReachedMaxSupply(totalSupply: string, maxSupply: string | null): boolean {
   if (!maxSupply) {
     return false;
   }
@@ -548,7 +528,7 @@ export function getTokenActionDisabledReasons(
   };
 }
 
-export function formatValue(value: string | null | undefined, t: Translate): string {
+function formatValue(value: string | null | undefined, t: Translate): string {
   if (!value) {
     return t("DashboardIssuance.wallet.none");
   }
@@ -558,19 +538,6 @@ export function formatValue(value: string | null | undefined, t: Translate): str
   }
 
   return `${value.slice(0, 6)}...${value.slice(-6)}`;
-}
-
-export function getExplorerHref(mintAddress: string | null): string | null {
-  if (!mintAddress) {
-    return null;
-  }
-
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
-  const clusterQuery =
-    cluster === "mainnet-beta" || cluster === "mainnet"
-      ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
-  return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
 }
 
 export async function executeActionRequest(
@@ -825,7 +792,7 @@ export interface SignerSelectionState {
   unavailableReason: string | null;
 }
 
-export function getAvailableSignerWallets(
+function getAvailableSignerWallets(
   authorityWallets: PaymentsDashboardWallet[]
 ): PaymentsDashboardWallet[] {
   return authorityWallets.filter((wallet) => wallet.publicKey.trim());

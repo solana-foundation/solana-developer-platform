@@ -6,14 +6,14 @@ import type { AccessControlMode } from "@/app/dashboard/[projectId]/issuance/acc
 import {
   type TokenLifecycle,
   tokenLifecycle,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 
 type Translate = ReturnType<typeof useTranslations>;
 
 /** The tabs of one token's page, in the header's order. */
-export const TOKEN_TABS = [
+const TOKEN_TABS = [
   "overview",
   "details",
   "public",
@@ -142,14 +142,4 @@ export interface TokenTabProps {
   form: AssetProfileForm;
   state: TokenLifecycle;
   canManageTokenAdmin: boolean;
-}
-
-/** A transaction on explorer.solana.com, on the cluster the dashboard runs against. */
-export function transactionExplorerHref(signature: string): string {
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
-  const query =
-    cluster === "mainnet-beta" || cluster === "mainnet"
-      ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
-  return `https://explorer.solana.com/tx/${signature}${query}`;
 }

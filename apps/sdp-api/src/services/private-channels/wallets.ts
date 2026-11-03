@@ -34,6 +34,7 @@ import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/erro
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
+import { createPrivateChannelAuthFetch } from "./egress";
 import { createPrivateChannelSigner, resolvePrivateChannelCustodyWallet } from "./wallet-access";
 
 const base58 = getBase58Codec();
@@ -90,7 +91,10 @@ async function resolveWalletSession(
     throw notFound("Active Private Channels principal");
   }
 
-  const client = createAuthClient(instance.auth_url, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
+  const client = createAuthClient(instance.auth_url, {
+    timeoutMs: SPC_AUTH_TIMEOUT_MS,
+    fetchImpl: createPrivateChannelAuthFetch(env),
+  });
   const spcAuth = await openSpcAuthContext(env, auth.organizationId, instance.id, pcUser, client);
 
   return { scope, instance, pcUser, client, spcAuth };

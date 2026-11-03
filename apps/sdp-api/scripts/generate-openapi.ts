@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { resolveSdpReleaseChannel } from "@sdp/types/release-channels";
 
+import { buildApiReference } from "@/openapi/reference";
 import { createPublicOpenApiDocument, createPublicSurfaceManifest } from "@/openapi/spec";
 
 // The docs build sets SDP_RELEASE_CHANNEL so each deployment documents only the
@@ -24,6 +25,13 @@ await writeFile(outputPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 await writeFile(
   path.join(outputDir, "public-surface.json"),
   `${JSON.stringify(createPublicSurfaceManifest(releaseChannel), null, 2)}\n`,
+  "utf8"
+);
+
+// The reference model the docs render their API reference from (@sdp/api-catalog/reference).
+await writeFile(
+  path.join(outputDir, "api-reference.json"),
+  `${JSON.stringify(buildApiReference(document), null, 2)}\n`,
   "utf8"
 );
 

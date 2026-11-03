@@ -388,6 +388,7 @@ describe("cleanupRetiredProviderCredentialSecrets", () => {
       cleanupStore.listPendingDestructions(
         {
           id: predecessorId,
+          provider: "privy",
           organization_id: ORGANIZATION_ID,
           secret_ref: `projects/p/secrets/sdp-provider-credentials-${predecessorId}`,
         },

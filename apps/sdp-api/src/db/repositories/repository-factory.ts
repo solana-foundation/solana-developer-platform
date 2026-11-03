@@ -28,6 +28,8 @@ import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
+import type { OrganizationRepository } from "./organization.repository";
+import { createPostgresOrganizationRepository } from "./organization.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -58,8 +60,6 @@ import type { PrivateChannelVerifiedWalletRepository } from "./private-channel-v
 import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-channel-verified-wallet.repository.postgres";
 import type { PrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository";
 import { createPostgresPrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository.postgres";
-import type { ProjectUserRepository } from "./project-user.repository";
-import { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
 import type { SecretRetirementsRepository } from "./secret-retirement.repository";
 import { createPostgresSecretRetirementsRepository } from "./secret-retirement.repository.postgres";
 import type { TokenRepository } from "./token.repository";
@@ -72,7 +72,7 @@ export function createPaymentsRepository(env: Env, scope: TenantScope): Payments
     createPostgresPaymentsRepository(getDb(env), scope),
     scope,
     "PaymentsRepository",
-    ["listTransfersByStatus"]
+    ["listTransfersByStatus", "listProcessingSignedSubmissions"]
   );
 }
 
@@ -88,7 +88,7 @@ export function createTransactionalPaymentsRepository(
     createPostgresPaymentsRepository(db, scope),
     scope,
     "PaymentsRepository",
-    ["listTransfersByStatus"]
+    ["listTransfersByStatus", "listProcessingSignedSubmissions"]
   );
 }
 
@@ -135,10 +135,12 @@ const PAYMENT_REQUESTS_SYSTEM_ONLY_METHODS = [
   "claimSponsoredTransactionWindow",
   "getSponsoredTransactionClaim",
   "storeSponsoredTransactionSignature",
+  "hasHotPaymentRequests",
   "listHotPaymentRequests",
   "listPaymentRequestsDueForCheck",
+  "hasLapsedPaymentRequests",
   "listLapsedPaymentRequests",
-  "listExpiredPaymentRequestsForLateCheck",
+  "listClosedPaymentRequestsForLateCheck",
   "markPaymentRequestsChecked",
   "countStaleAwaitingPaymentRequests",
   "countStaleLapsedPaymentRequests",
@@ -196,10 +198,6 @@ export function createCounterpartiesRepository(
     "CounterpartiesRepository",
     ["findActiveCounterpartyById", "findActiveCounterpartyByProviderCustomerReference"]
   );
-}
-
-export function createSystemCounterpartiesRepository(env: Env): CounterpartiesRepository {
-  return createPostgresCounterpartiesRepository(getDb(env));
 }
 
 export function createCounterpartyAccountsRepository(
@@ -329,6 +327,6 @@ export function createPrivateChannelSettlementObservationRepository(
   return createPostgresPrivateChannelSettlementObservationRepository(getDb(env));
 }
 
-export function createProjectUserRepository(env: Env): ProjectUserRepository {
-  return createPostgresProjectUserRepository(getDb(env));
+export function createOrganizationRepository(env: Env): OrganizationRepository {
+  return createPostgresOrganizationRepository(getDb(env));
 }

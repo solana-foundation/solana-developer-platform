@@ -27,9 +27,11 @@ import {
 interface Props {
   principals: PrivateChannelPrincipalDto[];
   channels: PrivateChannelDto[];
+  /** False for a read-only member: every control that changes a principal is hidden. */
+  canWrite: boolean;
 }
 
-export function MembersTable({ principals, channels }: Props) {
+export function MembersTable({ principals, channels, canWrite }: Props) {
   const [disableTarget, setDisableTarget] = useState<PrivateChannelPrincipalDto | null>(null);
   const t = useTranslations();
   const href = useProjectHref();
@@ -42,11 +44,13 @@ export function MembersTable({ principals, channels }: Props) {
             ? t("DashboardPrivateChannels.members.countOne", { count: principals.length })
             : t("DashboardPrivateChannels.members.countOther", { count: principals.length })}
         </p>
-        <Button asChild>
-          <Link href={href("/dashboard/integrations/private-channels/members/create")}>
-            {t("DashboardPrivateChannels.members.addPrincipal")}
-          </Link>
-        </Button>
+        {canWrite ? (
+          <Button asChild>
+            <Link href={href("/dashboard/integrations/private-channels/members/create")}>
+              {t("DashboardPrivateChannels.members.addPrincipal")}
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       {principals.length === 0 ? (
@@ -60,9 +64,11 @@ export function MembersTable({ principals, channels }: Props) {
               <TableHead>{t("DashboardPrivateChannels.members.columnPrincipal")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnVerifiedWallets")}</TableHead>
               <TableHead>{t("DashboardPrivateChannels.members.columnChannels")}</TableHead>
-              <TableHead className="text-right">
-                {t("DashboardPrivateChannels.members.columnActions")}
-              </TableHead>
+              {canWrite ? (
+                <TableHead className="text-right">
+                  {t("DashboardPrivateChannels.members.columnActions")}
+                </TableHead>
+              ) : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -71,6 +77,7 @@ export function MembersTable({ principals, channels }: Props) {
                 key={principal.id}
                 principal={principal}
                 allChannels={channels}
+                canWrite={canWrite}
                 onDisable={() => setDisableTarget(principal)}
               />
             ))}
@@ -86,10 +93,12 @@ export function MembersTable({ principals, channels }: Props) {
 function PrincipalRow({
   principal,
   allChannels,
+  canWrite,
   onDisable,
 }: {
   principal: PrivateChannelPrincipalDto;
   allChannels: PrivateChannelDto[];
+  canWrite: boolean;
   onDisable: () => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -127,10 +136,12 @@ function PrincipalRow({
                 channel.name +
                 (channel.isDefault ? ` ${t("DashboardPrivateChannels.members.defaultSuffix")}` : "")
               }
-              onRemove={pending || disabled ? undefined : () => removeFromChannel(channel.id)}
+              onRemove={
+                !canWrite || pending || disabled ? undefined : () => removeFromChannel(channel.id)
+              }
             />
           ))}
-          {!disabled && availableChannels.length > 0 ? (
+          {canWrite && !disabled && availableChannels.length > 0 ? (
             <AddToChannelMenu
               channels={availableChannels}
               disabled={pending}
@@ -139,15 +150,17 @@ function PrincipalRow({
           ) : null}
         </div>
       </TableCell>
-      <TableCell className="text-right">
-        {!principal.isDefault && !disabled ? (
-          <PrincipalActionsMenu
-            principalName={principal.name}
-            disabled={pending}
-            onDisable={onDisable}
-          />
-        ) : null}
-      </TableCell>
+      {canWrite ? (
+        <TableCell className="text-right">
+          {!principal.isDefault && !disabled ? (
+            <PrincipalActionsMenu
+              principalName={principal.name}
+              disabled={pending}
+              onDisable={onDisable}
+            />
+          ) : null}
+        </TableCell>
+      ) : null}
     </TableRow>
   );
 }

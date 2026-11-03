@@ -1,23 +1,6 @@
-import {
-  canProviderCreateWallet,
-  canProviderDeleteWallet,
-  canProviderSign,
-} from "@sdp/custody/providers";
+import { canProviderCreateWallet, canProviderDeleteWallet } from "@sdp/custody/providers";
 import { SigningError } from "@sdp/custody/signing";
 import type { CustodyProvider } from "@sdp/types/custody";
-
-export function custodyProviderCanSign(provider: CustodyProvider): boolean {
-  return canProviderSign(provider);
-}
-
-export function assertCustodyProviderCanSign(provider: CustodyProvider): void {
-  if (!custodyProviderCanSign(provider)) {
-    throw new SigningError(
-      `Provider does not support transaction signing: ${provider}`,
-      "INVALID_REQUEST"
-    );
-  }
-}
 
 export function assertCustodyProviderCanCreateWallet(provider: CustodyProvider): void {
   if (!canProviderCreateWallet(provider)) {

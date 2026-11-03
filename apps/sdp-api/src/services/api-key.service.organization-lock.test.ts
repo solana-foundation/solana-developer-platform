@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -23,10 +23,14 @@ const INPUT: CreateApiKeyInput = {
   projectId: TEST_PROJECT.id,
   createdByUserId: TEST_USER.id,
   actorRole: "admin",
-  grantChannel: { releaseChannel: "experimental", rampProviderStages: SDP_RAMP_PROVIDER_STAGES },
+  grantChannel: {
+    releaseChannel: "experimental",
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
+  },
   name: "Racing key",
   grants: ["transfers.read"],
   walletScope: { scope: "all" },
+  pepper: env.API_KEY_PEPPER,
 };
 
 function createKey(): Promise<unknown> {
@@ -182,7 +186,7 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
           new ApiKeyService(
             asTransactionalClient(tx),
             createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, "admin")
+          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, "admin", env.API_KEY_PEPPER)
         )
       ).then(
         (result) => result,

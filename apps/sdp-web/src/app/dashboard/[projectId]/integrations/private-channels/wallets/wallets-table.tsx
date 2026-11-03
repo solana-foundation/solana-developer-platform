@@ -34,6 +34,8 @@ interface Props {
   showBalance?: boolean;
   /** Optional id used by a page-level action to open the enrollment form. */
   enrollTriggerId?: string;
+  /** False for a read-only member: enroll, revoke and the create-wallet prompt are hidden. */
+  canWrite: boolean;
 }
 
 function shortKey(pk: string): string {
@@ -73,6 +75,7 @@ export function WalletsTable({
   loadError,
   showBalance = true,
   enrollTriggerId,
+  canWrite,
 }: Props) {
   const [pending, startTransition] = useTransition();
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -131,7 +134,7 @@ export function WalletsTable({
     <Card>
       <CardHeader>
         <CardTitle>{t("DashboardPrivateChannels.overview.walletsTitle")}</CardTitle>
-        {availableWallets.length > 0 ? (
+        {canWrite && availableWallets.length > 0 ? (
           <CardAction>
             <Button id={enrollTriggerId} disabled={pending} onClick={openEnrollment}>
               {t("DashboardPrivateChannels.verifiedWallets.enroll")}
@@ -149,7 +152,7 @@ export function WalletsTable({
             <p className="text-sm text-secondary">
               {t("DashboardPrivateChannels.verifiedWallets.noWallets")}
             </p>
-            {custodyEnabled ? (
+            {canWrite && custodyEnabled ? (
               <Button asChild>
                 <Link href={href("/dashboard/wallets")}>
                   {t("DashboardPrivateChannels.verifiedWallets.createWallet")}
@@ -169,7 +172,7 @@ export function WalletsTable({
                 {showBalance ? (
                   <TableHead>{t("DashboardPrivateChannels.overview.colBalance")}</TableHead>
                 ) : null}
-                <TableHead align="right"> </TableHead>
+                {canWrite ? <TableHead align="right"> </TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,20 +206,22 @@ export function WalletsTable({
                       t={t}
                       balance={channelBalances[verified.pubkey]}
                     />
-                    <TableCell align="right">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={t("DashboardPrivateChannels.verifiedWallets.revokeAria", {
-                          pubkey: verified.pubkey,
-                        })}
-                        title={t("DashboardPrivateChannels.verifiedWallets.revokeTitle")}
-                        disabled={busy}
-                        onClick={() => handleDelete(verified.pubkey)}
-                      >
-                        {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
-                      </Button>
-                    </TableCell>
+                    {canWrite ? (
+                      <TableCell align="right">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t("DashboardPrivateChannels.verifiedWallets.revokeAria", {
+                            pubkey: verified.pubkey,
+                          })}
+                          title={t("DashboardPrivateChannels.verifiedWallets.revokeTitle")}
+                          disabled={busy}
+                          onClick={() => handleDelete(verified.pubkey)}
+                        >
+                          {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
+                        </Button>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 );
               })}

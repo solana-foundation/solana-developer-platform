@@ -30,8 +30,8 @@ failed and its shares remained escrowed.
 The EARN-027 publication gate completed in
 [PR #1987](https://github.com/solana-foundation/solana-developer-platform/pull/1987):
 `cutbow7` approved exact head `b2d313803` before merge. External-wallet route
-discovery and queued previews are optional-auth; request/cancellation builds,
-submits, and history require an API key. Custody queue routes remain internal.
+discovery, queued previews, request/cancellation builds, submits, and history
+all require an API key. Custody queue routes remain internal.
 Production remains fail-closed until Veda names approved mainnet vaults for SDP
 rather than the shared Test Vault.
 
@@ -335,13 +335,13 @@ tolerance and SDP does not invent one.
 
 ## Sequencing
 
-| PR | Contents | Gate to start |
-|---|---|---|
-| 1 | This document | — |
-| 2 | `buildVaultWithdrawal` in `@sdp/veda`, withdrawal service, `POST /v1/earn/vault-withdrawals`, `GET .../:movementId` | Veda confirms deployment addresses (`VEDA_DEPLOYMENTS` is empty; nothing can be proven until then) and confirms the launch vault's `withdraw_authority` |
-| 3 | `GET /v1/earn/vault-positions/:id/withdrawal-options` | after 2 |
-| 4 | Queued capability, `earn_vault_withdrawal_requests` migration, request/cancel routes, the closed-request indexer | product answer to open question 5 |
-| — | `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` including `"production"` | **escalated, not part of this work** — the constant is global and flipping it opens Kamino, which still has no exit path |
+| PR  | Contents                                                                                                            | Gate to start                                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | This document                                                                                                       | —                                                                                                                                                       |
+| 2   | `buildVaultWithdrawal` in `@sdp/veda`, withdrawal service, `POST /v1/earn/vault-withdrawals`, `GET .../:movementId` | Veda confirms deployment addresses (`VEDA_DEPLOYMENTS` is empty; nothing can be proven until then) and confirms the launch vault's `withdraw_authority` |
+| 3   | `GET /v1/earn/vault-positions/:id/withdrawal-options`                                                               | after 2                                                                                                                                                 |
+| 4   | Queued capability, `earn_vault_withdrawal_requests` migration, request/cancel routes, the closed-request indexer    | product answer to open question 5                                                                                                                       |
+| —   | `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` including `"production"`                                                        | **escalated, not part of this work** — the constant is global and flipping it opens Kamino, which still has no exit path                                |
 
 ## Open questions
 

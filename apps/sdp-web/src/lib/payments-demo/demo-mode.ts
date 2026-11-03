@@ -11,9 +11,7 @@ import {
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
 import { paymentsDemoMode } from "@/flags";
-import { isNewDesignOn } from "@/flags/new-design";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
-import { designModuleForPath } from "@/lib/design-modules";
 import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { isPaymentsPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
@@ -68,13 +66,8 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
     if (!page || !isPaymentsPath(page)) {
       return false;
     }
-    // Demo data is part of the new design and has a flag of its own: a page on the previous
-    // design never gets it.
-    const [demoModeOn, newDesignPage] = await Promise.all([
-      paymentsDemoMode(),
-      isNewDesignOn(designModuleForPath(page) ?? undefined),
-    ]);
-    return demoModeOn && newDesignPage;
+    // Demo data has a flag of its own.
+    return paymentsDemoMode();
   } catch {
     // Outside a request there are no cookies or headers to read, so no demo.
     return false;

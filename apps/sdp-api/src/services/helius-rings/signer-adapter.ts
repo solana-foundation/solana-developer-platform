@@ -1,6 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { derivationMessageBase64 } from "@sdp/helius-rings-sdk/custody-ka/seed";
-import type { MovementId, MovementOf } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import { getBase64Codec } from "@solana/codecs";
 import {
   address,
@@ -210,7 +210,7 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 type OwnerSignerInput = Pick<
   SignRingsOuterTransactionInput,
   "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId" | "ringsWalletId"
-> & { movement: MovementId };
+> & { movement: MovementOf<"helius_rings"> };
 
 /** The derivation message is an exit; every other message is bring-up. */
 function ringsMessageMovement(
@@ -353,7 +353,7 @@ async function resolveOwnerSigner(input: OwnerSignerInput): Promise<TransactionS
     );
   }
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"helius_rings">(
     input.env,
     input.organizationId,
     input.projectId,

@@ -22,6 +22,7 @@ import * as dvpObservation from "@/services/dvp/observe-now";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -492,6 +493,8 @@ describe("deriveDvpTradeKind", () => {
 });
 
 describe("DvP routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     originalMarkets = env.MARKETS_ENABLED;

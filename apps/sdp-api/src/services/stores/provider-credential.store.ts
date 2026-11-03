@@ -33,7 +33,7 @@ export interface ProviderCredentialRow {
 }
 
 export interface LifecycleCredentialRow extends ProviderCredentialRow {
-  provider: "privy";
+  provider: "privy" | "fireblocks";
   source: "stored" | "runtime";
   storage_backend: StoredCredentialSecret["storageBackend"];
   deactivated_at: string | null;
@@ -56,11 +56,18 @@ export interface CredentialReferenceRow {
   provider_account_fingerprint: string | null;
 }
 
+export interface CredentialWalletReferenceRow {
+  id: string;
+  custody_connection_id: string;
+  wallet_id: string;
+  public_key: string;
+}
+
 export interface CustodyConnectionRow {
   id: string;
   organization_id: string;
   project_id: string;
-  provider: "privy";
+  provider: "privy" | "fireblocks";
   scope: "project";
   provider_credential_id: string;
   provider_credential_scope_key: string;
@@ -78,7 +85,7 @@ export interface CustodyConnectionRow {
 
 export interface ProjectConnectionListRow {
   id: string;
-  provider: "privy";
+  provider: "privy" | "fireblocks";
   connection_status: CustodyConnectionStatus;
   setup_metadata: unknown;
   last_check_status: CustodyConnectionCheckStatus | null;
@@ -123,14 +130,14 @@ const CREATING_SUBMISSION = `creating.status = 'creating'
 const CREDENTIAL_LINEAGE_SQL = `WITH RECURSIVE credential_lineage(id, rotated_from_provider_credential_id, credential_version) AS (
   SELECT id, rotated_from_provider_credential_id, credential_version
   FROM provider_credentials
-  WHERE id = ? AND organization_id = ? AND provider = 'privy'
+  WHERE id = ? AND organization_id = ? AND provider IN ('privy', 'fireblocks')
   UNION
   SELECT related.id, related.rotated_from_provider_credential_id, related.credential_version
   FROM provider_credentials related
   JOIN credential_lineage member
     ON related.rotated_from_provider_credential_id = member.id
     OR related.id = member.rotated_from_provider_credential_id
-  WHERE related.organization_id = ? AND related.provider = 'privy'
+  WHERE related.organization_id = ? AND related.provider IN ('privy', 'fireblocks')
 )`;
 
 export class ProviderCredentialStore {
@@ -175,7 +182,7 @@ export class ProviderCredentialStore {
   async listProjectConnections(
     organizationId: string,
     projectId: string,
-    options: { lock?: boolean } = {}
+    options: { lock?: boolean; provider?: CustodyProvider } = {}
   ): Promise<ProjectConnectionState[]> {
     return this.db.queryMany<ProjectConnectionState>(
       `SELECT c.id, c.organization_id, c.project_id, c.provider, c.scope,
@@ -192,10 +199,11 @@ export class ProviderCredentialStore {
        JOIN provider_credentials pc ON pc.id = c.provider_credential_id
        WHERE c.organization_id = ?
          AND c.project_id = ?
-         AND c.provider = 'privy'
+         AND c.provider IN ('privy', 'fireblocks')
+         ${options.provider ? "AND c.provider = ?" : ""}
        ORDER BY c.created_at, c.id
        ${options.lock ? "FOR UPDATE OF c" : ""}`,
-      [organizationId, projectId]
+      [organizationId, projectId, ...(options.provider ? [options.provider] : [])]
     );
   }
 
@@ -227,7 +235,7 @@ export class ProviderCredentialStore {
               idempotency_fingerprint, deactivated_at, last_validated_at,
               last_failed_at, last_failure_code, secret_retention_expires_at, created_at
        FROM provider_credentials
-       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       WHERE id = ? AND organization_id = ? AND provider IN ('privy', 'fireblocks')
        ${options.lock ? "FOR UPDATE" : ""}`,
       [id, organizationId]
     );
@@ -245,7 +253,7 @@ export class ProviderCredentialStore {
               idempotency_fingerprint, deactivated_at, last_validated_at,
               last_failed_at, last_failure_code, secret_retention_expires_at, created_at
        FROM provider_credentials
-       WHERE id = ? AND organization_id = ? AND provider = 'privy'`,
+       WHERE id = ? AND organization_id = ? AND provider IN ('privy', 'fireblocks')`,
       [id, organizationId]
     );
   }
@@ -253,7 +261,7 @@ export class ProviderCredentialStore {
   async findGcpContainerRef(organizationId: string, credentialId: string): Promise<string | null> {
     const row = await this.db.queryOne<{ secret_ref: string }>(
       `SELECT secret_ref FROM provider_credentials
-       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       WHERE id = ? AND organization_id = ? AND provider IN ('privy', 'fireblocks')
          AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
          AND secret_ref IS NOT NULL AND secret_version_ref IS NOT NULL`,
       [credentialId, organizationId]
@@ -269,7 +277,7 @@ export class ProviderCredentialStore {
     const row = await this.db.queryOne<{ provider_credential_id: string }>(
       `SELECT provider_credential_id
        FROM custody_connections
-       WHERE id = ? AND organization_id = ? AND project_id = ? AND provider = 'privy'`,
+       WHERE id = ? AND organization_id = ? AND project_id = ? AND provider IN ('privy', 'fireblocks')`,
       [connectionId, organizationId, projectId]
     );
     return row?.provider_credential_id ?? null;
@@ -286,7 +294,7 @@ export class ProviderCredentialStore {
        FROM custody_connections c
        JOIN projects p ON p.id = c.project_id
        WHERE c.organization_id = ?
-         AND c.provider = 'privy'
+         AND c.provider IN ('privy', 'fireblocks')
          AND c.provider_credential_id = ?
          AND c.status <> 'deactivated'
        ORDER BY c.project_id, c.id
@@ -307,10 +315,28 @@ export class ProviderCredentialStore {
        JOIN credential_lineage lineage ON lineage.id = c.provider_credential_id
        JOIN projects p ON p.id = c.project_id
        WHERE c.organization_id = ?
-         AND c.provider = 'privy'
+         AND c.provider IN ('privy', 'fireblocks')
          AND c.status <> 'deactivated'
        ORDER BY c.project_id, c.id`,
       [providerCredentialId, organizationId, organizationId, organizationId]
+    );
+  }
+
+  /** Include inactive wallets: they retain this credential and can be reactivated. */
+  async listCredentialWalletReferences(
+    organizationId: string,
+    providerCredentialId: string,
+    options: { lock?: boolean } = {}
+  ): Promise<CredentialWalletReferenceRow[]> {
+    return this.db.queryMany<CredentialWalletReferenceRow>(
+      `SELECT w.id, w.custody_connection_id, w.wallet_id, w.public_key
+       FROM custody_connections c
+       JOIN custody_wallets w ON w.custody_connection_id = c.id
+       WHERE c.organization_id = ? AND c.provider = 'fireblocks'
+         AND c.provider_credential_id = ? AND c.status <> 'deactivated'
+       ORDER BY w.id
+       ${options.lock ? "FOR UPDATE OF w" : ""}`,
+      [organizationId, providerCredentialId]
     );
   }
 
@@ -359,7 +385,7 @@ export class ProviderCredentialStore {
               last_failed_at, last_failure_code, secret_retention_expires_at, created_at
        FROM provider_credentials
        WHERE organization_id = ?
-         AND provider = 'privy'
+         AND provider IN ('privy', 'fireblocks')
          AND rotated_from_provider_credential_id = ?
          AND status IN ('creating', 'pending')
        ORDER BY created_at, id
@@ -416,7 +442,7 @@ export class ProviderCredentialStore {
       `UPDATE custody_connections
        SET provider_credential_id = ?, provider_credential_scope_key = ?, updated_at = sdp_iso_now()
        WHERE organization_id = ?
-         AND provider = 'privy'
+         AND provider IN ('privy', 'fireblocks')
          AND provider_credential_id = ?
          AND status <> 'deactivated'`,
       [params.candidateId, params.candidateScopeKey, params.organizationId, params.predecessorId]
@@ -476,7 +502,7 @@ export class ProviderCredentialStore {
       `UPDATE custody_connections
        SET provider_credential_id = ?, provider_credential_scope_key = ?, updated_at = sdp_iso_now()
        WHERE organization_id = ?
-         AND provider = 'privy'
+         AND provider IN ('privy', 'fireblocks')
          AND provider_credential_id = ?
          AND status <> 'deactivated'`,
       [params.predecessorId, params.predecessorScopeKey, params.organizationId, params.currentId]
@@ -509,7 +535,7 @@ export class ProviderCredentialStore {
     if (connectionIds.length === 0) return;
     await this.db.queryMany<{ id: string }>(
       `SELECT id FROM custody_connections
-       WHERE organization_id = ? AND provider = 'privy'
+       WHERE organization_id = ? AND provider IN ('privy', 'fireblocks')
          AND id IN (SELECT jsonb_array_elements_text(?::jsonb))
        ORDER BY project_id, id FOR UPDATE`,
       [organizationId, JSON.stringify(connectionIds)]
@@ -520,7 +546,7 @@ export class ProviderCredentialStore {
     const row = await this.db.queryOne<{ id: string }>(
       `SELECT w.id FROM custody_connections c
        JOIN custody_wallets w ON w.custody_connection_id = c.id
-       WHERE c.organization_id = ? AND c.provider = 'privy'
+       WHERE c.organization_id = ? AND c.provider IN ('privy', 'fireblocks')
          AND c.provider_credential_id = ? AND w.status = 'active'
        LIMIT 1`,
       [organizationId, credentialId]
@@ -547,7 +573,7 @@ export class ProviderCredentialStore {
              deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
          WHERE candidate.id = ?
            AND candidate.organization_id = ?
-           AND candidate.provider = 'privy'
+           AND candidate.provider IN ('privy', 'fireblocks')
            AND candidate.status = ?
            AND candidate.rotated_from_provider_credential_id IS NOT DISTINCT FROM ?
            AND NOT EXISTS (
@@ -626,7 +652,7 @@ export class ProviderCredentialStore {
          WHERE id = ?
            AND organization_id = ?
            AND project_id = ?
-           AND provider = 'privy'
+           AND provider IN ('privy', 'fireblocks')
            AND scope = 'project'
          UNION
          SELECT next.id
@@ -635,7 +661,7 @@ export class ProviderCredentialStore {
            ON next.rotated_from_provider_credential_id = previous.id
          WHERE next.organization_id = ?
            AND next.project_id = ?
-           AND next.provider = 'privy'
+           AND next.provider IN ('privy', 'fireblocks')
            AND next.scope = 'project'
        )
        SELECT DISTINCT c.id
@@ -643,7 +669,7 @@ export class ProviderCredentialStore {
        JOIN credential_lineage lineage ON lineage.id = c.provider_credential_id
        WHERE c.organization_id = ?
          AND c.project_id = ?
-         AND c.provider = 'privy'
+         AND c.provider IN ('privy', 'fireblocks')
        ORDER BY c.id`,
       [
         providerCredentialId,
@@ -667,7 +693,7 @@ export class ProviderCredentialStore {
       `SELECT w.id FROM custody_wallets w
        JOIN custody_connections c ON c.id = w.custody_connection_id
        WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-         AND c.provider = 'privy' AND w.status = 'active'
+         AND c.provider IN ('privy', 'fireblocks') AND w.status = 'active'
        LIMIT 1`,
       [connectionId, organizationId, projectId]
     ));
@@ -686,7 +712,7 @@ export class ProviderCredentialStore {
         `UPDATE custody_connections c
          SET status = 'deactivated', deactivated_at = sdp_iso_now(), updated_at = sdp_iso_now()
          WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-           AND c.provider = 'privy' AND c.provider_credential_id = ?
+           AND c.provider IN ('privy', 'fireblocks') AND c.provider_credential_id = ?
            AND c.status = ? AND c.status IN ('failed', 'active')
            AND EXISTS (
              SELECT 1 FROM provider_credentials pc
@@ -759,7 +785,7 @@ export class ProviderCredentialStore {
        WHERE c.id = ?
          AND c.organization_id = ?
          AND c.project_id = ?
-         AND c.provider = 'privy'
+         AND c.provider IN ('privy', 'fireblocks')
        ${options.lock ? "FOR UPDATE OF c, pc" : ""}`,
       [options.excludedCreatingCredentialId ?? null, connectionId, organizationId, projectId]
     );
@@ -849,21 +875,27 @@ export class ProviderCredentialStore {
     providerWalletId: string;
     publicKey: string;
     label?: string;
+    additionalWallets?: Array<{ walletId: string; address: string; label?: string }>;
   }): Promise<ProviderCredentialRow | null> {
     const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
-    await this.db.execute(
-      `INSERT INTO custody_wallets (
+    const wallets = [
+      { walletId: params.providerWalletId, address: params.publicKey, label: params.label },
+      ...(params.additionalWallets ?? []),
+    ];
+    for (const [index, wallet] of wallets.entries())
+      await this.db.execute(
+        `INSERT INTO custody_wallets (
          id, custody_config_id, custody_connection_id, wallet_id,
          public_key, label, purpose, status, updated_at
        ) VALUES (?, NULL, ?, ?, ?, ?, 'transfer', 'active', sdp_iso_now())`,
-      [
-        custodyWalletId,
-        params.connectionId,
-        params.providerWalletId,
-        params.publicKey,
-        params.label ?? null,
-      ]
-    );
+        [
+          index === 0 ? custodyWalletId : `cwlt_${crypto.randomUUID()}`,
+          params.connectionId,
+          wallet.walletId,
+          wallet.address,
+          wallet.label ?? null,
+        ]
+      );
 
     // Write-only: default_custody_wallet_id is set solely to satisfy
     // custody_connections_active_lifecycle_check until HOO-1985 drops it; nothing reads it.
@@ -871,7 +903,7 @@ export class ProviderCredentialStore {
       `UPDATE custody_connections
        SET default_custody_wallet_id = ?,
            status = 'active',
-           setup_metadata = setup_metadata - 'pendingWalletLabel',
+           setup_metadata = setup_metadata - 'pendingWalletLabel' - 'pendingFireblocksVaultIds',
            last_check_status = 'success',
            last_check_failure_code = NULL,
            activated_at = sdp_iso_now(),
@@ -1109,7 +1141,8 @@ export class ProviderCredentialStore {
 
   async findCreatingSubmission(
     organizationId: string,
-    projectId: string
+    projectId: string,
+    provider: CustodyProvider = "privy"
   ): Promise<ProviderCredentialRow | null> {
     return this.db.queryOne<ProviderCredentialRow>(
       `SELECT creating.id, creating.organization_id, creating.project_id, creating.provider,
@@ -1118,10 +1151,10 @@ export class ProviderCredentialStore {
               creating.idempotency_key, creating.idempotency_fingerprint,
               creating.last_failure_code, creating.created_at
        FROM provider_credentials creating
-       WHERE creating.organization_id = ? AND creating.project_id = ? AND creating.provider = 'privy'
+       WHERE creating.organization_id = ? AND creating.project_id = ? AND creating.provider = ?
          AND ${CREATING_SUBMISSION}
        ORDER BY creating.created_at, creating.id LIMIT 1`,
-      [organizationId, projectId]
+      [organizationId, projectId, provider]
     );
   }
 
@@ -1135,7 +1168,7 @@ export class ProviderCredentialStore {
     return this.db.queryOne<ProviderCredentialRow>(
       `UPDATE provider_credentials
        SET status = 'pending', secret_version_ref = ?, updated_at = sdp_iso_now()
-       WHERE id = ? AND organization_id = ? AND provider = 'privy'
+       WHERE id = ? AND organization_id = ? AND provider IN ('privy', 'fireblocks')
          AND status = 'creating' AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
          AND secret_ref = ? AND secret_version_ref IS NULL
        RETURNING id, organization_id, project_id, provider, label, scope, scope_key,
@@ -1156,7 +1189,7 @@ export class ProviderCredentialStore {
          SET status = 'deactivated', deactivated_at = sdp_iso_now(),
              last_failed_at = sdp_iso_now(), last_failure_code = 'secret_creation_abandoned',
              secret_retention_expires_at = sdp_iso_now(), updated_at = sdp_iso_now()
-         WHERE pc.id = ? AND pc.organization_id = ? AND pc.provider = 'privy'
+         WHERE pc.id = ? AND pc.organization_id = ? AND pc.provider IN ('privy', 'fireblocks')
            AND pc.status = 'creating' AND pc.storage_backend = 'gcp_secret_manager'
            AND NOT EXISTS (
              SELECT 1 FROM custody_connections c
@@ -1171,10 +1204,12 @@ export class ProviderCredentialStore {
     id: string;
     organizationId: string;
     projectId: string;
+    provider?: "privy" | "fireblocks";
     providerCredentialId: string;
     providerCredentialScopeKey: string;
     requestDelayMs?: number;
     pendingWalletLabel?: string;
+    pendingFireblocksVaultIds?: string[];
     createdBy: string;
   }): Promise<CustodyConnectionRow> {
     const row = await this.db.queryOne<CustodyConnectionRow>(
@@ -1182,7 +1217,7 @@ export class ProviderCredentialStore {
        id, organization_id, project_id, provider, scope,
          provider_credential_id, provider_credential_scope_key,
          request_delay_ms, setup_metadata, status, created_by
-       ) VALUES (?, ?, ?, 'privy', 'project', ?, ?, ?, ?, 'pending', ?)
+       ) VALUES (?, ?, ?, ?, 'project', ?, ?, ?, ?, 'pending', ?)
        RETURNING id, organization_id, project_id, provider, scope,
                  provider_credential_id, provider_credential_scope_key,
                  provider_account_fingerprint,
@@ -1194,12 +1229,14 @@ export class ProviderCredentialStore {
         params.id,
         params.organizationId,
         params.projectId,
+        params.provider ?? "privy",
         params.providerCredentialId,
         params.providerCredentialScopeKey,
         params.requestDelayMs ?? null,
-        JSON.stringify(
-          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
-        ),
+        JSON.stringify({
+          pendingWalletLabel: params.pendingWalletLabel || undefined,
+          pendingFireblocksVaultIds: params.pendingFireblocksVaultIds,
+        }),
         params.createdBy,
       ]
     );
@@ -1216,6 +1253,7 @@ export class ProviderCredentialStore {
     providerCredentialScopeKey: string;
     requestDelayMs?: number;
     pendingWalletLabel?: string;
+    pendingFireblocksVaultIds?: string[];
   }): Promise<CustodyConnectionRow | null> {
     return this.db.queryOne<CustodyConnectionRow>(
       `UPDATE custody_connections
@@ -1261,9 +1299,10 @@ export class ProviderCredentialStore {
         params.providerCredentialId,
         params.providerCredentialScopeKey,
         params.requestDelayMs ?? null,
-        JSON.stringify(
-          params.pendingWalletLabel ? { pendingWalletLabel: params.pendingWalletLabel } : {}
-        ),
+        JSON.stringify({
+          pendingWalletLabel: params.pendingWalletLabel || undefined,
+          pendingFireblocksVaultIds: params.pendingFireblocksVaultIds,
+        }),
         params.id,
         params.expectedProviderCredentialId,
       ]
@@ -1274,4 +1313,18 @@ export class ProviderCredentialStore {
 export function getPendingWalletLabel(value: unknown): string | undefined {
   const label = parsePostgresJsonOr<Record<string, unknown>>(value, {}).pendingWalletLabel;
   return typeof label === "string" ? label : undefined;
+}
+
+export function getPendingFireblocksVaultIds(value: unknown): string[] | undefined {
+  const ids = parsePostgresJsonOr<Record<string, unknown>>(value, {}).pendingFireblocksVaultIds;
+  if (ids === undefined) return undefined;
+  if (
+    !Array.isArray(ids) ||
+    ids.length < 1 ||
+    ids.length > 20 ||
+    !ids.every((id): id is string => typeof id === "string" && /^\d{1,100}$/.test(id)) ||
+    new Set(ids).size !== ids.length
+  )
+    throw new Error("Invalid pending Fireblocks selection");
+  return ids;
 }

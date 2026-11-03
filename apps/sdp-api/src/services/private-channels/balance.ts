@@ -8,7 +8,7 @@
  *
  * The connection comes from the project's ACTIVE persisted instance (loaded by
  * the caller and passed in), matching the config-in pattern used by the rest of
- * this service. The transport (`createChannelGatewayRpc`/`getChannelTokenBalance`)
+ * this service. The transport (`createPrivateChannelLocalRpc`/`getChannelTokenBalance`)
  * is config-source-agnostic.
  */
 

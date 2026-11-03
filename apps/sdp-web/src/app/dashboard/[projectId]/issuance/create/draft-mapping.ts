@@ -218,7 +218,7 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
-export function pathLabel(path: string, t: Translate): string {
+function pathLabel(path: string, t: Translate): string {
   return t(PATH_LABEL_KEYS[path] ?? "DashboardIssuance.errors.field");
 }
 
@@ -229,7 +229,7 @@ export function getDefaultPublicFields(category: AssetCategory, type: string): s
   return entry ? [...entry.publicProjection] : [];
 }
 
-export function isValidUrl(value: string): boolean {
+function isValidUrl(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) {
     return false;
@@ -242,14 +242,6 @@ export function isValidUrl(value: string): boolean {
   }
 }
 
-// Guards any user-supplied URL that becomes an anchor `href`: returns the URL
-// only when it's a safe http(s) link, else undefined — so a `javascript:` (or
-// other) scheme can never execute in the app's origin. Callers render a link
-// only when this returns a value, and fall back to plain text otherwise.
-export function safeLinkHref(value: string): string | undefined {
-  return isValidUrl(value) ? value.trim() : undefined;
-}
-
 // Deploy-required metadata dot-paths mapped back to the flat draft field they
 // come from, so a missing deploy field can be flagged on its own input.
 const DEPLOY_PATH_TO_FIELD: Partial<Record<string, keyof DraftState>> = {
@@ -260,9 +252,7 @@ const DEPLOY_PATH_TO_FIELD: Partial<Record<string, keyof DraftState>> = {
 
 // An enabled setting with a required, still-empty parameter (e.g. a transfer fee
 // toggled on but no basis-points entered). Drives the editor's inline errors.
-export function advancedSettingsHaveMissingParams(
-  advancedSettings: AdvancedSettingsDraft
-): boolean {
+function advancedSettingsHaveMissingParams(advancedSettings: AdvancedSettingsDraft): boolean {
   for (const [key, selection] of Object.entries(advancedSettings)) {
     const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
     if (!setting?.params) {

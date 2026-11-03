@@ -1,7 +1,8 @@
 import type { UnifiedTransactionModule } from "@sdp/types/unified-transactions";
+import { transactionHref } from "@/lib/payments-routes";
 
 export const TRANSACTION_MODULE_HREFS = {
-  payments: (id) => `/dashboard/payments/transactions?transaction=${encodeURIComponent(id)}`,
+  payments: transactionHref,
   earn: (id) => `/dashboard/markets/earn?transaction=${encodeURIComponent(id)}`,
   dvp: (id) => `/dashboard/markets/dvp/${encodeURIComponent(id)}`,
   private_channels: (id) =>
@@ -13,9 +14,4 @@ export const TRANSACTION_MODULE_HREFS = {
 /** Dashboard detail route for a custody wallet. */
 export function walletHref(custodyWalletId: string): string {
   return `/dashboard/wallets/${encodeURIComponent(custodyWalletId)}`;
-}
-
-/** Dashboard detail route for a counterparty. */
-export function counterpartyHref(counterpartyId: string): string {
-  return `/dashboard/payments/counterparty/${encodeURIComponent(counterpartyId)}`;
 }

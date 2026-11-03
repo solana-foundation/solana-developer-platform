@@ -1,10 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { requestMemberRole } from "@/lib/sdp-api";
+import { LeaveOrganizationCard } from "./leave-organization-card";
+import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
+import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 
 /** Anything that is not a positive integer falls back to the first page. */
 function resolveMembersPage(value: string | string[] | undefined): number {
@@ -14,8 +18,8 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * Organization settings: the quick start for API key managers, and the members
- * and API-key IP allowlist sections for organization writers.
+ * Organization settings: the quick start for API key managers, and the members,
+ * mainnet access, API-key IP allowlist and email alert sections for organization admins.
  *
  * @param props - The route props.
  * @param props.searchParams - The query, carrying the members page.
@@ -28,7 +32,7 @@ export default async function SettingsPage({
 }) {
   const membersPage = resolveMembersPage((await searchParams).membersPage);
 
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -36,7 +40,7 @@ export default async function SettingsPage({
     redirect("/dashboard");
   }
 
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
 
   return (
     <div className="w-full flex flex-col gap-6">
@@ -48,7 +52,13 @@ export default async function SettingsPage({
       {dashboardAccess.capabilities.canManageOrgSettings ? (
         <MembersSection page={membersPage} />
       ) : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? <MainnetAccessSection /> : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <OrganizationAlertEmailsSection />
+      ) : null}
+      {/* Admins cannot leave; another admin removes them. */}
+      {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
     </div>
   );
 }

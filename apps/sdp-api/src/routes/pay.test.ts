@@ -22,13 +22,10 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { PAY_SPONSOR_SIGNATURES_PER_HOUR } from "@/services/payments/payment-request-sponsorship";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -40,6 +37,7 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { cancelSeededPaymentRequest, seedPaymentRequest } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
@@ -132,10 +130,7 @@ describe("Public payment request routes", () => {
   }
 
   function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
-    return createPaymentRequestsRepository(
-      env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
-    ).createPaymentRequest({
+    return seedPaymentRequest(env, {
       organizationId: TEST_ORG.id,
       projectId: wallet.projectId,
       custodyWalletId: wallet.custodyWalletId,
@@ -206,6 +201,23 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("refuses to build a transaction for a canceled request", async () => {
+    const sponsorship = stubSponsorship();
+    const request = await cancelSeededPaymentRequest(
+      env,
+      await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET),
+      { apiKeyId: null, userId: TEST_USER.id }
+    );
+
+    const response = await postTransaction(request.public_token);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Payment request is no longer payable" },
+    });
+    expect(sponsorship).not.toHaveBeenCalled();
+  });
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -376,6 +388,47 @@ describe("Public payment request routes", () => {
       }
     );
 
+    it("refuses with 409 before claiming or signing when the payer would keep less than the rent minimum (HOO-2375)", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      // 1.5003 SOL held, 1.5 SOL owed: 0.0003 SOL left, below the 0.00089088 minimum.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 1_500_300_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+
+      const res = await postTransaction(request.public_token);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0003" } },
+      });
+      // Refused before the claim: once the payer can afford the minimum, it is served.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 2_000_000_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
     it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -488,10 +541,7 @@ describe("Public payment request routes", () => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
+      const expiry = vi.spyOn(paymentRequests, "isPaymentRequestExpired").mockReturnValue(true);
       onTestFinished(() => expiry.mockRestore());
 
       const replay = await postTransaction(request.public_token);
@@ -499,7 +549,7 @@ describe("Public payment request routes", () => {
       expect(await replay.json()).not.toHaveProperty("transaction");
     });
 
-    it("answers no longer payable when the claim is lost to the deadline", async () => {
+    it("answers no longer payable when the claim is lost to a cancel", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
@@ -507,15 +557,16 @@ describe("Public payment request routes", () => {
         .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
         .mockImplementation((bindings) => {
           const repository = systemRepository(bindings);
-          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementation(async () => {
+            await cancelSeededPaymentRequest(env, request, {
+              apiKeyId: null,
+              userId: TEST_USER.id,
+            });
+            return false;
+          });
           return repository;
         });
       onTestFinished(() => factory.mockRestore());
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
-      onTestFinished(() => expiry.mockRestore());
 
       const response = await postTransaction(request.public_token);
 
@@ -544,6 +595,110 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(200);
       expect(sponsorship).toHaveBeenCalledTimes(2);
+    });
+
+    it("keys the sponsor's Kora quota on the payment request, not its wallet", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actor: { type: "payment_request", id: request.id } }),
+        "payments.pay_request",
+        { custodyWalletId: null }
+      );
+    });
+
+    it("caps one request's sponsor signatures per hour and still replays its signed claim", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const other = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      // Past the claims' last valid block height, every post re-claims and asks Kora again.
+      rpc.answer("getBlockHeight", 2_000);
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await postTransaction(request.public_token)).status).toBe(200);
+      }
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+
+      const refused = await postTransaction(request.public_token);
+      expect(refused.status).toBe(429);
+      expect(Number(refused.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await refused.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR);
+
+      // Another request on the same wallet keeps its own allowance.
+      expect((await postTransaction(other.public_token)).status).toBe(200);
+      // A live signed claim replays without asking Kora, so the cap never refuses it.
+      rpc.answer("getBlockHeight", 900);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sign).toHaveBeenCalledTimes(PAY_SPONSOR_SIGNATURES_PER_HOUR + 1);
+    });
+
+    it("counts only posts that reach the sponsor signature", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const sponsorAsPayer = () =>
+        app.request(
+          `/pay/${request.public_token}/tx`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: TEST_MOCK_FEE_PAYER }),
+          },
+          env
+        );
+
+      for (let attempt = 0; attempt <= PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect((await sponsorAsPayer()).status).toBe(400);
+      }
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
+    it("holds each clock hour to the cap across an hour boundary", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000 + 3_600_000;
+      const now = vi.spyOn(Date, "now");
+      onTestFinished(() => now.mockRestore());
+      const postAt = async (ms: number) => {
+        now.mockReturnValue(ms);
+        return (await postTransaction(request.public_token)).status;
+      };
+      rpc.answer("getBlockHeight", 2_000);
+
+      // Six in the last minute of one hour fill it.
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        expect(await postAt(hour - 30_000)).toBe(200);
+      }
+      // Just past the boundary the previous hour still counts nearly in full: one more fits.
+      expect(await postAt(hour + 30_000)).toBe(200);
+      expect(await postAt(hour + 30_000)).toBe(429);
+      // Near the next hour's end its weight has decayed, but the hour holds to six.
+      const lateStatuses: number[] = [];
+      for (let attempt = 0; attempt < PAY_SPONSOR_SIGNATURES_PER_HOUR; attempt++) {
+        lateStatuses.push(await postAt(hour + 3_540_000));
+      }
+      expect(lateStatuses.filter((status) => status === 200)).toHaveLength(
+        PAY_SPONSOR_SIGNATURES_PER_HOUR - 1
+      );
+      expect(lateStatuses.at(-1)).toBe(429);
+      expect(sign).toHaveBeenCalledTimes(2 * PAY_SPONSOR_SIGNATURES_PER_HOUR);
     });
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {

@@ -3,10 +3,9 @@ import { describe, it } from "node:test";
 import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
 import {
   decideRecurringPaymentActivationTransition,
-  decideRecurringPaymentLifecycleTransition,
+  decideRecurringPaymentCancelTransition,
   decideRecurringPaymentUpdateTransition,
   firstRecurringPaymentDueAfter,
-  getRecurringPaymentLifecycleStatuses,
   getRecurringPaymentOperationStaleBefore,
   hasRecurringPaymentAdvancedPastDueAt,
   isRecurringPaymentOperationStale,
@@ -19,64 +18,20 @@ const STALE = "2026-07-01T11:45:00.000Z";
 const FRESH = "2026-07-01T11:45:00.001Z";
 
 describe("recurring payment lifecycle transitions", () => {
-  it("maps cancel and resume lifecycle statuses", () => {
-    assert.deepEqual(getRecurringPaymentLifecycleStatuses("cancel"), {
-      processingStatus: "canceling",
-      claimableStatus: "active",
-      finalStatus: "canceled",
-    });
-    assert.deepEqual(getRecurringPaymentLifecycleStatuses("resume"), {
-      processingStatus: "resuming",
-      claimableStatus: "canceled",
-      finalStatus: "active",
-    });
-  });
-
-  it("distinguishes claimable, finalized, fresh, and stale lifecycle work", () => {
-    assert.equal(
-      decideRecurringPaymentLifecycleTransition({
-        operation: "cancel",
-        status: "active",
-        updatedAt: FRESH,
-        nowIso: NOW,
-      }),
-      "claimable"
-    );
-    assert.equal(
-      decideRecurringPaymentLifecycleTransition({
-        operation: "cancel",
-        status: "canceled",
-        updatedAt: FRESH,
-        nowIso: NOW,
-      }),
-      "already_final"
-    );
-    assert.equal(
-      decideRecurringPaymentLifecycleTransition({
-        operation: "resume",
-        status: "resuming",
-        updatedAt: FRESH,
-        nowIso: NOW,
-      }),
-      "processing"
-    );
-    assert.equal(
-      decideRecurringPaymentLifecycleTransition({
-        operation: "resume",
-        status: "resuming",
-        updatedAt: STALE,
-        nowIso: NOW,
-      }),
-      "recoverable"
-    );
-    assert.equal(
-      decideRecurringPaymentLifecycleTransition({
-        operation: "resume",
-        status: "paused",
-        updatedAt: FRESH,
-        nowIso: NOW,
-      }),
-      "invalid"
+  it("claims a cancel from a running or paused schedule and nothing else", () => {
+    const cases = [
+      { status: "active", updatedAt: FRESH, expected: "claimable" },
+      { status: "paused", updatedAt: FRESH, expected: "claimable" },
+      { status: "canceled", updatedAt: FRESH, expected: "already_final" },
+      { status: "canceling", updatedAt: FRESH, expected: "processing" },
+      { status: "canceling", updatedAt: STALE, expected: "recoverable" },
+      { status: "updating", updatedAt: FRESH, expected: "invalid" },
+    ] as const;
+    assert.deepEqual(
+      cases.map(({ status, updatedAt }) =>
+        decideRecurringPaymentCancelTransition({ status, updatedAt, nowIso: NOW })
+      ),
+      cases.map(({ expected }) => expected)
     );
   });
 

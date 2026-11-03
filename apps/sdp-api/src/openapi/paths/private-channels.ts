@@ -278,7 +278,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         description: "The created deposit, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelDepositSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -336,7 +336,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
         description: "The created withdrawal, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelWithdrawalSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -418,7 +418,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
           "The stored transfer: confirmed, failed, still submitted, or the original one when the key is replayed.",
         content: jsonContent(successResponseSchema(privateChannelTransferSchema)),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 
@@ -644,7 +644,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
           successResponseSchema(z.object({ wallet: privateChannelVerifiedWalletSchema }))
         ),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500, 503]),
     },
   });
 

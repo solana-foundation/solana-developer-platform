@@ -1,4 +1,4 @@
-import { SdpRpcError } from "./errors";
+import { RpcUnavailableError } from "./errors";
 import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 
@@ -21,15 +21,19 @@ export function isHeliusDasConfigured(): boolean {
  * @param init - The fetch init carrying the JSON-RPC request.
  * @returns The HTTP response.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Helius endpoint.
+ * @throws RpcUnavailableError `not_configured` when the scope's cluster has no Helius endpoint.
  */
 export function fetchHeliusDas(init: RequestInit): Promise<Response> {
   const { cluster } = currentClusterScope();
   const endpointUrl = process.env[MANAGED_RPC_ENV_KEYS[cluster].helius];
   if (!endpointUrl) {
-    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No Helius endpoint is configured for ${cluster}`, {
-      cluster,
-    });
+    throw new RpcUnavailableError(
+      "not_configured",
+      `No Helius endpoint is configured for ${cluster}`,
+      {
+        cluster,
+      }
+    );
   }
   return fetch(endpointUrl, init);
 }

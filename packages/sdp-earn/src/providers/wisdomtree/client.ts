@@ -126,7 +126,7 @@ export class WisdomTreeEarnClient extends StubEarnClient implements EarnDepositE
    * resolved through SDP's curated registry, then Connect must report both an
    * approved wallet and a tradable matching exchange code in the authenticated
    * direct/omnibus organization's context. Every valid negative result uses
-   * the same reason so the optional-auth build route cannot enumerate KYC or
+   * the same reason so the build route cannot enumerate KYC or
    * product-entitlement state.
    */
   async checkDepositEligibility(

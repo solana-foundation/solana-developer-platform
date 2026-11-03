@@ -17,7 +17,6 @@ The mechanism-split predecessors
 longer have writers, and their code is retired.
 
 Things that will bite:
-
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
   never from the caller.** Terminal regression is unrepresentable rather than
   merely refused. The guard is applied as a compare-and-swap in the same
@@ -91,7 +90,16 @@ Things that will bite:
   count equals the claimed id SET, not a literal, so the two fail together;
   it lives in `../../services/jobs/reconcile-earn-vault-movements.test.ts`
   ("reports exactly the rows the next claim would take"). Change one predicate
-  and you must change both.
+  and you must change both. Both take the sweep's `environment` (HOO-2148), so
+  pass the same one to both.
+- **Earn's sweep queries select one environment** (HOO-2148). The vault
+  movement, queued withdrawal and split-swap crons run once per environment,
+  so every claim, repair, backlog count and cleanup they call takes
+  `environment` and filters Earn's own `environment` column (joining
+  `projects` waits on `project_id NOT NULL`, HOO-2177). A row in the other
+  environment is neither returned, counted nor touched; each query has a
+  cross-environment test ("environment scope" describes). A new sweep query
+  takes `environment` too.
 - **A vault row's signer is a column pair, not a new model** (PRO-1722,
   migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
   `owner_address` (an external wallet SDP holds no key for signs) is set, on
@@ -99,29 +107,42 @@ Things that will bite:
   of `earn_external_wallet_transactions`, locked FIRST and consumable at most
   once, inside the same transaction that inserts the movement. One durable
   build can therefore never ledger twice; that consume is written HERE, with
-  the single ledger writer, not in the built-transactions repository. A
-  PRO-1943 anonymous build never reaches this repository and writes no row.
+  the single ledger writer, not in the built-transactions repository.
 - **`earn_split_swap_advisories` is advisory state, never a movement**
-  (PRO-1864, migration 0091). A row records that an authenticated split-swap
-  build handed a partner a standalone swap. An anonymous split build writes no
-  advisory. The detector writes nothing but back to this table and never
-  touches `earn_movements`. Its amount columns carry ONE declared unit each:
-  the floor and both balance samples are deposit-mint ATOMS with the decimals
-  recorded beside them, and the two `*_amount` columns are display-only
-  decimal strings. Compare atoms to atoms. `listExternalWalletDepositsSince`
-  on the movements repository is its status-aware follow-up read: a `failed`
-  deposit must not discharge an advisory.
+  (PRO-1864, migration 0091). A row records that a split-swap build handed a
+  partner a standalone swap. The detector writes nothing but back to this
+  table and never touches `earn_movements`. Its amount columns carry ONE
+  declared unit each: the floor and both balance samples are deposit-mint ATOMS
+  with the decimals recorded beside them, and the two `*_amount` columns are
+  display-only decimal strings. Compare atoms to atoms.
+  `listExternalWalletDepositsSince` on the movements repository is its
+  status-aware follow-up read: a `failed` deposit must not discharge an
+  advisory.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
 
+## Payment requests: unresolved signatures stay in the late watch
+
+The payment-request scan keeps `signature_scan_cursor` behind an unreadable
+candidate while `signature_scan_progress` tracks newer signatures already
+checked. `signature_scan_cycle_had_retry` survives verification-budget and
+pagination pauses. A full pass resets progress so unreadable signatures get
+another chance. An expired request can close after one hour, but it retains
+`signature_scan_stuck_signature`. The late-payment watch must continue checking
+such closed requests past its normal seven-day window so a recovered chain read
+can still settle them. Migration 0190 indexes that exception; migration 0191
+adds scan progress. Do not move the safe cursor past an unreadable candidate or
+drop the late-watch exception without another recovery path. A found payment
+does not advance the scan before settlement; the paid transition clears the
+stuck marker in the same transaction that records the inbound transfer.
+
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
 status change, with its source statuses, target and ramp types (HOO-2033).
-
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
   compare-and-swap on status and type, so an illegal source matches zero rows,
@@ -171,7 +192,6 @@ status change, with its source statuses, target and ramp types (HOO-2033).
 ## Ramps: status pull queue
 
 The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).
-
 - **One claim per row.** `claimRampTransferForStatusPull` selects and stamps
   `provider_status_last_polled_at` in one statement (`FOR UPDATE SKIP
   LOCKED`), so overlapping sweeps never ask about the same row. It leaves
@@ -214,7 +234,6 @@ deposit signature untouched, and withdraws the instruction for review.
 
 A removed ramp provider's id moves from `RAMP_PROVIDERS` to
 `RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
-
 - **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
   schema and the `ramp_webhook_events` row parse `provider` against
   `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id

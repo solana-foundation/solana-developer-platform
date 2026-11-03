@@ -10,7 +10,7 @@ import type {
 } from "@sdp/types/payments";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
-export const COUNTERPARTY_PAGE_SIZE = 10;
+const COUNTERPARTY_PAGE_SIZE = 10;
 
 export async function fetchCounterparties(
   request: SdpApiClient["request"],
@@ -63,7 +63,7 @@ export async function fetchCounterparty(
 }
 
 /** The most contacts the Contact list loads for local search and filtering. */
-export const CONTACT_DIRECTORY_CAP = 500;
+const CONTACT_DIRECTORY_CAP = 500;
 const DIRECTORY_PAGE_SIZE = 100;
 
 /**

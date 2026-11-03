@@ -41,8 +41,6 @@ const connectionsPageResultSchema = z.object({
 export const connectionsPageEnvelopeSchema = z.object({
   data: connectionsPageResultSchema,
 });
-
-export type ConnectionLastCheck = z.infer<typeof connectionLastCheckSchema>;
 export type CustodyConnectionListItem = z.infer<typeof custodyConnectionListItemSchema>;
 export type ConnectionsPageResult = z.infer<typeof connectionsPageResultSchema>;
 

@@ -89,8 +89,8 @@ export async function seedDefaultProjects(
       input.members.map((userId) =>
         db
           .prepare(
-            `INSERT INTO project_members (id, project_id, user_id, role)
-             VALUES (?, ?, ?, 'admin')
+            `INSERT INTO project_members (id, project_id, user_id)
+             VALUES (?, ?, ?)
              ON CONFLICT (project_id, user_id) DO NOTHING`
           )
           .bind(`pm_${ids[environment]}_${userId}`, ids[environment], userId)

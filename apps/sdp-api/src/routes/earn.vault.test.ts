@@ -8,6 +8,12 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
+/**
+ * Devnet's kvault gaining the floor instruction: the flip of the
+ * `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT` deployment constant that turns Kamino's
+ * devnet deposit floor policy on.
+ */
+const kvaultFloor = vi.hoisted(() => ({ onDevnet: false }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
@@ -17,6 +23,19 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => {
       surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
     isVaultDirectDepositEnabled: (environment: string, provider: string) =>
       surfacing.forceOn || actual.isVaultDirectDepositEnabled(environment, provider),
+  };
+});
+
+vi.mock("@sdp/types/kamino-programs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/kamino-programs")>();
+  return {
+    ...actual,
+    KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT: {
+      ...actual.KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
+      get devnet() {
+        return kvaultFloor.onDevnet || actual.KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT.devnet;
+      },
+    },
   };
 });
 
@@ -30,6 +49,7 @@ import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
@@ -213,7 +233,11 @@ async function seedConnectionWallet(): Promise<void> {
   });
 }
 
-function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
+function recordConnectionDeposit(
+  strategy: EarnStrategyRow,
+  requestId: string,
+  minSharesOut: string | null = "1"
+) {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -236,7 +260,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_connection",
       amount: "10",
-      minSharesOut: "1",
+      minSharesOut,
     }),
     createdBy: TEST_USER.id,
   });
@@ -388,6 +412,7 @@ afterEach(() => {
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   env.JUPITER_SWAP_API_KEY = originalJupiterSwapApiKey;
   surfacing.forceOn = false;
+  kvaultFloor.onDevnet = false;
   vaultDirectClientOverride.current = null;
   vi.restoreAllMocks();
 });
@@ -509,6 +534,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_kamino_prod",
       credentialId: "pcred_earn_vault_kamino_prod",
@@ -548,12 +574,9 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "kamino",
-        minSharesOut: "9.99",
-      })
+      expect.objectContaining({ provider: "kamino", minSharesOut: "9.99" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
@@ -589,6 +612,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_jupiter",
       credentialId: "pcred_earn_vault_jupiter",
@@ -633,16 +657,14 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "jupiter_lend",
-        minSharesOut: "9.99",
-      })
+      expect.objectContaining({ provider: "jupiter_lend", minSharesOut: "9.99" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("opens Ondo USDY only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_ondo",
       credentialId: "pcred_earn_vault_ondo",
@@ -710,22 +732,20 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "ondo",
-        minSharesOut: "9.9",
-      })
+      expect.objectContaining({ provider: "ondo", minSharesOut: "9.9" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("refuses a paused strategy", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ status: "paused" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -740,12 +760,13 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("refuses a deprecated strategy", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ status: "deprecated" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -758,12 +779,13 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("refuses a strategy whose host cluster is not fundable here", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -774,6 +796,78 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("mainnet-beta");
+  });
+});
+
+interface DepositStateChange {
+  change: string;
+  /** The recorded deposit carried no floor, which the policy allowed at the time. */
+  floorless: boolean;
+  apply: (strategy: EarnStrategyRow) => Promise<void>;
+  refusal: { status: number; error: Record<string, unknown> };
+}
+
+describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () => {
+  // Each change refuses a NEW deposit. None may refuse the same-key retry of a
+  // deposit already recorded: that retry is answered from its movement row.
+  it.each<DepositStateChange>([
+    {
+      change: "its strategy is paused",
+      floorless: false,
+      apply: async (strategy) => {
+        await getDb(env)
+          .prepare("UPDATE earn_strategies SET status = 'paused' WHERE id = ?")
+          .bind(strategy.id)
+          .run();
+      },
+      refusal: { status: 400, error: { details: { status: "paused" } } },
+    },
+    {
+      change: "devnet's kvault gains the floor instruction",
+      floorless: true,
+      apply: async () => {
+        kvaultFloor.onDevnet = true;
+      },
+      refusal: {
+        status: 400,
+        error: { message: expect.stringContaining("minSharesOut is required") },
+      },
+    },
+    {
+      change: "the organization loses the provider entitlement",
+      floorless: false,
+      apply: async () => {
+        await getDb(env)
+          .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+          .bind(JSON.stringify({ providerOverrides: { earn: { kamino: false } } }), TEST_ORG.id)
+          .run();
+      },
+      refusal: { status: 403, error: { details: { reason: "provider_not_entitled" } } },
+    },
+  ])("replays a recorded deposit after $change, refusing only new work", async (scenario) => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    const minSharesOut = scenario.floorless ? null : "1";
+    const recorded = await recordConnectionDeposit(strategy, "recorded-deposit", minSharesOut);
+    await scenario.apply(strategy);
+    const body = {
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_connection",
+      amount: "10",
+      minSharesOut: minSharesOut ?? undefined,
+    };
+
+    const replay = await postVaultDeposit(body, "recorded-deposit", TEST_API_KEY.raw);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: { movementId: recorded.movement.id, replayed: true, signature: "sig_recorded_deposit" },
+    });
+
+    const fresh = await postVaultDeposit(body, "new-deposit", TEST_API_KEY.raw);
+    expect(fresh.status).toBe(scenario.refusal.status);
+    expect(await fresh.json()).toMatchObject({ error: scenario.refusal.error });
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });
 
@@ -1077,6 +1171,12 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
 
   it("refuses a deposit into a deployed but un-surfaced provider as provider_not_offered", async () => {
     await seedAuth();
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_unsurfaced_hastra",
+      credentialId: "pcred_earn_vault_unsurfaced_hastra",
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_hastra",
+      providerWalletId: "privy_earn_vault_unsurfaced_hastra",
+    });
     const strategy = await seedStrategy({
       provider: "hastra",
       name: "Hastra PRIME",
@@ -1182,13 +1282,13 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
 });
 
 describe("POST /v1/earn/vault-deposit-previews", () => {
-  function postVaultDepositPreview(body: Record<string, unknown>, authenticated: boolean) {
+  function postVaultDepositPreview(body: Record<string, unknown>) {
     return app.request(
       "/v1/earn/vault-deposit-previews",
       {
         method: "POST",
         headers: {
-          ...(authenticated ? { Authorization: `Bearer ${TEST_API_KEY.raw}` } : {}),
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -1207,72 +1307,6 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     };
   }
 
-  it("quotes anonymously without resolving tenant entitlement", async () => {
-    const strategy = await seedStrategy({ provider: "veda" });
-    const client = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-    vaultDirectClientOverride.current = client;
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { strategyId: strategy.id, sharesOut: "9.99999" },
-    });
-  });
-
-  it("refuses an anonymous quote for a deployed but un-surfaced provider", async () => {
-    const strategy = await seedStrategy({
-      provider: "hastra",
-      name: "Hastra PRIME",
-      underlyingSource: undefined,
-      hostCluster: "mainnet-beta",
-      environment: "production",
-    });
-    const client = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-    vaultDirectClientOverride.current = client;
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Hastra / Figure is not currently offered.",
-        details: { reason: "provider_not_offered" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
-  });
-
-  it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {
-    const strategy = await seedStrategy({
-      provider: "kamino",
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-    vaultDirectClientOverride.current = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { strategyId: strategy.id, sharesOut: "9.99999" },
-    });
-  });
-
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
@@ -1283,7 +1317,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     });
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown> };
@@ -1312,7 +1346,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     );
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -1329,17 +1363,22 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     const client = quoteCapableClient({ sharesOut: "1", shareDecimals: 6, blockingIssues: [] });
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(403);
     expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
-    surfacing.forceOn = true;
-    const strategy = await seedStrategy({ provider: "upshift" });
+  it("answers 501 for a provider client that cannot quote", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({});
+    vaultDirectClientOverride.current = {
+      buildVaultDeposit: vi.fn(),
+      readVaultPositions: vi.fn(),
+      sponsoredPrograms: vi.fn(() => []),
+    };
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
@@ -1355,10 +1394,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
   it("answers 404 for a strategy this workspace cannot see", async () => {
     await seedAuth();
 
-    const res = await postVaultDepositPreview(
-      { strategyId: "earn_strategy_missing", amount: "1" },
-      true
-    );
+    const res = await postVaultDepositPreview({ strategyId: "earn_strategy_missing", amount: "1" });
 
     expect(res.status).toBe(404);
   });

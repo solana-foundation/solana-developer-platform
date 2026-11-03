@@ -8,7 +8,6 @@ import {
 } from "@sdp/types/payment-rails";
 import type { PaymentRampEstimate, PaymentRampQuote, RampTransferType } from "@sdp/types/payments";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
-import { isSolanaError, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE } from "@solana/kit";
 import { z } from "zod";
 import { compareDecimalAmounts, decimalStringFromNumber, sumDecimalAmounts } from "#/decimal";
 import { providerNotConfigured, rampAmountOutOfRange, SdpPaymentsError } from "#/errors";
@@ -170,33 +169,18 @@ const MOONPAY_ONRAMP_LIMITS: ReadonlyMap<string, RampCurrencyLimit> = new Map(
   Object.entries(RAMP_PROVIDER_SUPPORT_DETAILS.moonpay.onramp.currencies)
 );
 
-function compareMoonpayAmount(
-  field: "fiatAmount" | "cryptoAmount",
-  amount: string,
-  bound: string
-): number {
-  try {
-    return compareDecimalAmounts(amount, bound);
-  } catch (error) {
-    if (isSolanaError(error, SOLANA_ERROR__FIXED_POINTS__VALUE_OUT_OF_RANGE)) {
-      throw new SdpPaymentsError("BAD_REQUEST", `${field} is out of range`);
-    }
-    throw error;
-  }
-}
-
 function assertMoonpayOnrampAmount(fiatCurrency: RampFiatCurrency, fiatAmount: string): void {
   const limit = MOONPAY_ONRAMP_LIMITS.get(fiatCurrency);
   if (limit === undefined) {
     throw new SdpPaymentsError("BAD_REQUEST", `MoonPay on-ramp does not support ${fiatCurrency}`);
   }
-  if (limit.min !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.min) < 0) {
+  if (limit.min !== null && compareDecimalAmounts(fiatAmount, limit.min) < 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at least ${limit.min} ${fiatCurrency}`
     );
   }
-  if (limit.max !== null && compareMoonpayAmount("fiatAmount", fiatAmount, limit.max) > 0) {
+  if (limit.max !== null && compareDecimalAmounts(fiatAmount, limit.max) > 0) {
     throw new SdpPaymentsError(
       "BAD_REQUEST",
       `MoonPay on-ramp requires fiatAmount to be at most ${limit.max} ${fiatCurrency}`
@@ -554,7 +538,7 @@ export class MoonpayRampClient implements RampProvider<MoonpaySettlementEvent> {
     if (
       maximum !== undefined &&
       maximum !== null &&
-      compareMoonpayAmount("cryptoAmount", input.cryptoAmount, decimalStringFromNumber(maximum)) > 0
+      compareDecimalAmounts(input.cryptoAmount, decimalStringFromNumber(maximum)) > 0
     ) {
       throw rampAmountOutOfRange("amount_above_maximum", {
         amount: decimalStringFromNumber(maximum),

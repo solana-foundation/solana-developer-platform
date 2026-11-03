@@ -27,8 +27,9 @@
  * shipping unmonitored.
  */
 
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { EARN_DEPOSIT_TOKEN_SYMBOLS, type EarnDepositTokenSymbol } from "@sdp/types/earn";
 import {
   type SolanaCluster,
@@ -37,15 +38,22 @@ import {
 } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { z } from "zod";
+import { isEarnEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import { logEvent } from "@/runtime/money-path-events";
-import { assertClusterEndpoint } from "@/services/earn/execution-registry";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";
 
-/** Deadline for one mint read; the whole guard is a handful of these per pass. */
-export const DEPOSIT_MINT_READ_TIMEOUT_MS = 10_000;
+/**
+ * The guard could not read a cluster at all (no managed RPC pool for it), so drift on that
+ * cluster cannot alert. Logged at error wherever Earn is enabled: a silent skip is exactly how a
+ * mainnet hook change would go unseen.
+ */
+export const EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT = "sdp_api_earn_deposit_mint_guard_skipped";
+
+/** Deadline for the guard's one batched mint read per pass. */
+const DEPOSIT_MINT_READ_TIMEOUT_MS = 10_000;
 
 /** The extension state a Token-2022 deposit mint is expected to hold. */
 export interface PinnedToken2022MintState {
@@ -108,7 +116,7 @@ export function token2022DepositMints(cluster: SolanaCluster): Token2022DepositM
   return mints;
 }
 
-export type MintDriftField =
+type MintDriftField =
   | "owner"
   | "transfer_hook_extension"
   | "transfer_hook_program"
@@ -212,53 +220,77 @@ export function detectMintDrift(
 }
 
 /**
- * Read every Token-2022 deposit mint on `cluster` and report drift from its pin.
+ * Error wherever Earn is enabled, and wherever that cannot be read either, so
+ * the skip can never pass for routine where the guard was supposed to run.
+ */
+function skipLevel(env: Env): "error" | "info" {
+  try {
+    return isEarnEnabled(env) ? "error" : "info";
+  } catch {
+    return "error";
+  }
+}
+
+/**
+ * Read every Token-2022 deposit mint on the open cluster scope's cluster and
+ * report drift from its pin.
  *
- * Never throws and never blocks the pass that called it. A cluster this
- * deployment has no proven RPC for is a quiet skip (a devnet-only deployment
- * has nothing to say about mainnet PYUSD); a read that fails is a warning, not
- * an alert, because an RPC outage is already covered elsewhere and paging on
- * it here would teach people to ignore the event that matters.
+ * Never throws and never blocks the pass that called it. One
+ * `getMultipleAccounts` through `createClusterRpc()` reads every pinned mint of
+ * the cluster from its managed pool, whose genesis guard proves the chain. A cluster with no managed pool is
+ * a skip the guard cannot honestly call quiet: it logs
+ * `EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT` at error where Earn is enabled. A read
+ * that fails is a warning, not an alert, because an RPC outage is already
+ * covered elsewhere and paging on it here would teach people to ignore the event
+ * that matters.
  *
  * Returns the number of drift events emitted, for the caller's summary log.
  */
-export async function guardDepositMints(env: Env, cluster: SolanaCluster): Promise<number> {
-  const mints = token2022DepositMints(cluster);
+export async function guardDepositMints(env: Env): Promise<number> {
+  const { cluster } = currentClusterScope();
+  const mints = token2022DepositMints(cluster).flatMap((entry) => {
+    const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[entry.mint];
+    if (pinned) return [{ ...entry, pinned }];
+    // The unit suite refuses this state; at runtime it is a warning so a
+    // stale build cannot page on a code omission.
+    getLogger().warn({ cluster, ...entry }, "guardDepositMints: mint has no pinned state");
+    return [];
+  });
   if (mints.length === 0) return 0;
 
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
+  let rpc: SolanaRpc;
   try {
-    await assertClusterEndpoint(env, cluster, rpcUrl);
+    rpc = createClusterRpc();
   } catch (err) {
-    getLogger().info(
+    logEvent(skipLevel(env), {
+      event: EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT,
+      cluster,
+      ...describeError(err),
+      error_message: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
+
+  let accounts: readonly unknown[];
+  try {
+    const response = await rpc
+      .getMultipleAccounts(
+        mints.map(({ mint }) => address(mint)),
+        { encoding: "jsonParsed" }
+      )
+      .send({ abortSignal: AbortSignal.timeout(DEPOSIT_MINT_READ_TIMEOUT_MS) });
+    accounts = response.value;
+  } catch (err) {
+    getLogger().warn(
       { cluster, error: err instanceof Error ? err.message : String(err) },
-      "guardDepositMints: skipped, no proven RPC for this cluster"
+      "guardDepositMints: mint read failed"
     );
     return 0;
   }
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: DEPOSIT_MINT_READ_TIMEOUT_MS });
 
   let emitted = 0;
-  for (const { symbol, mint } of mints) {
-    const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[mint];
-    if (!pinned) {
-      // The unit suite refuses this state; at runtime it is a warning so a
-      // stale build cannot page on a code omission.
-      getLogger().warn({ cluster, symbol, mint }, "guardDepositMints: mint has no pinned state");
-      continue;
-    }
-
-    let observed: ObservedMintState | null;
-    try {
-      const response = await rpc.getAccountInfo(address(mint), { encoding: "jsonParsed" }).send();
-      observed = observeMintState(response.value);
-    } catch (err) {
-      getLogger().warn(
-        { cluster, symbol, mint, error: err instanceof Error ? err.message : String(err) },
-        "guardDepositMints: mint read failed"
-      );
-      continue;
-    }
+  for (const [index, { symbol, mint, pinned }] of mints.entries()) {
+    const observed: ObservedMintState | null = observeMintState(accounts[index]);
     if (!observed) {
       getLogger().warn(
         { cluster, symbol, mint },

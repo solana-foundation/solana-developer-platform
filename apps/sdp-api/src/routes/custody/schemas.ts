@@ -2,7 +2,7 @@
  * Wallet API Schemas
  */
 
-import { CUSTODY_PROVIDERS, type CustodyWalletOwnerTarget } from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
 
 const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
@@ -14,23 +14,23 @@ const custodyProviderSchema = z.enum(CUSTODY_PROVIDERS);
 // Initialize Signing
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const initializeLocalSchema = z.strictObject({
+const initializeLocalSchema = z.strictObject({
   provider: z.literal("local"),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeFireblocksSchema = z.strictObject({
+const initializeFireblocksSchema = z.strictObject({
   provider: z.literal("fireblocks"),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializePrivySchema = z.strictObject({
+const initializePrivySchema = z.strictObject({
   provider: z.literal("privy"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeCoinbaseCdpSchema = z.strictObject({
+const initializeCoinbaseCdpSchema = z.strictObject({
   provider: z.literal("coinbase_cdp"),
   network: z.enum(["solana", "solana-devnet"]).optional(),
   accountPolicy: z
@@ -40,31 +40,31 @@ export const initializeCoinbaseCdpSchema = z.strictObject({
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeParaSchema = z.strictObject({
+const initializeParaSchema = z.strictObject({
   provider: z.literal("para"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeTurnkeySchema = z.strictObject({
+const initializeTurnkeySchema = z.strictObject({
   provider: z.literal("turnkey"),
   requestDelayMs: z.number().int().min(0).max(3000).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeDfnsSchema = z.strictObject({
+const initializeDfnsSchema = z.strictObject({
   provider: z.literal("dfns"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeIbmHavenSchema = z.strictObject({
+const initializeIbmHavenSchema = z.strictObject({
   provider: z.literal("ibm_haven"),
   network: z.enum(["Solana", "SolanaDevnet"]).optional(),
   walletLabel: z.string().max(100).optional(),
 });
 
-export const initializeAnchorageSchema = z.strictObject({
+const initializeAnchorageSchema = z.strictObject({
   provider: z.literal("anchorage"),
   walletLabel: z.string().max(100).optional(),
   network: z.enum(["solana", "solana-devnet"]).optional(),
@@ -72,7 +72,7 @@ export const initializeAnchorageSchema = z.strictObject({
 
 // Utila is platform-managed (single configured vault); connecting only needs an
 // optional label for the first wallet, like the other hosted providers.
-export const initializeUtilaSchema = z.strictObject({
+const initializeUtilaSchema = z.strictObject({
   provider: z.literal("utila"),
   walletLabel: z.string().max(100).optional(),
 });
@@ -112,11 +112,6 @@ export const connectionWalletOwnerSchema = z.object({
 const CUSTODY_WALLET_OWNER_ERROR =
   "Name exactly one of provider (Managed) or connectionId (BYOK); custody defaults were removed";
 
-export const custodyWalletOwnerSchema = z.union(
-  [managedWalletOwnerSchema, connectionWalletOwnerSchema],
-  { error: CUSTODY_WALLET_OWNER_ERROR }
-) satisfies z.ZodType<CustodyWalletOwnerTarget>;
-
 const walletCreationFields = {
   label: z.string().max(100).optional(),
   purpose: z
@@ -126,21 +121,16 @@ const walletCreationFields = {
 
 export const createManagedWalletSchema = managedWalletOwnerSchema.extend(walletCreationFields);
 
-export const createConnectionWalletSchema =
-  connectionWalletOwnerSchema.extend(walletCreationFields);
+const createConnectionWalletSchema = connectionWalletOwnerSchema.extend(walletCreationFields);
 
 export const createWalletSchema = z.union(
   [createManagedWalletSchema, createConnectionWalletSchema],
   { error: CUSTODY_WALLET_OWNER_ERROR }
 );
 
-export type CreateWalletRequest = z.infer<typeof createWalletSchema>;
-
 export const updateWalletSchema = z.object({
   label: z.string().max(100).nullable().optional(),
 });
-
-export type UpdateWalletRequest = z.infer<typeof updateWalletSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Delete Wallet
@@ -151,8 +141,6 @@ export const deleteWalletSchema = z.object({
   walletId: z.string().min(1),
 });
 
-export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Signer Check
 // ═══════════════════════════════════════════════════════════════════════════
@@ -160,8 +148,6 @@ export type DeleteWalletRequest = z.infer<typeof deleteWalletSchema>;
 export const signerCheckSchema = z.object({
   walletId: z.string().trim().min(1),
 });
-
-export type SignerCheckRequest = z.infer<typeof signerCheckSchema>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Devnet Faucet

@@ -287,7 +287,9 @@ describe("credentials section", () => {
           })
         );
         const dialog = await openDialog();
-        expect(within(dialog).getByText(/does not revoke the key at Privy/)).toBeTruthy();
+        expect(
+          within(dialog).getByText(/does not revoke credentials at the provider/)
+        ).toBeTruthy();
         await userEvent.click(
           within(dialog).getByRole("button", { name: "Deactivate credentials" })
         );

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useIsPresent } from "motion/react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 interface HeightRevealProps {
@@ -19,6 +19,9 @@ interface HeightRevealProps {
 export function HeightReveal({ children, durationSeconds = 0.3 }: HeightRevealProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
+  // AnimatePresence keeps closing content mounted through its exit, so `inert` keeps focus and
+  // assistive technology out of controls that are about to unmount.
+  const isPresent = useIsPresent();
 
   // Measure before paint (not `useEffect`) so the first open commits the real
   // target height in one render, instead of painting a clipped height-0 frame
@@ -47,6 +50,7 @@ export function HeightReveal({ children, durationSeconds = 0.3 }: HeightRevealPr
       initial={{ height: 0 }}
       animate={{ height: contentHeight }}
       exit={{ height: 0 }}
+      inert={!isPresent}
       transition={{ duration: durationSeconds, ease }}
       // `contain` keeps the height change from reflowing siblings' internals;
       // `willChange` promotes the box so the browser can composite it.

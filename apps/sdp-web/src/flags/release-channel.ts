@@ -3,7 +3,7 @@ import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
@@ -41,7 +41,7 @@ export function deploymentReleaseChannel(): SdpReleaseChannel {
  * Unlike a module's dashboard flag it ignores per-user Vercel targeting.
  */
 export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
-  return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_STAGES);
+  return isModuleInReleaseChannel(deploymentReleaseChannel(), module, SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**
@@ -50,6 +50,6 @@ export function isModuleInDeploymentReleaseChannel(module: SdpModule): boolean {
  */
 export function rampProvidersInReleaseChannel(releaseChannel: SdpReleaseChannel): RampProviderId[] {
   return RAMP_PROVIDERS.filter((provider) =>
-    isRampProviderInReleaseChannel(releaseChannel, provider, SDP_RAMP_PROVIDER_STAGES)
+    isRampProviderInReleaseChannel(releaseChannel, provider, SDP_RAMP_PROVIDER_MATURITY)
   );
 }

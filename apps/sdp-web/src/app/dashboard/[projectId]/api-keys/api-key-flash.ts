@@ -12,7 +12,7 @@ export const API_KEYS_FLASH_PATH = "/dashboard/api-keys/flash";
 export const API_KEY_FLASH_SECRET_MAX_AGE_SECONDS = 120;
 export const API_KEY_FLASH_NOTICE_MAX_AGE_SECONDS = 300;
 
-export type FlashLevel = "success" | "error";
+type FlashLevel = "success" | "error";
 
 export interface ApiKeyFlash {
   level: FlashLevel;

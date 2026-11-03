@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   PaymentRequestCheckStamp,
@@ -9,9 +8,10 @@ import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
   checkAwaitingPaymentRequest,
-  checkExpiredPaymentRequestForLatePayment,
+  checkClosedPaymentRequestForLatePayment,
   closeLapsedPaymentRequest,
   type PaymentRequestCheck,
+  readLiveClaimFloor,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
@@ -25,7 +25,6 @@ const SWEEP_AGED_RECHECK_MS = 10 * 60_000;
 const SWEEP_AGED_AFTER_MS = 24 * 60 * 60_000;
 const EXPIRY_MIN_RECHECK_MS = 45_000;
 const EXPIRY_STALE_AFTER_MS = 10 * 60_000;
-const HOT_LANE_BLOCK_MARGIN = 150n;
 const LATE_PAYMENT_WATCH_MS = 7 * 24 * 60 * 60_000;
 const LATE_PAYMENT_RECHECK_MS = 10 * 60_000;
 const STALE_AFTER_MS = 2 * SWEEP_AGED_RECHECK_MS;
@@ -42,12 +41,17 @@ interface LaneRun {
 
 export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
-  const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
-  const rows = await createSystemPaymentRequestsRepository(env).listHotPaymentRequests({
-    environment,
-    minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
-    limit: HOT_BATCH_SIZE,
-  });
+  const repo = createSystemPaymentRequestsRepository(env);
+  let rows: PaymentRequestRow[] = [];
+  // The block height only bounds a live sponsored window, so with no window open the cluster
+  // is not asked at all: this lane runs every 30 s in every environment.
+  if (await repo.hasHotPaymentRequests({ environment })) {
+    rows = await repo.listHotPaymentRequests({
+      environment,
+      minLastValidBlockHeight: await readLiveClaimFloor(),
+      limit: HOT_BATCH_SIZE,
+    });
+  }
   throwIfEveryCheckFailed(await checkEach(env, rows, checkAwaitingPaymentRequest, "hot"));
 }
 
@@ -76,7 +80,6 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
 export async function expirePaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
   const repo = createSystemPaymentRequestsRepository(env);
-  const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
   const staleLapsed = await repo.countStaleLapsedPaymentRequests({
     environment,
     checkedBefore: new Date(Date.now() - EXPIRY_STALE_AFTER_MS).toISOString(),
@@ -84,35 +87,41 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
   if (staleLapsed > 0) {
     logEvent("warn", { event: "payment_requests.expiry_backlog", environment, stale: staleLapsed });
   }
-  const lapsed = await repo.listLapsedPaymentRequests({
-    environment,
-    checkedBefore: new Date(Date.now() - EXPIRY_MIN_RECHECK_MS).toISOString(),
-    liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
-    limit: EXPIRY_BATCH_SIZE,
-  });
+  const checkedBefore = new Date(Date.now() - EXPIRY_MIN_RECHECK_MS).toISOString();
+  let lapsed: PaymentRequestRow[] = [];
+  // As in the hot lane, the height only holds back a request whose sponsored transaction can
+  // still land: with nothing lapsed, the cluster is not asked.
+  if (await repo.hasLapsedPaymentRequests({ environment, checkedBefore })) {
+    lapsed = await repo.listLapsedPaymentRequests({
+      environment,
+      checkedBefore,
+      liveClaimMinLastValidBlockHeight: await readLiveClaimFloor(),
+      limit: EXPIRY_BATCH_SIZE,
+    });
+  }
   const expiry = await checkEach(env, lapsed, closeLapsedPaymentRequest, "expiry");
 
   const now = Date.now();
-  const expiredSince = new Date(now - LATE_PAYMENT_WATCH_MS).toISOString();
+  const closedSince = new Date(now - LATE_PAYMENT_WATCH_MS).toISOString();
   const stale = await repo.countStaleLateWatchPaymentRequests({
     environment,
-    expiredSince,
+    closedSince,
     checkedBefore: new Date(now - LATE_PAYMENT_STALE_AFTER_MS).toISOString(),
   });
   if (stale > 0) {
     logEvent("warn", { event: "payment_requests.late_watch_backlog", environment, stale });
   }
 
-  const watched = await repo.listExpiredPaymentRequestsForLateCheck({
+  const watched = await repo.listClosedPaymentRequestsForLateCheck({
     environment,
-    expiredSince,
+    closedSince,
     checkedBefore: new Date(now - LATE_PAYMENT_RECHECK_MS).toISOString(),
     limit: LATE_CHECK_BATCH_SIZE,
   });
   const lateWatch = await checkEach(
     env,
     watched,
-    checkExpiredPaymentRequestForLatePayment,
+    checkClosedPaymentRequestForLatePayment,
     "late_watch"
   );
   throwIfEveryCheckFailed(expiry, lateWatch);

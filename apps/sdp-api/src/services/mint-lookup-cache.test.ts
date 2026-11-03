@@ -6,6 +6,19 @@ afterEach(() => {
 });
 
 describe("createMintLookupCache", () => {
+  it("preserves a shared entry's original expiry instead of restarting its TTL", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const expiresAt = Date.now() + 1_000;
+    const cache = createMintLookupCache<{ expiresAt: number }>(60_000, {
+      expiresAtOf: (value) => value.expiresAt,
+    });
+    const fetchMissing = vi.fn(async () => new Map([["A", { expiresAt }]]));
+    await cache.lookup("mainnet-beta", ["A"], fetchMissing);
+    vi.advanceTimersByTime(1_000);
+    await cache.lookup("mainnet-beta", ["A"], fetchMissing);
+    expect(fetchMissing).toHaveBeenCalledTimes(2);
+  });
+
   it("reuses an answer until its TTL passes, then asks again", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const cache = createMintLookupCache<number>(30_000);
@@ -21,6 +34,23 @@ describe("createMintLookupCache", () => {
     vi.advanceTimersByTime(1);
     await cache.lookup("devnet", ["MintA"], fetchMissing);
     expect(fetchMissing).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds memory while retaining hot mints and returning every fetched value", async () => {
+    const cache = createMintLookupCache<number>(60_000, { maxEntries: 2 });
+    const fetchMissing = vi.fn(async (mints: string[]) => new Map(mints.map((mint) => [mint, 1])));
+
+    await cache.lookup("mainnet-beta", ["A", "B"], fetchMissing);
+    await cache.lookup("mainnet-beta", ["A"], fetchMissing);
+    await cache.lookup("mainnet-beta", ["C"], fetchMissing);
+    await cache.lookup("mainnet-beta", ["A", "C"], fetchMissing);
+    expect(fetchMissing).toHaveBeenCalledTimes(2);
+    await cache.lookup("mainnet-beta", ["B"], fetchMissing);
+    expect(fetchMissing).toHaveBeenCalledTimes(3);
+
+    const values = await cache.lookup("mainnet-beta", ["D", "E", "F"], fetchMissing);
+    expect(values.size).toBe(3);
+    expect(cache.entryCountForTests()).toBe(2);
   });
 
   it("drops expired entries for mints nobody asks about again", async () => {

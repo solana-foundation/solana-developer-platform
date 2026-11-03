@@ -107,10 +107,19 @@ export async function rotateCredentialsAction(
   const credentialId = String(formData.get("credentialId") ?? "").trim();
   const connectionId = String(formData.get("connectionId") ?? "").trim();
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
-  const appId = String(formData.get("appId") ?? "").trim();
-  const appSecret = String(formData.get("appSecret") ?? "");
+  const fields =
+    provider === "fireblocks"
+      ? {
+          apiKey: String(formData.get("apiKey") ?? "").trim(),
+          signingKeyId: String(formData.get("signingKeyId") ?? "").trim(),
+          vaultAccountId: String(formData.get("vaultAccountId") ?? "").trim(),
+        }
+      : {
+          appId: String(formData.get("appId") ?? "").trim(),
+          appSecret: String(formData.get("appSecret") ?? ""),
+        };
 
-  if (!credentialId || !idempotencyKey || !appId || !appSecret) {
+  if (!credentialId || !idempotencyKey || Object.values(fields).some((value) => !value.trim())) {
     return {
       status: "failed",
       kind: "invalid_credentials",
@@ -126,7 +135,7 @@ export async function rotateCredentialsAction(
       {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ fields: { appId, appSecret } }),
+        body: JSON.stringify({ provider: custodyProvider, fields }),
       }
     );
   } catch (error) {

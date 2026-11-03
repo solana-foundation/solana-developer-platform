@@ -7,21 +7,23 @@ import {
   toTransactionsApiQuery,
 } from "./transactions-query";
 
-const parseAll = (searchParams: Parameters<typeof parseTransactionFilters>[0]) =>
-  parseTransactionFilters(searchParams, UNIFIED_TRANSACTION_MODULES);
+const ALL = UNIFIED_TRANSACTION_MODULES;
 
 describe("transaction filter query", () => {
   it("parses valid fields independently", () => {
     expect(
-      parseAll({
-        tab: "payments",
-        status: "succeeded",
-        counterpartyId: "  cpty_42  ",
-        search: ["  xfr_42  ", "ignored"],
-        from: "2026-07-01",
-        to: "2026-07-18",
-        cursors: "first,second",
-      })
+      parseTransactionFilters(
+        {
+          tab: "payments",
+          status: "succeeded",
+          counterpartyId: "  cpty_42  ",
+          search: ["  xfr_42  ", "ignored"],
+          from: "2026-07-01",
+          to: "2026-07-18",
+          cursors: "first,second",
+        },
+        ALL
+      )
     ).toEqual({
       module: "payments",
       status: "succeeded",
@@ -35,84 +37,87 @@ describe("transaction filter query", () => {
 
   it("treats every malformed URL field as absent without dropping valid fields", () => {
     expect(() =>
-      parseAll({
-        tab: "unknown",
-        status: "complete",
-        search: "xy",
-        from: "not-a-date",
-        to: "2026-07-18",
-        cursor: "",
-      })
+      parseTransactionFilters(
+        {
+          tab: "unknown",
+          status: "complete",
+          search: "xy",
+          from: "not-a-date",
+          to: "2026-07-18",
+          cursor: "",
+        },
+        ALL
+      )
     ).not.toThrow();
     expect(
-      parseAll({
-        tab: "unknown",
-        status: "complete",
-        search: "xy",
-        from: "not-a-date",
-        to: "2026-07-18",
-        cursor: "",
-      })
+      parseTransactionFilters(
+        {
+          tab: "unknown",
+          status: "complete",
+          search: "xy",
+          from: "not-a-date",
+          to: "2026-07-18",
+          cursor: "",
+        },
+        ALL
+      )
     ).toEqual({ to: "2026-07-18", cursors: [] });
   });
 
-  it("maps the shared tab param: a module id selects it, all and unknown mean the default", () => {
-    expect(parseTransactionModule("earn", UNIFIED_TRANSACTION_MODULES)).toBe("earn");
-    expect(parseTransactionModule("all", UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
-    expect(parseTransactionModule(null, UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
-    expect(parseTransactionModule("unknown", UNIFIED_TRANSACTION_MODULES)).toBeUndefined();
-    expect(parseAll({ tab: "all" }).module).toBeUndefined();
+  it("maps the module param: a module id selects it, all and unknown mean the default", () => {
+    expect(parseTransactionModule("earn", ALL)).toBe("earn");
+    expect(parseTransactionModule("all", ALL)).toBeUndefined();
+    expect(parseTransactionModule(null, ALL)).toBeUndefined();
+    expect(parseTransactionModule("unknown", ALL)).toBeUndefined();
+    expect(parseTransactionFilters({ tab: "all" }, ALL).module).toBeUndefined();
   });
 
-  it("treats a module the dashboard does not show as the default tab", () => {
-    expect(parseTransactionModule("issuance", ["payments"])).toBeUndefined();
-    expect(parseTransactionFilters({ tab: "issuance" }, ["payments"]).module).toBeUndefined();
-    expect(parseTransactionFilters({ tab: "payments" }, ["payments"]).module).toBe("payments");
+  it("reads the module from ?module=, falling back to the legacy ?tab=", () => {
+    expect(parseTransactionFilters({ module: "dvp", tab: "earn" }, ALL).module).toBe("dvp");
+    expect(parseTransactionFilters({ tab: "earn" }, ALL).module).toBe("earn");
   });
 
-  it("opens All from its first page when a saved link names a hidden module", () => {
+  it("keeps a supported page size and drops the default or an unsupported one", () => {
+    expect(parseTransactionFilters({ pageSize: "50" }, ALL).pageSize).toBe(50);
+    expect(parseTransactionFilters({ pageSize: "25" }, ALL)).not.toHaveProperty("pageSize");
+    expect(parseTransactionFilters({ pageSize: "7" }, ALL)).not.toHaveProperty("pageSize");
     expect(
-      parseTransactionFilters(
-        { tab: "earn", cursor: "third", cursors: "first,second", status: "succeeded" },
-        ["payments"]
-      )
-    ).toEqual({ status: "succeeded", cursors: [] });
+      serializeTransactionFilters(parseTransactionFilters({ pageSize: "100" }, ALL)).toString()
+    ).toBe("pageSize=100");
   });
 
-  it("keeps pagination on an All link", () => {
-    expect(
-      parseTransactionFilters({ cursor: "third", cursors: "first,second" }, ["payments"])
-    ).toEqual({ cursor: "third", cursors: ["first", "second"] });
-    expect(
-      parseTransactionFilters({ tab: "all", cursor: "third", cursors: "first" }, ["payments"])
-    ).toEqual({ cursor: "third", cursors: ["first"] });
-  });
-
-  it("drops a saved kind with its hidden module, since the API refuses kind without module", () => {
-    expect(parseTransactionFilters({ tab: "earn", kind: "deposit" }, ["payments"])).toEqual({
-      cursors: [],
-    });
-    expect(parseAll({ tab: "earn", kind: "deposit" })).toMatchObject({
-      module: "earn",
-      kind: "deposit",
-    });
-  });
-
-  it("serializes filters to tab and translates date boundaries for the API", () => {
-    const filters = parseAll({
-      tab: "earn",
-      counterpartyId: "cpty_42",
-      from: "2026-07-01",
-      to: "2026-07-18",
-      cursors: "first",
-      cursor: "second",
-    });
+  it("serializes filters to module and translates date boundaries for the API", () => {
+    const filters = parseTransactionFilters(
+      {
+        module: "earn",
+        counterpartyId: "cpty_42",
+        from: "2026-07-01",
+        to: "2026-07-18",
+        cursors: "first",
+        cursor: "second",
+      },
+      ALL
+    );
 
     expect(serializeTransactionFilters(filters).toString()).toBe(
-      "tab=earn&counterpartyId=cpty_42&from=2026-07-01&to=2026-07-18&cursor=second&cursors=first"
+      "module=earn&counterpartyId=cpty_42&from=2026-07-01&to=2026-07-18&cursor=second&cursors=first"
     );
     expect(toTransactionsApiQuery(filters, 100).toString()).toBe(
       "limit=100&module=earn&counterpartyId=cpty_42&createdAtFrom=2026-07-01T00%3A00%3A00.000Z&createdAtTo=2026-07-18T23%3A59%3A59.999Z&cursor=second"
     );
+  });
+
+  it("drops a module the channel leaves out, with its kind and its cursor", () => {
+    expect(
+      parseTransactionFilters(
+        { module: "issuance", kind: "mint", cursor: "c2", cursors: "c1", status: "succeeded" },
+        ["payments"]
+      )
+    ).toEqual({ status: "succeeded", cursors: [] });
+    expect(parseTransactionModule("issuance", ["payments"])).toBeUndefined();
+  });
+
+  it("drops a kind that arrives without its module", () => {
+    expect(parseTransactionFilters({ kind: "deposit" }, ALL)).toEqual({ cursors: [] });
   });
 });

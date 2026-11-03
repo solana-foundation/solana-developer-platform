@@ -1,10 +1,10 @@
 "use client";
 
 import type { Node as PageTreeNode } from "fumadocs-core/page-tree";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
 function getNodeKey(node: PageTreeNode) {
@@ -24,10 +24,11 @@ function nodeContainsPath(node: PageTreeNode, pathname: string): boolean {
 
 type NavigationNodeProps = {
   node: PageTreeNode;
-  depth?: number;
+  onNavigate: () => void;
 };
 
-export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
+/** A page tree node in the sidebar. Each level of children sits further in (globals.css). */
+export function NavigationNode({ node, onNavigate }: NavigationNodeProps) {
   const pathname = usePathname();
 
   if (node.type === "separator") {
@@ -45,8 +46,13 @@ export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
     return (
       <Link
         href={node.url}
-        className={cn("launch-docs-nav-item", isActive && "is-active")}
-        style={{ paddingLeft: `${12 + depth * 14}px` }}
+        onClick={onNavigate}
+        className={cn(
+          "launch-docs-nav-item",
+          node.url === "/docs" && "is-start",
+          isActive && "is-active"
+        )}
+        aria-current={isActive ? "page" : undefined}
       >
         {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
         {node.name}
@@ -55,7 +61,7 @@ export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
   }
 
   if (node.type === "folder") {
-    return <FolderNode node={node} depth={depth} pathname={pathname} />;
+    return <FolderNode node={node} pathname={pathname} onNavigate={onNavigate} />;
   }
 
   return null;
@@ -63,11 +69,20 @@ export function NavigationNode({ node, depth = 0 }: NavigationNodeProps) {
 
 type FolderNodeProps = {
   node: Extract<PageTreeNode, { type: "folder" }>;
-  depth: number;
   pathname: string;
+  onNavigate: () => void;
 };
 
-function FolderNode({ node, depth, pathname }: FolderNodeProps) {
+/** A plain click, which opens the page here rather than in another tab or window. */
+function isPlainClick(event: MouseEvent<HTMLAnchorElement>) {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+/**
+ * A folder. Its row is one highlight, toggle included. A linked folder's link opens the folder
+ * as it opens the page, and toggles it from the page itself, as the chevron does.
+ */
+function FolderNode({ node, pathname, onNavigate }: FolderNodeProps) {
   const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
   const [isOpen, setIsOpen] = useState(containsPath);
 
@@ -78,17 +93,21 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
   const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
   const hasChildren = node.children.length > 0;
   const isActive = node.index?.url === pathname;
-  const ChevronIcon = isOpen ? ChevronDown : ChevronRight;
 
   return (
     <div className="launch-docs-nav-folder">
-      <div className="launch-docs-nav-folder-row">
+      <div className={cn("launch-docs-nav-folder-row", isActive && "is-active")}>
         {node.index ? (
           <>
             <Link
               href={node.index.url}
-              className={cn("launch-docs-nav-folder-link", isActive && "is-active")}
-              style={{ paddingLeft: `${12 + depth * 14}px` }}
+              className="launch-docs-nav-folder-link"
+              onClick={(event) => {
+                if (isPlainClick(event)) {
+                  setIsOpen((open) => (isActive ? !open : true));
+                  onNavigate();
+                }
+              }}
             >
               {node.icon ? <span className="launch-docs-nav-icon">{node.icon}</span> : null}
               {node.name}
@@ -98,9 +117,10 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
                 type="button"
                 className="launch-docs-nav-toggle"
                 onClick={() => setIsOpen((v) => !v)}
+                aria-expanded={isOpen}
                 aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
               >
-                <ChevronIcon aria-hidden="true" />
+                <ChevronRight className="launch-docs-nav-chevron" aria-hidden="true" />
               </button>
             )}
           </>
@@ -108,8 +128,8 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
           <button
             type="button"
             className="launch-docs-nav-folder-btn"
-            style={{ paddingLeft: `${12 + depth * 14}px` }}
             onClick={() => setIsOpen((v) => !v)}
+            aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
           >
             <span>
@@ -117,7 +137,10 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
               {node.name}
             </span>
             {hasChildren && (
-              <ChevronIcon className="launch-docs-nav-toggle-icon" aria-hidden="true" />
+              <ChevronRight
+                className="launch-docs-nav-toggle-icon launch-docs-nav-chevron"
+                aria-hidden="true"
+              />
             )}
           </button>
         )}
@@ -126,7 +149,7 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
       {hasChildren && isOpen ? (
         <div className="launch-docs-nav-children">
           {node.children.map((child) => (
-            <NavigationNode key={getNodeKey(child)} node={child} depth={depth + 1} />
+            <NavigationNode key={getNodeKey(child)} node={child} onNavigate={onNavigate} />
           ))}
         </div>
       ) : null}

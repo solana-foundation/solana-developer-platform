@@ -1,5 +1,6 @@
 import { getTemplateInfo } from "@sdp/issuance/templates";
-import { createRpc, createRpcForSdk } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { toSdkRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { MovementOf } from "@sdp/types/movements";
 import type { TokenTransaction, TokenTransactionType } from "@sdp/types/tokens";
@@ -11,6 +12,7 @@ import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -27,18 +29,18 @@ export interface ResolvedIssuanceWallet {
 }
 
 /** Shared live list authority for both signer selection and execution. */
-export async function resolveAllowlistAuthority(env: Env, listAddress: string): Promise<string> {
+export async function resolveAllowlistAuthority(listAddress: string): Promise<string> {
   const { authority } = await getListConfig({
-    rpc: createRpcForSdk<Parameters<typeof getListConfig>[0]["rpc"]>(env),
+    rpc: toSdkRpc<Parameters<typeof getListConfig>[0]["rpc"]>(createClusterRpc()),
     listConfig: assertValidAddress(listAddress, "ablListAddress"),
   });
   return authority;
 }
 
 /** Resolve the live Token-2022 pausable authority used for pause/unpause signing. */
-export async function resolvePauseAuthority(env: Env, mintAddress: string): Promise<string | null> {
+export async function resolvePauseAuthority(mintAddress: string): Promise<string | null> {
   const token = await inspectToken(
-    createRpcForSdk<Parameters<typeof inspectToken>[0]>(env),
+    toSdkRpc<Parameters<typeof inspectToken>[0]>(createClusterRpc()),
     assertValidAddress(mintAddress, "mintAddress")
   );
   return token.authorities.pausableAuthority ?? null;
@@ -126,17 +128,14 @@ function tokenMayHavePermanentDelegate(token: TokenRecord): boolean {
   return templateInfo?.requiredExtensions?.includes("permanentDelegate") ?? false;
 }
 
-async function fetchMintAuthorities(
-  env: Env,
-  mintAddress: string
-): Promise<{
+async function fetchMintAuthorities(mintAddress: string): Promise<{
   mintAuthority: string | null;
   freezeAuthority: string | null;
   permanentDelegate: string | null;
   metadataAuthority: string | null;
 }> {
   const mint = await fetchMaybeMint(
-    createRpc(env),
+    createClusterRpc(),
     assertValidAddress(mintAddress, "mintAddress"),
     { commitment: "confirmed" }
   );
@@ -163,7 +162,6 @@ async function fetchMintAuthorities(
 }
 
 export async function resolvePermanentDelegateAuthority(
-  env: Env,
   _tokenService: TokenService,
   token: TokenRecord
 ): Promise<string | null> {
@@ -176,10 +174,11 @@ export async function resolvePermanentDelegateAuthority(
   }
 
   try {
-    const { permanentDelegate } = await fetchMintAuthorities(env, token.mintAddress);
+    const { permanentDelegate } = await fetchMintAuthorities(token.mintAddress);
 
     return permanentDelegate;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve permanent delegate authority"
@@ -188,7 +187,6 @@ export async function resolvePermanentDelegateAuthority(
 }
 
 export async function resolveMetadataAuthority(
-  env: Env,
   _tokenService: TokenService,
   token: TokenRecord
 ): Promise<string | null> {
@@ -201,12 +199,13 @@ export async function resolveMetadataAuthority(
   }
 
   try {
-    const { metadataAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+    const { metadataAuthority } = await fetchMintAuthorities(token.mintAddress);
 
     // The typed mint decoder distinguishes a revoked/absent authority from a
     // failed read. Do not restore stale stored authority after revocation.
     return metadataAuthority;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve metadata authority"
@@ -215,10 +214,7 @@ export async function resolveMetadataAuthority(
 }
 
 /** Resolve the wallet authority that can execute freeze/thaw, including Token ACL mints. */
-export async function resolveFreezeOperationAuthority(
-  env: Env,
-  token: TokenRecord
-): Promise<string | null> {
+export async function resolveFreezeOperationAuthority(token: TokenRecord): Promise<string | null> {
   if (!token) {
     return null;
   }
@@ -230,16 +226,17 @@ export async function resolveFreezeOperationAuthority(
   try {
     const mint = assertValidAddress(token.mintAddress, "mintAddress");
     const mintConfig = await getTokenAclMintConfig(
-      createRpcForSdk<Parameters<typeof getTokenAclMintConfig>[0]>(env),
+      toSdkRpc<Parameters<typeof getTokenAclMintConfig>[0]>(createClusterRpc()),
       mint
     );
     if (mintConfig.exists) {
       return mintConfig.data.freezeAuthority;
     }
 
-    const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+    const { freezeAuthority } = await fetchMintAuthorities(token.mintAddress);
     return freezeAuthority;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve freeze authority"
@@ -248,7 +245,6 @@ export async function resolveFreezeOperationAuthority(
 }
 
 export async function resolveCurrentAuthorityForRole(
-  env: Env,
   tokenService: TokenService,
   token: TokenRecord,
   role: AuthorityRole,
@@ -266,9 +262,10 @@ export async function resolveCurrentAuthorityForRole(
         break;
       }
       try {
-        const { mintAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+        const { mintAuthority } = await fetchMintAuthorities(token.mintAddress);
         currentAuthority = mintAuthority;
       } catch (error) {
+        rethrowRpcUnavailable(error);
         throw new AppError(
           "SOLANA_RPC_ERROR",
           error instanceof Error ? error.message : "Failed to resolve mint authority"
@@ -277,14 +274,14 @@ export async function resolveCurrentAuthorityForRole(
       break;
     }
     case "freeze": {
-      currentAuthority = await resolveFreezeOperationAuthority(env, token);
+      currentAuthority = await resolveFreezeOperationAuthority(token);
       break;
     }
     case "permanentDelegate":
-      currentAuthority = await resolvePermanentDelegateAuthority(env, tokenService, token);
+      currentAuthority = await resolvePermanentDelegateAuthority(tokenService, token);
       break;
     case "metadata":
-      currentAuthority = await resolveMetadataAuthority(env, tokenService, token);
+      currentAuthority = await resolveMetadataAuthority(tokenService, token);
       break;
   }
 
@@ -412,7 +409,7 @@ async function loadResolvedAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"issuance">(
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
@@ -515,7 +512,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw walletNotFound();
   }
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"issuance">(
     env,
     auth.organizationId,
     projectId,

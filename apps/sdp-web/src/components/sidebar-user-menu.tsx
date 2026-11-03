@@ -35,7 +35,6 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
 import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
-import { useNewDesign } from "@/components/new-design";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
 import { supportedLocales } from "@/i18n/config";
@@ -53,16 +52,13 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 // (Radix can only mirror a side, so it cannot recover from "right" on its own).
 export function SidebarUserMenu({
   collapsed,
-  canManageOrgSettings,
   menuSide,
 }: {
   collapsed: boolean;
-  canManageOrgSettings: boolean;
   menuSide: "right" | "top";
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  const newDesign = useNewDesign();
   const { user } = useUser();
   const { openUserProfile, signOut } = useClerk();
   const { theme } = useTheme();
@@ -121,17 +117,15 @@ export function SidebarUserMenu({
             {t("Shared.dashboardShell.apiDocs")}
           </a>
         </DropdownMenuItem>
-        {canManageOrgSettings ? (
-          <DropdownMenuItem asChild className="gap-2.5">
-            <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
-              <Settings2Icon className="size-4 shrink-0 text-secondary" />
-              {t("Shared.dashboardShell.settings")}
-            </Link>
-          </DropdownMenuItem>
-        ) : null}
+        <DropdownMenuItem asChild className="gap-2.5">
+          <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
+            <Settings2Icon className="size-4 shrink-0 text-secondary" />
+            {t("Shared.dashboardShell.settings")}
+          </Link>
+        </DropdownMenuItem>
         <NetworkDebugMenuItem />
         <ThemeMenuItem />
-        {newDesign ? <LanguageMenuItem /> : null}
+        <LanguageMenuItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem className="gap-2.5" onSelect={() => openUserProfile()}>
           <UserRoundIcon className="size-4 shrink-0 text-secondary" />

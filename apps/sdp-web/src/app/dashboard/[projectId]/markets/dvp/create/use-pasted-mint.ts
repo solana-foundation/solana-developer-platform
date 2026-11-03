@@ -39,7 +39,7 @@ const pastedMintSchema = z.object({
 
 const inspectionEnvelopeSchema = z.object({ data: z.object({ mint: pastedMintSchema }) });
 
-export type PastedMint = z.infer<typeof pastedMintSchema>;
+type PastedMint = z.infer<typeof pastedMintSchema>;
 
 export interface PastedMintState {
   mint: PastedMint | null;

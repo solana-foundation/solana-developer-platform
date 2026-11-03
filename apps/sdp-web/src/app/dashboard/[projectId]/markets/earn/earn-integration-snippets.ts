@@ -20,9 +20,8 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
  * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
- * unpublished until PRO-2038)
- * documents this same authenticated flow plus the keyless catalogue and
- * unsigned-build tier. Keep the shared contract aligned in both.
+ * unpublished until PRO-2038) documents this same authenticated flow. Keep the
+ * shared contract aligned in both.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope, signers. */
@@ -128,9 +127,10 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
   const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
 const STRATEGY_ID = ${JSON.stringify(strategy.id)};
 
-// Create a Developer API key for this project in the dashboard (it includes
-// earn:read and earn:write) and keep it on your server. The customer's wallet
-// signs in your browser or mobile app; it never sees this key.
+// Create an API key for this project in the dashboard with Earn Read, Execute
+// and Manage (Manage builds queued-withdrawal cancellations) and keep it on your
+// server. The customer's wallet signs in your browser or mobile app; it never
+// sees this key.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;
@@ -704,7 +704,7 @@ export async function waitForEarnQueuedWithdrawal(
   const terminal = new Set(["fulfilled", "cancelled", "failed"]);
   while (true) {
     signal?.throwIfAborted();
-    const request = await getEarnQueuedWithdrawalRequest(withdrawalRequestId);
+    const request = await getEarnWithdrawalRequest(withdrawalRequestId);
     if (terminal.has(request.status)) return request;
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {

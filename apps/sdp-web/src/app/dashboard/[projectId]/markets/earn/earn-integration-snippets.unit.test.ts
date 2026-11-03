@@ -66,6 +66,11 @@ type GeneratedIntegration = {
     feePayer?: string;
   }): Promise<Record<string, unknown>>;
   listPendingEarnQueuedWithdrawals(ownerAddress: string): Promise<Array<Record<string, unknown>>>;
+  waitForEarnMovement(movementId: string): Promise<Record<string, unknown>>;
+  waitForEarnQueuedWithdrawal(
+    withdrawalRequestId: string,
+    options?: { intervalMs?: number }
+  ): Promise<Record<string, unknown>>;
   signEarnTransaction(
     built: Record<string, unknown>,
     customerSigner: (transaction: string) => Promise<string>,
@@ -639,5 +644,39 @@ describe("generated Embedded Yield integration", () => {
     await expect(repeated.listPendingEarnQueuedWithdrawals("owner")).rejects.toThrow(
       "cursor did not advance"
     );
+  });
+
+  it("runs both documented polling loops to their terminal status", async () => {
+    // The recovery loops are the module's funds-recovery path, so every
+    // function they call must exist IN the copied module: a reference to a
+    // helper the module never declared survives transpiling and only throws
+    // ReferenceError the first time a partner polls.
+    process.env.SDP_API_KEY = "sk_test_example";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith("/withdrawal-requests/request_1")) {
+          return Response.json({
+            data: { withdrawalRequest: { withdrawalRequestId: "request_1", status: "fulfilled" } },
+          });
+        }
+        if (path.endsWith("/movements/movement_1")) {
+          return Response.json({
+            data: { movement: { movementId: "movement_1", status: "finalized" } },
+          });
+        }
+        throw new Error(`Unexpected poll path: ${path}`);
+      })
+    );
+    const generated = await loadGeneratedIntegration(strategy);
+
+    await expect(
+      generated.waitForEarnQueuedWithdrawal("request_1", { intervalMs: 1 })
+    ).resolves.toMatchObject({ withdrawalRequestId: "request_1", status: "fulfilled" });
+    await expect(generated.waitForEarnMovement("movement_1")).resolves.toMatchObject({
+      movementId: "movement_1",
+      status: "finalized",
+    });
   });
 });

@@ -4,15 +4,16 @@ import {
   isByokCustodyProvider,
 } from "@sdp/types/custody";
 import {
+  isCustodyProviderInReleaseChannel,
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
-  SDP_BYOK_CUSTODY_PROVIDER_STAGES,
-  SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_BYOK_CUSTODY_PROVIDER_MATURITY,
+  SDP_MANAGED_CUSTODY_PROVIDER_MATURITY,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
-  type SdpRampProviderStages,
+  type SdpRampProviderMaturity,
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
@@ -134,10 +135,10 @@ describe("isCustodyProviderAvailable", () => {
       ).toBe(true);
     });
 
-    it.each(BYOK_CUSTODY_PROVIDERS)("offers BYOK %s", (provider) => {
+    it.each(BYOK_CUSTODY_PROVIDERS)("offers BYOK %s only within its channel", (provider) => {
       expect(
         isCustodyProviderAvailable({ SDP_RELEASE_CHANNEL: releaseChannel }, provider, "byok")
-      ).toBe(true);
+      ).toBe(provider !== "fireblocks" || releaseChannel !== "stable");
     });
 
     it.each(nonByokCustodyProviders)("never offers BYOK %s", (provider) => {
@@ -268,6 +269,7 @@ describe("release channels", () => {
         "custody",
         "payments",
         "recurring_payments",
+        "subscriptions",
         "ramps",
         "compliance",
         "issuance",
@@ -277,13 +279,13 @@ describe("release channels", () => {
         "private_channels",
         "helius_rings",
       ],
-      beta: ["custody", "payments", "recurring_payments", "markets", "earn"],
+      beta: ["custody", "payments", "recurring_payments", "subscriptions", "markets", "earn"],
       stable: ["custody", "payments", "recurring_payments"],
     });
   });
 
   it("pins each custody (provider, mode) pair's stage", () => {
-    expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
+    expect(SDP_MANAGED_CUSTODY_PROVIDER_MATURITY).toEqual({
       local: "beta",
       fireblocks: "beta",
       privy: "stable",
@@ -295,20 +297,29 @@ describe("release channels", () => {
       anchorage: "beta",
       utila: "beta",
     });
-    expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable" });
+    expect(SDP_BYOK_CUSTODY_PROVIDER_MATURITY).toEqual({ privy: "stable", fireblocks: "beta" });
+  });
+
+  it.each(SDP_RELEASE_CHANNEL_NAMES)("gates Fireblocks custody modes on %s", (channel) => {
+    expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "byok")).toBe(
+      channel !== "stable"
+    );
+    expect(isCustodyProviderInReleaseChannel(channel, "fireblocks", "managed")).toBe(
+      channel !== "stable"
+    );
   });
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)(
     "runs custody on %s because a custody provider is staged there",
     (releaseChannel) => {
-      expect(isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_STAGES)).toBe(
+      expect(isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_MATURITY)).toBe(
         true
       );
     }
   );
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
-    const stripeInBeta: SdpRampProviderStages = {
+    const stripeInBeta: SdpRampProviderMaturity = {
       moonpay: "experimental",
       stripe: "beta",
     };

@@ -354,7 +354,6 @@ jobs:
           cosign copy --force "${SRC_BASE}@${SRC_DIGEST}" "${DEST_BASE}:${DEPLOY_IMAGE_SHA}"
           echo "SRC_DIGEST=${SRC_DIGEST}" >> "${GITHUB_ENV}"
 
-
       - name: Resolve immutable deploy image
         run: |
           set -euo pipefail
@@ -470,7 +469,7 @@ jobs:
 
       - name: Deploy candidate without production traffic
         id: candidate
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           candidate_tag="candidate-${DEPLOY_IMAGE_SHA:0:12}"

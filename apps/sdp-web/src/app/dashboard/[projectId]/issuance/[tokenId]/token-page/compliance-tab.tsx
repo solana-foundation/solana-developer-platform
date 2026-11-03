@@ -14,7 +14,7 @@ import {
   type TokenAllowlistPage,
 } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/allowlist.data";
 import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance-query-key";
-import { formatTokenDay } from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+import { formatTokenDay } from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";

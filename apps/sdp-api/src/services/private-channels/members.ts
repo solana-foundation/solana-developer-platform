@@ -15,6 +15,8 @@ import {
   type SpcCredentialCipherEnv,
 } from "@/lib/spc-credential-crypto";
 import { getLogger } from "@/runtime/logger";
+import type { Env } from "@/types/env";
+import { createPrivateChannelAuthFetch } from "./egress";
 
 const SPC_USERNAME_MIN = 5;
 const SPC_USERNAME_MAX = 32;
@@ -124,13 +126,18 @@ async function reserveOrResumePrincipal(
 async function registerOrResumeSpcUser(
   repo: PrivateChannelUserRepository,
   input: ProvisionPrincipalInput,
-  reservation: PrincipalReservation
+  reservation: PrincipalReservation,
+  env: SpcCredentialCipherEnv & Pick<Env, "PRIVATE_CHANNEL_EGRESS_ALLOWLIST">
 ): Promise<{ spcUserId: string | null; username: string }> {
   try {
-    const registered = await spcRegister(input.authUrl, {
-      username: reservation.username,
-      password: reservation.password,
-    });
+    const registered = await spcRegister(
+      input.authUrl,
+      {
+        username: reservation.username,
+        password: reservation.password,
+      },
+      { fetchImpl: createPrivateChannelAuthFetch(env) }
+    );
     return { spcUserId: registered.id, username: registered.username };
   } catch (error) {
     if (!(error instanceof PrivateChannelError) || error.code !== "CONFLICT") throw error;
@@ -139,10 +146,14 @@ async function registerOrResumeSpcUser(
   // A matching login means a previous attempt registered this persisted
   // credential but stopped before completing the local reservation.
   try {
-    await spcLogin(input.authUrl, {
-      username: reservation.username,
-      password: reservation.password,
-    });
+    await spcLogin(
+      input.authUrl,
+      {
+        username: reservation.username,
+        password: reservation.password,
+      },
+      { fetchImpl: createPrivateChannelAuthFetch(env) }
+    );
     return { spcUserId: reservation.row.spc_user_id, username: reservation.username };
   } catch (error) {
     if (!(error instanceof PrivateChannelError) || error.code !== "UNAUTHORIZED") throw error;
@@ -174,7 +185,7 @@ async function findCompletedReservation(
  * clicked the button.
  */
 export async function provisionPrincipal(
-  env: SpcCredentialCipherEnv,
+  env: SpcCredentialCipherEnv & Pick<Env, "PRIVATE_CHANNEL_EGRESS_ALLOWLIST">,
   repo: PrivateChannelUserRepository,
   input: ProvisionPrincipalInput
 ): Promise<ProvisionPrincipalResult> {
@@ -191,7 +202,7 @@ export async function provisionPrincipal(
   if ("principal" in reservation) return reservation;
 
   try {
-    const registered = await registerOrResumeSpcUser(repo, input, reservation);
+    const registered = await registerOrResumeSpcUser(repo, input, reservation, env);
 
     const principal = await repo.completePrincipal({
       organizationId: input.organizationId,

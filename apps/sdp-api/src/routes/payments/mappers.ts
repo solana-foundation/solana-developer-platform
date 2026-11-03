@@ -1,14 +1,23 @@
 import {
   isRampTransferType,
+  type ListPaymentSubscriptionCollectionAttemptsResponse,
   type PaymentSubscriptionCollectionAttempt,
+  type PaymentSubscriptionCollectionAttemptStatus,
   type RampCryptoDeposit,
   type RampFiatPayout,
   type RampTransferSettlement,
 } from "@sdp/types/payments";
 import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/types/provider-access";
-import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
+import { z } from "zod";
+import type {
+  ListPaymentSubscriptionCollectionAttemptsResult,
+  PaymentSubscriptionCollectionAttemptRow,
+} from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequestQuery } from "@/lib/errors";
+import { success } from "@/lib/response";
+import type { AppContext } from "@/routes/payments/context";
+import { listSubscriptionCollectionAttemptsQuerySchema } from "@/routes/payments/schemas";
 import {
   currentProviderSettlement,
   readDeliveryMismatch,
@@ -74,12 +83,26 @@ export function mapTransferRow(row: TransferRow) {
     direction: row.direction,
     status: row.status,
     signature: row.signature,
-    serializedTx: row.serialized_tx,
+    // A batch chunk's signed bytes stay server-side; readers get the signature (HOO-2344).
+    serializedTx: row.type === "transfer_batch" ? null : row.serialized_tx,
     slot: row.slot,
     blockTime: row.block_time,
     confirmedAt: row.confirmed_at ?? undefined,
     fee: row.fee,
     error: row.error,
+    fireblocks: row.provider_data.fireblocksTransfer
+      ? {
+          transactionId: row.provider_reference,
+          status:
+            typeof row.provider_data.fireblocksStatus === "string"
+              ? row.provider_data.fireblocksStatus
+              : "SUBMISSION_PENDING",
+          subStatus:
+            typeof row.provider_data.fireblocksSubStatus === "string"
+              ? row.provider_data.fireblocksSubStatus
+              : null,
+        }
+      : undefined,
     ...(row.initiated_by_key_id
       ? {
           initiatedBy: {
@@ -147,4 +170,48 @@ export function mapCollectionAttemptRow(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** One page of a collection-attempt list, as a repository reads it. */
+export interface CollectionAttemptsPageQuery {
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Answers a collection-attempt list request: parses the status and paging query, reads one page
+ * through `readPage`, and responds in the collection-attempt list contract. The query is parsed
+ * before `readPage` runs, so a malformed query answers 400 before any lookup.
+ *
+ * @param c - Request context carrying the list query.
+ * @param readPage - Resolves the parent the attempts belong to (raising 404 when the caller cannot
+ *   see it) and reads the requested page of its attempts.
+ * @returns The JSON response holding the page, its total, and the page parameters.
+ */
+export async function respondWithCollectionAttemptsPage(
+  c: AppContext,
+  readPage: (
+    page: CollectionAttemptsPageQuery
+  ) => Promise<ListPaymentSubscriptionCollectionAttemptsResult>
+) {
+  const parsed = listSubscriptionCollectionAttemptsQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+
+  const { page, pageSize, status } = parsed.data;
+  const { rows, total } = await readPage({
+    status,
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+  });
+
+  const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
+    collectionAttempts: rows.map(mapCollectionAttemptRow),
+    total,
+    page,
+    pageSize,
+  };
+  return success(c, response);
 }

@@ -2,15 +2,19 @@
 
 import type { Root } from "fumadocs-core/page-tree";
 import { useSearchContext } from "fumadocs-ui/contexts/search";
+import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import { ArrowUpRight, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import type { AgentSetupOptions } from "@/lib/agent-setup";
+import { AgentSetup } from "./agent-setup";
 import { NavigationNode } from "./navigation-node";
 
 type DocsSidebarProps = {
   tree: Root;
   dashboardUrl: string | null;
+  agentSetup: AgentSetupOptions;
 };
 
 function getNodeKey(node: Root["children"][number]) {
@@ -25,7 +29,7 @@ function getNodeKey(node: Root["children"][number]) {
   return String(node.name);
 }
 
-export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
+export function DocsSidebar({ tree, dashboardUrl, agentSetup }: DocsSidebarProps) {
   const [open, setOpen] = useState(false);
   const { setOpenSearch } = useSearchContext();
 
@@ -52,7 +56,7 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
       <aside className={open ? "launch-docs-sidebar is-open" : "launch-docs-sidebar"}>
         <div className="launch-docs-sidebar-header">
           <div>
-            <Link href="/docs" className="launch-docs-brand">
+            <Link href="/docs" className="launch-docs-brand" onClick={() => setOpen(false)}>
               <span className="launch-docs-brand-mark">
                 <Image src="/icon.svg" alt="" width={24} height={24} aria-hidden="true" />
               </span>
@@ -72,18 +76,6 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
             <X aria-hidden="true" />
           </button>
 
-          <div className="launch-docs-sidebar-actions">
-            <Link href="/" className="launch-docs-sidebar-action">
-              Platform
-            </Link>
-            {dashboardUrl ? (
-              <a href={dashboardUrl} className="launch-docs-sidebar-action">
-                Dashboard
-                <ArrowUpRight aria-hidden="true" />
-              </a>
-            ) : null}
-          </div>
-
           <button
             type="button"
             className="launch-docs-sidebar-search"
@@ -96,24 +88,33 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
               <kbd>K</kbd>
             </span>
           </button>
+
+          <div className="launch-docs-sidebar-actions">
+            {dashboardUrl ? (
+              <a href={dashboardUrl} className="launch-docs-sidebar-action">
+                Dashboard
+                <ArrowUpRight aria-hidden="true" />
+              </a>
+            ) : null}
+            <AgentSetup options={agentSetup} />
+          </div>
         </div>
 
         <nav className="launch-docs-sidebar-nav" aria-label="Documentation navigation">
           {tree.children.map((node) => (
-            <NavigationNode key={getNodeKey(node)} node={node} />
+            <NavigationNode key={getNodeKey(node)} node={node} onNavigate={() => setOpen(false)} />
           ))}
         </nav>
 
         <div className="launch-docs-sidebar-status">
-          <span className="launch-docs-status-row">
-            <span className="launch-docs-status-dot" aria-hidden="true" />
-            Live on Devnet
-          </span>
-          <span className="launch-docs-status-row">
-            <span className="launch-docs-status-dot is-muted" aria-hidden="true" />
-            Mainnet
-            <span className="launch-badge">Coming soon</span>
-          </span>
+          <div className="launch-docs-status-line">
+            <span className="launch-docs-status-current">
+              <span className="launch-docs-status-dot" aria-hidden="true" />
+              Devnet live
+            </span>
+            <span className="launch-docs-status-future">Mainnet soon</span>
+          </div>
+          <ThemeSwitch mode="light-dark-system" className="launch-docs-theme-switch" />
         </div>
       </aside>
     </>

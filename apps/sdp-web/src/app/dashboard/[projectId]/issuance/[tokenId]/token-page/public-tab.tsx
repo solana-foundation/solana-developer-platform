@@ -4,11 +4,8 @@ import { Button } from "@sdp/ui/button";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-  IssuanceCheckRow,
-  LockHint,
-} from "@/app/dashboard/[projectId]/issuance/issuance-checkbox.redesign";
-import { IssuedTokenMark } from "@/app/dashboard/[projectId]/issuance/issued-token-mark.redesign";
+import { IssuanceCheckRow, LockHint } from "@/app/dashboard/[projectId]/issuance/issuance-checkbox";
+import { IssuedTokenMark } from "@/app/dashboard/[projectId]/issuance/issued-token-mark";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordBlock, RecordRow } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";

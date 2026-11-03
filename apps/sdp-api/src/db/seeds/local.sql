@@ -30,9 +30,11 @@ INSERT INTO projects (id, organization_id, name, slug, environment, status, crea
     ('prj_test123456789', 'org_test123456789', 'Default Sandbox Project', 'default-sandbox', 'sandbox', 'active', 'usr_test123456789');
 
 -- Create a test API key
--- key_hash is derived from the documented dev key via Postgres' built-in sha256(),
--- so the hash can never drift from the key. Auth uses plain SHA-256 when
--- API_KEY_PEPPER is unset; in production, use a random key and set API_KEY_PEPPER.
+-- key_hash is derived from the documented dev key under this database's
+-- API_KEY_PEPPER (HMAC-SHA-256, pgcrypto), so it matches what auth computes and
+-- can never drift from the key. `pnpm db:seed:local` passes the pepper as the
+-- psql variable `pepper` and refuses without it: the API has no unpeppered path
+-- (HOO-2219). In production, never seed this key.
 INSERT INTO api_keys (
     id, organization_id, project_id, created_by, name, key_prefix, key_hash,
     grants, rate_limit_tier, status
@@ -43,7 +45,7 @@ INSERT INTO api_keys (
     'usr_test123456789',
     'Development Key',
     'sk_test_abc',
-    encode(sha256('sk_test_abcdefghijklmnopqrstuvwxyz123456'::bytea), 'hex'),
+    encode(hmac('sk_test_abcdefghijklmnopqrstuvwxyz123456', :'pepper', 'sha256'), 'hex'),
     ARRAY(SELECT unnest(ARRAY[
       'transfers.read', 'transfers.execute', 'transfer_batches.read', 'transfer_batches.execute',
       'payment_requests.read', 'payment_requests.manage', 'counterparties.read',

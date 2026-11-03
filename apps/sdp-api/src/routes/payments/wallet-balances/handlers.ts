@@ -10,10 +10,7 @@ import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { resolveIssuedTokenLabelsByMint } from "@/routes/payments/token-labels";
 import { resolveWalletFromParams } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
-import {
-  attachTokenSymbolsToBalances,
-  attachUsdValuesToBalances,
-} from "@/services/helius-das.service";
+import { attachDisplayValuesToBalances } from "@/services/helius-das.service";
 import { walletBalancesQuerySchema } from "./schemas";
 
 const BALANCE_READ_TIMEOUT_MS = 3_000;
@@ -80,7 +77,7 @@ export async function getWalletBalances(c: AppContext) {
   }
   const lamports = solBalanceResult.value?.lamports ?? 0n;
   const splBalances = splBalancesResult.value;
-  const labeledBalances = await attachTokenSymbolsToBalances([
+  const balances = await attachDisplayValuesToBalances(c.env, [
     {
       token: "SOL",
       mint: SOL_MINT,
@@ -90,8 +87,6 @@ export async function getWalletBalances(c: AppContext) {
     },
     ...splBalances,
   ]);
-  const balances = await attachUsdValuesToBalances(c.env, labeledBalances);
-
   return success(c, {
     ...(minimumSlot === undefined ? {} : { balanceReadContext: { minimumSlot } }),
     walletBalances: {

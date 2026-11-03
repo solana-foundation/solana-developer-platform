@@ -1,7 +1,4 @@
-import {
-  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
-  PAYMENT_SUBSCRIPTION_STATUSES,
-} from "@sdp/types/payments";
+import { PAYMENT_SUBSCRIPTION_STATUSES } from "@sdp/types/payments";
 import { z } from "zod";
 import {
   i64StringSchema,
@@ -15,10 +12,6 @@ export const subscriptionIdParamsSchema = z.object({
 });
 
 export const paymentSubscriptionStatusSchema = z.enum(PAYMENT_SUBSCRIPTION_STATUSES);
-
-export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum(
-  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES
-);
 
 export const createSubscriptionSchema = z
   .object({
@@ -50,9 +43,3 @@ export const prepareSubscriptionCollectionSchema = z
     receiverTokenAccount: solanaAddressSchema("receiverTokenAccount"),
   })
   .strict();
-
-export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
-  status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-});

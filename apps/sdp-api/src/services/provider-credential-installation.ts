@@ -8,7 +8,7 @@ import type {
   ProviderCredentialStatus,
 } from "@/services/stores/provider-credential.store";
 
-export const INSTALLATION_COMPLETION_LEASE_MS = 60_000;
+const INSTALLATION_COMPLETION_LEASE_MS = 60_000;
 
 export type InstallationConflictReason =
   | "completion_in_progress"
@@ -20,7 +20,7 @@ type ExecuteDecision<Mode extends string = never> = [Mode] extends [never]
   ? { kind: "execute" }
   : { kind: "execute"; mode: Mode };
 
-export type InstallationDecision<Mode extends string = never> =
+type InstallationDecision<Mode extends string = never> =
   | ExecuteDecision<Mode>
   | { kind: "replay" }
   | { kind: "disabled"; refusal: CustodySetupRefusal }

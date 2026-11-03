@@ -39,7 +39,7 @@ describe("VaultSlippageSection", () => {
       name: "Slippage tolerance. Up to 0.1% less than quoted",
     });
     expect(trigger.className).toContain("w-full");
-    expect(trigger.closest("section")?.className).toContain("rounded-2xl");
+    expect(trigger.closest("section")?.className).toContain("rounded-card");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
 
     await user.click(trigger);

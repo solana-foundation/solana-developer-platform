@@ -651,17 +651,22 @@ const SCHEDULE_SPECS: readonly ScheduleSpec[] = [
   },
 ];
 
-interface RequestSpec {
+interface RequestSpecBase {
   key: string;
   wallet: WalletKey;
   amount: string;
-  status: PaymentRequestStatus;
   createdAgo: number;
   /** Signed offset from `now`, or null for a request that never expires. */
   expiresAt: number | null;
-  paidByTransferId?: string;
-  canceledAgo?: number;
 }
+
+/** A canceled request says when it was canceled; a paid one may name the transfer that paid it. */
+type RequestSpec = RequestSpecBase &
+  (
+    | { status: Exclude<PaymentRequestStatus, "paid" | "canceled"> }
+    | { status: "paid"; paidByTransferId?: string }
+    | { status: "canceled"; canceledAgo: number }
+  );
 
 const REQUEST_SPECS: readonly RequestSpec[] = [
   {
@@ -1100,6 +1105,7 @@ function buildSchedule(spec: ScheduleSpec, world: WorldBase, clock: Clock): Sche
       subscriptionAuthorityAddress: onchain(demoAddress(`subscription-authority:${spec.key}`)),
       authorizationSignature: onchain(demoSignature(`authorization:${spec.key}`)),
       status: spec.status,
+      pausedReason: null,
       metadataUri: null,
       createdBy: CREATED_BY,
       createdAt: clock.at(spec.createdAt),
@@ -1121,14 +1127,17 @@ function buildRequest(
 ): CreatedPaymentRequest {
   const wallet = world.wallets[spec.wallet];
   const createdAt = clock.ago(spec.createdAgo);
-  const paidAt = transfers.find((row) => row.transfer.id === spec.paidByTransferId)?.transfer
-    .createdAt;
+  const paidAt =
+    spec.status === "paid"
+      ? transfers.find((row) => row.transfer.id === spec.paidByTransferId)?.transfer.createdAt
+      : undefined;
   const expiresAt = spec.expiresAt === null ? null : clock.at(spec.expiresAt);
+  const canceledAt = spec.status === "canceled" ? clock.ago(spec.canceledAgo) : null;
   const closedAt =
     spec.status === "paid"
       ? paidAt
-      : spec.status === "canceled" && spec.canceledAgo !== undefined
-        ? clock.ago(spec.canceledAgo)
+      : canceledAt !== null
+        ? canceledAt
         : spec.status === "expired"
           ? (expiresAt ?? undefined)
           : undefined;
@@ -1145,7 +1154,10 @@ function buildRequest(
     status: spec.status,
     expiresAt,
     fulfilledByTransferId: spec.status === "paid" ? (spec.paidByTransferId ?? null) : null,
-    canceledBy: spec.status === "canceled" ? CREATED_BY : null,
+    paidLate: false,
+    canceledByApiKeyId: null,
+    canceledByUserId: spec.status === "canceled" ? CREATED_BY : null,
+    canceledAt,
     lifecycle: [
       { status: "awaiting_payment", at: createdAt },
       ...(closedAt === undefined ? [] : [{ status: spec.status, at: closedAt }]),
@@ -1553,12 +1565,18 @@ function recurringPaymentBody(world: DemoWorld, recurringPaymentId: string) {
   return recurringPayment ? { data: { recurringPayment } } : undefined;
 }
 
-function collectionAttemptsBody(world: DemoWorld, subscriptionId: string, params: URLSearchParams) {
-  if (!world.schedules.some((schedule) => schedule.subscriptionId === subscriptionId)) {
+/** `GET /v1/payments/recurring-payments/:id/collection-attempts`: the attempts of the schedule's subscription. */
+function collectionAttemptsBody(
+  world: DemoWorld,
+  recurringPaymentId: string,
+  params: URLSearchParams
+) {
+  const recurringPayment = world.schedules.find((schedule) => schedule.id === recurringPaymentId);
+  if (!recurringPayment) {
     return undefined;
   }
   const attempts = world.attempts
-    .filter((attempt) => attempt.subscriptionId === subscriptionId)
+    .filter((attempt) => attempt.subscriptionId === recurringPayment.subscriptionId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const page = pageOf(attempts, params);
   return {
@@ -1603,7 +1621,7 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
     }
   }
   if (collection === "requests" && child === "link") return requestLinkBody(world, id);
-  if (collection === "subscriptions" && child === "collection-attempts") {
+  if (collection === "recurring-payments" && child === "collection-attempts") {
     return collectionAttemptsBody(world, id, params);
   }
   if (collection === "wallets" && child === "balances") return walletBalancesBody(world, id);

@@ -6,15 +6,14 @@ import type { Env } from "@/types/env";
 
 /**
  * Route authorization by action (HOO-2099). Every route declares exactly one
- * action with {@link requireAction} (or {@link requireActionWhenAuthenticated}
- * for an optional-auth Earn route), or is marked {@link publicRoute} with the
+ * action with {@link requireAction}, or is marked {@link publicRoute} with the
  * reason no action applies. The declaration is the middleware's function name,
  * which `hono/dev`'s `inspectRoutes` reads back, so the route inventory test
  * (`route-actions.test.ts`) checks every registered route without a second
  * list.
  */
 
-const ACTION_DECLARATION = /^requireAction(?:WhenAuthenticated)?\(([a-z_]+\.[a-z_]+)\)$/;
+const ACTION_DECLARATION = /^requireAction\(([a-z_]+\.[a-z_]+)\)$/;
 const PUBLIC_DECLARATION = /^publicRoute\((.+)\)$/s;
 
 /**
@@ -64,22 +63,6 @@ function named(
 export function requireAction(action: Action): MiddlewareHandler<{ Bindings: Env }> {
   return named(`requireAction(${action})`, async (c, next) => {
     assertCallerMayPerform(c, action);
-    await next();
-  });
-}
-
-/**
- * The action of an optional-auth route (anonymous Earn reads and unsigned
- * builds): an anonymous request passes untouched, and a request that
- * authenticated must hold the action, exactly as on an authenticated route.
- */
-export function requireActionWhenAuthenticated(
-  action: Action
-): MiddlewareHandler<{ Bindings: Env }> {
-  return named(`requireActionWhenAuthenticated(${action})`, async (c, next) => {
-    if (c.get("apiKey") || c.get("clerk")) {
-      assertCallerMayPerform(c, action);
-    }
     await next();
   });
 }

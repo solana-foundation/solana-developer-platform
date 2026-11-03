@@ -1,4 +1,5 @@
-import { createRpcForSdk } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { toSdkRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/addresses";
 import { resolveTokenAccount } from "@solana/mosaic-sdk";
@@ -18,7 +19,6 @@ import {
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
 } from "@/services/token-operation.service";
-import type { Env } from "@/types/env";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -71,14 +71,13 @@ function toBurnOperationAppError(error: unknown): AppError | null {
 }
 
 async function resolveValidatedBurnSource(
-  env: Env,
   authorityAddress: Address,
   requestedSource: Address,
   mintAddress: Address,
   amountBaseUnits: bigint,
   tokenSymbol: string
 ): Promise<Address> {
-  const rpc = createRpcForSdk<MosaicSdkRpc>(env);
+  const rpc = toSdkRpc<MosaicSdkRpc>(createClusterRpc());
 
   let authorityAta: Awaited<ReturnType<typeof resolveTokenAccount>>;
   try {
@@ -171,7 +170,6 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     token.decimals
   );
   const normalizedSource = await resolveValidatedBurnSource(
-    c.env,
     signer.address,
     source,
     mintAddress,
@@ -367,7 +365,6 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     });
     const signer = authority.signer;
     const normalizedSource = await resolveValidatedBurnSource(
-      c.env,
       signer.address,
       source,
       mintAddress,

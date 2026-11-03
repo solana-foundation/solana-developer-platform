@@ -44,11 +44,13 @@ type DocsBodyProps = {
   prev?: NavPage;
   next?: NavPage;
   bare?: boolean;
+  /** A generated API reference page, which scopes the reference styles. */
+  apiReference?: boolean;
 };
 
-export function DocsBody({ children, prev, next, bare }: DocsBodyProps) {
+export function DocsBody({ children, prev, next, bare, apiReference }: DocsBodyProps) {
   return (
-    <div className="launch-docs-body">
+    <div className={apiReference ? "launch-docs-body is-api-reference" : "launch-docs-body"}>
       {children}
       {!bare && <PageFeedback />}
       {!bare && <PageNav prev={prev} next={next} />}

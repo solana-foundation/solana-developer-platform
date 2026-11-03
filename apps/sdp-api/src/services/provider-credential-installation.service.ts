@@ -1,6 +1,7 @@
 import { normalizePrivyWalletId } from "@sdp/custody/provider-wallet-ids";
 import type { ProvisionPrivyResult } from "@sdp/custody/provisioning";
 import { SigningError } from "@sdp/custody/signing";
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -23,11 +24,20 @@ import {
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
 import {
+  type ByokCredentialAuthentication,
+  checkByokCredential,
+  parseByokCredential,
+} from "@/services/custody/byok-credential";
+import {
   checkPrivyCredential,
   getPrivyProviderAccountFingerprint,
   type PrivyCredentialAuthentication,
 } from "@/services/custody/privy-credential";
-import { findPrivyWalletByExternalId, provisionPrivyWallet } from "@/services/custody/provisioning";
+import {
+  findPrivyWalletByExternalId,
+  getFireblocksVault,
+  provisionPrivyWallet,
+} from "@/services/custody/provisioning";
 import {
   admitByokCustodySetup,
   type CustodySetupAdmission,
@@ -42,6 +52,7 @@ import {
 import type { SafeProviderCredential } from "@/services/provider-credential-submission.service";
 import { destroySecretVersion, queueOrphanedSecretVersion } from "@/services/secret-retirement";
 import {
+  getPendingFireblocksVaultIds,
   getPendingWalletLabel,
   type InstallationConnectionState,
   ProviderCredentialStore,
@@ -65,7 +76,7 @@ interface SafeCompletion {
 
 export interface SafeInstallationConnection {
   id: string;
-  provider: "privy";
+  provider: ByokCustodyProvider;
   label: string;
   status: InstallationConnectionState["status"];
   completion: SafeCompletion | null;
@@ -98,7 +109,11 @@ interface LoadedInstallation {
 }
 
 type ProviderOutcome =
-  | { kind: "success"; wallet: ProvisionPrivyResult }
+  | {
+      kind: "success";
+      wallet: ProvisionPrivyResult & { label?: string };
+      additionalWallets?: Array<ProvisionPrivyResult & { label?: string }>;
+    }
   | {
       kind: "failed";
       code: "invalid_credentials" | "provider_account_already_connected" | "wallet_conflict";
@@ -144,7 +159,10 @@ export async function deactivateCustodyConnection(
     action: "deactivate",
     resourceType: "custody_connection",
     resourceId: connectionId,
-    metadata: { event: "custody_connection_deactivation_started", provider: "privy" },
+    metadata: {
+      event: "custody_connection_deactivation_started",
+      provider: loaded.target.provider,
+    },
   });
   let changed = false;
   let refusedTarget = loaded.target;
@@ -228,7 +246,7 @@ export async function deactivateCustodyConnection(
   }
   if (changed) {
     await context.audit.completeCritical(c, intent, {
-      metadata: { event: "custody_connection_deactivated", provider: "privy" },
+      metadata: { event: "custody_connection_deactivated", provider: loaded.target.provider },
     });
   } else {
     await completeInstallationCriticalNoop(
@@ -306,7 +324,7 @@ export async function completeProviderCredentialInstallation(
     resourceId: connectionId,
     metadata: {
       event: "provider_credential_installation_completion_started",
-      provider: "privy",
+      provider: loaded.target.provider,
       scope: loaded.target.credential_scope,
       projectId: context.projectId,
       providerCredentialId: loaded.target.provider_credential_id,
@@ -321,11 +339,7 @@ export async function completeProviderCredentialInstallation(
       context.c.env,
       loaded.target.credential_storage_backend
     );
-    const credential = await readPrivyCredential(
-      secretStore,
-      context.organizationId,
-      loaded.target
-    );
+    const credential = await readByokCredential(secretStore, context.organizationId, loaded.target);
     failureCode = "completion_failed";
     const leaseToken = await acquireCompletionLease(context, loaded.target);
     if (!leaseToken) {
@@ -358,7 +372,13 @@ export async function completeProviderCredentialInstallation(
     completionPersistencePending = true;
     const replay =
       outcome.kind === "success"
-        ? await persistSuccess(context, loaded.target, leaseToken, outcome.wallet)
+        ? await persistSuccess(
+            context,
+            loaded.target,
+            leaseToken,
+            outcome.wallet,
+            outcome.additionalWallets
+          )
         : outcome.kind === "retry_unknown"
           ? await persistRetryUnknown(context, loaded.target, leaseToken)
           : await persistFailure(context, loaded.target, leaseToken, outcome.code);
@@ -385,7 +405,7 @@ export async function completeProviderCredentialInstallation(
         throw installationConflict("provider_account_already_connected");
       }
       if (outcome.code === "wallet_conflict") {
-        throw conflict("Privy wallet cannot be reconciled");
+        throw conflict("Custody wallet cannot be reconciled");
       }
     }
     return completionResult(completed);
@@ -396,7 +416,7 @@ export async function completeProviderCredentialInstallation(
           event: "sdp_api_credential_installation_audit_unresolved",
           organizationId: context.organizationId,
           projectId: context.projectId,
-          provider: "privy",
+          provider: loaded.target.provider,
           providerCredentialId: loaded.target.provider_credential_id,
           connectionId,
           auditIntentId: auditIntent.id,
@@ -438,7 +458,7 @@ export async function cancelProviderCredentialInstallation(
     resourceType: "custody_connection",
     resourceId: connectionId,
     metadata: {
-      provider: "privy",
+      provider: loaded.target.provider,
       event: "provider_credential_installation_cancellation_started",
       providerCredentialId: loaded.target.provider_credential_id,
     },
@@ -637,7 +657,12 @@ function mapSafeCredential(target: InstallationConnectionState): SafeProviderCre
     projectId: target.credential_project_id,
     status: target.credential_status,
     createdAt: target.credential_created_at,
-    displayMetadata: appIdSuffix ? { appIdSuffix } : {},
+    displayMetadata: {
+      appIdSuffix,
+      apiKeySuffix: typeof metadata.apiKeySuffix === "string" ? metadata.apiKeySuffix : undefined,
+      primaryVaultId:
+        typeof metadata.primaryVaultId === "string" ? metadata.primaryVaultId : undefined,
+    },
   };
 }
 
@@ -656,11 +681,11 @@ function createPersistedSecretStore(
   }
 }
 
-async function readPrivyCredential(
+async function readByokCredential(
   store: CredentialSecretStore,
   organizationId: string,
   row: InstallationConnectionState
-): Promise<PrivyCredentialAuthentication> {
+): Promise<ByokCredentialAuthentication> {
   let payload: CredentialSecretPayload;
   try {
     payload = await store.read({ orgId: organizationId, stored: toStoredCredentialSecret(row) });
@@ -671,12 +696,7 @@ async function readPrivyCredential(
     throw internalError();
   }
 
-  const appId = typeof payload.appId === "string" ? payload.appId.trim() : "";
-  const appSecret = typeof payload.appSecret === "string" ? payload.appSecret : "";
-  if (!appId || !appSecret) {
-    throw internalError();
-  }
-  return { appId, appSecret };
+  return parseByokCredential(row.provider, payload);
 }
 
 function toStoredCredentialSecret(row: InstallationConnectionState): StoredCredentialSecret {
@@ -688,13 +708,113 @@ function toStoredCredentialSecret(row: InstallationConnectionState): StoredCrede
   };
 }
 
+async function verifySelectedFireblocksVaults(
+  context: InstallationContext,
+  target: InstallationConnectionState,
+  credential: Extract<ByokCredentialAuthentication, { provider: "fireblocks" }>,
+  primaryWallet: ProvisionPrivyResult
+): Promise<ProviderOutcome> {
+  const selectedIds = getPendingFireblocksVaultIds(target.setup_metadata);
+  const imported: Array<ProvisionPrivyResult & { label?: string }> = [];
+  if (selectedIds) {
+    if (!selectedIds.includes(credential.vaultAccountId))
+      return { kind: "failed", code: "invalid_credentials" };
+    // Only selected vaults are read; each address is verified once by solana-keychain.
+    for (const id of selectedIds) {
+      try {
+        const vault = await getFireblocksVault(context.c.env, credential, id);
+        if (!vault.hasSolanaWallet) return { kind: "failed", code: "invalid_credentials" };
+        const verified =
+          id === credential.vaultAccountId
+            ? { status: "success" as const, wallet: primaryWallet }
+            : await checkByokCredential(context.c.env, { ...credential, vaultAccountId: id });
+        if (verified.status !== "success" || !verified.wallet)
+          return verified.status === "failed"
+            ? { kind: "failed", code: "invalid_credentials" }
+            : { kind: "retry_unknown" };
+        imported.push({ ...verified.wallet, label: vault.name.slice(0, 100) });
+      } catch (error) {
+        return providerErrorOutcome(error);
+      }
+    }
+    const duplicate = await context.db.queryOne<{ id: string }>(
+      `SELECT w.id FROM custody_wallets w JOIN custody_connections c ON c.id = w.custody_connection_id
+       WHERE c.organization_id = ? AND c.project_id = ? AND c.provider = 'fireblocks'
+         AND c.id <> ? AND w.status = 'active'
+         AND w.public_key IN (SELECT jsonb_array_elements_text(CAST(? AS jsonb))) LIMIT 1`,
+      [
+        context.organizationId,
+        context.projectId,
+        target.id,
+        JSON.stringify(imported.map((wallet) => wallet.address)),
+      ]
+    );
+    if (duplicate) return { kind: "failed", code: "provider_account_already_connected" };
+  }
+
+  return {
+    kind: "success",
+    wallet: imported.find((wallet) => wallet.walletId === primaryWallet.walletId) ?? primaryWallet,
+    additionalWallets: imported.filter((wallet) => wallet.walletId !== primaryWallet.walletId),
+  };
+}
+
+async function completeFireblocksInstallation(
+  context: InstallationContext,
+  target: InstallationConnectionState,
+  credential: Extract<ByokCredentialAuthentication, { provider: "fireblocks" }>,
+  leaseToken: string
+): Promise<ProviderOutcome> {
+  const checked = await checkByokCredential(context.c.env, credential);
+  if (checked.status !== "success")
+    return checked.status === "failed"
+      ? { kind: "failed", code: "invalid_credentials" }
+      : { kind: "retry_unknown" };
+  if (!checked.wallet) return { kind: "retry_unknown" };
+  const imported = await verifySelectedFireblocksVaults(
+    context,
+    target,
+    credential,
+    checked.wallet
+  );
+  if (imported.kind !== "success") return imported;
+  if (
+    target.provider_account_fingerprint &&
+    target.provider_account_fingerprint !== checked.fingerprint
+  )
+    return { kind: "failed", code: "wallet_conflict" };
+  if (!target.provider_account_fingerprint) {
+    try {
+      if (
+        !(await context.store.reserveProviderAccountFingerprint({
+          connectionId: target.id,
+          providerCredentialId: target.provider_credential_id,
+          leaseToken,
+          fingerprint: checked.fingerprint,
+        }))
+      ) {
+        const current = await loadInstallation(context, target.id);
+        if (current.decisions.complete.kind === "replay")
+          return { kind: "replay", installation: current };
+        throw conflict(INSTALLATION_UNAVAILABLE_MESSAGE);
+      }
+    } catch (error) {
+      if (!isPostgresUniqueViolation(error)) throw error;
+      return { kind: "failed", code: "provider_account_already_connected" };
+    }
+  }
+  return imported;
+}
+
 async function executeCompletionMode(
   context: InstallationContext,
   target: InstallationConnectionState,
-  credential: PrivyCredentialAuthentication,
+  credential: ByokCredentialAuthentication,
   leaseToken: string,
   mode: "full" | "reconcile_only"
 ): Promise<ProviderOutcome> {
+  if (credential.provider === "fireblocks")
+    return completeFireblocksInstallation(context, target, credential, leaseToken);
   const externalId = `sdp_${target.id}`;
   const fingerprint = await getPrivyProviderAccountFingerprint(credential.appId);
   if (target.provider_account_fingerprint && target.provider_account_fingerprint !== fingerprint) {
@@ -794,7 +914,8 @@ async function persistSuccess(
   context: InstallationContext,
   target: InstallationConnectionState,
   leaseToken: string,
-  wallet: ProvisionPrivyResult
+  wallet: ProvisionPrivyResult & { label?: string },
+  additionalWallets?: Array<ProvisionPrivyResult & { label?: string }>
 ): Promise<LoadedInstallation | null> {
   try {
     await context.db.transaction(async (tx) => {
@@ -808,7 +929,8 @@ async function persistSuccess(
         leaseToken,
         providerWalletId: wallet.walletId,
         publicKey: wallet.address,
-        label: getPendingWalletLabel(target.setup_metadata),
+        label: getPendingWalletLabel(target.setup_metadata) ?? wallet.label,
+        additionalWallets,
       });
       if (!updated) throw new Error("Installation Credential changed during success persistence");
     });
@@ -866,7 +988,7 @@ async function persistFailure(
       tx,
       retirementContext(target),
       storedSecretRef(target),
-      "orphaned by a rejected Privy installation"
+      "orphaned by a rejected custody installation"
     );
     return row;
   });
@@ -953,7 +1075,7 @@ function storedSecretRef(credential: InstallationConnectionState) {
 /** Who the retirement belongs to, for the queue row and the orphan-risk log. */
 function retirementContext(credential: InstallationConnectionState) {
   return {
-    provider: "privy" as const,
+    provider: credential.provider,
     orgId: credential.organization_id,
     sourceId: credential.provider_credential_id,
   };

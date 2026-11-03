@@ -14,7 +14,8 @@ This map is generated from the module-boundary check. It records the permitted w
 
 | Module | Purpose | Allowed workspace dependencies |
 | --- | --- | --- |
-| `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/hastra`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree` |
+| `@sdp/api` | Node.js API and application composition root. | `@sdp/api-catalog`, `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/hastra`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree` |
+| `@sdp/api-catalog` | The public API's reference model and request snippets, shared by the API, the dashboard and the docs. | `@sdp/types` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/redaction`, `@sdp/types` |
 | `@sdp/design-tokens` | Design tokens (CSS custom properties, Tailwind theme mapping, typed catalog) for SDP UI. | None |
@@ -41,12 +42,13 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
-| `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` |
+| `sdp-docs` | Public documentation site and generated API reference. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` |
 
 ## Declared Workspace Graph
 
-- `@sdp/api` -> `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/hastra`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/ondo`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree`
+- `@sdp/api` -> `@sdp/api-catalog`, `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/fee-payment`, `@sdp/hastra`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/ondo`, `@sdp/payments`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree`
+- `@sdp/api-catalog` -> `@sdp/types`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/redaction`, `@sdp/types`
 - `@sdp/design-tokens` -> None
@@ -73,5 +75,5 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/veda` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `bigint-buffer` -> None
-- `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`
+- `sdp-docs` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types`
+- `sdp-web` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`

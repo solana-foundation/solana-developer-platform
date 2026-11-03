@@ -133,12 +133,15 @@ const ACTION_LABELS = {
 export function ActivityCard({
   operations,
   projectRings,
+  canWrite,
   onChanged,
   onSelect,
 }: {
   operations: RingsOperationSummary[];
   /** Names the ring pinned on each row; unknown ids fall back to the truncated program id. */
   projectRings: ProjectRing[];
+  /** False for a read-only member: recheck, retry and void (all writes) are hidden. */
+  canWrite: boolean;
   onChanged: () => Promise<void>;
   onSelect: (operationId: string) => void;
 }) {
@@ -223,7 +226,9 @@ export function ActivityCard({
                 <TableHead>{t("DashboardHeliusRings.activity.amount")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.ring")}</TableHead>
                 <TableHead>{t("DashboardHeliusRings.activity.created")}</TableHead>
-                <TableHead>{t("DashboardHeliusRings.activity.action")}</TableHead>
+                {canWrite ? (
+                  <TableHead>{t("DashboardHeliusRings.activity.action")}</TableHead>
+                ) : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -284,34 +289,36 @@ export function ActivityCard({
                           shortenShieldedAddress(operation.ringProgramId))}
                     </TableCell>
                     <TableCell>{formatWhen(operation.createdAt, locale)}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        {actions.map((action) => (
-                          <Button
-                            key={action.kind}
-                            // Void is the irreversible one, so it never wears
-                            // the same weight as the observation beside it.
-                            variant={action.kind === "void" ? "ghost" : "secondary"}
-                            size="sm"
-                            // One request per row at a time: the actions read
-                            // and write the same operation.
-                            disabled={rowBusy}
-                            // The row opens the detail drawer, which is not
-                            // what someone aiming at the button asked for.
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleAction(operation.id, action, operation.state);
-                            }}
-                          >
-                            {t(
-                              ACTION_LABELS[action.kind][
-                                rowBusy && busy?.kind === action.kind ? "busy" : "idle"
-                              ]
-                            )}
-                          </Button>
-                        ))}
-                      </span>
-                    </TableCell>
+                    {canWrite ? (
+                      <TableCell>
+                        <span className="flex items-center gap-2">
+                          {actions.map((action) => (
+                            <Button
+                              key={action.kind}
+                              // Void is the irreversible one, so it never wears
+                              // the same weight as the observation beside it.
+                              variant={action.kind === "void" ? "ghost" : "secondary"}
+                              size="sm"
+                              // One request per row at a time: the actions read
+                              // and write the same operation.
+                              disabled={rowBusy}
+                              // The row opens the detail drawer, which is not
+                              // what someone aiming at the button asked for.
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleAction(operation.id, action, operation.state);
+                              }}
+                            >
+                              {t(
+                                ACTION_LABELS[action.kind][
+                                  rowBusy && busy?.kind === action.kind ? "busy" : "idle"
+                                ]
+                              )}
+                            </Button>
+                          ))}
+                        </span>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 );
               })}

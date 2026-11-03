@@ -10,8 +10,8 @@ describe("Markets route loading states", () => {
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain('data-embedded-yield-loading="portfolio"');
-    expect(markup).toContain("max-w-[90rem]");
-    expect(markup).toContain("h-44");
+    expect(markup).toContain('data-earn-loading="summary"');
+    expect(markup).toContain('data-earn-loading="table"');
   });
 
   it("matches the unified strategy and code guide while configuration loads", () => {
@@ -19,8 +19,9 @@ describe("Markets route loading states", () => {
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain('data-embedded-yield-loading="integrate"');
-    expect(markup).toContain("max-w-5xl");
-    expect(markup).toContain("h-56");
+    expect(markup).not.toContain("max-w-5xl");
+    // The code block: the guide's 36rem viewport under its title bar.
+    expect(markup).toContain("h-[calc(36rem+2.375rem)]");
   });
 
   it("matches the code guide while integration loads", () => {
@@ -28,7 +29,8 @@ describe("Markets route loading states", () => {
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain('data-embedded-yield-loading="integrate"');
-    expect(markup).toContain("max-w-5xl");
-    expect(markup).toContain("h-56");
+    expect(markup).not.toContain("max-w-5xl");
+    // The code block: the guide's 36rem viewport under its title bar.
+    expect(markup).toContain("h-[calc(36rem+2.375rem)]");
   });
 });

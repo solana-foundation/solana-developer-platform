@@ -4,11 +4,10 @@
 
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
-import { AppError, type ErrorResponse } from "./errors";
+import type { AppError } from "./errors";
 
-export interface SuccessResponse<T> {
+interface SuccessResponse<T> {
   data: T;
   meta?: {
     requestId?: string;
@@ -16,7 +15,7 @@ export interface SuccessResponse<T> {
   };
 }
 
-export interface PaginatedResponse<T> {
+interface PaginatedResponse<T> {
   data: T[];
   meta: {
     total: number;
@@ -106,26 +105,6 @@ export function appErrorResponse(c: Context<{ Bindings: Env }>, err: AppError): 
 }
 
 /**
- * Send an error response
- */
-export function error(c: Context<{ Bindings: Env }>, err: AppError | Error) {
-  if (err instanceof AppError) {
-    const response: ErrorResponse = err.toResponse();
-    return c.json(response, err.statusCode as 400);
-  }
-
-  // Unexpected errors
-  getLogger().error({ error: err }, "Unexpected error");
-  const response: ErrorResponse = {
-    error: {
-      code: "INTERNAL_ERROR",
-      message: "An internal error occurred",
-    },
-  };
-  return c.json(response, 500);
-}
-
-/**
  * Send a 201 Created response with location header
  */
 export function created<T>(c: Context<{ Bindings: Env }>, data: T, location?: string) {
@@ -133,13 +112,6 @@ export function created<T>(c: Context<{ Bindings: Env }>, data: T, location?: st
     c.header("Location", location);
   }
   return success(c, data, 201);
-}
-
-/**
- * Send a 202 Accepted response (for async operations)
- */
-export function accepted<T>(c: Context<{ Bindings: Env }>, data: T) {
-  return success(c, data, 202);
 }
 
 /**

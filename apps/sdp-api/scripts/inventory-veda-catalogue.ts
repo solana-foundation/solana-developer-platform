@@ -26,7 +26,8 @@
  *   pnpm --filter @sdp/api earn:inventory:veda:render   # re-render, no network
  *
  * NO credential, like Kamino's: Veda is read entirely on chain. It does need an
- * RPC endpoint per cluster (`SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`),
+ * RPC endpoint per cluster, the preferred endpoint of that cluster's managed
+ * pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`, as the API reads it),
  * and `readVedaVaults` proves each endpoint's genesis hash before reading a
  * single account — so a mainnet URL in the devnet slot fails loudly instead of
  * quietly inventorying the wrong chain.
@@ -45,11 +46,14 @@ import {
   vedaDeployment,
 } from "@sdp/types/veda-programs";
 import {
+  SDP_ENVIRONMENT_BY_CLUSTER,
   SOLANA_CLUSTERS,
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
 const INVENTORY_FILE = path.join(INVENTORY_ROOT, "veda.inventory.json");
@@ -116,10 +120,8 @@ type VaultRow = z.infer<typeof vaultRowSchema>;
 type ClusterInventory = z.infer<typeof clusterSchema>;
 type Inventory = z.infer<typeof inventorySchema>;
 
-function rpcUrlFor(cluster: SolanaCluster): string {
-  const value =
-    cluster === "devnet" ? process.env.SOLANA_DEVNET_RPC_URL : process.env.SOLANA_MAINNET_RPC_URL;
-  return (value ?? "").trim();
+function rpcUrlFor(cluster: SolanaCluster): string | null {
+  return earnProviderEndpointUrls(cluster)[0] ?? null;
 }
 
 async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventory> {
@@ -134,10 +136,10 @@ async function inventoryCluster(cluster: SolanaCluster): Promise<ClusterInventor
   }
 
   const rpcUrl = rpcUrlFor(cluster);
-  if (rpcUrl === "") {
+  if (rpcUrl === null) {
     return {
       cluster,
-      skipped: `set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL to inventory this cluster`,
+      skipped: `set a SOLANA_RPC_<PROVIDER>_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_API_KEY_URL to inventory this cluster`,
       configuredVaults: deployment.vaultStateAddresses.length,
       rows: [],
     };
@@ -314,7 +316,12 @@ ${inventory.clusters.map(renderCluster).join("\n")}`;
 async function runFetch(): Promise<void> {
   const clusters: ClusterInventory[] = [];
   for (const cluster of SOLANA_CLUSTERS) {
-    clusters.push(await inventoryCluster(cluster));
+    // Each cluster is read in its environment's cluster scope, as the catalogue sync reads it.
+    clusters.push(
+      await runInEnvironmentClusterScope(SDP_ENVIRONMENT_BY_CLUSTER[cluster], () =>
+        inventoryCluster(cluster)
+      )
+    );
   }
 
   const inventory: Inventory = {

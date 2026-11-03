@@ -31,7 +31,7 @@ export interface ListUnifiedTransactionsInput {
   limit: number;
 }
 
-export interface ListUnifiedTransactionsResult {
+interface ListUnifiedTransactionsResult {
   rows: UnifiedTransaction[];
   nextCursor: string | null;
 }

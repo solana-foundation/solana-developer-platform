@@ -1,8 +1,18 @@
 "use client";
 
-import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
+import {
+  isPartiallyFailedTransferBatchStatus,
+  type MoneyMovementStatus,
+  type PaymentTransferBatchRequest,
+} from "@sdp/types/payments";
+import { z } from "zod";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
-import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import {
+  canonicalDecimalAmount,
+  isMovementInFlight,
+  storageFingerprint,
+  uncertainMoneyAnswerMessage,
+} from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -11,6 +21,7 @@ import {
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
+  retryTransferBatch,
   TransferBatchRequestError,
   type Translate,
 } from "./payments-workspace.data";
@@ -26,6 +37,7 @@ import {
  */
 
 const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
+const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:idempotency:v1");
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
@@ -85,6 +97,129 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
   ]);
 }
 
+/** Where a blank Reference's generated payout run name is kept, per batch content. */
+const DEFAULT_REFERENCE_STORE_PREFIX = "sdp:payments:transfer-batch:reference:v1:";
+/** How long a generated name outlives an unsettled send: past any recovery. */
+const DEFAULT_REFERENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const storedReferenceSchema = z.object({ reference: z.string(), savedAt: z.number() });
+
+/**
+ * `localStorage`, not the key store's `sessionStorage`: the run's name has to
+ * survive a closed tab, a reload and a new day (HOO-2335), or a send whose
+ * answer was lost would be named a new run when the wizard is reopened.
+ */
+function referenceStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function referenceStoreName(unnamed: PaymentTransferBatchRequest): string {
+  const { externalId: _ignored, ...rest } = unnamed;
+  return `${DEFAULT_REFERENCE_STORE_PREFIX}${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
+}
+
+/**
+ * The payout run reference the dashboard sends when the user leaves Reference
+ * blank (HOO-2335): the UTC day plus a digest of the wallet, token and
+ * recipients with their amounts. The same batch sent again, from any browser
+ * or by another operator, names the same run, so the API answers it with the
+ * first batch or refuses it (409) instead of paying everyone again. A real
+ * second identical payout the same day needs a reference of its own.
+ *
+ * @param request - The batch without a reference.
+ * @param day - The UTC calendar day, `YYYY-MM-DD`, shared by every operator.
+ */
+export function defaultTransferBatchReference(
+  request: PaymentTransferBatchRequest,
+  day: string
+): string {
+  const { externalId: _ignored, ...rest } = request;
+  return `batch-${day}-${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
+}
+
+/**
+ * The default reference for this batch, minted on its first send and kept
+ * until that send is settled, so a send whose answer was lost and is tried
+ * again after midnight, in another tab or after a reload still names the same
+ * run. A storage that refuses falls back to the day's name.
+ */
+export function claimDefaultTransferBatchReference(
+  unnamed: PaymentTransferBatchRequest,
+  now: Date = new Date()
+): string {
+  const storage = referenceStorage();
+  const name = referenceStoreName(unnamed);
+  try {
+    const raw = storage?.getItem(name);
+    const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+    if (stored?.success && now.getTime() - stored.data.savedAt < DEFAULT_REFERENCE_TTL_MS) {
+      return stored.data.reference;
+    }
+  } catch {
+    // An unreadable entry is replaced below.
+  }
+  const reference = defaultTransferBatchReference(unnamed, now.toISOString().slice(0, 10));
+  try {
+    storage?.setItem(name, JSON.stringify({ reference, savedAt: now.getTime() }));
+  } catch {
+    // Kept for this send only; the day's name still dedupes it today.
+  }
+  return reference;
+}
+
+/**
+ * A partially failed batch keeps its default reference, so sending it again is
+ * answered with the batch. Once a retry has finished it, the run is done: the
+ * name is forgotten (while the resent recipients are still processing, only
+ * once the batch reads final), so a later identical payout is a new run.
+ */
+function releaseReferenceWhenFinished(retried: CreateTransferBatchResult): void {
+  const reference = retried.batch.externalId;
+  if (reference === null || reference === undefined) return;
+  const release = (status: MoneyMovementStatus) => {
+    if (!isMovementInFlight(status) && !isPartiallyFailedTransferBatchStatus(status)) {
+      releaseDefaultReferenceNamed(reference);
+    }
+  };
+  if (!isMovementInFlight(retried.batch.status)) {
+    release(retried.batch.status);
+    return;
+  }
+  settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(retried.batch.id), release);
+}
+
+/** Forgets whichever stored default reference carries this name. */
+function releaseDefaultReferenceNamed(reference: string): void {
+  const storage = referenceStorage();
+  if (storage === null) return;
+  try {
+    for (const name of Object.keys(storage)) {
+      if (!name.startsWith(DEFAULT_REFERENCE_STORE_PREFIX)) continue;
+      const raw = storage.getItem(name);
+      const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+      if (stored?.success && stored.data.reference === reference) storage.removeItem(name);
+    }
+  } catch {
+    // Left to expire.
+  }
+}
+
+/** Forgets a settled send's default reference, so the next identical batch is a new run. */
+function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest): void {
+  const storage = referenceStorage();
+  const name = referenceStoreName(sent);
+  try {
+    const raw = storage?.getItem(name);
+    const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+    if (stored?.success && stored.data.reference === sent.externalId) storage?.removeItem(name);
+  } catch {
+    // Left to expire.
+  }
+}
+
 /**
  * The idempotency key for this batch, minting and persisting one the first time.
  * The same batch rebuilt after a retry or a reload gets the SAME key.
@@ -118,17 +253,28 @@ export async function sendTransferBatchUnderKey(
   request: PaymentTransferBatchRequest,
   t: Translate
 ): Promise<CreateTransferBatchResult> {
-  // Sent in the form it is keyed by, whatever form the caller passed.
-  const canonical = canonicalTransferBatchRequest(request);
+  // Sent in the form it is keyed by, whatever form the caller passed, and
+  // always naming its payout run: a blank Reference gets the durable default.
+  const unnamed = canonicalTransferBatchRequest(request);
+  const canonical =
+    unnamed.externalId === undefined
+      ? { ...unnamed, externalId: claimDefaultTransferBatchReference(unnamed) }
+      : unnamed;
   const fingerprint = transferBatchRequestFingerprint(canonical);
   const { key, persisted } = store.claim(fingerprint);
+  const settleKey = () => {
+    store.release(fingerprint, key);
+    releaseDefaultTransferBatchReference(canonical);
+  };
   let result: CreateTransferBatchResult;
   try {
     result = await createTransferBatch(canonical, t, { value: key, persisted });
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {
       const answer = { status: error.status, replayed: error.replayed, code: error.code };
-      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      if (settleMoneyIdempotencyKey(store, fingerprint, key, answer)) {
+        releaseDefaultTransferBatchReference(canonical);
+      }
       const uncertain = uncertainMoneyAnswerMessage(answer);
       if (uncertain !== null) {
         // The key is kept, so the next press is answered under it: send nothing new.
@@ -139,19 +285,74 @@ export async function sendTransferBatchUnderKey(
   }
   // The batch row exists, so once it is final the key is spent and the next
   // identical batch is a new intent. While it is still processing the key is
-  // kept, so that send is answered by the replay (APE-461).
+  // kept, so that send is answered by the replay (APE-461); a partially failed
+  // batch keeps it for good (APE-462): sending it again would pay the paid
+  // recipients twice, so its failed ones are finished with a retry.
+  if (isPartiallyFailedTransferBatchStatus(result.batch.status)) return result;
   const settled = settleMoneyIdempotencyKey(store, fingerprint, key, {
     status: 200,
     replayed: false,
     code: null,
     movementStatus: result.batch.status,
   });
+  if (settled) {
+    releaseDefaultTransferBatchReference(canonical);
+    return result;
+  }
   // A replay repeats the first answer verbatim, so only a read of the batch's
   // current state can show it final and settle the key.
-  if (!settled) {
-    settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), () =>
-      store.release(fingerprint, key)
-    );
-  }
+  settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), (status) => {
+    if (!isPartiallyFailedTransferBatchStatus(status)) settleKey();
+  });
   return result;
+}
+
+/** What makes two retry presses the SAME retry: the batch, and the recipients it found failed. */
+export function transferBatchRetryFingerprint(
+  batchId: string,
+  failedRecipientIds: readonly string[]
+): string {
+  return JSON.stringify([batchId, [...failedRecipientIds].sort()]);
+}
+
+/**
+ * Retries a batch's failed recipients under a key kept per batch and failed
+ * set, so a double press, a timeout or a reload is answered by the first
+ * retry instead of sending again. The API records the retry under its key
+ * before it sends anything, so a same-key press after a timeout or a 5xx is
+ * answered from that record (HOO-2343). A recorded answer retires the key at
+ * once, even while the resent recipients are processing: the API only ever
+ * sends recipients that are failed when it runs, so a later retry under a new
+ * key cannot pay anyone twice, and if they fail again the same failed set
+ * must not be answered by this retry. An uncertain answer keeps the key, as
+ * for a send.
+ *
+ * @param batchId - The batch to retry.
+ * @param failedRecipientIds - Its recipients the dashboard last read as failed.
+ * @param t - Translator, for the API's refusal message.
+ * @returns The batch after the retry.
+ */
+export async function retryTransferBatchUnderKey(
+  batchId: string,
+  failedRecipientIds: readonly string[],
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const fingerprint = transferBatchRetryFingerprint(batchId, failedRecipientIds);
+  const { key, persisted } = retryStore.claim(fingerprint);
+  try {
+    const retried = await retryTransferBatch(batchId, t, { value: key, persisted });
+    retryStore.release(fingerprint, key);
+    releaseReferenceWhenFinished(retried);
+    return retried;
+  } catch (error) {
+    if (error instanceof TransferBatchRequestError) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(retryStore, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
+        throw new TransferBatchRequestError(t(uncertain), error.status, error.replayed, error.code);
+      }
+    }
+    throw error;
+  }
 }

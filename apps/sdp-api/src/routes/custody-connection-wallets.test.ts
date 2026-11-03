@@ -223,9 +223,11 @@ describe("Connection-owned wallet control plane", () => {
     assert(audit, "Wallet creation outcome must exist");
     expect(audit).toMatchObject({
       api_key_id: API_KEY.id,
-      request_id: "wallet-creation-audit-request",
+      request_id: response.headers.get("x-request-id"),
       resource_id: body.data.wallet.id,
     });
+    expect(audit.request_id).toMatch(/^req_/);
+    expect(audit.request_id).not.toBe("wallet-creation-audit-request");
     expect(z.record(z.string(), z.json()).parse(JSON.parse(audit.metadata))).toMatchObject({
       event: "custody_wallet_created",
       auditPhase: "outcome",

@@ -1,7 +1,8 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { getChainHeight } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -10,7 +11,6 @@ import {
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -72,6 +72,10 @@ import type { Env } from "@/types/env";
  * counted, emits its own error event, marks the tick error-level and THROWS so
  * `sdp_cron_run` records error. The job's own database queries failing emit no
  * tick at all: a fabricated tick with zero counts would read as a healthy sweep.
+ *
+ * A `cluster` Cron Definition: each environment runs its own sweep inside its
+ * cluster scope, claims and counts only its own advisories, and reads the block
+ * height through `createClusterRpc()`. The tick names the environment.
  */
 
 const BATCH_SIZE = 128;
@@ -85,7 +89,13 @@ const ESCALATE_AFTER_MS = 60 * 60_000;
 const OBSERVED_STATUSES = new Set(["confirmed", "finalized"]);
 const IN_FLIGHT_STATUSES = new Set(["requested", "submitted"]);
 
-export interface EarnSplitSwapDetectionStats {
+/** A confirmed block height and the slot of the bank that reported it. */
+interface ChainHeight {
+  blockHeight: bigint;
+  absoluteSlot: Slot;
+}
+
+interface EarnSplitSwapDetectionStats {
   checked: number;
   depositObserved: number;
   followUpPending: number;
@@ -107,7 +117,8 @@ export async function detectOrphanedEarnSplitSwaps(
   const advisories = createPostgresEarnSplitSwapAdvisoriesRepository(db);
   const ledger = createPostgresEarnMovementsRepository(db);
 
-  const batch = await advisories.claimOpenForDetection(BATCH_SIZE);
+  const { environment } = currentClusterScope();
+  const batch = await advisories.claimOpenForDetection({ environment, limit: BATCH_SIZE });
   const stats: EarnSplitSwapDetectionStats = {
     checked: batch.length,
     depositObserved: 0,
@@ -121,46 +132,37 @@ export async function detectOrphanedEarnSplitSwaps(
     blockHeightReadFailures: 0,
   };
 
-  // One block height per environment, read once for the whole batch so every
-  // advisory in a tick is judged against the same moment on its own cluster.
-  const byEnvironment = new Map<SdpEnvironment, EarnSplitSwapAdvisoryRow[]>();
-  for (const advisory of batch) {
-    const rows = byEnvironment.get(advisory.environment);
-    if (rows) rows.push(advisory);
-    else byEnvironment.set(advisory.environment, [advisory]);
-  }
-
-  for (const [environment, rows] of byEnvironment) {
-    let blockHeight: bigint | null = null;
+  // One block height for the whole batch, read only when there is something
+  // to judge, so every advisory in a tick is judged against the same moment on
+  // the scope's cluster. Height and slot come from one bank: the balance read
+  // must reach that slot (see judgeAdvisory).
+  let height: ChainHeight | null = null;
+  if (batch.length > 0) {
     try {
-      const cluster = earnClusterFor(environment);
-      const rpcUrl = resolveClusterRpcUrl(env, cluster);
-      await assertClusterEndpoint(env, cluster, rpcUrl);
-      blockHeight = await createRpc(env, { rpcUrl })
-        .getBlockHeight({ commitment: "confirmed" })
-        .send();
+      height = await getChainHeight(createClusterRpc(), "confirmed");
     } catch (error) {
       logEvent("error", {
         event: "sdp_api_earn_split_swap_block_height_read_failed",
         environment,
-        rows: rows.length,
+        rows: batch.length,
         ...describeError(error),
         error_message: errorMessage(error),
       });
       stats.blockHeightReadFailures += 1;
     }
-
-    for (const advisory of rows) {
-      // Sequential on purpose: one filtered RPC read per judged advisory.
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
-      await judgeAdvisory(env, advisories, ledger, advisory, blockHeight, now(), stats);
-    }
   }
 
-  const openBacklog = await advisories.countOpen();
+  for (const advisory of batch) {
+    // Sequential on purpose: one filtered RPC read per judged advisory.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
+    await judgeAdvisory(advisories, ledger, advisory, height, now(), stats);
+  }
+
+  const openBacklog = await advisories.countOpen({ environment });
   const failures = stats.balanceReadFailures + stats.blockHeightReadFailures;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_split_swap_detection_tick",
+    environment,
     checked: stats.checked,
     deposit_observed: stats.depositObserved,
     follow_up_pending: stats.followUpPending,
@@ -185,11 +187,10 @@ export async function detectOrphanedEarnSplitSwaps(
 }
 
 async function judgeAdvisory(
-  env: Env,
   advisories: ReturnType<typeof createPostgresEarnSplitSwapAdvisoriesRepository>,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   advisory: EarnSplitSwapAdvisoryRow,
-  blockHeight: bigint | null,
+  height: ChainHeight | null,
   nowMs: number,
   stats: EarnSplitSwapDetectionStats
 ): Promise<void> {
@@ -231,8 +232,8 @@ async function judgeAdvisory(
   // 2. Too early to judge: the swap can still land, or the grace has not run.
   const ageMs = nowMs - Date.parse(advisory.created_at);
   if (
-    blockHeight === null ||
-    blockHeight <= BigInt(advisory.swap_last_valid_block_height) ||
+    height === null ||
+    height.blockHeight <= BigInt(advisory.swap_last_valid_block_height) ||
     ageMs < GRACE_MS
   ) {
     stats.pending += 1;
@@ -251,15 +252,16 @@ async function judgeAdvisory(
   );
   if (await resolveWithMovement(advisories, advisory, exactFollowUps, null, stats)) return;
 
-  // 4. The balance is the ground truth: judge it against the build-time baseline.
+  // 4. The balance is the ground truth: judge it against the build-time baseline,
+  //    read from a node at least as current as the height that proved the swap's
+  //    window closed. A lagging pool endpoint would predate a landed swap and turn
+  //    an orphan into a permanent `unfunded`; a node behind the floor fails the
+  //    read instead, and the advisory waits for the next sweep.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
-    balance = await readOwnerMintBalance(
-      env,
-      advisory.environment,
-      advisory.owner_address,
-      advisory.deposit_token_mint
-    );
+    balance = await readOwnerMintBalance(advisory.owner_address, advisory.deposit_token_mint, {
+      minContextSlot: height.absoluteSlot,
+    });
   } catch (error) {
     stats.balanceReadFailures += 1;
     logEvent("error", {

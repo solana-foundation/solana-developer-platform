@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { z } from "zod";
 
-export type FieldErrors<T> = Partial<Record<keyof T, string>>;
+type FieldErrors<T> = Partial<Record<keyof T, string>>;
 
 export interface ZodFormApi<TInput, TOutput> {
   values: TInput;

@@ -1,4 +1,5 @@
 import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { SigningError } from "@sdp/custody/signing";
 import * as authPkg from "@sdp/private-channels/auth";
 import { PrivateChannelError } from "@sdp/private-channels/errors";
 import type { Action } from "@sdp/types/actions";
@@ -139,7 +140,7 @@ beforeEach(async () => {
     ),
     // The member's project scope, which the custody signer re-reads (SOLA9-790).
     db.prepare(
-      "INSERT INTO project_members (id, project_id, user_id, role) VALUES ('pm_pc_wallet', 'prj_1', 'usr_test_pc_wallet', 'admin')"
+      "INSERT INTO project_members (id, project_id, user_id) VALUES ('pm_pc_wallet', 'prj_1', 'usr_test_pc_wallet')"
     ),
     db.prepare(
       "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status) VALUES ('cfg_verify', 'org_test_pc_wallet', 'prj_1', 'privy', '{}', 'active')"
@@ -470,6 +471,14 @@ describe("verifyPrivateChannelWallet", () => {
     });
     expect(spcSession.getSpcSession).toHaveBeenCalledTimes(1);
     expect(client.challengeWallet).toHaveBeenCalledTimes(1);
+    expect(client.verifyWallet).not.toHaveBeenCalled();
+  });
+  it("answers a custody policy refusal of the challenge as CUSTODY_POLICY_REFUSED", async () => {
+    signMessages.mockRejectedValueOnce(new SigningError("Privy policy refused", "POLICY_REFUSED"));
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CUSTODY_POLICY_REFUSED",
+      statusCode: 422,
+    });
     expect(client.verifyWallet).not.toHaveBeenCalled();
   });
 });

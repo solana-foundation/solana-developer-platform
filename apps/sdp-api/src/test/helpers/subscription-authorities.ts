@@ -1,4 +1,10 @@
-import type { PaymentRecurringPaymentStatus, PaymentSubscriptionStatus } from "@sdp/types/payments";
+import type {
+  PaymentRecurringPaymentAttemptStatus,
+  PaymentRecurringPaymentStatus,
+  PaymentRecurringPaymentUpdateAttemptStage,
+  PaymentSubscriptionStatus,
+  RecurringPaymentPauseReason,
+} from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
@@ -80,8 +86,9 @@ let sequence = 0;
 
 /**
  * A period-24 subscription from the tenant's wallet on `authority`, last changed at `changedAt`
- * (its cancel time when canceled), and the recurring payment it belongs to unless `recurring` is
- * null. Returns the subscription and recurring payment ids.
+ * (its cancel time when canceled), and the recurring payment that names it as its subscription
+ * unless `recurring` is null, which leaves it standalone. Returns the subscription and recurring
+ * payment ids.
  */
 export async function seedAuthoritySubscription(
   tenant: SubscriptionAuthorityTenant,
@@ -170,11 +177,64 @@ export async function seedAuthoritySubscription(
       idempotencyFingerprint: null,
     })
   );
+  const pausedReason: RecurringPaymentPauseReason | null =
+    input.recurring.status === "paused" ? "failed_attempts" : null;
   await db.execute(
     `UPDATE payment_recurring_payments
-        SET status = ?, subscription_authority_address = ?, updated_at = ?
+        SET status = ?, paused_reason = ?, subscription_id = ?, subscription_authority_address = ?,
+            updated_at = ?
       WHERE id = ?`,
-    [input.recurring.status, input.authority, input.changedAt, recurringPaymentId]
+    [
+      input.recurring.status,
+      pausedReason,
+      subscription.id,
+      input.authority,
+      input.changedAt,
+      recurringPaymentId,
+    ]
   );
   return { subscriptionId: subscription.id, recurringPaymentId };
+}
+
+/**
+ * A replacement update attempt on one of the tenant's recurring payments, naming the subscription
+ * it replaced and the one it created.
+ *
+ * @param tenant - The tenant the recurring payment belongs to.
+ * @param attempt - The attempt to seed.
+ * @param attempt.id - Id of the update attempt.
+ * @param attempt.recurringPaymentId - The recurring payment being edited.
+ * @param attempt.status - The attempt's status.
+ * @param attempt.stage - The step the attempt reached.
+ * @param attempt.oldSubscriptionId - The subscription the edit replaces, or null.
+ * @param attempt.newSubscriptionId - The subscription the edit created, or null.
+ * @returns Resolves once the attempt is written.
+ */
+export async function seedRecurringPaymentUpdateAttempt(
+  tenant: SubscriptionAuthorityTenant,
+  attempt: {
+    id: string;
+    recurringPaymentId: string;
+    status: PaymentRecurringPaymentAttemptStatus;
+    stage: PaymentRecurringPaymentUpdateAttemptStage;
+    oldSubscriptionId: string | null;
+    newSubscriptionId: string | null;
+  }
+): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO payment_recurring_payment_update_attempts (
+       id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+       old_subscription_id, new_subscription_id)
+     VALUES (?, ?, ?, ?, 'replacement', ?, ?, ?, ?)`,
+    [
+      attempt.id,
+      TEST_ORG.id,
+      tenant.projectId,
+      attempt.recurringPaymentId,
+      attempt.status,
+      attempt.stage,
+      attempt.oldSubscriptionId,
+      attempt.newSubscriptionId,
+    ]
+  );
 }

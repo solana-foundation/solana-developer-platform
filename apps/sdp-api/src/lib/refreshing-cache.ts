@@ -26,7 +26,7 @@ export interface RefreshingCacheOptions {
   claimWaitMs: number;
 }
 
-export interface RefreshingCacheRead<T> {
+interface RefreshingCacheRead<T> {
   /** Reads the source. The first caller's `load` serves every caller waiting on it. */
   load: () => Promise<T>;
   kv?: KVStore;

@@ -30,9 +30,7 @@ import {
   disconnectPrivateChannelAction,
 } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/actions";
 import { DeleteConfirmationDialog } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-confirmation-dialogs";
-import { PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form";
-import { PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form.redesign";
-import { useNewDesign } from "@/components/new-design";
+import { PrivateChannelsConnectForm } from "@/app/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
@@ -48,11 +46,6 @@ export function ChannelActionsMenu({
   enrollDisabledReason: string | null;
 }) {
   const t = useTranslations();
-  // NEW DESIGN picks the connect form; the previous design keeps the original file.
-  const newDesign = useNewDesign();
-  const PrivateChannelsConnectForm = newDesign
-    ? CurrentPrivateChannelsConnectForm
-    : LegacyPrivateChannelsConnectForm;
   const router = useRouter();
   const href = useProjectHref();
   const [manageOpen, setManageOpen] = useState(false);

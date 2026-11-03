@@ -35,6 +35,12 @@ import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
 import { DvpTradesWorkspace } from "./dvp-trades-workspace";
 
+// A member who may write; the read-only cases live with each component's own viewer tests.
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => true,
+}));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 // The select's popup positioning is integration-tested with the shared UI

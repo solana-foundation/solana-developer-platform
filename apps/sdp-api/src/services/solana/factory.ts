@@ -5,8 +5,9 @@
  * fee payment provider integration (Kora for gasless transactions).
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { Token2022Service } from "@sdp/solana/token-2022";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { createIssuanceSponsor } from "@/services/issuance/sponsored-submitter";
 import { isKoraSponsorshipConfigured, type SponsorshipScope } from "@/services/sponsorship.service";
@@ -30,7 +31,11 @@ import type { Env } from "@/types/env";
 export function createToken2022Service(
   env: Env,
   signer: TransactionSigner,
-  sponsorship: { scope: SponsorshipScope; movement: MovementId; custodyWalletId: string }
+  sponsorship: {
+    scope: SponsorshipScope;
+    movement: MovementOf<"issuance">;
+    custodyWalletId: string;
+  }
 ): Token2022Service {
   const feePayment = isKoraSponsorshipConfigured(env)
     ? createIssuanceSponsor(env, sponsorship.scope, sponsorship.movement, {
@@ -38,5 +43,5 @@ export function createToken2022Service(
       })
     : undefined;
 
-  return new Token2022Service(env, signer, feePayment);
+  return new Token2022Service(createClusterRpc(), signer, feePayment);
 }

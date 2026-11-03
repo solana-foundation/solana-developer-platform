@@ -137,10 +137,14 @@ describe("provisionPrincipal", () => {
       scope
     );
 
-    expect(loginSpy).toHaveBeenCalledWith(scope.authUrl, {
-      username: "treasury-abcde",
-      password: expect.any(String),
-    });
+    expect(loginSpy).toHaveBeenCalledWith(
+      scope.authUrl,
+      {
+        username: "treasury-abcde",
+        password: expect.any(String),
+      },
+      expect.objectContaining({ fetchImpl: expect.any(Function) })
+    );
     expect(repo.completePrincipal).toHaveBeenCalledWith(
       expect.objectContaining({ id: reservation.id, spcUserId: null })
     );

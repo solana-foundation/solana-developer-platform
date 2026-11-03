@@ -1,17 +1,29 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PaymentRequestsPage as RedesignPaymentRequestsPage } from "./page.redesign";
-import { fetchPaymentRequests } from "./payment-requests-page.data";
+import {
+  PAYMENT_REQUEST_CREATE_PARAM,
+  PAYMENT_REQUEST_NEW_HREF,
+  PAYMENT_REQUEST_OPEN_PARAM,
+  paymentRequestHref,
+  paymentsPlaygroundHref,
+} from "@/lib/payments-routes";
+import { requestProjectHref } from "@/lib/sdp-api";
+import {
+  loadPaymentRequestsList,
+  parsePaymentRequestsListParams,
+  paymentRequestsListHref,
+} from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 export const dynamic = "force-dynamic";
 
-async function PaymentRequestsPage() {
+export default async function PaymentRequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -19,31 +31,54 @@ async function PaymentRequestsPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  const params = await searchParams;
+  if (params.tab === "playground") {
+    // Requests no longer has a playground tab; its endpoints moved into the Payments one.
+    redirect(await requestProjectHref(paymentsPlaygroundHref("list-payment-requests")));
+  }
+  if (params[PAYMENT_REQUEST_CREATE_PARAM] === "1") {
+    // The new-request form was a dialog here; it is its own page now.
+    redirect(await requestProjectHref(PAYMENT_REQUEST_NEW_HREF));
+  }
+  const openId = params[PAYMENT_REQUEST_OPEN_PARAM];
+  if (typeof openId === "string" && openId !== "") {
+    // One request opened in a dialog here; it has its own page now.
+    redirect(await requestProjectHref(paymentRequestHref(openId)));
+  }
 
-  const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+  const listState = parsePaymentRequestsListParams(params);
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
-    const [result, walletsResult] = await Promise.all([
-      trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
-      trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
-    ]);
+    // One page, as the URL names it: listing reconciles each open request on chain, so the list
+    // reads no more than it shows (see loadPaymentRequestsList).
+    const result = await trace.step("fetch_payment_requests", () =>
+      loadPaymentRequestsList(apiClient.request, listState)
+    );
 
-    trace.log({ ok: result.ok, count: result.data.length, total: result.total });
+    trace.log({
+      ok: result.ok,
+      count: result.data.length,
+      total: result.total,
+    });
 
-    const wallets = walletsResult.ok && walletsResult.data ? walletsResult.data : [];
+    // Under Awaiting payment the total is the API's upper bound (see loadPaymentRequestsList),
+    // so a page past it is past the end all the more.
+    const lastPage = Math.max(1, Math.ceil(result.total / listState.pageSize));
+    if (result.ok && listState.page > lastPage) {
+      // A page past the end (an old link, or requests gone since) lands on the last one.
+      redirect(await requestProjectHref(paymentRequestsListHref({ ...listState, page: lastPage })));
+    }
 
     return (
-      <div className="flex h-full min-h-0 w-full flex-col">
-        <PaymentRequestsWorkspace
-          initialPaymentRequests={result.data}
-          initialError={result.error}
-          initialLocalErrorCode={result.localErrorCode}
-          apiBaseUrl={apiBaseUrl}
-          wallets={wallets}
-        />
-      </div>
+      <PaymentRequestsWorkspace
+        initialPaymentRequests={result.data}
+        total={result.total}
+        totalIsExact={result.totalIsExact}
+        hasNextPage={result.hasNextPage}
+        listState={listState}
+        initialError={result.error}
+        initialLocalErrorCode={result.localErrorCode}
+      />
     );
   });
 }
-
-export default withLegacyDesign(RedesignPaymentRequestsPage, PaymentRequestsPage, "activity");

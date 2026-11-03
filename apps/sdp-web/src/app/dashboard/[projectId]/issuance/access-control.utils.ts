@@ -6,19 +6,8 @@ const BLOCKLIST_TEMPLATES = new Set<TokenTemplate>(["stablecoin", "tokenized-sec
 
 export type AccessControlMode = "allowlist" | "blocklist" | "disabled";
 
-export function supportsBlocklistMode(template: TokenTemplate): boolean {
+function supportsBlocklistMode(template: TokenTemplate): boolean {
   return BLOCKLIST_TEMPLATES.has(template);
-}
-
-export function getDefaultAccessControlMode(template: TokenTemplate): AccessControlMode {
-  switch (template) {
-    case "stablecoin":
-      return "blocklist";
-    case "tokenized-security":
-      return "allowlist";
-    default:
-      return "disabled";
-  }
 }
 
 export function getTokenAccessControlMode(token: AccessControlTokenShape): AccessControlMode {

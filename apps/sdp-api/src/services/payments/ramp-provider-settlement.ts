@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 
 /** What a provider reported when it settled a ramp, as `provider_data.providerSettlement` stores it. */
-export const providerSettlementSchema = z
+const providerSettlementSchema = z
   .object({
     reference: z.string(),
     observedAt: z.string().optional(),

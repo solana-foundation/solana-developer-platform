@@ -3,12 +3,20 @@
 Solana RPC clients, the balance-read context, and the transport helpers every
 provider read path is built from.
 
+## Transaction history versions
+
+Every `getTransaction` read across SDP passes
+`MAX_SUPPORTED_TRANSACTION_VERSION` from `@sdp/rpc/transaction-version`.
+It is 1 so external v1 transactions can settle and reconcile; it does not
+change the v0 transactions SDP builds or broadcasts. `pnpm
+check:transaction-reads` runs in CI and requires the shared option on production
+transaction reads. It rejects an omitted option or an explicit v0-only cap.
+
 ## Outbound pool
 
 `apps/sdp-api/src/runtime/outbound-dispatcher.ts` installs one undici `Agent`
 as the global dispatcher at API and job boot, so every `fetch` (kit, web3.js,
 REST) shares it:
-
 - `keepAliveTimeout` 19 s: past the ~16 s Treasury refresh and under a Solana
   RPC node's 20 s idle close, so steady refreshes reuse sockets (each closed
   socket holds a Cloud NAT port for 120 s).
@@ -27,7 +35,6 @@ seams) re-send one JSON-RPC request once, at once, to the same URL, and only
 when `fetch` rejected because the socket closed or reset before any response
 (`UND_ERR_SOCKET`, `ECONNRESET`, "other side closed"). That is a pooled
 keep-alive socket the server closed as it was reused.
-
 - Re-sent: the plain reads in `READ_METHODS` (accounts, balances, blocks,
   slots, signatures, token reads).
 - Never re-sent: `sendTransaction`, `simulateTransaction`, `requestAirdrop`,
@@ -36,7 +43,7 @@ keep-alive socket the server closed as it was reused.
   `getRecentPrioritizationFees`), unknown or provider-specific methods,
   batches, aborted requests, and a body that died after the headers
   ("terminated"). `socket-retry.test.ts` pins each.
-- `createRpc` wraps every transport it builds, and `contextAwareRpcFetch` is
+- The managed pool and `createRpc` wrap every transport they build, and `contextAwareRpcFetch` is
   `withRpcReadContextFetch(fetchWithReadSocketRetry)`. Both helpers are
   exported from `@sdp/rpc/read-context` and `@sdp/rpc/solana`.
 
@@ -44,13 +51,44 @@ keep-alive socket the server closed as it was reused.
 
 A provider read transport must compose, innermost first:
 
-raw transport -> `withReadSocketRetry` -> in-flight dedup -> `withRpcReadContext`
--> deadline
+raw transport -> pinned telemetry (Earn scope) -> `withReadSocketRetry`
+-> in-flight dedup -> `withRpcReadContext` -> deadline
 
 Put the re-send below the dedup, so one re-send serves every joiner, and below
 the read context, so a minimum-slot scope sees only the attempt that answered,
 carrying the scoped payload. Sends, simulations and blockhash reads never take
 a shared or re-sent path.
+
+## RPC telemetry
+
+The API supplies `setRpcTelemetrySink` from `@sdp/rpc/telemetry`. Sink failures
+cannot change an RPC result. Events name the configured provider, cluster and
+method; they never include endpoint URLs or request payloads.
+- `managed_pool` counts one logical endpoint attempt, which may include a
+  genesis proof or socket retry. These are not billed request counts.
+- `earn_pinned` counts physical transport calls inside
+  `runWithPinnedRpcTelemetry`. Provider Kit transports pass their endpoint as
+  the second argument to `withReadSocketRetry`; the fetch helper already
+  instruments its calls. Outside the pinned scope those hooks do nothing.
+- Successes keep the first ten per surface/provider/cluster/method, then
+  every tenth with `sample_weight: 10`. Failures, failovers, cooldowns and
+  unverified HTTP successes remain exact. Queries must use the weights.
+- HTTP 200 can carry a JSON-RPC error. Fetch classification reads a clone
+  bounded to 64 KiB and one second without blocking the SDK. An unreadable
+  result is `http_success_unverified`, never a confirmed success. Exclude
+  those and genesis-proof attempts from successful latency percentiles.
+- Kit and fetch responses use the same Zod envelope parser and outcome
+  classifier. Results stay opaque; the caller receives the original response.
+- Caller cancellations and caller deadlines use `outcome: aborted`, retained
+  without sampling. Provider failure rates count `failed` against
+  `succeeded|failed`; they exclude cancellations and unverified responses.
+  Managed endpoint timeouts remain failures and retain their existing failover.
+- Mark each transport-owned deadline with `markRpcAttemptDeadline` before
+  composing or forwarding its signal. Pinned provider timeouts then remain
+  `failed`, including deadlines forwarded through shared reads; caller-owned
+  cancellation and whole-request budgets remain `aborted`.
+
+Telemetry adds no RPC calls and preserves provider request budgets.
 
 ## Read floors
 
@@ -62,3 +100,29 @@ an older entry for later callers. Hydration runs each read under the stamp
 taken right after its position rows were read, and reconciliation close-out
 under a fresh stamp, so neither reuses a request sent before that point. A
 floor does not make an RPC node current; the minimum-slot scope does.
+
+## Bounded clients
+
+`createClusterRpc({ timeoutMs })` bounds each request end to end, failover hops
+and genesis probes included, for a client handed to a helper that sends without
+a signal. It takes behaviour only, never a cluster or URL: the client wraps the
+scope's memoized pool transport, so failover, cooldowns and genesis proofs stay
+shared, and it is memoized per deadline and pool. A caller that sends itself
+passes `abortSignal` to `.send()` instead.
+
+## Earn's URL helpers (transitional, HOO-1881)
+
+Earn reads the scope like every module, but its provider packages still build
+their own transports from a URL and pin one endpoint per operation, until they
+take clients (HOO-1881) and `withConsistentRpcReads` (HOO-2025). `factory.ts`
+therefore exports two Earn-only functions, fenced by Biome to
+`apps/sdp-api/src/services/earn/cluster-rpc.ts`:
+- `earnClusterEndpointUrls(cluster)`: the scope's pool URLs in failover order,
+  or none.
+- `proveEarnClusterEndpoint(cluster, url)`: the pool's own genesis probe and
+  proof cache for one of its URLs, so an endpoint the pool proved costs Earn no
+  second probe, and the other way round.
+
+Both take the cluster the provider asked for and refuse one that is not the
+scope's (`CLUSTER_SCOPE_CONFLICT`), outside a scope (`CLUSTER_SCOPE_MISSING`),
+or not in the pool. Delete them once the provider packages take clients.

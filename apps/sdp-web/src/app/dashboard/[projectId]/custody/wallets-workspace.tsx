@@ -3,7 +3,6 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cn } from "@sdp/ui/cn";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
@@ -13,9 +12,7 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { useProjectHref } from "@/lib/use-dashboard-project";
 import type { KnownCustodyProvider } from "./provider-catalog";
-import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsOverview } from "./wallets-overview";
 
 const WalletsPlayground = dynamic(
@@ -32,7 +29,6 @@ const WalletsPlayground = dynamic(
 interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   connectedProviders: KnownCustodyProvider[];
-  custodyAvailability: CustodyAvailabilityResult;
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -41,13 +37,10 @@ interface WalletsWorkspaceProps {
 export function WalletsWorkspace({
   apiBaseUrl,
   connectedProviders,
-  custodyAvailability,
   configsError,
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const router = useRouter();
-  const href = useProjectHref();
   const { dashboardAccess } = useDashboardWorkspace();
   const isPlaygroundTab = useDashboardTab() === "playground";
 
@@ -69,16 +62,6 @@ export function WalletsWorkspace({
     return () => globalThis.clearTimeout(timeoutId);
   }, [isPlaygroundTab]);
 
-  const openWalletSetup = (provider: KnownCustodyProvider | null) => {
-    const params = new URLSearchParams();
-    if (provider) {
-      params.set("provider", provider);
-    }
-
-    const query = params.toString();
-    router.push(href(`/dashboard/wallets/setup${query ? `?${query}` : ""}`));
-  };
-
   return (
     <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
@@ -90,13 +73,10 @@ export function WalletsWorkspace({
             content: (
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
-                  connectedProviders={connectedProviders}
-                  custodyAvailability={custodyAvailability}
                   configsError={configsError}
                   wallets={wallets}
                   walletsError={walletsError}
                   canManageCustody={dashboardAccess.capabilities.canManageCustody}
-                  onCreateWallet={openWalletSetup}
                 />
               </div>
             ),

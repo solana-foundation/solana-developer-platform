@@ -19,7 +19,6 @@ export function FullscreenLoadingIndicator({
   statusMessage,
   action,
   paused = false,
-  newDesign = false,
 }: {
   allowDelayedReload?: boolean;
   children: ReactNode;
@@ -30,8 +29,6 @@ export function FullscreenLoadingIndicator({
   statusMessage?: string;
   action?: ReactNode;
   paused?: boolean;
-  /** NEW DESIGN: the 280px ruled sidebar and a flat page; off, the previous design's card. */
-  newDesign?: boolean;
 }) {
   const t = useTranslations();
   const [showReload, setShowReload] = useState(false);
@@ -58,7 +55,7 @@ export function FullscreenLoadingIndicator({
     <main
       aria-busy={!paused}
       data-shell-loading-skeleton
-      data-sdp-new-design={newDesign ? "" : undefined}
+      data-sdp-dashboard-shell=""
       className={cn(
         "flex min-h-screen bg-[var(--sdp-shell-bg)] text-primary",
         paused && "[&_*]:animate-none"
@@ -66,11 +63,8 @@ export function FullscreenLoadingIndicator({
     >
       <div
         aria-hidden="true"
-        style={{ width: isSidebarOpen ? (newDesign ? 280 : 296) : 64 }}
-        className={cn(
-          "hidden shrink-0 flex-col gap-8 px-4 py-5 md:flex",
-          newDesign && "border-r border-border-default"
-        )}
+        style={{ width: isSidebarOpen ? 280 : 64 }}
+        className="hidden shrink-0 flex-col gap-8 border-r border-border-default px-4 py-5 md:flex"
       >
         <div className="flex items-center gap-3">
           <SkeletonBlock className="size-8 shrink-0 rounded-lg" />
@@ -83,25 +77,13 @@ export function FullscreenLoadingIndicator({
         </div>
         <div className="space-y-2">
           {SIDEBAR_ROW_IDS.map((id) => (
-            <SkeletonBlock
-              key={id}
-              className={cn("h-10 w-full", newDesign ? "rounded-control" : "rounded-[10px]")}
-            />
+            <SkeletonBlock key={id} className="h-10 w-full rounded-control" />
           ))}
         </div>
-        <SkeletonBlock
-          className={cn("mt-auto h-10 w-full", newDesign ? "rounded-control" : "rounded-[10px]")}
-        />
+        <SkeletonBlock className="mt-auto h-10 w-full rounded-control" />
       </div>
 
-      <section
-        className={cn(
-          "relative min-w-0 flex-1 px-3 py-5 md:p-6",
-          newDesign
-            ? "bg-surface-raised"
-            : "rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80"
-        )}
-      >
+      <section className="relative min-w-0 flex-1 bg-surface-raised px-3 py-5 md:p-6">
         <div aria-hidden="true" className="space-y-6">
           <div className="grid min-h-10 grid-cols-[1fr_auto] items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
             <SkeletonBlock className="size-8 rounded-lg md:invisible" />

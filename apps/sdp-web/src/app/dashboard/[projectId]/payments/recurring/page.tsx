@@ -1,15 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import {
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { withLegacyDesign } from "@/flags/new-design";
+import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { RecurringPaymentsPage as RedesignRecurringPaymentsPage } from "./page.redesign";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
@@ -22,7 +18,7 @@ interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
+export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -45,7 +41,7 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
         trace.step("fetch_issued_token_symbols", () =>
-          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          fetchIssuedTokenSymbolsWhenIssuanceEnabled(apiClient.request)
         ),
       ]);
       if (!recurringPaymentsResult.ok) {
@@ -108,5 +104,3 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
     }
   );
 }
-
-export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage, "activity");

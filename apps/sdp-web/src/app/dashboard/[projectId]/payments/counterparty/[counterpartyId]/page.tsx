@@ -1,17 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterpartyDetail } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
+import {
+  fetchCounterpartyDetail,
+  fetchCounterpartyPayouts,
+} from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace";
-import { withLegacyDesign } from "@/flags/new-design";
 import { isRampsEnabled } from "@/flags/ramps";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { requestProjectHref } from "@/lib/sdp-api";
-import { CounterpartyDetailRoute as RedesignCounterpartyDetailRoute } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-async function CounterpartyDetailRoute({
+export default async function CounterpartyDetailRoute({
   params,
 }: {
   params: Promise<{ counterpartyId: string }>;
@@ -29,9 +30,12 @@ async function CounterpartyDetailRoute({
   return withDashboardPageTrace(
     "dashboard.counterparty.detail.page",
     async ({ trace, apiClient }) => {
-      const [detail, rampsEnabled] = await Promise.all([
+      const [detail, payouts, rampsEnabled] = await Promise.all([
         trace.step("fetch_counterparty_detail", () =>
           fetchCounterpartyDetail(apiClient.request, counterpartyId)
+        ),
+        trace.step("fetch_counterparty_payouts", () =>
+          fetchCounterpartyPayouts(apiClient.request, counterpartyId)
         ),
         isRampsEnabled(),
       ]);
@@ -39,7 +43,12 @@ async function CounterpartyDetailRoute({
       trace.log({
         ok: detail.counterparty !== null,
         accounts: detail.accounts.length,
+        accountsFailed: detail.accountsFailed,
         transfers: detail.transfers.length,
+        transfersFailed: detail.transfersFailed,
+        payouts: payouts.data.length,
+        payoutsTotal: payouts.total,
+        payoutsFailed: !payouts.ok,
       });
 
       if (!detail.counterparty) {
@@ -51,7 +60,13 @@ async function CounterpartyDetailRoute({
           <CounterpartyDetailWorkspace
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
+            accountsTotal={detail.accountsTotal}
+            accountsFailed={detail.accountsFailed}
             initialTransfers={detail.transfers}
+            transfersFailed={detail.transfersFailed}
+            payouts={payouts.data}
+            payoutsTotal={payouts.total}
+            payoutsFailed={!payouts.ok}
             rampsEnabled={rampsEnabled}
           />
         </div>
@@ -59,9 +74,3 @@ async function CounterpartyDetailRoute({
     }
   );
 }
-
-export default withLegacyDesign(
-  RedesignCounterpartyDetailRoute,
-  CounterpartyDetailRoute,
-  "contacts"
-);

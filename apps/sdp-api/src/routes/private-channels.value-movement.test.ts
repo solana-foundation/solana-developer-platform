@@ -16,6 +16,7 @@ import {
 } from "@/lib/idempotency";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -494,6 +495,8 @@ async function setKeyGrants(grants: string[]) {
 }
 
 describe("Private Channels — deposit and withdrawal access", () => {
+  installClusterRpcStub();
+
   afterAll(() => {
     providerSignerMock.mockRestore();
     env.PRIVY_APP_ID = originalPrivy.appId;

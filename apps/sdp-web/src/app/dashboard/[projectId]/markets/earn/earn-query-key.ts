@@ -16,4 +16,6 @@ export const earnQueryKeys = {
   withdrawal: ({ programId, withdrawalRef }: { programId: string; withdrawalRef: string }) =>
     ["dashboard-earn-withdrawal", programId, withdrawalRef] as const,
   fundingWallets: () => "dashboard-earn-funding-wallets",
+  kaminoAllocations: ({ vaults }: { vaults: string }) =>
+    ["dashboard-earn-kamino-allocations", vaults] as const,
 };

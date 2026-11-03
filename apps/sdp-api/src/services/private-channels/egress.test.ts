@@ -1,11 +1,14 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
+import { RpcHttpStatusError } from "@sdp/rpc/errors";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertApprovedPrivateChannelDestinations,
   buildPrivateChannelEgressAllowlist,
   checkPrivateChannelDestination,
+  createPrivateChannelAuthFetch,
+  createPrivateChannelGatewayTransport,
   createPrivateChannelProbeTransport,
   resolvePrivateChannelEgressAllowlist,
 } from "@/services/private-channels/egress";
@@ -284,5 +287,195 @@ describe("createPrivateChannelProbeTransport", () => {
     });
 
     expect(response.text.length).toBe(64 * 1024);
+  });
+});
+
+/**
+ * The runtime legs (`withGatewayRpc`'s JSON-RPC dials and the SPC auth REST
+ * calls) aim at URLs re-read from a stored row long after connect, so their
+ * guards cannot be connect-time only. These tests pin the same refusal and
+ * pass-through behaviour the probe transport has, at whatever moment a dial
+ * happens.
+ */
+describe("createPrivateChannelGatewayTransport", () => {
+  const servers: ReturnType<typeof createServer>[] = [];
+
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
+  });
+
+  /** A loopback server the test can approve explicitly, the way an operator would. */
+  async function startServer(
+    handler: Parameters<typeof createServer>[1]
+  ): Promise<{ origin: string }> {
+    const server = createServer(handler);
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    // SAFETY: the server listens on 127.0.0.1 with an ephemeral port, so the
+    // address is the AddressInfo form, never a pipe string or null.
+    const { port } = server.address() as AddressInfo;
+    return { origin: `http://127.0.0.1:${port}` };
+  }
+
+  it("refuses a destination that is not on the allowlist, without dialling it", async () => {
+    let dialled = false;
+    const { origin } = await startServer(() => {
+      dialled = true;
+    });
+    const transport = createPrivateChannelGatewayTransport(envWith(ALLOWED), origin);
+
+    await expect(
+      transport({ payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] } })
+    ).rejects.toThrow(/not on this deployment's approved/i);
+    expect(dialled).toBe(false);
+  });
+
+  it("dials an approved origin with the caller's headers and parses the JSON answer", async () => {
+    let authorization: string | undefined;
+    const { origin } = await startServer((req, res) => {
+      authorization = req.headers.authorization;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    const transport = createPrivateChannelGatewayTransport(envWith(origin), origin, {
+      Authorization: "Bearer tok-1",
+    });
+
+    const response = await transport({
+      payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
+    });
+
+    expect(response).toEqual({ ok: true });
+    expect(authorization).toBe("Bearer tok-1");
+  });
+
+  it("raises an RpcHttpStatusError carrying the gateway's status", async () => {
+    const { origin } = await startServer((_req, res) => {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "account not owned by caller" }));
+    });
+    const transport = createPrivateChannelGatewayTransport(envWith(origin), origin);
+
+    const error = await transport({
+      payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
+    }).catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(RpcHttpStatusError);
+    if (!(error instanceof RpcHttpStatusError)) throw new Error("narrowing");
+    expect(error.httpStatus).toBe(403);
+  });
+
+  it("does not follow a redirect off the approved origin", async () => {
+    let reachedTarget = false;
+    const { origin: target } = await startServer((_req, res) => {
+      reachedTarget = true;
+      res.end("secret");
+    });
+    const { origin } = await startServer((_req, res) => {
+      res.writeHead(302, { Location: `${target}/latest/meta-data/` });
+      res.end();
+    });
+    const transport = createPrivateChannelGatewayTransport(envWith(`${origin},${target}`), origin);
+
+    const error = await transport({
+      payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
+    }).catch((error: unknown) => error);
+
+    // Even with the redirect target itself approved, the hop is not taken —
+    // the probes pin the same rule. The 302 surfaces as its own non-2xx error.
+    expect(error).toBeInstanceOf(RpcHttpStatusError);
+    if (!(error instanceof RpcHttpStatusError)) throw new Error("narrowing");
+    expect(error.httpStatus).toBe(302);
+    expect(reachedTarget).toBe(false);
+  });
+});
+
+describe("createPrivateChannelAuthFetch", () => {
+  const servers: ReturnType<typeof createServer>[] = [];
+
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
+  });
+
+  /** A loopback server the test can approve explicitly, the way an operator would. */
+  async function startServer(
+    handler: Parameters<typeof createServer>[1]
+  ): Promise<{ origin: string }> {
+    const server = createServer(handler);
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    // SAFETY: the server listens on 127.0.0.1 with an ephemeral port, so the
+    // address is the AddressInfo form, never a pipe string or null.
+    const { port } = server.address() as AddressInfo;
+    return { origin: `http://127.0.0.1:${port}` };
+  }
+
+  it("refuses a destination that is not on the allowlist, without dialling it", async () => {
+    let dialled = false;
+    const { origin } = await startServer(() => {
+      dialled = true;
+    });
+    const fetchImpl = createPrivateChannelAuthFetch(envWith(ALLOWED));
+
+    await expect(fetchImpl(`${origin}/challenge`, { method: "POST" })).rejects.toThrow(
+      /not on this deployment's approved/i
+    );
+    expect(dialled).toBe(false);
+  });
+
+  it("reaches an approved origin like a normal fetch", async () => {
+    const { origin } = await startServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ challenge: "abc" }));
+    });
+    const fetchImpl = createPrivateChannelAuthFetch(envWith(origin));
+
+    const response = await fetchImpl(`${origin}/challenge`, { method: "POST" });
+
+    expect(response.ok).toBe(true);
+    await expect(response.json()).resolves.toEqual({ challenge: "abc" });
+  });
+
+  it("takes a URL, not a Request — there is no body stream to guard", async () => {
+    const fetchImpl = createPrivateChannelAuthFetch(envWith(ALLOWED));
+
+    await expect(
+      fetchImpl(new Request(`${ALLOWED}/challenge`, { method: "POST" }))
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("does not follow a redirect off the approved origin", async () => {
+    let reachedTarget = false;
+    const { origin: target } = await startServer((_req, res) => {
+      reachedTarget = true;
+      res.end("secret");
+    });
+    const { origin } = await startServer((_req, res) => {
+      res.writeHead(302, { Location: `${target}/latest/meta-data/` });
+      res.end();
+    });
+    const fetchImpl = createPrivateChannelAuthFetch(envWith(`${origin},${target}`));
+
+    const response = await fetchImpl(`${origin}/challenge`, { method: "POST" });
+
+    // Even with the redirect target itself approved, the hop is not taken: the
+    // auth client sees the 302 and classifies the attempt as failed.
+    expect(response.status).toBe(302);
+    expect(response.ok).toBe(false);
+    expect(reachedTarget).toBe(false);
+  });
+
+  it("refuses a body it cannot send rather than sending an empty one", async () => {
+    let dialled = false;
+    const { origin } = await startServer((_req, res) => {
+      dialled = true;
+      res.end("{}");
+    });
+    const fetchImpl = createPrivateChannelAuthFetch(envWith(origin));
+
+    await expect(
+      fetchImpl(`${origin}/challenge`, { method: "POST", body: new URLSearchParams({ a: "b" }) })
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(dialled).toBe(false);
   });
 });

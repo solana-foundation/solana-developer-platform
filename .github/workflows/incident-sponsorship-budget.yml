@@ -1,0 +1,251 @@
+# Incident response: Kora sponsorship kill switch and budgets (sponsorship:budget),
+# run against prod/stage from CI because Cloud SQL and Redis are private-IP only.
+#
+# Gating: `status` and `kill` run with the deploy credentials alone, so on-call can
+# shut sponsorship off instantly. `resume` and `set` on prod first require a
+# release-production approval (a second person: the environment prevents
+# self-review). Stage is ungated, for drills.
+#
+# Requires the sdp-<env>-incident-ops Cloud Run job (sdp-infra): same VPC, service
+# account, DATABASE_URL/REDIS_URL wiring as the migrate job, command pinned to
+# ["node", "incident-ops.js"]. This workflow only overrides the execution args, and
+# that entrypoint only dispatches to the allowlisted incident scripts.
+name: Incident — sponsorship budget
+
+run-name: "Sponsorship ${{ inputs.action }} — ${{ inputs.target }} ${{ inputs.network }} — ${{ github.actor }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment to act on"
+        type: choice
+        options: [prod, stage]
+        required: true
+      action:
+        description: "status lists every policy; kill disables the global policy now; resume re-enables it (approval + expected_version); set upserts one policy (approval + expected_version)"
+        type: choice
+        options: [status, kill, resume, set]
+        required: true
+      network:
+        description: "Solana network the policy applies to"
+        type: choice
+        options: [mainnet, devnet]
+        required: true
+      reason:
+        description: "Why (recorded on the policy row) — required for kill/resume/set"
+        type: string
+      scope:
+        description: "set only: policy scope"
+        type: choice
+        options: [global, organization, project]
+        default: global
+      scope_id:
+        description: "set only: organization or project id when the scope is not global"
+        type: string
+      enabled:
+        description: "set only: leave the policy enabled"
+        type: boolean
+        default: true
+      limits:
+        description: "set only: per-transaction,hourly,daily lamports limits, comma-separated"
+        type: string
+      expected_version:
+        description: "resume/set only: policy version shown by status (0 if the policy does not exist yet), so a racing kill wins"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate and stage the command
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      args: ${{ steps.compose.outputs.args }}
+      gated: ${{ steps.compose.outputs.gated }}
+    steps:
+      - name: Compose the allowlisted command
+        id: compose
+        env:
+          TARGET: ${{ inputs.target }}
+          ACTION: ${{ inputs.action }}
+          NETWORK: ${{ inputs.network }}
+          REASON: ${{ inputs.reason }}
+          SCOPE: ${{ inputs.scope }}
+          SCOPE_ID: ${{ inputs.scope_id }}
+          ENABLED: ${{ inputs.enabled }}
+          LIMITS: ${{ inputs.limits }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          OPERATOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${OPERATOR}" =~ ^[A-Za-z0-9-]{1,39}$ ]]; then
+            echo "Unexpected actor login." >&2; exit 1
+          fi
+          # The args list is |-delimited, so inputs may not carry | ^ quotes or control chars.
+          text_re='^[A-Za-z0-9][A-Za-z0-9 ._,:;/#()-]{3,199}$'
+          check_text() {
+            local name="$1" value="$2"
+            if [[ ! "${value}" =~ ${text_re} ]]; then
+              echo "${name} must be 4-200 chars of letters, digits, spaces and ._,:;/#()- and start with a letter or digit." >&2
+              exit 1
+            fi
+          }
+          check_lamports() {
+            local name="$1" value="$2"
+            if [[ ! "${value}" =~ ^[0-9]{1,15}$ ]]; then
+              echo "${name} must be a plain integer number of lamports." >&2
+              exit 1
+            fi
+          }
+          # resume and set carry the version read from status, so a kill that
+          # lands after dispatch (or during the approval wait) wins over them.
+          check_expected_version() {
+            if [[ ! "${EXPECTED_VERSION}" =~ ^[0-9]{1,9}$ ]]; then
+              echo "expected_version must be the non-negative integer version shown by status (0 if no policy exists)." >&2
+              exit 1
+            fi
+          }
+          args=(sponsorship-budget "${ACTION}" --network "${NETWORK}")
+          if [[ "${ACTION}" != "status" ]]; then
+            check_text reason "${REASON}"
+          fi
+          if [[ "${ACTION}" == "kill" || "${ACTION}" == "resume" ]]; then
+            args+=(--operator "github:${OPERATOR}" --reason "${REASON}")
+          fi
+          if [[ "${ACTION}" == "resume" ]]; then
+            check_expected_version
+            args+=(--expected-version "${EXPECTED_VERSION}")
+          fi
+          if [[ "${ACTION}" == "set" ]]; then
+            check_expected_version
+            IFS=',' read -r PER_TX_LAMPORTS HOURLY_LAMPORTS DAILY_LAMPORTS extra <<< "${LIMITS}"
+            if [[ -n "${extra:-}" ]]; then
+              echo "limits must be exactly three comma-separated lamports values." >&2
+              exit 1
+            fi
+            check_lamports per_tx_lamports "${PER_TX_LAMPORTS:-}"
+            check_lamports hourly_lamports "${HOURLY_LAMPORTS:-}"
+            check_lamports daily_lamports "${DAILY_LAMPORTS:-}"
+            args+=(--scope "${SCOPE}")
+            if [[ "${SCOPE}" != "global" ]]; then
+              if [[ ! "${SCOPE_ID}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+                echo "scope_id is required for a non-global scope." >&2
+                exit 1
+              fi
+              args+=(--scope-id "${SCOPE_ID}")
+            elif [[ -n "${SCOPE_ID}" ]]; then
+              echo "scope_id is not valid for the global scope." >&2
+              exit 1
+            fi
+            args+=(--enabled "${ENABLED}")
+            args+=(--per-tx-lamports "${PER_TX_LAMPORTS}")
+            args+=(--hourly-lamports "${HOURLY_LAMPORTS}")
+            args+=(--daily-lamports "${DAILY_LAMPORTS}")
+            args+=(--expected-version "${EXPECTED_VERSION}")
+            args+=(--operator "github:${OPERATOR}" --reason "${REASON}")
+          fi
+          joined="$(IFS='|'; echo "${args[*]}")"
+          echo "args=${joined}" >> "${GITHUB_OUTPUT}"
+          gated=false
+          if [[ "${TARGET}" == "prod" && ( "${ACTION}" == "resume" || "${ACTION}" == "set" ) ]]; then
+            gated=true
+          fi
+          echo "gated=${gated}" >> "${GITHUB_OUTPUT}"
+          printf 'This run executes on %s:\n\n    incident-ops %s\n' "${TARGET}" "${args[*]}" >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${gated}" == "true" ]]; then
+            echo "Re-enabling or changing a policy on prod waits for release-production approval." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  approve:
+    name: Re-enable approval
+    needs: validate
+    if: needs.validate.outputs.gated == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: release-production
+    concurrency:
+      group: sdp-incident-ops-approval
+      cancel-in-progress: true
+    steps:
+      - name: Record the approved command
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: |
+          echo "Approved sponsorship-budget command on prod: ${ARGS//|/ }" >> "${GITHUB_STEP_SUMMARY}"
+
+  run-prod:
+    name: Run on prod
+    needs: [validate, approve]
+    if: >-
+      always() && inputs.target == 'prod' &&
+      needs.validate.result == 'success' &&
+      (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    # Executions serialize per target at the job, not the workflow: a gated run
+    # waiting on approval must never block an emergency kill.
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
+    env:
+      PROJECT_ID: solana-developer-platform
+      REGION: us-central1
+      OPS_JOB: sdp-prod-incident-ops
+      MIGRATE_JOB: sdp-prod-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh
+
+  run-stage:
+    name: Run on stage
+    needs: [validate]
+    if: inputs.target == 'stage' && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: sdp-incident-ops-run-${{ inputs.target }}
+      cancel-in-progress: false
+    env:
+      PROJECT_ID: solana-developer-platform-stg
+      REGION: us-central1
+      OPS_JOB: sdp-stage-incident-ops
+      MIGRATE_JOB: sdp-stage-api-public-migrate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.STAGE_DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.STAGE_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Execute the incident-ops job
+        env:
+          ARGS: ${{ needs.validate.outputs.args }}
+        run: bash scripts/ci/run-incident-ops.sh

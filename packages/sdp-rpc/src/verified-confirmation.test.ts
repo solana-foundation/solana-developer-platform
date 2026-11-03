@@ -15,6 +15,7 @@ import {
 } from "@solana/kit";
 import type { SolanaRpc } from "./solana";
 import {
+  fetchFailedError,
   type JsonParsedTransactionResponse,
   jsonParsedTransactionMeta,
   jsonParsedTransactionResponse,
@@ -168,7 +169,7 @@ test("retries a transient status failure instead of surfacing it", async () => {
     getSignatureStatuses: () => ({
       send: async () => {
         calls += 1;
-        if (calls === 1) throw new Error("fetch failed");
+        if (calls === 1) throw fetchFailedError();
         return { context: { slot: 100n }, value: [CONFIRMED_STATUS] };
       },
     }),

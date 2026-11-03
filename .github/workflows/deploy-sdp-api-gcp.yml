@@ -69,4 +69,3 @@ jobs:
           # runs, so this fails the deploy instead of skipping.
           gcloud run services update "${WORKER_SERVICE}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
-

@@ -34,7 +34,7 @@ export interface DvpLegFundingClaim {
   fundingTx: string | null;
 }
 
-export interface DvpLegFundingClaimInsert {
+interface DvpLegFundingClaimInsert {
   tradeId: string;
   side: "a" | "b";
   organizationId: string;

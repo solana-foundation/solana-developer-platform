@@ -51,7 +51,87 @@ function isBlockedIpv6(address: string): boolean {
   if (/^fe[89ab][0-9a-f]:/.test(host)) return true; // link-local
   if (/^ff[0-9a-f]{2}:/.test(host)) return true; // multicast
 
+  // Further prefixes embed an IPv4 address in their last 32 bits, so the
+  // embedded address is classified as IPv4: the deprecated IPv4-compatible
+  // (`::a.b.c.d`) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, and NAT64
+  // (`64:ff9b::/96`), which a dual-stack host routes to a real IPv4 target.
+  // The local-use NAT64 prefix (`64:ff9b:1::/48`) embeds its IPv4 at a
+  // different offset and is not classified here.
+  const groups = parseIpv6Groups(host);
+  if (groups) {
+    for (const prefix of EMBEDDED_IPV4_PREFIXES) {
+      const embedded = embeddedIpv4(groups, prefix);
+      if (embedded !== null && isBlockedIpv4(embedded)) {
+        return true;
+      }
+    }
+  }
+
   return false;
+}
+
+/** Prefixes whose last 32 bits carry an embedded IPv4 address, as 16-bit groups. */
+const EMBEDDED_IPV4_PREFIXES: readonly (readonly number[])[] = [
+  [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000], // ::/96 (deprecated IPv4-compatible)
+  [0x0000, 0x0000, 0x0000, 0x0000, 0xffff, 0x0000], // ::ffff:0:0/96 (deprecated IPv4-translated)
+  [0x0064, 0xff9b, 0x0000, 0x0000, 0x0000, 0x0000], // 64:ff9b::/96 (NAT64 well-known)
+];
+
+/** The eight 16-bit groups of one expanded IPv6 address. */
+type Ipv6Groups = readonly [number, number, number, number, number, number, number, number];
+
+/**
+ * Expand a textual IPv6 address into its eight 16-bit groups, or null when it
+ * is not an IPv6 address Node could have canonicalised. Accepts the compressed
+ * `::` form and an optional trailing dotted-quad (`::127.0.0.1`).
+ */
+function parseIpv6Groups(host: string): Ipv6Groups | null {
+  const halves = host.split("::");
+  if (halves.length > 2) return null;
+  const head = parseIpv6GroupList(halves[0] ?? "");
+  const tail = parseIpv6GroupList(halves.length === 2 ? (halves[1] ?? "") : "");
+  if (head === null || tail === null) return null;
+
+  const fill = 8 - head.length - tail.length;
+  // Without `::` the explicit groups must be exactly eight; with it, at least one.
+  if (fill < 0 || (halves.length === 1 && fill !== 0) || (halves.length === 2 && fill === 0)) {
+    return null;
+  }
+  // The fill check above makes head, fill and tail total exactly eight groups,
+  // so each name below is a present group.
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = [...head, ...Array<number>(fill).fill(0), ...tail];
+  return [g0, g1, g2, g3, g4, g5, g6, g7];
+}
+
+/** Parse one `::`-free run of groups; the last may be a dotted quad. */
+function parseIpv6GroupList(run: string): readonly number[] | null {
+  if (run === "") return [];
+  const parts = run.split(":");
+  const groups: number[] = [];
+  for (const [index, part] of parts.entries()) {
+    const dotted = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(part);
+    if (dotted?.[1]) {
+      // A dotted quad may only appear as the final group pair.
+      if (index !== parts.length - 1) return null;
+      const octets = dotted.slice(1).map(Number);
+      if (octets.some((octet) => !Number.isInteger(octet) || octet > 255)) return null;
+      groups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+      return groups;
+    }
+    if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+    groups.push(Number.parseInt(part, 16));
+  }
+  return groups;
+}
+
+/** The address's last 32 bits as a dotted quad when the address carries `prefix`, else null. */
+function embeddedIpv4(groups: Ipv6Groups, prefix: readonly number[]): string | null {
+  for (const [index, group] of prefix.entries()) {
+    if (groups[index] !== group) return null;
+  }
+  const high = groups[6];
+  const low = groups[7];
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].map(String).join(".");
 }
 
 /**

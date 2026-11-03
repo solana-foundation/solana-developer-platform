@@ -13,17 +13,13 @@ import { signature } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { buildDvpTradeRow } from "@/test/fixtures/dvp";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const recordObservation = vi.hoisted(() => vi.fn());
 const readDvpTradeObservation = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn(() => ({ send: async () => 100n })));
 const resolveDvpClose = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight }),
-  confirmTransaction: vi.fn(),
-}));
 vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/repositories/repository-factory")>()),
   createDvpTradeRepository: () => ({ recordObservation }),
@@ -46,6 +42,10 @@ const CLOSED_REREAD_STATUSES = [
   "closed_unknown",
 ] as const satisfies readonly DvpTradeStatus[];
 
+function observeInSandbox(row: DvpTradeRow) {
+  return inSandboxScope(() => observeDvpTradeIfStale(env, row, NOW));
+}
+
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return buildDvpTradeRow({
     id: "dvp_observe",
@@ -56,8 +56,11 @@ function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
 }
 
 describe("observeDvpTradeIfStale", () => {
+  const clusterRpc = installClusterRpcStub();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    clusterRpc.answer("getBlockHeight", 100);
     readDvpTradeObservation.mockResolvedValue({
       tradeAccountExists: true,
       legA: { exists: true, amount: 1n, frozen: false },
@@ -71,7 +74,7 @@ describe("observeDvpTradeIfStale", () => {
   });
 
   it("re-reads an open trade whose last reading has aged out", async () => {
-    const result = await observeDvpTradeIfStale(env, trade(), NOW);
+    const result = await observeInSandbox(trade());
 
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("funded");
@@ -80,11 +83,7 @@ describe("observeDvpTradeIfStale", () => {
   // The pairing with the page's poll interval is the whole cost control: most
   // polls must be answered from the row, not from the cluster.
   it("answers from the row when the reading is recent", async () => {
-    await observeDvpTradeIfStale(
-      env,
-      trade({ observedAt: new Date(NOW - 1_000).toISOString() }),
-      NOW
-    );
+    await observeInSandbox(trade({ observedAt: new Date(NOW - 1_000).toISOString() }));
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
@@ -93,7 +92,7 @@ describe("observeDvpTradeIfStale", () => {
   // gives NaN, and NaN comparisons are false — so "recent enough" must not be
   // what an unparseable timestamp falls through to.
   it("reads a trade that has never been observed", async () => {
-    await observeDvpTradeIfStale(env, trade({ observedAt: null }), NOW);
+    await observeInSandbox(trade({ observedAt: null }));
 
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
@@ -101,23 +100,19 @@ describe("observeDvpTradeIfStale", () => {
   // An expired trade's escrows still exist: a reclaim can drain one and a
   // deposit can land, and the counterparty's page has no other way to see it.
   it("re-reads an expired trade on the open cadence", async () => {
-    await observeDvpTradeIfStale(
-      env,
-      trade({ status: "expired", observedAt: new Date(NOW - 5_000).toISOString() }),
-      NOW
+    await observeInSandbox(
+      trade({ status: "expired", observedAt: new Date(NOW - 5_000).toISOString() })
     );
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
 
-    await observeDvpTradeIfStale(
-      env,
-      trade({ status: "expired", observedAt: new Date(NOW - 11_000).toISOString() }),
-      NOW
+    await observeInSandbox(
+      trade({ status: "expired", observedAt: new Date(NOW - 11_000).toISOString() })
     );
     expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
   });
 
   it.each(NEVER_REREAD_STATUSES)("never spends a chain read on a %s trade", async (status) => {
-    await observeDvpTradeIfStale(env, trade({ status }), NOW);
+    await observeInSandbox(trade({ status }));
 
     expect(readDvpTradeObservation).not.toHaveBeenCalled();
   });
@@ -125,11 +120,7 @@ describe("observeDvpTradeIfStale", () => {
   it.each(CLOSED_REREAD_STATUSES)(
     "answers a recently observed %s trade from the row",
     async (status) => {
-      await observeDvpTradeIfStale(
-        env,
-        trade({ status, observedAt: new Date(NOW - 30_000).toISOString() }),
-        NOW
-      );
+      await observeInSandbox(trade({ status, observedAt: new Date(NOW - 30_000).toISOString() }));
 
       expect(readDvpTradeObservation).not.toHaveBeenCalled();
     }
@@ -138,11 +129,7 @@ describe("observeDvpTradeIfStale", () => {
   it.each(CLOSED_REREAD_STATUSES)(
     "re-reads a %s trade after the closed cadence elapses",
     async (status) => {
-      await observeDvpTradeIfStale(
-        env,
-        trade({ status, observedAt: new Date(NOW - 90_000).toISOString() }),
-        NOW
-      );
+      await observeInSandbox(trade({ status, observedAt: new Date(NOW - 90_000).toISOString() }));
 
       expect(readDvpTradeObservation).toHaveBeenCalledTimes(1);
     }
@@ -158,14 +145,12 @@ describe("observeDvpTradeIfStale", () => {
       closeResolution: null,
     });
 
-    await observeDvpTradeIfStale(
-      env,
+    await observeInSandbox(
       trade({
         status: "settled",
         closeSignature: signature("1".repeat(64)),
         observedAt: new Date(NOW - 90_000).toISOString(),
-      }),
-      NOW
+      })
     );
 
     expect(resolveDvpClose).not.toHaveBeenCalled();
@@ -176,7 +161,7 @@ describe("observeDvpTradeIfStale", () => {
   it("falls back to the stored row when the chain cannot be read", async () => {
     readDvpTradeObservation.mockRejectedValue(new Error("rpc down"));
 
-    const result = await observeDvpTradeIfStale(env, trade(), NOW);
+    const result = await observeInSandbox(trade());
 
     expect(result.status).toBe("partially_funded");
   });

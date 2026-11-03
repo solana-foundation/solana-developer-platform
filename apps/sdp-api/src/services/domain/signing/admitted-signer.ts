@@ -1,3 +1,5 @@
+import { SigningError } from "@sdp/custody/signing";
+import type { CustodyProvider } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
 import {
   assertIsTransactionSigner,
@@ -8,13 +10,30 @@ import {
   isTransactionSendingSigner,
   type TransactionSigner,
 } from "@solana/kit";
+import { custodyPolicyRefused } from "@/lib/errors";
 import { assertMovementAdmitted, type MoneyAdmissionDecision } from "@/lib/money-admission";
+
+/**
+ * Rethrows a custody signing failure, as the API's `CUSTODY_POLICY_REFUSED` when the provider's
+ * policy refused the signature and unchanged otherwise.
+ *
+ * @param error - What the custody signing call rejected with.
+ * @param provider - The provider resolved for this custody wallet.
+ * @returns Never; it always throws.
+ */
+function rethrowPolicyRefusal(error: unknown, provider: CustodyProvider): never {
+  if (error instanceof SigningError && error.code === "POLICY_REFUSED") {
+    throw custodyPolicyRefused(error, provider);
+  }
+  throw error;
+}
 
 export interface AdmittedSignerContext {
   movement: MovementId;
   organizationId: string;
   projectId: string;
   custodyWalletId: string;
+  provider: CustodyProvider;
 }
 
 /**
@@ -31,12 +50,16 @@ export interface AdmittedSignerContext {
  * confirms an earlier signature working: several flows resolve a signer before
  * they know whether they still need one. The wrapper offers exactly the
  * signing kinds the real signer does, so the kit guards classify it the same.
+ * It is also where a custody provider's policy refusal becomes the API's 422
+ * `CUSTODY_POLICY_REFUSED` (HOO-2333), once, for every flow that signs, with
+ * the provider's `SigningError` as its cause.
  */
 export function admittedSigner(
   signer: TransactionSigner,
   decide: () => Promise<MoneyAdmissionDecision>,
   context: AdmittedSignerContext
 ): TransactionSigner {
+  const rethrow = (error: unknown): never => rethrowPolicyRefusal(error, context.provider);
   const admit = async () => {
     assertMovementAdmitted(await decide(), {
       surface: "signer",
@@ -52,7 +75,7 @@ export function admittedSigner(
       ? {
           signTransactions: async (...args: Parameters<typeof signer.signTransactions>) => {
             await admit();
-            return signer.signTransactions(...args);
+            return signer.signTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -62,7 +85,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.modifyAndSignTransactions>
           ) => {
             await admit();
-            return signer.modifyAndSignTransactions(...args);
+            return signer.modifyAndSignTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -72,7 +95,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.signAndSendTransactions>
           ) => {
             await admit();
-            return signer.signAndSendTransactions(...args);
+            return signer.signAndSendTransactions(...args).catch(rethrow);
           },
         }
       : {}),
@@ -80,7 +103,7 @@ export function admittedSigner(
       ? {
           signMessages: async (...args: Parameters<typeof signer.signMessages>) => {
             await admit();
-            return signer.signMessages(...args);
+            return signer.signMessages(...args).catch(rethrow);
           },
         }
       : {}),
@@ -90,7 +113,7 @@ export function admittedSigner(
             ...args: Parameters<typeof signer.modifyAndSignMessages>
           ) => {
             await admit();
-            return signer.modifyAndSignMessages(...args);
+            return signer.modifyAndSignMessages(...args).catch(rethrow);
           },
         }
       : {}),

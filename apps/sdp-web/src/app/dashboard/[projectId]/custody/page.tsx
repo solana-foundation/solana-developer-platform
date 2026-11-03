@@ -9,11 +9,8 @@ import {
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { availableCustodyProviders } from "@/lib/provider-availability";
-import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
@@ -21,8 +18,6 @@ import {
   type SdpApiClient,
 } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
-import { CurrentCustodyPage as RedesignCurrentCustodyPage } from "./page.redesign";
-import type { CustodyAvailabilityResult } from "./wallets-create-area";
 import { WalletsWorkspace } from "./wallets-workspace";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -32,6 +27,20 @@ function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
     (value) => ({ ok: true, value }),
     (error) => ({ ok: false, error })
   );
+}
+
+/** A failed read's message, or the fallback when what it threw was not an Error. */
+function settledError(result: SettledResult<unknown>, fallback: string): string | null {
+  if (result.ok) return null;
+  return result.error instanceof Error ? result.error.message : fallback;
+}
+
+/** The providers with an active config that the catalogue knows. */
+function activeKnownProviders(configs: readonly CustodyConfigSummary[]): KnownCustodyProvider[] {
+  return configs
+    .filter((config) => config.status === "active")
+    .map((config) => config.provider)
+    .filter(isKnownCustodyProvider);
 }
 
 async function getCustodyConfigs(
@@ -65,8 +74,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-// react-doctor-disable-next-line no-high-complexity-react-function -- main's page, unchanged; this change only moves its default export to the design switch
-async function CustodyPage() {
+export default async function CustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -99,46 +107,26 @@ async function CustodyPage() {
       );
     }
 
-    const [configsResult, walletsResult, providerAvailabilityResult] = await Promise.all([
+    const [configsResult, walletsResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
-      trace.step("fetch_provider_availability", () =>
-        settle(fetchProjectProviderAvailability(projectClient))
-      ),
     ]);
 
-    const connectedProviders: KnownCustodyProvider[] = configsResult.ok
-      ? configsResult.value.configs
-          .filter((config) => config.status === "active")
-          .map((config) => config.provider)
-          .filter(isKnownCustodyProvider)
+    const connectedProviders = configsResult.ok
+      ? activeKnownProviders(configsResult.value.configs)
       : [];
-
-    const configsError = configsResult.ok
-      ? null
-      : configsResult.error instanceof Error
-        ? configsResult.error.message
-        : t("DashboardCustody.unableToLoadWalletProviders");
-    const walletsError = walletsResult.ok
-      ? null
-      : walletsResult.error instanceof Error
-        ? walletsResult.error.message
-        : t("DashboardCustody.unableToLoadWallets");
-    // Availability only drives the create area, so a failed read closes that
-    // area instead of taking down the existing wallets.
-    const custodyAvailability: CustodyAvailabilityResult = providerAvailabilityResult.ok
-      ? { ok: true, providers: availableCustodyProviders(providerAvailabilityResult.value) }
-      : { ok: false };
+    const configsError = settledError(
+      configsResult,
+      t("DashboardCustody.unableToLoadWalletProviders")
+    );
+    const walletsError = settledError(walletsResult, t("DashboardCustody.unableToLoadWallets"));
+    const wallets = walletsResult.ok ? walletsResult.value : [];
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      availableProviderCount: custodyAvailability.ok ? custodyAvailability.providers.length : null,
-      providerAvailabilityError: providerAvailabilityResult.ok
-        ? null
-        : String(providerAvailabilityResult.error),
-      walletCount: walletsResult.ok ? walletsResult.value.length : 0,
+      walletCount: wallets.length,
     });
 
     return (
@@ -146,9 +134,8 @@ async function CustodyPage() {
         <WalletsWorkspace
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           connectedProviders={connectedProviders}
-          custodyAvailability={custodyAvailability}
           configsError={configsError}
-          wallets={walletsResult.ok ? walletsResult.value : []}
+          wallets={wallets}
           walletsError={walletsError}
         />
       </Suspense>
@@ -161,5 +148,3 @@ async function CustodyPage() {
     throw error;
   }
 }
-
-export default withLegacyDesign(RedesignCurrentCustodyPage, CustodyPage, "wallets");

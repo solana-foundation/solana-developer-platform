@@ -17,7 +17,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { offersCustodyMode } from "@/lib/provider-availability";
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 
 // The lifecycle view changes under other people — a rotation in a sibling
 // project retires the credential this page is showing — so it is never served
@@ -41,7 +41,7 @@ export default async function CustodyConnectionPage({
     notFound();
   }
 
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -49,7 +49,7 @@ export default async function CustodyConnectionPage({
     redirect("/dashboard");
   }
 
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
   // The internal custody routes are `custody:admin` for reads as well as
   // writes, so a member would get 403 on every request this page makes. Send
   // them back to the provider page, which tells them which role they need

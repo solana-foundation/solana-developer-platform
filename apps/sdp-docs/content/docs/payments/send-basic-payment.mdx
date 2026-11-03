@@ -95,7 +95,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
@@ -114,7 +114,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "payment-invoice-1234",
     },
@@ -135,7 +135,7 @@ const { data } = await response.json();
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -181,10 +181,7 @@ Click the record to see full details including the Solana Explorer link.
 
 Poll status for async confirmations:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sk_test_..."
-```
+<ApiExample operation="get-payment-transfer" />
 
 </Tab>
 </Tabs>
@@ -194,13 +191,27 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 </HowItWorks>
 
+## Pay a counterparty
+
+When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
+
+The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
+
+## SOL and the rent-exempt minimum
+
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL). SDP refuses a native SOL transfer with `409 AMOUNT_BELOW_RENT_MINIMUM` if it would fund an empty address below that minimum or leave the source with a nonzero balance below it. Nothing is written or sent.
+
+`details.recipientIndexes` (`[0]`) or `details.sourceRemainder` identifies the problem; `details.minimumAmount` gives the minimum. Fund the address, send at least the minimum, or send the source wallet's whole balance. The `409` is not stored under the `Idempotency-Key`, so the same request can run after the balance changes. Token transfers are unaffected: SDP sponsors rent for a missing token account.
+
 ## Deduplication
 
-`POST /v1/payments/transfers` requires an `Idempotency-Key`: a request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. Send one stable key per logical payment and reuse it for every retry. A retry with the same key and request returns the original transfer instead of sending a second one; reusing the key with a different payload, wallet or credential returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A transfer that fails after it was recorded (such as `400 TRANSACTION_FAILED`) answers every same-key retry with the same error; send a new key to try again. A replay is a snapshot, so read the transfer with `GET` to see whether it has finalized. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
+`POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
+
+A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
-See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries-for-single-transfers) for the same pattern applied to a run of transfers.
 
 ## Related
 

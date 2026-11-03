@@ -30,19 +30,27 @@ describe("API playground module coverage", () => {
         wallets: [],
         t,
       }),
-      payments: buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t),
+      payments: buildPaymentsPlaygroundEndpointConfigs(
+        { transfers: [], wallets: [], rampProviders: [] },
+        t
+      ),
       counterparties: buildCounterpartyPlaygroundEndpointConfigs([], t),
       issuance: buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
     };
 
     for (const [module, configs] of Object.entries(configsByModule)) {
       const configuredKeys = new Set(configs.map(operationKey));
-      const publicKeys = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule).map(
-        operationKey
-      );
+      const publicEndpoints = getOpenApiPlaygroundEndpoints(module as keyof typeof configsByModule);
+      const publicKeys = publicEndpoints.map(operationKey);
 
       expect(configuredKeys.size).toBe(configs.length);
       expect(publicKeys.every((key) => configuredKeys.has(key))).toBe(true);
+      for (const publicEndpoint of publicEndpoints) {
+        const form = configs.find(
+          (config) => operationKey(config) === operationKey(publicEndpoint)
+        );
+        expect(form?.referenceEndpointId ?? form?.id).toBe(publicEndpoint.id);
+      }
       for (const [otherModule, otherConfigs] of Object.entries(configsByModule)) {
         if (otherModule !== module) {
           const otherKeys = new Set(otherConfigs.map(operationKey));
@@ -63,7 +71,10 @@ describe("API playground release channel", () => {
     endpoints.map((endpoint) => endpoint.path.split("?", 1)[0]);
 
   it("offers no ramp form, curated or generated, on a stable deployment", () => {
-    const payments = buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t);
+    const payments = buildPaymentsPlaygroundEndpointConfigs(
+      { transfers: [], wallets: [], rampProviders: [] },
+      t
+    );
     expect(paths(payments)).toContain("/v1/payments/ramps/onramp/quote");
 
     const stable = paths(filterPlaygroundEndpointsToReleaseChannel(payments, "stable"));
@@ -121,7 +132,7 @@ describe("API playground release channel", () => {
   it("filters every playground's forms on every channel without rejecting their examples", () => {
     const builders = [
       buildWalletsPlaygroundEndpointConfigs({ connectedProviders: [], wallets: [], t }),
-      buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t),
+      buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [], rampProviders: [] }, t),
       buildCounterpartyPlaygroundEndpointConfigs([], t),
       buildIssuancePlaygroundEndpointConfigs({ templates: [], tokens: [], t }),
     ];
@@ -194,7 +205,10 @@ describe("API playground allowlist", () => {
   });
 
   it("does not offer a hand-authored form whose operation is not published", () => {
-    const payments = buildPaymentsPlaygroundEndpointConfigs({ transfers: [], wallets: [] }, t);
+    const payments = buildPaymentsPlaygroundEndpointConfigs(
+      { transfers: [], wallets: [], rampProviders: [] },
+      t
+    );
     expect(paths(payments)).toContain("/v1/payments/ramps/offramp/quote");
     expect(
       paths(filterPlaygroundEndpointsToReleaseChannel(payments, "experimental"))

@@ -1,18 +1,47 @@
 ---
 title: API Reference
-description: Endpoint index from the repository OpenAPI spec.
+description: Choose an API family to explore its endpoints.
 ---
 
-<div>
-  <a href="/docs/postman/collection.json" download>Download Postman collection</a>
-  {" · "}
-  <a href="/docs/postman/collection.json">Open raw JSON</a>
-</div>
+<ApiFamilyList>
 
 - [Health](/docs/reference/api/health)
+
+  Service health and readiness endpoints.
+
 - [Wallets](/docs/reference/api/wallets)
+
+  Wallet signing provider configuration and wallet management.
+
 - [Projects](/docs/reference/api/projects)
+
+  Projects and their provider availability.
+
 - [Issuance](/docs/reference/api/issuance)
+
+  Token issuance, allowlists, and lifecycle operations.
+
 - [Payments](/docs/reference/api/payments)
+
+  Wallet balances, transfers, and payment flows.
+
 - [Compliance](/docs/reference/api/compliance)
+
+  Risk and compliance screening endpoints.
+
+- [Counterparties](/docs/reference/api/counterparties)
+
+  A counterparty is a person or business you pay or get paid by.
+
 - [Asset Profiles](/docs/reference/api/asset-profiles)
+
+  Issued-asset identity and metadata profiles, plus the public token metadata URI.
+
+</ApiFamilyList>
+
+[API conventions](/docs/reference/conventions) cover authentication, environments, idempotency, errors, pagination, rate limits, and versioning.
+
+<ActionLinks>
+  <a href="/docs/postman/collection.json" download>Download Postman collection</a>
+  <a href="/docs/postman/collection.json">Open raw JSON</a>
+</ActionLinks>

@@ -9,69 +9,58 @@ import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-type EarnRouteDeclaration = {
-  readonly tier: "keyless" | "keyed";
-  readonly action: Action;
-};
-
-const keyless = (action: Action) =>
-  ({ tier: "keyless", action }) as const satisfies EarnRouteDeclaration;
-
-const keyed = (action: Action) =>
-  ({ tier: "keyed", action }) as const satisfies EarnRouteDeclaration;
-
 /**
  * Each Earn route's one action (coarse until Earn is promoted: reads `read`,
  * cancels and program setup `manage`, builds, submits and movements `execute`).
  */
-const EARN_ROUTE_ACTIONS: Record<string, EarnRouteDeclaration> = {
-  "GET /strategies": keyless("earn.read"),
-  "GET /strategies/:strategyId": keyless("earn.read"),
-  "GET /external-wallet/positions/summary": keyed("earn.read"),
-  "GET /external-wallet/positions": keyed("earn.read"),
-  "GET /external-wallet/movements": keyed("earn.read"),
-  "GET /external-wallet/movements/:movementId": keyed("earn.read"),
-  "GET /external-wallet/earnings": keyed("earn.read"),
-  "POST /vault-deposits": keyed("earn.execute"),
-  "POST /vault-deposit-previews": keyless("earn.read"),
-  "GET /vault-deposits": keyed("earn.read"),
-  "GET /vault-deposits/:movementId": keyed("earn.read"),
-  "POST /vault-withdrawals": keyed("earn.execute"),
-  "POST /vault-withdrawal-previews": keyed("earn.read"),
-  "POST /vault-withdrawal-options": keyed("earn.read"),
-  "POST /vault-queued-withdrawal-previews": keyed("earn.read"),
-  "GET /vault-withdrawals": keyed("earn.read"),
-  "GET /vault-withdrawals/:movementId": keyed("earn.read"),
-  "POST /vault-withdrawal-requests": keyed("earn.execute"),
-  "GET /vault-withdrawal-requests": keyed("earn.read"),
-  "GET /vault-withdrawal-requests/:withdrawalRequestId": keyed("earn.read"),
-  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed("earn.execute"),
-  "GET /vault-positions": keyed("earn.read"),
-  "GET /vault-share-reconciliation": keyed("earn.read"),
-  "POST /external-wallet/deposit-transactions": keyless("earn.execute"),
-  "POST /external-wallet/deposits": keyed("earn.execute"),
-  "POST /external-wallet/withdrawal-previews": keyless("earn.read"),
-  "POST /external-wallet/withdrawal-transactions": keyless("earn.execute"),
-  "POST /external-wallet/withdrawal-options": keyless("earn.read"),
-  "POST /external-wallet/queued-withdrawal-previews": keyless("earn.read"),
-  "POST /external-wallet/withdrawal-request-transactions": keyed("earn.execute"),
-  "POST /external-wallet/withdrawal-request-cancel-transactions": keyed("earn.manage"),
-  "POST /external-wallet/withdrawals": keyed("earn.execute"),
-  "POST /external-wallet/withdrawal-requests": keyed("earn.execute"),
-  "POST /external-wallet/withdrawal-request-cancellations": keyed("earn.execute"),
-  "GET /external-wallet/withdrawal-requests": keyed("earn.read"),
-  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": keyed("earn.read"),
-  "GET /movements": keyed("earn.read"),
-  "GET /programs": keyed("earn.read"),
-  "POST /programs": keyed("earn.manage"),
-  "GET /programs/:programId": keyed("earn.read"),
-  "PUT /programs/:programId": keyed("earn.manage"),
-  "GET /programs/:programId/deposits": keyed("earn.read"),
-  "POST /programs/:programId/withdrawal-preview": keyed("earn.read"),
-  "POST /programs/:programId/withdrawals": keyed("earn.execute"),
-  "GET /programs/:programId/withdrawals": keyed("earn.read"),
-  "GET /programs/:programId/withdrawals/:withdrawalRef": keyed("earn.read"),
-};
+const EARN_ROUTE_ACTIONS = {
+  "GET /strategies": "earn.read",
+  "GET /strategies/:strategyId": "earn.read",
+  "GET /external-wallet/positions/summary": "earn.read",
+  "GET /external-wallet/positions": "earn.read",
+  "GET /external-wallet/movements": "earn.read",
+  "GET /external-wallet/movements/:movementId": "earn.read",
+  "GET /external-wallet/earnings": "earn.read",
+  "POST /vault-deposits": "earn.execute",
+  "POST /vault-deposit-previews": "earn.read",
+  "GET /vault-deposits": "earn.read",
+  "GET /vault-deposits/:movementId": "earn.read",
+  "POST /vault-withdrawals": "earn.execute",
+  "POST /vault-withdrawal-previews": "earn.read",
+  "POST /vault-withdrawal-options": "earn.read",
+  "POST /vault-queued-withdrawal-previews": "earn.read",
+  "GET /vault-withdrawals": "earn.read",
+  "GET /vault-withdrawals/:movementId": "earn.read",
+  "POST /vault-withdrawal-requests": "earn.execute",
+  "GET /vault-withdrawal-requests": "earn.read",
+  "GET /vault-withdrawal-requests/:withdrawalRequestId": "earn.read",
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": "earn.manage",
+  "GET /vault-positions": "earn.read",
+  "GET /vault-share-reconciliation": "earn.read",
+  "POST /external-wallet/deposit-transactions": "earn.execute",
+  "POST /external-wallet/deposits": "earn.execute",
+  "POST /external-wallet/withdrawal-previews": "earn.read",
+  "POST /external-wallet/withdrawal-transactions": "earn.execute",
+  "POST /external-wallet/withdrawal-options": "earn.read",
+  "POST /external-wallet/queued-withdrawal-previews": "earn.read",
+  "POST /external-wallet/withdrawal-request-transactions": "earn.execute",
+  "POST /external-wallet/withdrawal-request-cancel-transactions": "earn.manage",
+  "POST /external-wallet/withdrawals": "earn.execute",
+  "POST /external-wallet/withdrawal-requests": "earn.execute",
+  "POST /external-wallet/withdrawal-request-cancellations": "earn.execute",
+  "GET /external-wallet/withdrawal-requests": "earn.read",
+  "GET /external-wallet/withdrawal-requests/:withdrawalRequestId": "earn.read",
+  "GET /movements": "earn.read",
+  "GET /programs": "earn.read",
+  "POST /programs": "earn.manage",
+  "GET /programs/:programId": "earn.read",
+  "PUT /programs/:programId": "earn.manage",
+  "GET /programs/:programId/deposits": "earn.read",
+  "POST /programs/:programId/withdrawal-preview": "earn.read",
+  "POST /programs/:programId/withdrawals": "earn.execute",
+  "GET /programs/:programId/withdrawals": "earn.read",
+  "GET /programs/:programId/withdrawals/:withdrawalRef": "earn.read",
+} as const satisfies Record<string, Action>;
 
 const EARN_ACTIONS = actionsInModule("earn");
 
@@ -158,14 +147,12 @@ function requestAnonymously(route: string) {
 
 const ROUTES = Object.keys(EARN_ROUTE_ACTIONS).sort();
 
-const KEYLESS_ROUTES = ROUTES.filter((route) => EARN_ROUTE_ACTIONS[route].tier === "keyless");
-
-const KEYED_ROUTES = ROUTES.filter((route) => EARN_ROUTE_ACTIONS[route].tier === "keyed");
+const ACTION_BY_ROUTE: ReadonlyMap<string, Action> = new Map(Object.entries(EARN_ROUTE_ACTIONS));
 
 function actionFor(route: string): Action {
-  const declaration = EARN_ROUTE_ACTIONS[route];
-  assert(declaration);
-  return declaration.action;
+  const action = ACTION_BY_ROUTE.get(route);
+  assert(action);
+  return action;
 }
 
 function grantSetId(grants: readonly Action[]): string {
@@ -228,35 +215,8 @@ describe("earn route inventory", () => {
   });
 });
 
-describe("route tier conformance", () => {
-  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
-    "$route admits an anonymous caller",
-    async ({ route }) => {
-      const res = await requestAnonymously(route);
-      expect(res.status, `${route} unexpectedly required authentication`).not.toBe(401);
-      expect(res.status, `${route} unexpectedly required permissions`).not.toBe(403);
-    }
-  );
-  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
-    "$route rejects an invalid presented API key instead of silently downgrading",
-    async ({ route }) => {
-      const res = await requestAsKey(route, "sk_test_unknown_key", {});
-      expect(res.status, route).toBe(401);
-      const body = errorBodySchema.parse(await res.json());
-      expect(body.error.code, route).toBe("INVALID_API_KEY");
-    }
-  );
-  it.each(KEYLESS_ROUTES.map((route) => ({ route })))(
-    "$route rejects a malformed bearer token instead of returning an internal error",
-    async ({ route }) => {
-      const res = await requestAsKey(route, "invalid", {});
-      expect(res.status, route).toBe(401);
-      const body = errorBodySchema.parse(await res.json());
-      expect(body.error.code, route).toBe("UNAUTHORIZED");
-      expect(body.error.message, route).toBe("Invalid Clerk token");
-    }
-  );
-  it.each(KEYED_ROUTES.map((route) => ({ route })))(
+describe("credential conformance", () => {
+  it.each(ROUTES.map((route) => ({ route })))(
     "$route refuses an anonymous caller before its handler",
     async ({ route }) => {
       const res = await requestAnonymously(route);

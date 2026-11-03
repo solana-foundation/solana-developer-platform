@@ -32,6 +32,7 @@ import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { conflict } from "@/lib/errors";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
+import { inSandboxScope, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
@@ -78,8 +79,8 @@ vi.mock("@solana-program/token-2022", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
   fetchMaybeMint,
 }));
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({}),
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   getRecentBlockhash: async () => ({
     blockhash: "11111111111111111111111111111111",
     lastValidBlockHeight: 100n,
@@ -88,7 +89,11 @@ vi.mock("@sdp/rpc/solana", () => ({
   confirmTransaction,
 }));
 
-const { reclaimDvpTradeLeg } = await import("./reclaim");
+const { reclaimDvpTradeLeg: reclaimUnscoped } = await import("./reclaim");
+
+function reclaimDvpTradeLeg(...args: Parameters<typeof reclaimUnscoped>) {
+  return inSandboxScope(() => reclaimUnscoped(...args));
+}
 
 function trade(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
   return buildDvpTradeRow({
@@ -145,6 +150,8 @@ function sentInstructions() {
 }
 
 describe("reclaimDvpTradeLeg", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     vi.clearAllMocks();
     const sponsor = await createTestSponsor();

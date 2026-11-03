@@ -1,5 +1,4 @@
 import type { PrivateChannelRow } from "@sdp/private-channels/channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelId(): string {
   return `pch_${crypto.randomUUID()}`;
@@ -12,26 +11,22 @@ export interface PrivateChannelScope {
   projectId: string;
 }
 
-export interface CreatePrivateChannelInput extends PrivateChannelScope {
+interface CreatePrivateChannelInput extends PrivateChannelScope {
   name: string;
   description: string | null;
 }
 
-export interface PrivateChannelRef {
+interface PrivateChannelRef {
   instanceId: string;
   channelId: string;
 }
 
 /** Scope for looking a channel up by project (used by handlers that don't
  *  yet know which instance owns it — the join enforces the tenancy check). */
-export interface ProjectChannelRef {
+interface ProjectChannelRef {
   organizationId: string;
   projectId: string;
   channelId: string;
-}
-
-export interface PrivateChannelRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelRepository {

@@ -26,9 +26,13 @@ export function rpcHttpError(
  * transaction, which proves it was never broadcast.
  *
  * @param customProgramErrorCode - A custom program error to carry as the cause, if any.
+ * @param logs - The simulation's logs, if any.
  * @returns A kit `SolanaError` for the refused send.
  */
-export function sendTransactionPreflightError(customProgramErrorCode?: number): SolanaError {
+export function sendTransactionPreflightError(
+  customProgramErrorCode?: number,
+  logs: string[] | null = null
+): SolanaError {
   const cause =
     customProgramErrorCode === undefined
       ? undefined
@@ -41,7 +45,7 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     fee: null,
     loadedAccountsDataSize: null,
     loadedAddresses: null,
-    logs: null,
+    logs,
     postBalances: null,
     postTokenBalances: null,
     preBalances: null,
@@ -50,5 +54,19 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     returnData: null,
     unitsConsumed: null,
     ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+/**
+ * The `TypeError` undici's `fetch` rejects with when it can't connect. `@sdp/rpc` classifies it
+ * by its cause's `code`, never by message, so a fixture must carry the code a real one does.
+ * `ECONNREFUSED` by default, which the dead-socket re-send leaves alone.
+ *
+ * @param code - The Node/undici error code on the cause.
+ * @returns The fetch rejection.
+ */
+export function fetchFailedError(code = "ECONNREFUSED"): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error(`connect ${code}`), { code }),
   });
 }

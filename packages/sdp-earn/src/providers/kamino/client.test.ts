@@ -456,10 +456,10 @@ describe("KaminoEarnClient.listStrategies", () => {
     const fetchMock = stubKaminoFetch(...catalogue([vault()], [metrics()]));
 
     await assert.rejects(
-      // No RPC URL in the sandbox context, so the devnet path fails closed —
-      // which itself proves the mainnet REST path was not taken.
+      // No catalogue endpoint in the sandbox context, so the devnet path fails
+      // closed, which itself proves the mainnet REST path was not taken.
       client.listStrategies(sandboxCtx),
-      /RPC URL/
+      /No devnet RPC endpoint is configured/
     );
     assert.equal(
       fetchMock.mock.calls.length,

@@ -9,19 +9,19 @@ import { ApiKeyAuthoringWorkspace } from "@/app/dashboard/[projectId]/api-keys/a
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
 export default async function EditApiKeyPage({ params }: { params: Promise<{ keyId: string }> }) {
-  const [{ userId, orgId, orgRole }, { keyId }] = await Promise.all([auth(), params]);
+  const [{ userId, orgId }, { keyId }] = await Promise.all([auth(), params]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
   }
-  if (!resolveDashboardAccess(orgRole).capabilities.canManageApiKeys) {
+  if (!resolveDashboardAccess(await requestMemberRole()).capabilities.canManageApiKeys) {
     redirect(await requestProjectHref("/dashboard/api-keys"));
   }
 

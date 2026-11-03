@@ -260,6 +260,134 @@ describe("Payments routes — subscriptions", () => {
     expect(subscriptionBody.error.message).toContain("Counterparty not found");
   });
 
+  it("refuses a subscription paid from one of the organization's SDP wallets", async () => {
+    const counterpartyRes = await app.request(
+      "/v1/counterparties",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          externalId: "subscription_custody_subscriber",
+          entityType: "individual",
+          displayName: "Custody Subscriber Counterparty",
+          email: "subscription-custody-subscriber@example.com",
+          identity: TEST_COUNTERPARTY_IDENTITY,
+        }),
+      },
+      env
+    );
+    expect(counterpartyRes.status).toBe(201);
+    const counterpartyId = successResponseSchema(counterpartyResponseSchema).parse(
+      await counterpartyRes.json()
+    ).data.counterparty.id;
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(planRes.status).toBe(201);
+    const planId = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await planRes.json()
+    ).data.subscriptionPlan.id;
+
+    // The seeded custody wallet's address (HOO-2339): its subscription would approve u64::MAX.
+    const subscriptionRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet1,
+        }),
+      },
+      env
+    );
+
+    expect(subscriptionRes.status).toBe(409);
+    const body = errorResponseSchema.parse(await subscriptionRes.json());
+    expect(body.error.message).toContain("Use a recurring payment");
+    const listRes = await app.request(
+      `/v1/payments/subscriptions?planId=${planId}`,
+      { headers: SUBSCRIPTION_HEADERS },
+      env
+    );
+    expect((await listRes.json()).data.total).toBe(0);
+
+    // One created before the check: its authorization is refused before it approves anything.
+    const legacyRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        }),
+      },
+      env
+    );
+    expect(legacyRes.status).toBe(201);
+    const legacyId = successResponseSchema(paymentSubscriptionResponseSchema).parse(
+      await legacyRes.json()
+    ).data.subscription.id;
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET subscriber_address = ? WHERE id = ?")
+      .bind(TEST_SOLANA_ADDRESSES.wallet1, legacyId)
+      .run();
+
+    const authorizeRes = await app.request(
+      `/v1/payments/subscriptions/${legacyId}/prepare-authorization`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          expectedSubscriptionAuthorityInitId: "0",
+          subscriberTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
+          expectedPlanCreatedAt: "1700000000",
+        }),
+      },
+      env
+    );
+
+    expect(authorizeRes.status).toBe(409);
+    expect(errorResponseSchema.parse(await authorizeRes.json()).error.message).toContain(
+      "Use a recurring payment"
+    );
+
+    // One already authorized: its collection is refused too, since a recurring collect from the
+    // wallet resets the shared allowance to zero.
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET status = 'active' WHERE id = ?")
+      .bind(legacyId)
+      .run();
+    const collectRes = await app.request(
+      `/v1/payments/subscriptions/${legacyId}/prepare-collection`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
+      },
+      env
+    );
+
+    expect(collectRes.status).toBe(409);
+    expect(errorResponseSchema.parse(await collectRes.json()).error.message).toContain(
+      "Use a recurring payment"
+    );
+  });
+
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
     const subscriberTokenAccount = TEST_SOLANA_ADDRESSES.wallet3;
 

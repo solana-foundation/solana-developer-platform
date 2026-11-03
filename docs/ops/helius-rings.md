@@ -36,10 +36,10 @@ administrator later changes the project default. The optional custom Ring RPC
 field is stored now so custom-ring support can use the same project-wide
 configuration without changing this schema.
 
-| Variable | Meaning |
-| --- | --- |
-| `HELIUS_RINGS_ENABLED` | Gates routes, dashboard, indexing poll. Default `false`. |
-| `SOLANA_NETWORK` | Must be `devnet`. |
+| Variable                                   | Meaning                                                                                                                      |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `HELIUS_RINGS_ENABLED`                     | Gates routes, dashboard, indexing poll. Default `false`.                                                                     |
+| `SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL` | The devnet pool Rings reads and sends through when an operation has no tenant connection. Rings refuses non-devnet projects. |
 
 ### Where the shielded keys come from
 
@@ -52,7 +52,6 @@ randomize the signature by design and are refused — see
 [helius-rings-custody-providers.md](helius-rings-custody-providers.md).
 
 Two consequences worth knowing before provisioning:
-
 - **The identity follows the owner key, not the project.** One custody wallet gives one
   shielded identity, so two Rings wallets over the same custody wallet — in different
   projects or different organizations — converge on it. That matches the chain, whose
@@ -91,19 +90,19 @@ Transitions are CAS under `SELECT … FOR UPDATE`.
 
 ## Failure codes
 
-| Code | Retryable | Meaning |
-| --- | --- | --- |
-| `policy_denied` | no | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it. |
-| `approval_rejected` | no | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it. |
-| `proof_failed` | yes | Prover error. |
-| `signer_failed` | varies | Custody signing failed; also used when `ready_to_sign` ages out (10 min) before a signature was recorded. |
-| `submit_failed` | yes | RPC submit error (provisioning only in practice). |
-| `indexing_timeout` | yes | Unsigned rows: Photon did not index within 30 minutes. |
-| `manual_reconciliation_required` | no | Signed bytes exist and neither the indexer nor the chain has a record of them. Operator rechecks or voids. |
-| `config_error` | no | Upstreams missing or gateway misconfigured. |
-| `gateway_unavailable` | yes | Port unreachable or transient upstream failure. |
-| `invalid_input` | varies | Bad input or inconsistent row. |
-| `insufficient_balance` | no | Not enough shielded balance. |
+| Code                             | Retryable | Meaning                                                                                                    |
+| -------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------- |
+| `policy_denied`                  | no        | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it.                       |
+| `approval_rejected`              | no        | Retired (ADR 0006). Nothing sets it. Only old rows and the CHECK constraint keep it.                       |
+| `proof_failed`                   | yes       | Prover error.                                                                                              |
+| `signer_failed`                  | varies    | Custody signing failed; also used when `ready_to_sign` ages out (10 min) before a signature was recorded.  |
+| `submit_failed`                  | yes       | RPC submit error (provisioning only in practice).                                                          |
+| `indexing_timeout`               | yes       | Unsigned rows: Photon did not index within 30 minutes.                                                     |
+| `manual_reconciliation_required` | no        | Signed bytes exist and neither the indexer nor the chain has a record of them. Operator rechecks or voids. |
+| `config_error`                   | no        | Upstreams missing or gateway misconfigured.                                                                |
+| `gateway_unavailable`            | yes       | Port unreachable or transient upstream failure.                                                            |
+| `invalid_input`                  | varies    | Bad input or inconsistent row.                                                                             |
+| `insufficient_balance`           | no        | Not enough shielded balance.                                                                               |
 
 ## Who started an operation
 
@@ -119,7 +118,6 @@ recorded for Rings.
 ## Withdraw (SOL)
 
 Spends consume notes and need a proof. The pipeline:
-
 1. **Prepare** — spend-slot preflight; reserve intent.
 2. **Build + prove** — sync wallet at `requireSlot`, select notes, prove in one port call.
 3. **Persist outbox** — `signed_transaction`, `last_valid_block_height`, `input_notes` before broadcast.
@@ -136,7 +134,6 @@ wallet. A signed failure holds the slot until completed or voided.
 A row reaches `manual_reconciliation_required` (non-retryable) only once the
 sweep has asked both the indexer and the chain and neither accounts for its
 signature. The row then offers two actions:
-
 - **Recheck** — `POST /operations/:id/recheck`, no body. Asks the indexer again
   and completes the row on a hit. It can never conclude absence, so it is safe
   to press repeatedly, and an indexer lagging the chain is the likelier
@@ -232,7 +229,6 @@ outbox first so the same bytes can be resubmitted after a lost RPC response.
 `runPipeline` returns as soon as the broadcast succeeds, so an operation ends
 the request in `indexing`. Only `executeOperation` completes it, by asking
 Photon, and two things call it:
-
 - The dashboard, every 4s while a row is `indexing` and the page is open. This
   is what makes the UI track the chain rather than the cron.
 - `poll-rings-indexing`, as the backstop when no one is watching.
@@ -246,7 +242,6 @@ row with no bytes the same call concludes signing died and fails it.
 
 `poll-rings-indexing` (every minute in-process; every 5 min on Cloud Run) runs
 three passes per tick:
-
 1. **Expired bytes** — signed rows past `last_valid_block_height` get one Photon
    check, then a `getSignatureStatuses` check with history search, and only a
    signature the chain cannot account for becomes
@@ -284,15 +279,15 @@ Enabled when `HELIUS_RINGS_ENABLED=true`.
 
 ## What ships
 
-| Flow | Upstreams unset | Configured |
-| --- | --- | --- |
-| Provisioning | 503, wallet `pending` | On-chain register, wallet `ready` |
-| Sync | 503 | On-demand from dashboard |
-| Shield | `failed:config_error` or `gateway_unavailable` | Build, sign, broadcast, index |
-| Shield (custom ring) | same; also needs a Ring RPC URL in project setup and an active ring | Ring-bound deposit through the ring program |
-| Withdraw (SOL) | same | Note selection, prove, outbox, sign, broadcast, index |
-| Withdraw / transfer (custom ring) | same; needs the ring active with its lookup table | Ring transact through the SDK's one-call builders, ALT-compressed; a USDC withdraw adds the token-account create |
-| Merge (SOL, default ring) | same | Clears the on-chain merge gate, selects 2–5 notes, proves, signs, broadcasts, indexes |
+| Flow                              | Upstreams unset                                                     | Configured                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Provisioning                      | 503, wallet `pending`                                               | On-chain register, wallet `ready`                                                                                |
+| Sync                              | 503                                                                 | On-demand from dashboard                                                                                         |
+| Shield                            | `failed:config_error` or `gateway_unavailable`                      | Build, sign, broadcast, index                                                                                    |
+| Shield (custom ring)              | same; also needs a Ring RPC URL in project setup and an active ring | Ring-bound deposit through the ring program                                                                      |
+| Withdraw (SOL)                    | same                                                                | Note selection, prove, outbox, sign, broadcast, index                                                            |
+| Withdraw / transfer (custom ring) | same; needs the ring active with its lookup table                   | Ring transact through the SDK's one-call builders, ALT-compressed; a USDC withdraw adds the token-account create |
+| Merge (SOL, default ring)         | same                                                                | Clears the on-chain merge gate, selects 2–5 notes, proves, signs, broadcasts, indexes                            |
 
 ## Custom rings
 
@@ -316,10 +311,9 @@ and resumes from where it stopped on re-run:
 SDP_API_KEY=sk_... scripts/deploy-custom-ring.sh <ring-label>
 ```
 
-Then record the printed program id under a name in the dashboard's *Custom
-rings* card. The manual steps below are the reference for what the script
+Then record the printed program id under a name in the dashboard's _Custom
+rings_ card. The manual steps below are the reference for what the script
 does.
-
 1. Get the `zolana-ring` CLI from the `custom-rings` release of
    [`helius-labs/zolana`](https://github.com/helius-labs/zolana).
    `zolana-ring new` writes the ring's `ring.toml` and program keypair —
@@ -344,7 +338,7 @@ does.
    the wallet with devnet SOL first — it fee-pays every bring-up transaction
    and rents the config, ring-auth, reader-record, and lookup-table accounts.
 3. Hand the program id to the project admin. They enter it with a name in the
-   dashboard's *Custom rings* card (or `POST /v1/helius-rings/rings`).
+   dashboard's _Custom rings_ card (or `POST /v1/helius-rings/rings`).
 
 SDP then completes bring-up through the SDK: an auditor key from the Ring RPC
 saved in project setup, the ring's create-config instruction, its

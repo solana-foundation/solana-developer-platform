@@ -274,7 +274,7 @@ export async function mintEarnPositionForProviderWallet(
  * skippable by the next caller.
  */
 
-export interface EarnMovementCursor {
+interface EarnMovementCursor {
   createdAt: string;
   id: string;
 }
@@ -411,13 +411,14 @@ export interface EarnMovementsRepository {
     observedUpdatedAt: string;
   }): Promise<boolean>;
   /**
-   * Finalized withdrawals whose payout was not observed at settlement
-   * (`token_amount_settled IS NULL`), oldest attempt first, bounded to rows
-   * settled after `settledAfter` (RPC transaction history is finite) and not
-   * attempted since `retryBefore`. Stamps `reconciliation_attempted_at` on the
-   * claim so the repair sweep spaces its retries.
+   * Finalized withdrawals in one environment whose payout was not observed at
+   * settlement (`token_amount_settled IS NULL`), oldest attempt first, bounded
+   * to rows settled after `settledAfter` (RPC transaction history is finite)
+   * and not attempted since `retryBefore`. Stamps `reconciliation_attempted_at`
+   * on the claim so the repair sweep spaces its retries.
    */
   claimUnvaluedWithdrawalPayouts(params: {
+    environment: SdpEnvironment;
     limit: number;
     settledAfter: string;
     retryBefore: string;
@@ -432,8 +433,9 @@ export interface EarnMovementsRepository {
     organizationId: string;
     tokenAmountSettled: string;
   }): Promise<boolean>;
-  /** Bounded, retry-spaced receipt repair, including historical Kamino deposits. */
+  /** Bounded, retry-spaced receipt repair in one environment, including historical Kamino deposits. */
   claimUnvaluedKaminoDeposits(params: {
+    environment: SdpEnvironment;
     limit: number;
     retryBefore: string;
   }): Promise<EarnMovementRow[]>;
@@ -552,17 +554,23 @@ export interface EarnMovementsRepository {
     destinationAddress?: string;
   }): Promise<{ rows: EarnMovementRow[]; hasMore: boolean }>;
   /**
-   * Atomically select a fair, bounded batch and rotate its attempt cursor; not a work lease.
+   * Atomically select a fair, bounded batch of one environment's movements and
+   * rotate its attempt cursor; not a work lease. One environment per claim, so
+   * each cluster's sweep registration works only its own rows.
    *
    * Provider-order rows remain in the queue through reversible confirmation.
    * Once `chain_finalized_at` records irreversible finality, another chain read
    * cannot advance them and they leave this queue until provider reconciliation.
    */
-  claimUnsettledVaultMovements(limit: number): Promise<EarnMovementRow[]>;
+  claimUnsettledVaultMovements(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<EarnMovementRow[]>;
   /**
    * Backlog telemetry over the SAME predicate the claim uses (PRO-1863): how
-   * many vault movements remain unsettled, and how old the oldest one is. Read
-   * after a sweep tick so the reported backlog is what the tick left behind.
+   * many of one environment's vault movements remain unsettled, and how old the
+   * oldest one is. Read after a sweep tick so the reported backlog is what the
+   * tick left behind.
    *
    * Dimensioned, because the flat total is not alertable. A `confirmed` row
    * whose signature ages out of RPC history is a PERMANENT member of this set
@@ -574,7 +582,7 @@ export interface EarnMovementsRepository {
    * are excluded here exactly as they are from the claim — they are
    * awaiting-provider surface, not chain-reconciliation backlog.
    */
-  getUnsettledVaultMovementStats(): Promise<{
+  getUnsettledVaultMovementStats(params: { environment: SdpEnvironment }): Promise<{
     backlog: number;
     backlogBlockhashBound: number;
     backlogConfirmed: number;
@@ -728,7 +736,7 @@ export interface CreateSignedVaultDepositIntentInput
  * whose same-key twin committed while this write waited for the lock, is
  * answered from that row.
  */
-export interface LedgerAdmissionHook {
+interface LedgerAdmissionHook {
   admit?: (transaction: DatabaseExecutor) => Promise<void>;
 }
 
@@ -740,7 +748,7 @@ export interface LedgerAdmissionHook {
  * locks in `db/client.ts`; a hash collision with another key only adds
  * serialization. Exits never take it (ADR 0002: nothing queues money out).
  */
-export function earnVaultDepositWriteLockKey(key: {
+function earnVaultDepositWriteLockKey(key: {
   environment: SdpEnvironment;
   provider: string;
   vaultAddress: string;
@@ -760,7 +768,7 @@ async function lockVaultDepositWrites(
 }
 
 /** Planning metadata only. The ledger cannot infer a rent payment from a build. */
-export interface ShareAccountRentAttribution {
+interface ShareAccountRentAttribution {
   /** The builder observed the ATA missing before execution. */
   createsShareAccount?: boolean;
   /** Planned payer for a creation, or null for the owner. */
@@ -786,7 +794,7 @@ export interface ExternalWalletMovementTotals {
   openWithdrawalRequestCount: number;
 }
 
-export interface AdvanceVaultMovementInput {
+interface AdvanceVaultMovementInput {
   movementId: string;
   organizationId: string;
   toStatus: string;
@@ -803,7 +811,7 @@ export interface AdvanceVaultMovementInput {
   tokenAmountSettled?: string | null;
 }
 
-export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
+interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -868,7 +876,7 @@ export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmi
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateSignedExternalWalletWithdrawalIntentInput {
+interface CreateSignedExternalWalletWithdrawalIntentInput {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -915,11 +923,11 @@ export interface CreateCustodialMovementInput {
   initiatedByKeyId: string | null;
 }
 
-export type UpdateCustodialMovementSelector =
+type UpdateCustodialMovementSelector =
   | { movementId: string }
   | { provider: string; providerReference: string };
 
-export interface UpdateCustodialMovementGuardedInput {
+interface UpdateCustodialMovementGuardedInput {
   selector: UpdateCustodialMovementSelector;
   organizationId: string;
   toStatus: string;
@@ -1699,6 +1707,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND status = 'finalized'
                 AND token_amount_settled IS NULL
                 AND signature IS NOT NULL
+                AND environment = ?
                 AND settled_at >= ?
                 AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
               ORDER BY COALESCE(reconciliation_attempted_at, settled_at) ASC, id ASC
@@ -1713,7 +1722,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            )
            SELECT * FROM touched ORDER BY settled_at ASC, id ASC`
         )
-        .bind(params.settledAfter, params.retryBefore, params.limit)
+        .bind(params.environment, params.settledAfter, params.retryBefore, params.limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -1743,6 +1752,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               WHERE execution_model = 'vault_direct' AND provider = 'kamino'
                 AND direction = 'deposit' AND status = 'finalized'
                 AND deposit_receipt_observed_at IS NULL AND signature IS NOT NULL
+                AND environment = ?
                 AND (reconciliation_attempted_at IS NULL OR reconciliation_attempted_at <= ?)
               ORDER BY (reconciliation_attempted_at IS NOT NULL) ASC,
                        COALESCE(reconciliation_attempted_at, settled_at) ASC, id ASC
@@ -1752,7 +1762,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                FROM candidates WHERE movement.id = candidates.id RETURNING movement.*
            ) SELECT * FROM touched`
         )
-        .bind(params.retryBefore, params.limit)
+        .bind(params.environment, params.retryBefore, params.limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
@@ -2156,7 +2166,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       );
     },
 
-    async claimUnsettledVaultMovements(limit) {
+    async claimUnsettledVaultMovements({ environment, limit }) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("claimUnsettledVaultMovements limit must be an integer from 1 to 256");
       }
@@ -2190,6 +2200,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               WHERE execution_model = 'vault_direct'
                 AND status IN ('requested', 'submitted')
                 AND chain_finalized_at IS NULL
+                AND environment = ?
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -2200,6 +2211,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               WHERE execution_model = 'vault_direct'
                 AND status = 'confirmed'
                 AND chain_finalized_at IS NULL
+                AND environment = ?
               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
                        created_at ASC,
                        id ASC
@@ -2215,6 +2227,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
               WHERE movement.execution_model = 'vault_direct'
                 AND movement.status IN ('requested', 'submitted', 'confirmed')
                 AND movement.chain_finalized_at IS NULL
+                AND movement.environment = ?
                 AND NOT EXISTS (
                   SELECT 1 FROM reserved WHERE reserved.id = movement.id
                 )
@@ -2238,12 +2251,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            SELECT * FROM touched
            ORDER BY (status = 'confirmed') ASC, created_at ASC, id ASC`
         )
-        .bind(blockhashBoundQuota, confirmedQuota, limit)
+        .bind(environment, blockhashBoundQuota, environment, confirmedQuota, environment, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapMovementRow);
     },
 
-    async getUnsettledVaultMovementStats() {
+    async getUnsettledVaultMovementStats({ environment }) {
       // Keep this predicate in lockstep with claimUnsettledVaultMovements: the
       // backlog it reports must be the same set the sweep would claim. Bound by
       // the "reports exactly the rows the next claim would take" test in
@@ -2265,8 +2278,10 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
              FROM earn_movements
             WHERE execution_model = 'vault_direct'
               AND status IN ('requested', 'submitted', 'confirmed')
-              AND chain_finalized_at IS NULL`
+              AND chain_finalized_at IS NULL
+              AND environment = ?`
         )
+        .bind(environment)
         .first<{
           backlog: number | string;
           backlog_blockhash_bound: number | string;

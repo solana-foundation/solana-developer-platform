@@ -4,6 +4,7 @@ import {
   apiKeyDetailSchema,
   apiKeyResponseSchema,
   listApiKeysResponseSchema,
+  memberApiKeysResponseSchema,
   revokeApiKeyResponseSchema,
   rotateApiKeyResponseSchema,
 } from "@/openapi/schemas/api-keys";
@@ -70,13 +71,13 @@ import {
   tokenTransactionSchema,
   tokenWithAssetProfileResponseSchema,
 } from "@/openapi/schemas/issuance";
+import { onboardingStatusResponseSchema } from "@/openapi/schemas/onboarding";
 import {
-  onboardingCompleteResponseSchema,
-  onboardingStatusResponseSchema,
-} from "@/openapi/schemas/onboarding";
-import {
+  createOrganizationResponseSchema,
   inviteMemberResponseSchema,
   listMembersResponseSchema,
+  mainnetAccessSchema,
+  memberRoleSchema,
   organizationSchema,
 } from "@/openapi/schemas/organizations";
 import {
@@ -86,8 +87,8 @@ import {
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
+  paymentRequestSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
-  paymentSubscriptionCollectionAttemptResponseSchema,
   paymentSubscriptionListResponseSchema,
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
@@ -107,15 +108,18 @@ import {
   listProjectApiKeysResponseSchema,
   listProjectMembersResponseSchema,
   listProjectsResponseSchema,
-  projectMemberResponseSchema,
   projectProviderAvailabilityResponseSchema,
   projectResponseSchema,
 } from "@/openapi/schemas/projects";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
+export const mainnetAccessResponse = successResponseSchema(mainnetAccessSchema);
+export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
 
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
 export const inviteMemberResponse = successResponseSchema(inviteMemberResponseSchema);
+export const memberRoleResponse = successResponseSchema(memberRoleSchema);
+export const memberApiKeysResponse = successResponseSchema(memberApiKeysResponseSchema);
 export const actionSuccessResponse = successResponseSchema(actionSuccessSchema);
 
 export const listApiKeysResponse = successResponseSchema(listApiKeysResponseSchema);
@@ -156,7 +160,6 @@ export const listCounterpartyProviderAccountsResponse = successResponseSchema(
 export const projectResponse = successResponseSchema(projectResponseSchema);
 export const listProjectsResponse = successResponseSchema(listProjectsResponseSchema);
 export const listProjectMembersResponse = successResponseSchema(listProjectMembersResponseSchema);
-export const projectMemberResponse = successResponseSchema(projectMemberResponseSchema);
 export const listProjectApiKeysResponse = successResponseSchema(listProjectApiKeysResponseSchema);
 /**
  * The project provider availability envelope, with or without the Earn family.
@@ -279,7 +282,6 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
-export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);
@@ -288,6 +290,7 @@ export const transferBatchListResponse = paginatedResponseSchema(transferBatchSc
 export const transferBatchEstimateResponse = successResponseSchema(
   transferBatchEstimateResponseSchema
 );
+export const paymentRequestResponse = successResponseSchema(paymentRequestSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );
@@ -315,9 +318,6 @@ export const preparePaymentSubscriptionLifecycleResponse = successResponseSchema
 );
 export const paymentSubscriptionListResponse = successResponseSchema(
   paymentSubscriptionListResponseSchema
-);
-export const paymentSubscriptionCollectionAttemptResponse = successResponseSchema(
-  paymentSubscriptionCollectionAttemptResponseSchema
 );
 export const preparePaymentSubscriptionCollectionResponse = successResponseSchema(
   preparePaymentSubscriptionCollectionResponseSchema

@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { AppError } from "@/lib/errors";
@@ -284,6 +285,13 @@ describe("assessVaultExposure", () => {
     vi.restoreAllMocks();
   });
 
+  /** The evaluation as a sandbox request runs it: inside that cluster scope. */
+  function assessInSandbox(input: Parameters<typeof assessVaultExposure>[0]) {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      assessVaultExposure(input)
+    );
+  }
+
   function evaluatedEvents() {
     return logEvent.mock.calls.filter(
       ([, payload]) => payload?.event === EARN_VOLUME_CAP_EVALUATED_EVENT
@@ -291,9 +299,8 @@ describe("assessVaultExposure", () => {
   }
 
   it("emits the evaluated event on an admitted deposit", async () => {
-    const verdict = await assessVaultExposure({
+    const verdict = await assessInSandbox({
       env: {} as Env,
-      environment: "sandbox",
       strategy,
       amount: "10",
       stage: "admission" as const,
@@ -329,13 +336,12 @@ describe("assessVaultExposure", () => {
 
   it("reports would_block without enforcing in shadow mode, and enforces under the flag", async () => {
     const input = {
-      environment: "sandbox" as const,
       strategy,
       amount: "10",
       stage: "admission" as const,
       readExposure: async () => "95",
     };
-    const shadow = await assessVaultExposure({ ...input, env: {} as Env });
+    const shadow = await assessInSandbox({ ...input, env: {} as Env });
     expect(shadow).toEqual({
       enforced: false,
       key: { environment: "sandbox", provider: "kamino", vaultAddress: CAPPED_VAULT },
@@ -347,7 +353,7 @@ describe("assessVaultExposure", () => {
       expect.objectContaining({ would_block: true, enforced: false }),
     ]);
 
-    const enforced = await assessVaultExposure({
+    const enforced = await assessInSandbox({
       ...input,
       env: { EARN_VOLUME_CAPS_ENFORCED: "true" } as Env,
     });
@@ -370,9 +376,8 @@ describe("assessVaultExposure", () => {
       .fn()
       .mockRejectedValue(Object.assign(new Error("ledger down"), { code: "ECONN" }));
     await expect(
-      assessVaultExposure({
+      assessInSandbox({
         env: {} as Env,
-        environment: "sandbox",
         strategy,
         amount: "10",
         stage: "admission" as const,
@@ -396,9 +401,8 @@ describe("assessVaultExposure", () => {
   });
 
   it("uses the catalogue TVL for the share bound", async () => {
-    const verdict = await assessVaultExposure({
+    const verdict = await assessInSandbox({
       env: {} as Env,
-      environment: "sandbox",
       strategy: { ...strategy, risk_metadata: { tvlUsd: 100 } },
       amount: "1",
       stage: "admission" as const,
@@ -416,9 +420,8 @@ describe("assessVaultExposure", () => {
 
   it("never throws the typed refusal itself: that is the admission step's job", async () => {
     // Belt and braces for the contract the route tests pin end to end.
-    const verdict = await assessVaultExposure({
+    const verdict = await assessInSandbox({
       env: { EARN_VOLUME_CAPS_ENFORCED: "true" } as Env,
-      environment: "sandbox",
       strategy,
       amount: "1000",
       stage: "admission" as const,

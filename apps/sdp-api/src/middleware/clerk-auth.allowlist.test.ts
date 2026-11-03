@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
@@ -77,30 +76,11 @@ describe("Clerk auth and the organization IP allowlist", () => {
       orgSlug: TEST_ORG.slug,
       role: "member",
     });
-    await db
-      .prepare("DELETE FROM organization_members WHERE organization_id = ?")
-      .bind(ORG_ID)
-      .run();
   });
 
   afterEach(async () => {
     await clearKVStores(env);
   });
-
-  async function provisionedRows(): Promise<{ memberships: number; projects: number }> {
-    const memberships = await getDb(env)
-      .prepare("SELECT COUNT(*) AS total FROM organization_members WHERE organization_id = ?")
-      .bind(ORG_ID)
-      .first<{ total: number }>();
-    const projects = await getDb(env)
-      .prepare("SELECT COUNT(*) AS total FROM projects WHERE organization_id = ?")
-      .bind(ORG_ID)
-      .first<{ total: number }>();
-
-    assert(memberships !== null);
-    assert(projects !== null);
-    return { memberships: Number(memberships.total), projects: Number(projects.total) };
-  }
 
   // The allowlist governs API keys only: dashboard requests reach the API from
   // SDP's own servers, so filtering a session would filter SDP itself.
@@ -120,27 +100,5 @@ describe("Clerk auth and the organization IP allowlist", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ organizationId: ORG_ID });
-  });
-
-  it("provisions normally from an allowed origin", async () => {
-    const { app, token } = await createApp();
-
-    const res = await app.request(
-      "/protected",
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-forwarded-for": "203.0.113.42",
-        },
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ organizationId: ORG_ID });
-
-    const rows = await provisionedRows();
-    expect(rows.memberships).toBe(1);
-    expect(rows.projects).toBeGreaterThan(0);
   });
 });

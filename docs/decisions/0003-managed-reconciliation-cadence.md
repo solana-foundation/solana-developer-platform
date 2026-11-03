@@ -4,7 +4,6 @@
 > always-on worker replaced the managed Cloud Run Job, which is deleted along
 > with `job.ts`, the `sdp-api-managed-*` monitor namespace, and the Sentry
 > check-in lifecycle described below. Kept for history.
-
 - **Status:** Superseded by ADR 0011
 - **Date:** 2026-08-22
 - **Deciders:** SDP API and Infrastructure teams

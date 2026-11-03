@@ -17,8 +17,10 @@ import {
   createEarnVaultWithdrawalRequest,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
+  earnLedgerRefreshInterval,
   earnProgramsRefreshInterval,
   earnVaultMovementRefreshInterval,
+  earnVaultPositionsRefreshInterval,
   fetchEarnExternalWalletPositionSummary,
   fetchEarnExternalWalletPositions,
   fetchEarnProgramsState,
@@ -962,6 +964,51 @@ describe("earnProgramsRefreshInterval", () => {
 
   it("does not poll before the read resolves", () => {
     expect(earnProgramsRefreshInterval(undefined)).toBe(0);
+  });
+});
+
+describe("earnVaultPositionsRefreshInterval", () => {
+  const position: EarnVaultPosition = {
+    id: "position",
+    provider: "kamino",
+    providerReference: "vault",
+    custodyWalletId: "wallet",
+    tokenMint: USDC,
+    shareMint: "shares",
+    label: "Vault",
+    createdAt: TIMESTAMP,
+    closedAt: null,
+    tokenValue: "10",
+    shares: "10",
+    feeSponsored: false,
+  };
+  const read = (positions: EarnVaultPosition[]) => ({ positions, startedAt: 0, landedAt: 0 });
+
+  it("polls live values while any position exists", () => {
+    expect(earnVaultPositionsRefreshInterval(read([position]))).toBe(15_000);
+  });
+
+  it("idles once a read lists no position", () => {
+    // A first position only arrives through a movement Treasury reads directly.
+    expect(earnVaultPositionsRefreshInterval(read([]))).toBe(120_000);
+  });
+
+  it("keeps the live cadence until a read says otherwise", () => {
+    expect(earnVaultPositionsRefreshInterval(undefined)).toBe(15_000);
+  });
+});
+
+describe("earnLedgerRefreshInterval", () => {
+  it("discovers at the ledger cadence while a movement is in flight", () => {
+    expect(earnLedgerRefreshInterval([{}])).toBe(30_000);
+  });
+
+  it("idles once nothing is in flight", () => {
+    expect(earnLedgerRefreshInterval([])).toBe(120_000);
+  });
+
+  it("keeps the ledger cadence until a read says otherwise", () => {
+    expect(earnLedgerRefreshInterval(undefined)).toBe(30_000);
   });
 });
 

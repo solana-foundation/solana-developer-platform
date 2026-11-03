@@ -5,6 +5,7 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
+import type { EarnRuntimeEnvironment } from "@sdp/earn/types";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -344,7 +345,9 @@ describe("KaminoVaultDirectClient capabilities", () => {
           value: position(runtime, vault, input.owner, vault === providerReferences[1] ? "0" : "1"),
         }))
     );
-    const processEnv = {
+    // The API passes its whole process env, and a process-level RPC URL there
+    // must never reach a provider read: the endpoint comes from the resolver.
+    const processEnv: EarnRuntimeEnvironment & Record<string, string> = {
       SOLANA_RPC_URL: "https://process-mainnet.example.invalid",
       UNRELATED: "preserved",
     };

@@ -100,6 +100,8 @@ function stablecoinOptions(overrides: Partial<CreateTokenOptions> = {}): CreateT
   };
 }
 
+const clusterRpc = RpcModule.createRpc("https://solana-rpc.mock.invalid");
+
 describe("MosaicService.createToken — Kora sponsorship", () => {
   let signer: TransactionSigner;
   let koraAddress: Address;
@@ -113,6 +115,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      clusterRpc,
       signer,
       fee.submitter,
       // Mirror the createMosaicService factory wiring so on-chain failures
@@ -290,6 +293,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const ownFeePayer = await Kit.generateKeyPairSigner();
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        clusterRpc,
         signer
       );
       vi.spyOn(
@@ -359,9 +363,9 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     }
 
     it("submits a custody-signed mint through the sponsor on the service's RPC after onBeforeSubmit", async () => {
-      const createRpcSpy = vi.spyOn(RpcModule, "createRpcForSdk");
       const sponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        clusterRpc,
         signer,
         fee.submitter,
         { transactionFailedError: transactionFailed }
@@ -408,7 +412,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const [{ transaction, lastValidBlockHeight, rpc }] = fee.submitSponsored.mock.calls[0];
       expect(transaction).toEqual(new Uint8Array([1, 2, 3]));
       expect(lastValidBlockHeight).toBe(mintTx.lifetimeConstraint.lastValidBlockHeight);
-      expect(rpc).toBe(createRpcSpy.mock.results[0].value);
+      expect(rpc).toBe(clusterRpc);
       expect(confirmSpy).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ signature: koraSignature, slot: 7n, tokenAccount });
     });
@@ -443,11 +447,9 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       const sendTransaction = vi.fn().mockReturnValue({
         send: vi.fn().mockResolvedValue(directSignature),
       });
-      vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue({
-        sendTransaction,
-      } as unknown as ReturnType<typeof RpcModule.createRpcForSdk>);
       const unsponsored = new MosaicService(
         env as ConstructorParameters<typeof MosaicService>[0],
+        { sendTransaction } as unknown as RpcModule.SolanaRpc,
         signer,
         undefined,
         // Mirror the createMosaicService factory wiring so on-chain failures
@@ -580,6 +582,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     fee = makeSponsor(koraAddress);
     service = new MosaicService(
       env as ConstructorParameters<typeof MosaicService>[0],
+      clusterRpc,
       signer,
       fee.submitter,
       {

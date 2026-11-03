@@ -1,4 +1,4 @@
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { DVP_SETTLEMENT_AVAILABILITY, DVP_TRADE_STATUSES, type DvpTradeSide } from "@sdp/types/dvp";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
@@ -19,6 +19,7 @@ import {
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { callerMayPerform } from "@/middleware/require-action";
@@ -916,7 +917,7 @@ async function respondWithPartyTrade(c: AppContext, tradeId: string) {
   }
 
   // Read, not recorded: persisting would UPDATE another org's row (0089).
-  const observed = await observeDvpTradeWithoutRecording(c.env, trade);
+  const observed = await observeDvpTradeWithoutRecording(trade);
 
   // Derived from the caller's OWN wallets, like any other view. Labels are
   // never resolved (attribution is the creator's fact); claims ARE read, and
@@ -980,9 +981,10 @@ export const inspectMint = async (c: AppContext) => {
 
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
-    inspection = await inspectDvpMint(createRpc(c.env), parsed);
-  } catch {
+    inspection = await inspectDvpMint(createClusterRpc(), parsed);
+  } catch (error) {
     // The read failed, so nothing is known about the mint: retryable, never "not found".
+    rethrowRpcUnavailable(error);
     throw solanaRpcError("Could not read the mint from Solana. Try again.");
   }
   if (!inspection) {

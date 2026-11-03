@@ -11,6 +11,12 @@ describe("strategySourceLabel", () => {
     ).toBe("translated:DashboardEarn.deposit.vaultBackingFigureHomeEquity");
   });
 
+  it("names the protocol a provider reports by id", () => {
+    // Kamino's catalogue reports its lending protocol as `klend`; a review read "Backing: klend".
+    expect(strategySourceLabel({ underlyingSource: "klend" }, t)).toBe("Kamino Lend");
+    expect(strategySourceLabel({ underlyingSource: "ondo-usdy" }, t)).toBe("Ondo USDY");
+  });
+
   it("keeps brand names and unknown sources as they are", () => {
     expect(strategySourceLabel({ underlyingSource: "kamino" }, t)).toBe("Kamino");
     expect(strategySourceLabel({ underlyingSource: "Upshift" }, t)).toBe("Upshift");

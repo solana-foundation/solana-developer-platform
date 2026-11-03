@@ -28,9 +28,12 @@ export async function updateAssetProfileAction(
 
   try {
     const client = await createSdpApiClient();
-    const profileResponse = await client.request(`/v1/issuance/asset-profiles/${profileId}`, {
-      method: "GET",
-    });
+    const profileResponse = await client.request(
+      `/v1/issuance/asset-profiles/${encodeURIComponent(profileId)}`,
+      {
+        method: "GET",
+      }
+    );
     if (!profileResponse.ok) {
       const body = await profileResponse.text();
       return {
@@ -61,10 +64,13 @@ export async function updateAssetProfileAction(
 
     // Token row first — it is what the rest of the dashboard displays. If the
     // profile PATCH then fails, retrying re-sends the same values (idempotent).
-    const tokenResponse = await client.request(`/v1/issuance/tokens/${tokenId}`, {
-      method: "PATCH",
-      body: JSON.stringify(tokenPatch),
-    });
+    const tokenResponse = await client.request(
+      `/v1/issuance/tokens/${encodeURIComponent(tokenId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(tokenPatch),
+      }
+    );
     if (!tokenResponse.ok) {
       const body = await tokenResponse.text();
       return {
@@ -77,10 +83,13 @@ export async function updateAssetProfileAction(
       };
     }
 
-    const updateResponse = await client.request(`/v1/issuance/asset-profiles/${profileId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ issuanceMetadata: mergedMetadata }),
-    });
+    const updateResponse = await client.request(
+      `/v1/issuance/asset-profiles/${encodeURIComponent(profileId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ issuanceMetadata: mergedMetadata }),
+      }
+    );
     if (!updateResponse.ok) {
       const body = await updateResponse.text();
       return {

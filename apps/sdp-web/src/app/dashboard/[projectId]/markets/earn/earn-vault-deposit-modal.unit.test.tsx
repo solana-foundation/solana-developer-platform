@@ -51,8 +51,7 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
   "DashboardEarn.deposit.flowProcessing": "Processing",
   "DashboardEarn.deposit.flowProviderSettlement": "Provider settlement",
   "DashboardEarn.deposit.flowComplete": "Complete",
-  "DashboardEarn.deposit.progressLabel": "Progress",
-  "DashboardEarn.deposit.progressReview": "Review",
+  "DashboardEarn.deposit.stepProgress": "Step {current} of {total}",
   "DashboardEarn.deposit.walletsLoadError": "Wallets could not be loaded.",
   "DashboardEarn.deposit.walletsEmptyTitle": "No active custody wallets",
   "DashboardEarn.deposit.walletsEmptyBody": "Create a wallet before depositing.",
@@ -313,16 +312,22 @@ describe("exact vault amount helpers", () => {
   });
 });
 
+/** The flow's progress as the reader sees it: the current step's name and "Step x of y". */
+function flowProgress(): { step: string | null; label: string | undefined } {
+  const progress = document.querySelector("[data-earn-flow-step]");
+  return {
+    step: progress?.getAttribute("data-earn-flow-step") ?? null,
+    label: progress?.querySelector('[role="status"]')?.textContent ?? undefined,
+  };
+}
+
 describe("EarnVaultDepositModal", () => {
   it("auto-selects the only wallet and its largest held stablecoin and fills Max", async () => {
     const user = userEvent.setup();
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
-    const progress = screen.getByRole("navigation", { name: "Progress" });
-    expect(
-      Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
-    ).toEqual(["Details", "Review", "Processing", "Complete"]);
+    expect(flowProgress()).toEqual({ step: "Details", label: "Details, Step 1 of 4" });
     expect(
       screen.queryByText("Choose the custody wallet that will sign and own the vault shares.")
     ).toBeNull();
@@ -354,14 +359,38 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getByText("$1.25")).toBeTruthy();
     expect(screen.getByText("Treasury wallet")).toBeTruthy();
     expect(screen.queryByText("Swap required before deposit")).toBeNull();
-    const completedMarker = document.querySelector('[data-earn-step-complete="true"]');
-    expect(completedMarker?.className).toContain("bg-white");
-    expect(completedMarker?.className).toContain("text-black");
-    expect(completedMarker?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect((screen.getByLabelText("Amount") as HTMLInputElement).value).toBe("1.25");
+  });
+
+  it("continues to the review on Enter, and never submits the deposit on Enter", async () => {
+    const user = userEvent.setup();
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    await screen.findByRole("dialog");
+    // An amount the form refuses stays on the form.
+    await user.type(screen.getByLabelText("Amount"), "0{Enter}");
+    expect(flowProgress().step).toBe("Details");
+
+    await user.clear(screen.getByLabelText("Amount"));
+    await user.type(screen.getByLabelText("Amount"), "1.25{Enter}");
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
+
+    // The review moves money, so only its button confirms.
+    await user.keyboard("{Enter}");
+    expect(mocks.createEarnVaultDeposit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
+  });
+
+  it("opens in the Earn dialogs' shared frame, its top edge pinned", async () => {
+    render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("max-w-lg");
+    expect(dialog.parentElement?.className).toContain("items-start");
   });
 
   it("auto-selects a wallet's held stablecoin while showing every supported option", async () => {
@@ -589,13 +618,9 @@ describe("EarnVaultDepositModal", () => {
       expect(document.querySelector('[data-earn-step-processing="true"]')).toBeNull();
       if (status === "confirmed") {
         const confirmation = document.querySelector('[data-earn-outcome="success"]');
-        const terminalStep = document.querySelector('[data-earn-step-terminal-active="true"]');
         expect(confirmation).toBeTruthy();
         expect(confirmation?.className).toContain("mx-auto");
-        expect(terminalStep?.className).toContain("bg-white");
-        expect(terminalStep?.className).toContain("text-black");
-        expect(terminalStep?.querySelector('[data-earn-step-check="true"]')).toBeTruthy();
-        expect(document.querySelectorAll('[data-earn-step-check="true"]')).toHaveLength(4);
+        expect(flowProgress()).toEqual({ step: "Complete", label: "Complete, Step 4 of 4" });
       }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
@@ -632,8 +657,11 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getByText("Processing at the provider")).toBeTruthy();
     expect(screen.getByText(/this is not a completed position yet/)).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
-    expect(screen.getByText("Provider settlement").getAttribute("aria-current")).toBe("step");
-    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+    // The provider still has to deliver shares, so the flow stops short of Complete.
+    expect(flowProgress()).toEqual({
+      step: "Provider settlement",
+      label: "Provider settlement, Step 4 of 5",
+    });
     expect(onDeposited).toHaveBeenCalledWith(deposit, {
       amount: "1",
       custodyWalletId: "wallet_1",
@@ -1020,6 +1048,29 @@ describe("slippage-floored providers", () => {
     expect(
       screen.queryByText("The selected custody wallet signs the vault deposit transaction.")
     ).toBeNull();
+  });
+
+  it("keeps the review's share figures whole instead of clipping their digits", async () => {
+    // A long decimal reads in full and on one line right before confirm: no ellipsis, no digit
+    // pushed onto the next line.
+    primeQuote("123456789.123456");
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1.000000" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(screen.getByText("123456789.123456")).toBeTruthy();
+    for (const label of ["Expected shares", "Minimum shares received"]) {
+      const value = screen.getByText(label).closest("dt")?.nextElementSibling;
+      expect(value?.tagName).toBe("DD");
+      expect(value?.className).not.toContain("truncate");
+      expect(value?.className).toContain("whitespace-nowrap");
+    }
   });
 
   it("keeps the wallet-pays note while the strategy is not sponsored", async () => {

@@ -48,7 +48,7 @@ export async function scanGcpCredentialContainers(
       rows.some(
         (row) =>
           row.organization_id !== owner.organization_id ||
-          row.provider !== "privy" ||
+          row.provider !== owner.provider ||
           row.storage_backend !== "gcp_secret_manager"
       )
     ) {
@@ -67,7 +67,7 @@ export async function scanGcpCredentialContainers(
         containerOwnerCredentialId: owner.id,
         secretRef: owner.secret_ref,
         secretVersionRef: versionRef,
-        provider: "privy",
+        provider: owner.provider,
         storageBackend: "gcp_secret_manager",
         reason: "secret_cleanup_failed",
         errorName: error instanceof Error ? error.name : "UnknownError",
@@ -255,7 +255,7 @@ export async function scanGcpCredentialContainers(
           {
             organizationId: owner.organization_id,
             containerOwnerCredentialId: owner.id,
-            provider: "privy",
+            provider: owner.provider,
             storageBackend: "gcp_secret_manager",
             reason: "cleanup_deadline_reached",
             outcome: "scan_incomplete",

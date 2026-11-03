@@ -34,9 +34,18 @@ export interface MintLookupCache<T> {
   entryCountForTests(): number;
 }
 
-export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
+/** Bounded local cache that can preserve a shared entry's original deadline. */
+export function createMintLookupCache<T>(
+  ttlMs: number,
+  options: { expiresAtOf?: (value: T) => number; maxEntries?: number } = {}
+): MintLookupCache<T> {
+  const maxEntries = options.maxEntries ?? 10_000;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new Error("Mint cache capacity must be a positive integer");
+  }
   const entries = new Map<string, CacheEntry<T>>();
   const inFlight = new Map<string, Promise<T | undefined>>();
+  let nextSweepAt = 0;
 
   function readEntry(key: string): CacheEntry<T> | null {
     const entry = entries.get(key);
@@ -47,16 +56,20 @@ export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
       entries.delete(key);
       return null;
     }
+    // Keep frequently displayed mints when a wallet introduces many new ones.
+    entries.delete(key);
+    entries.set(key, entry);
     return entry;
   }
 
   /**
-   * Drops every expired entry. A mint seen once is otherwise never read again to
-   * expire it, and wallets collect unsolicited tokens, so without this the cache
-   * would grow with every mint any wallet ever held.
+   * Drops unused expired entries at most once per TTL. Capacity bounds memory
+   * between sweeps; repeated misses never rescan the whole cache each time.
    */
   function sweepExpired(): void {
     const now = Date.now();
+    if (now < nextSweepAt) return;
+    nextSweepAt = now + ttlMs;
     for (const [key, entry] of entries) {
       if (entry.expiresAt <= now) {
         entries.delete(key);
@@ -94,7 +107,16 @@ export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
               (answered) => {
                 const value = answered.get(mint);
                 if (value !== undefined) {
-                  entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+                  const expiresAt = options.expiresAtOf
+                    ? Math.min(Date.now() + ttlMs, options.expiresAtOf(value))
+                    : Date.now() + ttlMs;
+                  if (expiresAt > Date.now()) {
+                    entries.set(key, { value, expiresAt });
+                    if (entries.size > maxEntries) {
+                      const oldest = entries.keys().next().value;
+                      if (oldest !== undefined) entries.delete(oldest);
+                    }
+                  }
                 }
                 return value;
               },
@@ -123,6 +145,7 @@ export function createMintLookupCache<T>(ttlMs: number): MintLookupCache<T> {
     clearForTests() {
       entries.clear();
       inFlight.clear();
+      nextSweepAt = 0;
     },
     entryCountForTests() {
       return entries.size;

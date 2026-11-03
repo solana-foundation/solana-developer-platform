@@ -26,6 +26,7 @@ import {
   type MoneyPrincipal,
   type MoneyPrincipalKind,
 } from "@/lib/money-principal";
+import { parseDisabledMovements } from "@/lib/movement-control";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
@@ -38,7 +39,7 @@ import type { Env } from "@/types/env";
  *
  * The signing waists (custody signer, fee sponsor) ask on every start
  * signature; jobs, `/pay` and provider-API starts (ramp quotes) ask before
- * their first provider call or signature. All of them make the same single
+ * their first provider call or signature. Each check makes one live
  * read, {@link readMoneyAdmissionFactsWith}: the project and organization, and
  * the ambient principal's own row, joined into one primary-key statement. The
  * decision, {@link decideMovement}, is pure.
@@ -48,6 +49,9 @@ import type { Env } from "@/types/env";
  * | active               | sandbox, or production with entitlement  | admit   |
  * | active               | production without the entitlement       | refuse  |
  * | suspended or deleted | any                                      | refuse  |
+ *
+ * An operator-disabled project movement also refuses its start. The same
+ * live read supplies this control without another database round trip.
  *
  * Then the principal (see `lib/money-principal.ts`): a start with none is
  * refused; an API key must be live, hold one of the movement's actions and
@@ -67,6 +71,7 @@ import type { Env } from "@/types/env";
 
 export type MoneyAdmissionRefusal =
   | "project_not_found"
+  | "movement_disabled"
   | "organization_inactive"
   | "production_not_enabled"
   | "principal_missing"
@@ -115,6 +120,8 @@ export interface MoneyAdmissionFacts {
   projectEnvironment: ProjectEnvironment;
   /** The raw `organizations.settings` column. */
   rawSettings: string | null;
+  /** Operator-only project controls, read live for starts. */
+  disabledMovements: readonly MovementId[];
   principal: MoneyPrincipalFacts;
   /** When the row was read (epoch ms), for key expiry. */
   readAt: number;
@@ -157,6 +164,7 @@ export interface MoneyStartContext {
 
 const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">, string> = {
   project_not_found: "Project not found",
+  movement_disabled: "This movement is disabled for the project",
   organization_inactive: "Organization is not active",
   // Matches `productionNotEnabled()`, the edge refusal for the same reason.
   production_not_enabled: "Production is not enabled for this organization",
@@ -206,7 +214,8 @@ export class MoneyMovementRefusedError extends AppError {
  * signer's own refusal, made early so a flow that records, claims an
  * Idempotency-Key or calls a gateway before it signs (Private Channels,
  * Rings, transfers, transfer batches, signer check) does none of it. Same
- * 403; the waist still decides every signature (ADR 0007 addendum).
+ * 403; the waist still decides every signature (ADR 0007 addendum). Recurring
+ * payments also ask it for writes that sign nothing (HOO-2337).
  */
 export function assertCallerWalletInScope(
   caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
@@ -242,12 +251,18 @@ export function assertCallerMaySignWith(
 
 /**
  * Refuses, before any work, a wallet whose purpose the movement does not
- * allow (APE-371), without requiring the caller's wallet scope: recurring
- * writes that sign nothing succeed on any project wallet (HOO-2099). A
- * refused wallet outside the scope is refused as out of scope instead, so a
- * key never learns the purpose of a wallet it cannot see. The custody signer
- * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
- * cron included.
+ * allow (APE-371), without requiring the caller's wallet scope. A refused
+ * wallet outside the scope is refused as out of scope instead, so a key never
+ * learns the purpose of a wallet it cannot see. The custody signer makes the
+ * same purpose refusal ({@link decideWalletPurpose}) on every path, cron
+ * included.
+ *
+ * Wallet scope usually bounds only what SDP signs with (a ramp cancel signs
+ * nothing and needs none). Recurring payments are the exception (HOO-2337):
+ * every write to a schedule, signing or not and cancel included, requires the
+ * source wallet in scope, because an in-scope activator signs whatever terms
+ * a pending edit left. Their authorize step asks
+ * {@link assertCallerWalletInScope} first and this only for the purpose.
  *
  * @param caller - The authenticated caller, as read at authentication.
  * @param wallet - The custody wallet the movement would sign with.
@@ -462,7 +477,9 @@ export function decideMovement(
   if (!organization.admitted || !facts) {
     return organization;
   }
-  return decidePrincipal(movement, facts, subject);
+  const principal = decidePrincipal(movement, facts, subject);
+  if (!principal.admitted) return principal;
+  return facts.disabledMovements.includes(movement) ? refuse("movement_disabled") : ADMITTED;
 }
 
 /**
@@ -529,6 +546,7 @@ const walletScopeSchema = z.enum(API_KEY_WALLET_SCOPES);
 
 interface MoneyAdmissionRow {
   environment: ProjectEnvironment;
+  disabled_movements: unknown;
   status: string;
   settings: string | null;
   key_id: string | null;
@@ -641,7 +659,7 @@ export async function readMovementFactsWith(
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
   return movementNeedsAdmissionFacts(movement)
-    ? readMoneyAdmissionFactsWith(db, scope, subject)
+    ? readMoneyAdmissionFactsWith(db, scope, movement, subject)
     : null;
 }
 
@@ -649,9 +667,10 @@ export async function readMovementFactsWith(
 export async function readMoneyAdmissionFacts(
   env: Env,
   scope: MoneyAdmissionScope,
+  movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
-  return readMoneyAdmissionFactsWith(getDb(env), scope, subject);
+  return readMoneyAdmissionFactsWith(getDb(env), scope, movement, subject);
 }
 
 /**
@@ -663,15 +682,16 @@ export async function readMoneyAdmissionFacts(
  * The joins the principal does not use match nothing, so the cost is the
  * same one round trip the organization read always made.
  */
-export async function readMoneyAdmissionFactsWith(
+async function readMoneyAdmissionFactsWith(
   db: DatabaseExecutor,
   scope: MoneyAdmissionScope,
+  movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
   const principal = currentMoneyPrincipal();
   const row = await db
     .prepare(
-      `SELECT p.environment, o.status, o.settings,
+      `SELECT p.environment, p.disabled_movements, o.status, o.settings,
               ak.id AS key_id, ak.status AS key_status, ak.expires_at AS key_expires_at,
               ak.rotation_deadline AS key_rotation_deadline, ak.grants AS key_grants,
               ak.wallet_scope AS key_wallet_scope,
@@ -716,6 +736,12 @@ export async function readMoneyAdmissionFactsWith(
         organizationStatus: row.status,
         projectEnvironment: row.environment,
         rawSettings: row.settings,
+        // A malformed control fails starts closed. Exits never consult it,
+        // including when their credential still requires a live read.
+        disabledMovements:
+          MOVEMENTS[movement].kind === "start"
+            ? parseDisabledMovements(row.disabled_movements)
+            : [],
         principal: principalFacts(principal, row),
         readAt: Date.now(),
       }

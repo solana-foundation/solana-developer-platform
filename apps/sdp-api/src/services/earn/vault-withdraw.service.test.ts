@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
@@ -15,10 +16,6 @@ const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultWithdrawClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultWithdrawClient,
@@ -42,7 +39,14 @@ vi.mock("./vault-sponsorship", async (importOriginal) => ({
   resolveVaultSponsorship,
 }));
 
-const { withdrawFromVault } = await import("./vault-withdraw.service");
+const service = await import("./vault-withdraw.service");
+
+/** A custody exit, in the cluster scope the project middleware opens for its project. */
+function withdrawFromVault(...args: Parameters<typeof service.withdrawFromVault>) {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    service.withdrawFromVault(...args)
+  );
+}
 
 const ORG = "org_vault_withdraw";
 const PROJECT = "prj_vault_withdraw";
@@ -60,7 +64,6 @@ function input(overrides: Partial<VaultWithdrawalInput> = {}): VaultWithdrawalIn
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox",
     provider: "kamino",
     positionId,
     vaultAddress: VAULT,
@@ -149,7 +152,7 @@ beforeEach(async () => {
 describe("withdrawFromVault", () => {
   it("records three back-to-back same-amount withdraws as separate intents", async () => {
     const memos: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       memos.push(
         Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
       );
@@ -268,7 +271,7 @@ describe("withdrawFromVault", () => {
   });
 
   it("stamps the idempotency memo onto the one transaction", async () => {
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       const memo = Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString(
         "utf8"
       );

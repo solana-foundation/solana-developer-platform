@@ -12,6 +12,9 @@ export function transactionHref(transactionId: string): string {
  */
 export const PAYMENT_TRANSACTION_OPEN_PARAM = "transaction";
 
+/** The Recurring payments list. */
+export const PAYMENT_RECURRING_HREF = "/dashboard/payments/recurring";
+
 /** The Requests list. */
 export const PAYMENT_REQUESTS_HREF = "/dashboard/payments/requests";
 

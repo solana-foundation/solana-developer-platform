@@ -1,6 +1,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 
-export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+export type FundManagementModalAction = "mint" | "burn";
 export type AdminAction =
   | "update-metadata"
   | "mint"

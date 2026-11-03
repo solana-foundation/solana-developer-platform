@@ -4,7 +4,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
-import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
+import { fetchDisplayUsdPrices } from "@/services/display-price.service";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
 
@@ -207,12 +207,12 @@ export async function attachTokenSymbolsToBalanceMap(
 }
 
 /**
- * Sets `usdPrice` and `usdValue` on each balance Jupiter priced. A mint it did not price
+ * Sets `usdPrice` and `usdValue` on each balance with a display price. An unpriced mint
  * stays unpriced: a symbol, a stablecoin template or a peg is not a market price, and
  * anyone can mint a token called "USDC".
  *
  * @param balances - Balances to decorate.
- * @param pricesByMint - Jupiter USD prices keyed by mint.
+ * @param pricesByMint - Display USD prices keyed by mint.
  * @returns The balances, priced where a price exists.
  */
 function enrichBalancesWithUsdValues(
@@ -227,20 +227,25 @@ function enrichBalancesWithUsdValues(
       return balance;
     }
 
+    const usdValue = uiAmount * usdPrice;
+    if (!Number.isFinite(usdValue)) {
+      return { ...balance, usdPrice };
+    }
+
     return {
       ...balance,
       usdPrice,
-      usdValue: Number((uiAmount * usdPrice).toFixed(6)),
+      usdValue: Number(usdValue.toFixed(6)),
     };
   });
 }
 
-/** Jupiter USD prices for the distinct mints across `balances`. */
+/** Display USD prices for the distinct mints across `balances`. */
 function fetchUsdPricesForBalances(
   env: Env,
   balances: CustodyWalletTokenBalance[]
 ): Promise<Map<string, number>> {
-  return fetchJupiterUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
+  return fetchDisplayUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
 }
 
 export async function attachUsdValuesToBalances(
@@ -249,6 +254,41 @@ export async function attachUsdValuesToBalances(
 ): Promise<CustodyWalletTokenBalance[]> {
   const pricesByMint = await fetchUsdPricesForBalances(env, balances);
   return enrichBalancesWithUsdValues(balances, pricesByMint);
+}
+
+/** Resolve display labels and USD prices together for the same balance set. */
+export async function attachDisplayValuesToBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<CustodyWalletTokenBalance[]> {
+  const [labeled, priced] = await Promise.all([
+    attachTokenSymbolsToBalances(balances),
+    attachUsdValuesToBalances(env, balances),
+  ]);
+  return labeled.map((balance, index) => {
+    const price = priced[index];
+    if (price?.usdPrice === undefined) return balance;
+    if (price.usdValue === undefined) return { ...balance, usdPrice: price.usdPrice };
+    return { ...balance, usdPrice: price.usdPrice, usdValue: price.usdValue };
+  });
+}
+
+/** Resolve display labels and USD prices together across wallets. */
+export async function attachDisplayValuesToBalanceMap(
+  env: Env,
+  balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const allBalances = [...balancesByWalletId.values()].flat();
+  const enriched = await attachDisplayValuesToBalances(env, allBalances);
+  let cursor = 0;
+  return new Map(
+    [...balancesByWalletId.entries()].map(([walletId, balances]) => {
+      const nextCursor = cursor + balances.length;
+      const walletBalances = enriched.slice(cursor, nextCursor);
+      cursor = nextCursor;
+      return [walletId, walletBalances] as const;
+    })
+  );
 }
 
 export async function attachUsdValuesToBalanceMap(

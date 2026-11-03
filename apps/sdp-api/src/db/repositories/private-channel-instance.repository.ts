@@ -2,7 +2,6 @@ import type {
   PrivateChannelInstance,
   PrivateChannelInstanceInput,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelInstanceId(): string {
   return `pci_${crypto.randomUUID()}`;
@@ -58,10 +57,6 @@ export interface ReactivateInstanceInput extends PrivateChannelInstanceInput {
 
 export interface UpdateActiveInstanceInput extends PrivateChannelInstanceInput, ProjectScope {
   id: string;
-}
-
-export interface PrivateChannelInstanceRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelInstanceRepository {

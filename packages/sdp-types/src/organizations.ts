@@ -9,8 +9,18 @@ import type { OrganizationRole } from "./roles";
 export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
 export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
-export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
+/**
+ * `provisioning` is an organization SDP is still creating (ADR 0012): it holds
+ * its creator's one-organization slot but may not authenticate until active.
+ */
+export const ORGANIZATION_STATUSES = ["provisioning", "active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
+
+/** Incident operations cannot activate provisioning or deleted organizations. */
+export const ORGANIZATION_CONTROL_SOURCE_STATUSES = {
+  suspend: ["active", "suspended"],
+  resume: ["suspended"],
+} as const satisfies Record<string, readonly OrganizationStatus[]>;
 
 /**
  * Organization statuses whose credentials may authenticate (HOO-1955). A
@@ -52,7 +62,8 @@ export function memberStatusMayMoveMoney(status: string): boolean {
   return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
 }
 
-export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",
@@ -77,7 +88,6 @@ export interface Organization {
 
 export interface OrganizationSettings {
   defaultEnvironment?: "sandbox" | "production";
-  webhookSecret?: string;
   allowedIpAddresses?: string[];
   /**
    * Pre-enforcement allowlist parked by migration 0055 — never applied, any
@@ -92,6 +102,11 @@ export interface OrganizationSettings {
    * list hides them.
    */
   enableProductionProject?: boolean;
+  /**
+   * `false` stops the alert emails admins get when money moves or the organization's
+   * configuration changes (HOO-2299); unset or `true` sends them. Turning it off is itself emailed.
+   */
+  alertEmails?: boolean;
   customRateLimits?: {
     requestsPerMinute?: number;
     requestsPerDay?: number;
@@ -165,7 +180,6 @@ export interface Invitation {
   email: string;
   role: OrganizationRole;
   invitedBy: string;
-  tokenHash: string;
   expiresAt: string;
   status: InvitationStatus;
   createdAt: string;

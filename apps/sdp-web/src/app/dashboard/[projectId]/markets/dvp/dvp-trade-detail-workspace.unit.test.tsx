@@ -45,7 +45,7 @@ afterEach(() => {
 function renderDetailWithOnChainOpen(value: DvpTrade): string {
   const { container } = render(
     <EnglishTestI18n>
-      <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+      <DvpTradeDetailWorkspace canWrite cluster="devnet" trade={value} />
     </EnglishTestI18n>
   );
   fireEvent.click(within(container).getByRole("button", { name: "On-chain details" }));
@@ -61,7 +61,7 @@ const FUNDED = { observedAmount: "1000", funded: true, surplus: null, frozen: fa
 function renderDetail(value: DvpTrade): string {
   return renderToStaticMarkup(
     <EnglishTestI18n>
-      <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+      <DvpTradeDetailWorkspace canWrite cluster="devnet" trade={value} />
     </EnglishTestI18n>
   );
 }
@@ -98,7 +98,7 @@ describe("DvpTradeDetailWorkspace", () => {
       });
       const { container } = render(
         <EnglishTestI18n>
-          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+          <DvpTradeDetailWorkspace canWrite cluster="devnet" trade={value} />
         </EnglishTestI18n>
       );
 
@@ -139,7 +139,7 @@ describe("DvpTradeDetailWorkspace", () => {
         });
         const { container } = render(
           <EnglishTestI18n>
-            <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+            <DvpTradeDetailWorkspace canWrite cluster="devnet" trade={value} />
           </EnglishTestI18n>
         );
 
@@ -213,7 +213,7 @@ describe("DvpTradeDetailWorkspace", () => {
       });
       const { container } = render(
         <EnglishTestI18n>
-          <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
+          <DvpTradeDetailWorkspace canWrite cluster="devnet" trade={value} />
         </EnglishTestI18n>
       );
       const page = within(container);
@@ -374,6 +374,7 @@ describe("DvpTradeDetailWorkspace", () => {
       const { container } = render(
         <EnglishTestI18n>
           <DvpTradeDetailWorkspace
+            canWrite
             cluster="devnet"
             trade={trade({
               status: "funded",

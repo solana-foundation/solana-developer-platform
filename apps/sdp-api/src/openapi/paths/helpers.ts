@@ -2,6 +2,14 @@ import type { IdempotencyKeyMode } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { idempotencyKeyHeaderSchema, projectScopeHeaderSchema } from "@/openapi/schemas/base";
 
+/**
+ * The OpenAPI extension naming the group an operation sits in within its tag: the API reference
+ * shows a family's groups as folders of its operations (apps/sdp-docs). A tag's operations name
+ * one each or none, and its groups appear in the order its operations first name them
+ * (`buildApiReference`).
+ */
+export const DOCS_GROUP = "x-sdp-group";
+
 export const jsonContent = (schema: z.ZodTypeAny) => ({
   "application/json": { schema },
 });
@@ -76,7 +84,7 @@ const ANSWER_AFTER_RECORD =
   "Once the request has written its record, any answer below 500 is stored: a transfer that fails after that (such as 400 `TRANSACTION_FAILED` or a 409 signer mismatch) answers a same-key retry with the same error and `Idempotent-Replayed: true`, and after 24 hours the record answers with the same status and code. A 5xx is not stored: a same-key retry runs again and is answered from the record. To try again after a failure, send the request with a new key.";
 
 /** The `Idempotency-Key` header description for a route's declared mode. */
-export function idempotencyKeyDescription({
+function idempotencyKeyDescription({
   key,
   serverErrors,
   recovery,

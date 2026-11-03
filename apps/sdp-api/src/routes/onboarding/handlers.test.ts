@@ -4,34 +4,25 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { AppError } from "@/lib/errors";
+import { authorize } from "@/middleware/authorize";
 import { requestIdMiddleware } from "@/middleware/request-id";
-import { validateBody } from "@/middleware/validate";
 import { successResponseSchema } from "@/openapi/schemas/base";
-import {
-  onboardingCompleteResponseSchema,
-  organizationOnboardingSetupSchema,
-} from "@/openapi/schemas/onboarding";
+import { organizationOnboardingSetupSchema } from "@/openapi/schemas/onboarding";
+import { seedClerkIdentity } from "@/test/helpers/clerk";
 import { seedTestCustodyRows, type TestCustodyConfigRow } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
-import { completeOnboarding, getOnboardingStatus } from "./handlers";
-import { completeOnboardingSchema } from "./schemas";
+import { authorizeOnboardingSession } from "./access";
+import { getOnboardingStatus } from "./handlers";
 
 const ORGANIZATION_ID = "org_onboarding_test";
 const CLERK_ORGANIZATION_ID = "org_clerk_onboarding_test";
+const CLERK_USER_ID = "user_clerk_onboarding_test";
 const USER_ID = "user_onboarding_test";
 const PROJECT_ID = "project_onboarding_test";
-
-function completeRequest(custodyProvider: string) {
-  return {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ custodyProvider }),
-  };
-}
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -44,16 +35,15 @@ function createApp() {
   app.use("*", requestIdMiddleware());
   app.use("*", async (c, next) => {
     c.set("clerkOnboarding", {
-      clerkUserId: "user_clerk_onboarding_test",
+      clerkUserId: CLERK_USER_ID,
       clerkOrgId: CLERK_ORGANIZATION_ID,
       orgSlug: "onboarding-test",
-      orgRole: "org:admin",
       email: "onboarding@example.com",
+      organizationId: ORGANIZATION_ID,
     });
     await next();
   });
-  app.get("/status", getOnboardingStatus);
-  app.post("/complete", validateBody(completeOnboardingSchema), completeOnboarding);
+  app.get("/status", authorize(authorizeOnboardingSession), getOnboardingStatus);
   return app;
 }
 
@@ -71,14 +61,16 @@ async function seedOrganization() {
          VALUES (?, 'onboarding@example.com', 1, 'Onboarding user', 'active')`
       )
       .bind(USER_ID),
-    getDb(env)
-      .prepare(
-        `INSERT INTO auth_organization_identities
-           (id, provider, provider_org_id, organization_id, slug)
-         VALUES ('aoi_onboarding_test', 'clerk', ?, ?, 'onboarding-test')`
-      )
-      .bind(CLERK_ORGANIZATION_ID, ORGANIZATION_ID),
   ]);
+  await seedClerkIdentity(getDb(env), {
+    userId: USER_ID,
+    email: "onboarding@example.com",
+    clerkUserId: CLERK_USER_ID,
+    organizationId: ORGANIZATION_ID,
+    clerkOrgId: CLERK_ORGANIZATION_ID,
+    orgSlug: "onboarding-test",
+    role: "admin",
+  });
   await seedDefaultProjects(getDb(env), {
     organizationId: ORGANIZATION_ID,
     createdBy: USER_ID,
@@ -90,8 +82,6 @@ async function seedOrganization() {
 const statusResponseSchema = successResponseSchema(
   z.object({ setup: organizationOnboardingSetupSchema })
 );
-
-const completeResponseSchema = successResponseSchema(onboardingCompleteResponseSchema);
 
 function custodyConfig(
   overrides: Pick<TestCustodyConfigRow, "id" | "projectId" | "provider" | "status">
@@ -299,27 +289,6 @@ describe("organization onboarding handlers", () => {
       currentStep: "custody",
       custodyProviders: [],
       completedAt: null,
-      version: 1,
-      canManage: true,
-    });
-  });
-
-  it("completes once the requested provider backs the default sandbox project", async () => {
-    const app = createApp();
-    expect((await app.request("/complete", completeRequest("privy"), env)).status).toBe(400);
-
-    await seedDefaultSandboxCustodyWallet();
-
-    expect((await app.request("/complete", completeRequest("turnkey"), env)).status).toBe(400);
-
-    const response = await app.request("/complete", completeRequest("privy"), env);
-    expect(response.status).toBe(200);
-    const { setup } = completeResponseSchema.parse(await response.json()).data;
-    expect(setup).toEqual({
-      status: "complete",
-      currentStep: "complete",
-      custodyProviders: ["privy"],
-      completedAt: expect.any(String),
       version: 1,
       canManage: true,
     });

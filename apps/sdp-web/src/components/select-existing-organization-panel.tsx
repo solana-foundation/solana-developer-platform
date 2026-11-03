@@ -1,10 +1,13 @@
 "use client";
 
-import { useOrganizationList } from "@clerk/nextjs";
+import { useOrganization, useOrganizationList } from "@clerk/nextjs";
+import { cn } from "@sdp/ui/cn";
 import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import { CreateOrganizationForm } from "@/components/create-organization-form";
 import { useTranslations } from "@/i18n/provider";
 
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
@@ -16,7 +19,7 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
         width={36}
         height={36}
         unoptimized
-        className="size-9 rounded-lg object-cover"
+        className="size-8 rounded-control-inner object-cover"
         aria-hidden="true"
       />
     );
@@ -25,108 +28,211 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
   return (
     <span
       aria-hidden="true"
-      className="flex size-9 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-on-primary"
+      className="flex size-8 shrink-0 items-center justify-center rounded-control-inner bg-primary text-meta font-medium text-on-primary"
     >
       {name.trim().slice(0, 2).toUpperCase() || "?"}
     </span>
   );
 }
 
+const ENTRY_ROW_CLASS =
+  "flex min-h-12 w-full items-center gap-3 rounded-control bg-fill px-3 py-2 text-body text-primary transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50";
+
+type EntryState = "no-access" | "create" | "select";
+
+function resolveEntryState(params: {
+  noAccess: boolean;
+  isLoaded: boolean;
+  hasChoices: boolean;
+}): EntryState {
+  if (params.noAccess) return "no-access";
+  if (params.isLoaded && !params.hasChoices) return "create";
+  return "select";
+}
+
+function entryCopy(
+  state: EntryState,
+  t: ReturnType<typeof useTranslations>
+): { title: string; description: string } {
+  switch (state) {
+    case "no-access":
+      return {
+        title: t("Shared.SharedComponents.noOrganizationAccessTitle"),
+        description: t("Shared.SharedComponents.noOrganizationAccessDescription"),
+      };
+    case "create":
+      return {
+        title: t("Shared.SharedComponents.createOrganizationTitle"),
+        description: t("Shared.SharedComponents.createOrganizationDescription"),
+      };
+    case "select":
+      return {
+        title: t("Shared.SharedComponents.selectOrganization"),
+        description: t("Shared.SharedComponents.selectExistingOrganizationDescription"),
+      };
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unknown entry state: ${String(exhaustive)}`);
+    }
+  }
+}
+
 /**
- * Entry state for a signed-in user who belongs to an organization but has not
- * selected one for the current Clerk session. It deliberately exposes only
- * existing memberships: organization creation belongs outside SDP.
+ * Entry state for a signed-in person with no organization selected for the
+ * session: their organizations to pick from, their pending invitations to
+ * accept, or, with neither, the step that creates their organization in SDP
+ * (ADR 0012). With `noAccess`, the session's organization is one SDP refused,
+ * so the same choices are offered under that explanation.
+ *
+ * @param props.noAccess - Whether SDP refused the session's organization.
  */
-export function SelectExistingOrganizationPanel() {
+export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolean }) {
   const t = useTranslations();
   const router = useRouter();
-  const { userMemberships, setActive, isLoaded } = useOrganizationList({
+  const { userMemberships, userInvitations, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
+    userInvitations: { infinite: true },
   });
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const memberships = userMemberships.data ?? [];
+  const { organization: activeOrganization } = useOrganization();
+  // The organization SDP refused is no way forward, so it is not offered again.
+  const memberships = (userMemberships.data ?? []).filter(
+    (membership) => !noAccess || membership.organization.id !== activeOrganization?.id
+  );
+  const invitations = userInvitations.data ?? [];
+  const copy = entryCopy(
+    resolveEntryState({
+      noAccess,
+      isLoaded,
+      hasChoices: memberships.length > 0 || invitations.length > 0,
+    }),
+    t
+  );
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--sdp-shell-bg)] px-4 py-10 text-primary">
-      <section className="w-full max-w-md rounded-3xl border border-border-subtle bg-surface-raised p-6 shadow-sm">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-medium tracking-tight">
-            {t("Shared.SharedComponents.selectOrganization")}
-          </h1>
-          <p className="text-sm leading-6 text-tertiary">
-            {t("Shared.SharedComponents.selectExistingOrganizationDescription")}
-          </p>
-        </div>
+    <section className="flex flex-col gap-8">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-heading font-medium text-primary">{copy.title}</h1>
+        <p className="text-body text-secondary">{copy.description}</p>
+      </div>
 
-        <div
-          className="mt-6 space-y-2"
-          aria-busy={switchingTo !== null || !isLoaded || userMemberships.isFetching}
-        >
-          {!isLoaded ? (
-            <div className="flex items-center gap-2 rounded-2xl bg-fill-subtle px-4 py-3 text-sm text-tertiary">
-              <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
-              {t("Shared.SharedComponents.loading")}
-            </div>
-          ) : null}
+      <div
+        className="flex flex-col gap-2"
+        aria-busy={switchingTo !== null || !isLoaded || userMemberships.isFetching}
+      >
+        {!isLoaded ? (
+          <div className="flex items-center gap-2 text-body text-secondary">
+            <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+            {t("Shared.SharedComponents.loading")}
+          </div>
+        ) : null}
 
-          {isLoaded && memberships.length === 0 ? (
-            <p className="rounded-2xl bg-fill-subtle px-4 py-3 text-sm text-tertiary">
-              {t("Shared.SharedComponents.noOrganizations")}
-            </p>
-          ) : null}
+        {isLoaded && memberships.length === 0 && invitations.length === 0 ? (
+          <CreateOrganizationForm />
+        ) : null}
 
-          {memberships.map((membership) => {
-            const organization = membership.organization;
-            const isSwitching = switchingTo === organization.id;
-
-            return (
-              <button
-                key={organization.id}
-                type="button"
-                disabled={!setActive || switchingTo !== null}
-                onClick={async () => {
-                  if (!setActive) return;
-                  setSwitchingTo(organization.id);
-                  try {
-                    await setActive({ organization: organization.id });
-                    router.refresh();
-                  } catch {
-                    setSwitchingTo(null);
-                  }
-                }}
-                className="flex w-full items-center gap-3 rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
-              >
-                <OrganizationMark name={organization.name} imageUrl={organization.imageUrl} />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {organization.name}
-                </span>
-                {isSwitching ? (
-                  <LoaderCircleIcon
-                    className="size-4 animate-spin text-tertiary"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
-                )}
-              </button>
-            );
-          })}
-
-          {isLoaded && userMemberships.hasNextPage ? (
+        {invitations.map((invitation) => {
+          const organization = invitation.publicOrganizationData;
+          return (
             <button
+              key={invitation.id}
               type="button"
-              disabled={switchingTo !== null || userMemberships.isFetching}
-              onClick={() => userMemberships.fetchNext()}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border-default px-4 py-3 text-sm font-medium transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
+              disabled={!setActive || switchingTo !== null}
+              onClick={async () => {
+                if (!setActive) return;
+                setSwitchingTo(organization.id);
+                try {
+                  await invitation.accept();
+                } catch {
+                  setSwitchingTo(null);
+                  toast.error(t("Shared.SharedComponents.acceptInvitationFailed"));
+                  return;
+                }
+                // Accepted: the invitation becomes a membership, so a failed
+                // switch leaves it to pick from the list rather than accept again.
+                try {
+                  await Promise.all([userInvitations.revalidate(), userMemberships.revalidate()]);
+                  await setActive({ organization: organization.id });
+                  router.refresh();
+                } catch {
+                  setSwitchingTo(null);
+                  toast.error(t("Shared.SharedComponents.switchOrganizationFailed"));
+                }
+              }}
+              className={cn(ENTRY_ROW_CLASS, "text-left")}
             >
-              {userMemberships.isFetching ? (
-                <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
-              ) : null}
-              {t("Shared.SharedComponents.loadMore")}
+              <OrganizationMark name={organization.name} imageUrl={organization.imageUrl} />
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {t("Shared.SharedComponents.acceptInvitation", {
+                  organization: organization.name,
+                })}
+              </span>
+              {switchingTo === organization.id ? (
+                <LoaderCircleIcon
+                  className="size-4 animate-spin text-tertiary"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
+              )}
             </button>
-          ) : null}
-        </div>
-      </section>
-    </main>
+          );
+        })}
+
+        {memberships.map((membership) => {
+          const organization = membership.organization;
+          const isSwitching = switchingTo === organization.id;
+
+          return (
+            <button
+              key={organization.id}
+              type="button"
+              disabled={!setActive || switchingTo !== null}
+              onClick={async () => {
+                if (!setActive) return;
+                setSwitchingTo(organization.id);
+                try {
+                  await setActive({ organization: organization.id });
+                  router.refresh();
+                } catch {
+                  setSwitchingTo(null);
+                }
+              }}
+              className={cn(ENTRY_ROW_CLASS, "text-left")}
+            >
+              <OrganizationMark name={organization.name} imageUrl={organization.imageUrl} />
+              <span className="min-w-0 flex-1 truncate font-medium">{organization.name}</span>
+              {isSwitching ? (
+                <LoaderCircleIcon
+                  className="size-4 animate-spin text-tertiary"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
+              )}
+            </button>
+          );
+        })}
+
+        {isLoaded && (userMemberships.hasNextPage || userInvitations.hasNextPage) ? (
+          <button
+            type="button"
+            disabled={
+              switchingTo !== null || userMemberships.isFetching || userInvitations.isFetching
+            }
+            onClick={() => {
+              if (userMemberships.hasNextPage) userMemberships.fetchNext();
+              if (userInvitations.hasNextPage) userInvitations.fetchNext();
+            }}
+            className={cn(ENTRY_ROW_CLASS, "justify-center font-medium")}
+          >
+            {userMemberships.isFetching || userInvitations.isFetching ? (
+              <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+            ) : null}
+            {t("Shared.SharedComponents.loadMore")}
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }

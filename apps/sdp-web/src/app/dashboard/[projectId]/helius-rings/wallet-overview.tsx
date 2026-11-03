@@ -4,6 +4,7 @@ import { Button } from "@sdp/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
 import { Loader2, RefreshCw } from "lucide-react";
 import { formatCurrencyAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import {
@@ -11,7 +12,7 @@ import {
   ringNameByProgramId,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
-import { useRingsBalance } from "./use-rings-balance";
+import { type RingsBalanceState, useRingsBalance } from "./use-rings-balance";
 
 /**
  * Adjacent-run grouping over the API's deterministic order (default bucket
@@ -54,7 +55,9 @@ export function WalletOverview({
   // server refuses to read an identity it cannot derive, so asking only turns a
   // known state into a generic read failure — and the refresh button would
   // invite an operator to keep asking.
-  const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
+  // The balance is read by a sync, which writes; a read-only member never asks.
+  const canWrite = useCanWrite();
+  const readable = canWrite && wallet.shieldedAddress !== null && wallet.status !== "paused";
   const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
   const reading = state.name === "loading";
@@ -66,42 +69,82 @@ export function WalletOverview({
     <Card>
       <CardHeader>
         <CardTitle>{wallet.name}</CardTitle>
-        <CardAction>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            disabled={reading || !readable}
-            aria-label={refreshLabel}
-            title={refreshLabel}
-            onClick={refresh}
-          >
-            {reading ? (
-              <Loader2 className="animate-spin" aria-hidden="true" />
-            ) : (
-              <RefreshCw aria-hidden="true" />
-            )}
-          </Button>
-        </CardAction>
+        {canWrite ? (
+          <CardAction>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              disabled={reading || !readable}
+              aria-label={refreshLabel}
+              title={refreshLabel}
+              onClick={refresh}
+            >
+              {reading ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RefreshCw aria-hidden="true" />
+              )}
+            </Button>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
         <hr className="border-border-default" role="presentation" />
         <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
           {t("DashboardHeliusRings.overview.privateBalanceLabel")}
         </p>
-        {wallet.status === "paused" ? (
-          <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
-        ) : wallet.shieldedAddress === null ? (
-          <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>
-        ) : state.name === "loading" ? (
-          <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>
-        ) : state.name === "failed" ? (
-          <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>
-        ) : (
-          <Summary sync={state.sync} locale={locale} projectRings={projectRings} />
-        )}
+        <PrivateBalance
+          wallet={wallet}
+          canWrite={canWrite}
+          state={state}
+          locale={locale}
+          projectRings={projectRings}
+        />
       </CardContent>
     </Card>
   );
+}
+
+/** The wallet's private balance, or why there is none to show. */
+function PrivateBalance({
+  wallet,
+  canWrite,
+  state,
+  locale,
+  projectRings,
+}: {
+  wallet: RingsWallet;
+  canWrite: boolean;
+  state: RingsBalanceState;
+  locale: string;
+  projectRings: ProjectRing[];
+}) {
+  const t = useTranslations();
+  if (wallet.status === "paused") {
+    return (
+      <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
+    );
+  }
+  if (wallet.shieldedAddress === null) {
+    return <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>;
+  }
+  if (!canWrite) {
+    return (
+      <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.readOnly")}</p>
+    );
+  }
+  switch (state.name) {
+    case "loading":
+      return <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>;
+    case "failed":
+      return <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>;
+    case "observed":
+      return <Summary sync={state.sync} locale={locale} projectRings={projectRings} />;
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unhandled balance state: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
 function Summary({

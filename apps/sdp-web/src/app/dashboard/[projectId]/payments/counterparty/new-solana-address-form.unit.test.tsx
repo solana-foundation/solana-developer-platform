@@ -8,8 +8,13 @@ import type { ComplianceSnapshot } from "@/app/dashboard/[projectId]/payments/pa
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { NewSolanaAddressForm } from "./new-solana-address-form";
+import * as addressScreening from "./use-address-screening";
 
-const screening = vi.hoisted(() => ({ next: null as ComplianceSnapshot | null }));
+const screening = vi.hoisted(() => ({
+  next: null as ComplianceSnapshot | null,
+  enabled: true,
+  calls: 0,
+}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -17,8 +22,15 @@ vi.mock("@/app/dashboard/[projectId]/payments/payments-workspace.data", async (i
   ...(await importOriginal<
     typeof import("@/app/dashboard/[projectId]/payments/payments-workspace.data")
   >()),
-  runComplianceCheck: vi.fn(async () => screening.next),
+  runComplianceCheck: vi.fn(async () => {
+    screening.calls += 1;
+    return screening.next;
+  }),
 }));
+// Whether this deployment screens addresses (its Compliance channel), per test.
+vi.spyOn(addressScreening, "useAddressScreeningEnabled").mockImplementation(
+  () => screening.enabled
+);
 
 const ADDRESS = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
 
@@ -59,6 +71,8 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   screening.next = null;
+  screening.enabled = true;
+  screening.calls = 0;
 });
 
 describe("NewSolanaAddressForm", () => {
@@ -107,5 +121,19 @@ describe("NewSolanaAddressForm", () => {
     await user.click(screen.getByRole("button", { name: "Add anyway" }));
     await waitFor(() => expect(onAdded).toHaveBeenCalledWith(account));
     expect(writes).toHaveLength(1);
+  });
+
+  it("adds the address without screening where the deployment does not run Compliance", async () => {
+    // Stable refuses the screening route; asking anyway raised a false "flagged" warning.
+    screening.enabled = false;
+    const { user, writes, onAdded } = renderForm();
+    await user.type(screen.getByLabelText("Address"), ADDRESS);
+    await user.click(screen.getByRole("button", { name: "Add address" }));
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(account));
+    expect(screening.calls).toBe(0);
+    expect(writes).toEqual([
+      { accountKind: "crypto_wallet", details: { network: "solana", address: ADDRESS } },
+    ]);
   });
 });

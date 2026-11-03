@@ -9,16 +9,13 @@ const mocks = vi.hoisted(() => ({
   fetchProjectProviderAvailability: vi.fn(),
   organizationFetch: vi.fn(),
   projectRequest: vi.fn(),
+  requestMemberRole: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
-// The route is the design switch; this test is about the previous design's page.
-vi.mock("@/flags/new-design", () => ({
-  withLegacyDesign: (_current: unknown, legacy: unknown) => legacy,
-}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));
@@ -28,6 +25,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
     organizationClient: { request: vi.fn(), fetch: mocks.organizationFetch },
     projectClient: { request: mocks.projectRequest, fetch: vi.fn() },
   }),
+  requestMemberRole: mocks.requestMemberRole,
 }));
 vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
   createCustodySetupWalletAction: vi.fn(),
@@ -41,7 +39,8 @@ describe("custody setup page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/custody/setup`);
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    mocks.requestMemberRole.mockResolvedValue("admin");
     mocks.organizationFetch.mockResolvedValue({
       linked: true,
       organization: { id: "org_test" },
@@ -105,7 +104,7 @@ describe("custody setup page", () => {
     [{ provider: "privy" }, `/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
     [{}, `/dashboard/${PRODUCTION_PROJECT.id}/integrations`],
   ])("redirects a member given %o to %s before any API read", async (searchParams, destination) => {
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
+    mocks.requestMemberRole.mockResolvedValue("member");
 
     await expect(
       CustodySetupPage({ searchParams: Promise.resolve(searchParams) })

@@ -1,4 +1,8 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import {
   FINALIZED_SIGNATURE_STATUS_TTL_MS,
@@ -6,7 +10,7 @@ import {
   resolveVaultBalanceReadContext,
 } from "./vault-balance-read-context";
 
-const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), prove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn() }));
 vi.mock("@/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/client")>()),
   getDb: vi.fn(),
@@ -14,21 +18,14 @@ vi.mock("@/db/client", async (importOriginal) => ({
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc: vi.fn(), getSignatureStatuses: mocks.statuses }));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.invalid",
-}));
-vi.mock("./execution-registry", () => ({
-  assertClusterEndpoint: mocks.prove,
-  earnClusterFor: (environment: string) =>
-    environment === "production" ? "mainnet-beta" : "devnet",
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
+  getSignatureStatuses: mocks.statuses,
 }));
 const input = {
   movementIds: ["one", "two", "three"],
   organizationId: "org",
   projectId: "project",
-  environment: "sandbox" as const,
   custodyWalletIds: ["wallet"],
 };
 const movement = {
@@ -41,28 +38,45 @@ const movement = {
 };
 const status = (slot: bigint) => ({ slot, confirmationStatus: "confirmed", err: null });
 
+/** One read, in the cluster scope the project middleware opens for the project it names. */
+function resolveInScope(
+  readInput: Parameters<typeof resolveVaultBalanceReadContext>[1],
+  environment: SdpEnvironment
+) {
+  return runInClusterScope({ projectId: readInput.projectId, environment }, () =>
+    resolveVaultBalanceReadContext({} as Env, readInput)
+  );
+}
+
+// The status read gets a real pool client; each cluster's pool is the stub's test endpoint.
+installClusterRpcStub();
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetFinalizedSignatureStatuses();
   mocks.movement.mockResolvedValue(movement);
   mocks.statuses.mockResolvedValue([status(100n), status(103n), status(102n)]);
-  mocks.prove.mockResolvedValue(undefined);
 });
 
 describe("vault balance confirmation context", () => {
   it("uses the highest confirmed slot across repeated or offsetting movements", async () => {
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual({
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
       minimumSlotByPositionId: new Map([["position", 103]]),
     });
     expect(mocks.movement).toHaveBeenCalledWith({ movementId: "one", organizationId: "org" });
-    expect(mocks.prove).toHaveBeenCalledWith({}, "devnet", "https://rpc.invalid");
+    // The bounded devnet client: the pool memoizes one per cluster and timeout.
+    expect(mocks.statuses.mock.calls[0]?.[0]).toBe(
+      runInClusterScope({ projectId: "project", environment: "sandbox" }, () =>
+        createClusterRpc({ timeoutMs: 3_000 })
+      )
+    );
   });
 
   it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
     mocks.movement.mockResolvedValueOnce({ ...movement, position_id: "other" });
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual({
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
       minimumSlotByPositionId: new Map([
@@ -80,10 +94,9 @@ describe("vault balance confirmation context", () => {
     { ...movement, execution_model: "custodial" },
   ])("refuses a foreign or unreadable movement before any RPC call", async (row) => {
     mocks.movement.mockResolvedValueOnce(row);
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).rejects.toMatchObject({
+    await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({
       statusCode: 404,
     });
-    expect(mocks.prove).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
 
@@ -94,15 +107,13 @@ describe("vault balance confirmation context", () => {
     { ...status(101n), slot: undefined },
   ])("does not acknowledge missing or nonconfirmed chain evidence", async (unknown) => {
     mocks.statuses.mockResolvedValue([status(100n), unknown, status(102n)]);
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).rejects.toMatchObject({
+    await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({
       statusCode: 503,
     });
   });
 
   it("preserves ordinary position reads without a confirmation constraint", async () => {
-    await expect(
-      resolveVaultBalanceReadContext({} as Env, { ...input, movementIds: [] })
-    ).resolves.toBeUndefined();
+    await expect(resolveInScope({ ...input, movementIds: [] }, "sandbox")).resolves.toBeUndefined();
     expect(mocks.movement).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
@@ -145,12 +156,11 @@ describe("finalized signature statuses are read once", () => {
     chain.set("sig-three", finalized(102n));
 
     for (let poll = 0; poll < 3; poll += 1) {
-      await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual(expected);
+      await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
     }
 
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
     expect(mocks.statuses.mock.calls[0]?.[1]).toEqual(["sig-one", "sig-two", "sig-three"]);
-    expect(mocks.prove).toHaveBeenCalledTimes(3);
   });
 
   it("keeps reading a confirmed-only movement, and only that one", async () => {
@@ -158,11 +168,11 @@ describe("finalized signature statuses are read once", () => {
     chain.set("sig-two", status(103n));
     chain.set("sig-three", finalized(102n));
 
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual(expected);
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
     chain.set("sig-two", finalized(103n));
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual(expected);
-    await expect(resolveVaultBalanceReadContext({} as Env, input)).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
 
     expect(mocks.statuses.mock.calls.map(([, signatures]) => signatures)).toEqual([
       ["sig-one", "sig-two", "sig-three"],
@@ -174,11 +184,11 @@ describe("finalized signature statuses are read once", () => {
   it("never remembers a failed read or a status the checks refuse", async () => {
     const single = { ...input, movementIds: ["one"] };
     mocks.statuses.mockRejectedValueOnce(new Error("RPC request timed out after 3000ms"));
-    await expect(resolveVaultBalanceReadContext({} as Env, single)).rejects.toThrow("timed out");
+    await expect(resolveInScope(single, "sandbox")).rejects.toThrow("timed out");
 
     chain.set("sig-one", { ...finalized(100n), err: { InstructionError: [0, "Custom"] } });
     for (let poll = 0; poll < 2; poll += 1) {
-      await expect(resolveVaultBalanceReadContext({} as Env, single)).rejects.toMatchObject({
+      await expect(resolveInScope(single, "sandbox")).rejects.toMatchObject({
         statusCode: 503,
       });
     }
@@ -192,12 +202,12 @@ describe("finalized signature statuses are read once", () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     try {
-      await resolveVaultBalanceReadContext({} as Env, single);
-      await resolveVaultBalanceReadContext({} as Env, single);
+      await resolveInScope(single, "sandbox");
+      await resolveInScope(single, "sandbox");
       expect(mocks.statuses).toHaveBeenCalledTimes(1);
 
       clock.mockReturnValue(now + FINALIZED_SIGNATURE_STATUS_TTL_MS + 1);
-      await resolveVaultBalanceReadContext({} as Env, single);
+      await resolveInScope(single, "sandbox");
       expect(mocks.statuses).toHaveBeenCalledTimes(2);
     } finally {
       clock.mockRestore();
@@ -208,18 +218,18 @@ describe("finalized signature statuses are read once", () => {
       environment: "production",
       signature: "sig-one",
     });
-    await resolveVaultBalanceReadContext({} as Env, { ...single, environment: "production" });
+    await resolveInScope(single, "production");
     expect(mocks.statuses).toHaveBeenCalledTimes(3);
   });
 
   it("holds a bounded number of statuses, dropping the oldest", async () => {
     const movementIds = Array.from({ length: 1_025 }, (_, index) => `m${index}`);
     for (const id of movementIds) chain.set(`sig-${id}`, finalized(100n));
-    await resolveVaultBalanceReadContext({} as Env, { ...input, movementIds });
+    await resolveInScope({ ...input, movementIds }, "sandbox");
 
-    await resolveVaultBalanceReadContext({} as Env, { ...input, movementIds: ["m1024"] });
+    await resolveInScope({ ...input, movementIds: ["m1024"] }, "sandbox");
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
-    await resolveVaultBalanceReadContext({} as Env, { ...input, movementIds: ["m0"] });
+    await resolveInScope({ ...input, movementIds: ["m0"] }, "sandbox");
     expect(mocks.statuses).toHaveBeenCalledTimes(2);
     expect(mocks.statuses.mock.calls[1]?.[1]).toEqual(["sig-m0"]);
   });

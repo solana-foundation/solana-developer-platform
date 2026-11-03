@@ -50,10 +50,7 @@ test.describe("payments command center and transaction ledger", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await gotoProjectPage(page, projectId, "/dashboard/payments/transactions");
 
-    // new-design-activity renders the search as a searchbox; the previous design's is a textbox.
-    const search = page
-      .getByRole("searchbox", { name: /search transactions/i })
-      .or(page.getByRole("textbox", { name: /search transactions/i }));
+    const search = page.getByRole("searchbox", { name: /search transactions/i });
     await expect(search).toBeVisible();
     await search.fill("invoice-42");
     await search.press("Enter");
@@ -62,9 +59,6 @@ test.describe("payments command center and transaction ledger", () => {
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
 
-    // The payments sub-nav lives in the persistent sidebar, which only exists at xl
-    // and above — mobile navigation is the bottom bar now, and its More sheet does
-    // not repeat a menu the Payments page already carries.
     await page.setViewportSize({ width: 1440, height: 900 });
     const paymentsToggle = page.getByRole("button", { name: /payments menu/i });
     await expect(paymentsToggle).toHaveAttribute("aria-expanded", "true");

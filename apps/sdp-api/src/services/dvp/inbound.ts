@@ -22,7 +22,7 @@ import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime
 import type { Env } from "@/types/env";
 
 /** How many inbound trades a single read returns. */
-export const DVP_INBOUND_LIMIT = 50;
+const DVP_INBOUND_LIMIT = 50;
 
 /**
  * The caller's custody wallet behind a party address: identity, not just

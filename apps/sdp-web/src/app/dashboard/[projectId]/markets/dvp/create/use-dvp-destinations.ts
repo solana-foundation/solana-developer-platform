@@ -30,7 +30,7 @@ import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base
 import type { DvpCreateContext } from "./dvp-create.data";
 import { type DvpPartySlot, resolvePartySlotAddress } from "./use-dvp-parties";
 
-export type PayoutMode = "party" | "elsewhere";
+type PayoutMode = "party" | "elsewhere";
 
 /** A destination nobody has named yet. Blank, not a guess at the first wallet. */
 const EMPTY_SLOT: DvpPartySlot = { mode: "address", address: "" };

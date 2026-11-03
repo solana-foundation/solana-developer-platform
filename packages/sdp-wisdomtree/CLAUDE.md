@@ -19,13 +19,13 @@ accounts "Program" — decode them, don't trust the table). Money moves like
 this:
 
 - **Subscription (money in):** TransferChecked of USDC from the owner to
-  WisdomTree's *on-receipt Purchase wallet*, resolved from the Connect API at
+  WisdomTree's _on-receipt Purchase wallet_, resolved from the Connect API at
   build time. Receiving USDC from a KYC-registered wallet is what opens the
   order; fund tokens settle back to the owner AFTER NAV strike, outside the
   transaction. The plan therefore also creates the owner's fund-token ATA when
   measured absent (that is the `createsShareAccount` the ledger records).
 - **Redemption (money out):** TransferChecked of fund tokens to the
-  *on-receipt Sale wallet*; USDC settles back later. No account is ever closed
+  _on-receipt Sale wallet_; USDC settles back later. No account is ever closed
   — `rentRefundTo` is accepted and unused.
 
 Consequences that differ from Kamino:
@@ -58,7 +58,7 @@ layers in SDP, none redundant:
    in one authenticated Connect context, the wallet registry must report the
    sender Approved AND the products shelf must contain the requested registry
    fund with `can_trade === true` before USDC leaves. A valid negative result
-   always gets the same generic refusal: the optional-auth build route must not
+   always gets the same generic refusal: the build route must not
    reveal whether a wallet is registered, its KYC state, or the organization's
    product entitlements. Malformed/upstream responses fail closed.
 2. **Hook account resolution** (`transfer-hook.ts`): the standard SPL

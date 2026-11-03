@@ -202,7 +202,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
       await assert.rejects(plain.getSlot().send(), /fetch failed/);
       assert.deepEqual(plainServer.methods, ["getSlot", "getSlot"]);
 
-      const rpc = createRpc({}, { rpcUrl: sharedServer.url });
+      const rpc = createRpc(sharedServer.url);
       assert.equal(await rpc.getSlot().send(), 42n);
       await pooled();
       assert.equal(await rpc.getSlot().send(), 42n);
@@ -215,7 +215,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends a transaction on a dead socket", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createRpc(server.url);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(
@@ -231,7 +231,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends a blockhash read on a dead socket, through either seam", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createRpc(server.url);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(rpc.getLatestBlockhash().send(), /fetch failed/);
@@ -255,7 +255,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("never re-sends once a response has started", async () => {
     const server = await startDroppingServer("mid-body");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url });
+      const rpc = createRpc(server.url);
       await rpc.getSlot().send();
       await pooled();
       await assert.rejects(rpc.getSlot().send(), /terminated/);
@@ -268,7 +268,7 @@ describe("a reused socket that dies before the response (loopback)", () => {
   it("keeps a minimum-slot scope valid when the answer came from the retry", async () => {
     const server = await startDroppingServer("before-response");
     try {
-      const rpc = createRpc({}, { rpcUrl: server.url, wrapTransport: withRpcReadContext });
+      const rpc = createRpc(server.url, { wrapTransport: withRpcReadContext });
       await rpc.getSlot().send();
       await pooled();
       const account = await withMinimumRpcSlot(100, () =>

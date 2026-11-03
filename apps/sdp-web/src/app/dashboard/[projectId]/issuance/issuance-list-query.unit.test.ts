@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  countActiveIssuanceFilters,
   DEFAULT_ISSUANCE_LIST_QUERY,
   getIssuanceListResultSetKey,
   hasActiveIssuanceListFilters,
@@ -194,16 +193,6 @@ describe("toIssuanceListUrlParams", () => {
 });
 
 describe("filter counting", () => {
-  it("counts only narrowing filters, not sort or search", () => {
-    expect(countActiveIssuanceFilters(DEFAULT_ISSUANCE_LIST_QUERY)).toBe(0);
-    expect(countActiveIssuanceFilters(query({ sort: "oldest" }))).toBe(0);
-    expect(countActiveIssuanceFilters(query({ search: "usdc" }))).toBe(0);
-    expect(countActiveIssuanceFilters(query({ status: "draft" }))).toBe(1);
-    expect(
-      countActiveIssuanceFilters(query({ status: "draft", template: "custom", date: "7d" }))
-    ).toBe(3);
-  });
-
   it("treats search as narrowing when deciding empty-state copy", () => {
     expect(hasActiveIssuanceListFilters(DEFAULT_ISSUANCE_LIST_QUERY)).toBe(false);
     expect(hasActiveIssuanceListFilters(query({ sort: "oldest" }))).toBe(false);

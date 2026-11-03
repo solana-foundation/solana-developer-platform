@@ -144,11 +144,11 @@ export class OndoEarnClient extends StubEarnClient {
    * and the mint account itself is verified, so a row here is an observation
    * about a live instrument rather than a restatement of this file.
    *
-   * The RPC is resolved PER CLUSTER (`resolveCatalogueRpcUrl`): a devnet
-   * deployment reaches mainnet through `SOLANA_MAINNET_RPC_URL`, which is what
-   * lets its production pass succeed and the sandbox mirror carry the row.
-   * Without the override the process endpoint is tried and the genesis proof
-   * refuses it, so the pass skips as PROVIDER_NOT_CONFIGURED rather than
+   * The RPC is resolved PER CLUSTER (`resolveCatalogueRpcUrl`): the caller
+   * hands over mainnet's own managed pool, which is what lets the production
+   * pass succeed and the sandbox mirror carry the row on every deployment.
+   * Without a mainnet endpoint the pass skips as PROVIDER_NOT_CONFIGURED, and
+   * an endpoint serving another chain fails the genesis proof, rather than
    * reading the wrong chain.
    */
   async listStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
@@ -161,7 +161,7 @@ export class OndoEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listUsdyStrategy(resolveCatalogueRpcUrl(ctx.env, cluster), cluster, deployment);
+    return this._listUsdyStrategy(resolveCatalogueRpcUrl(ctx, cluster), cluster, deployment);
   }
 
   /**

@@ -194,10 +194,20 @@
       "import": "./src/release-channels.ts",
       "default": "./src/release-channels.ts"
     },
+    "./admin-alerts": {
+      "types": "./src/admin-alerts.ts",
+      "import": "./src/admin-alerts.ts",
+      "default": "./src/admin-alerts.ts"
+    },
     "./roles": {
       "types": "./src/roles.ts",
       "import": "./src/roles.ts",
       "default": "./src/roles.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts",
+      "default": "./src/rpc.ts"
     },
     "./site": {
       "types": "./src/site.ts",
@@ -208,6 +218,11 @@
       "types": "./src/tokens.ts",
       "import": "./src/tokens.ts",
       "default": "./src/tokens.ts"
+    },
+    "./trace-correlation": {
+      "types": "./src/trace-correlation.ts",
+      "import": "./src/trace-correlation.ts",
+      "default": "./src/trace-correlation.ts"
     },
     "./unified-transactions": {
       "types": "./src/unified-transactions.ts",
@@ -233,6 +248,16 @@
       "types": "./src/wisdomtree-programs.ts",
       "import": "./src/wisdomtree-programs.ts",
       "default": "./src/wisdomtree-programs.ts"
+    },
+    "./fireblocks": {
+      "types": "./src/fireblocks.ts",
+      "import": "./src/fireblocks.ts",
+      "default": "./src/fireblocks.ts"
+    },
+    "./mainnet-access": {
+      "types": "./src/mainnet-access.ts",
+      "import": "./src/mainnet-access.ts",
+      "default": "./src/mainnet-access.ts"
     }
   },
   "scripts": {
@@ -241,7 +266,7 @@
   },
   "dependencies": {
     "@solana/addresses": "catalog:",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "typescript": "6.0.3"

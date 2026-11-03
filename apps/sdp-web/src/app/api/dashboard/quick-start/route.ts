@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
+import { loadQuickStartStatus } from "@/lib/quick-start-server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 
 /**

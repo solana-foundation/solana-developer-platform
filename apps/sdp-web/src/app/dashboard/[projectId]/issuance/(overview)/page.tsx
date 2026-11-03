@@ -1,124 +1,59 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { parseIssuanceListQuery } from "@/app/dashboard/[projectId]/issuance/issuance-list-query";
 import {
-  attachIssuanceAssetProfiles,
   fetchIssuanceTokenFacets,
   fetchIssuanceTokensPage,
 } from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { IssuanceWorkspace } from "@/app/dashboard/[projectId]/issuance/issuance-workspace";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
-import { assetProfiles } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
-import { readApiErrorMessage } from "@/lib/api-error";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
-import { IssuancePage as RedesignIssuancePage } from "./page.redesign";
 
-interface IssuanceTemplateView {
-  id: string;
-  name: string;
-  description?: string;
-}
+const templatesResponseSchema = z.object({
+  data: z.object({
+    templates: z.array(
+      z.object({ id: z.string(), name: z.string(), description: z.string().optional() })
+    ),
+  }),
+});
+type IssuanceTemplateView = z.infer<typeof templatesResponseSchema>["data"]["templates"][number];
 
-interface FetchResult<T> {
-  ok: boolean;
-  status?: number;
-  data?: T;
-  error?: string;
-}
-
-function resolveTokenListNotice(
-  status: number | null,
-  t: Awaited<ReturnType<typeof getTranslations>>
-): string {
-  if (typeof status === "number" && status >= 400 && status < 500) {
-    return t("DashboardIssuance.errors.tokenListRetry");
-  }
-
-  return t("DashboardIssuance.errors.tokenListCreateOrRetry");
-}
-
-function parseErrorMessage(body: string, fallback: string): string {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return readApiErrorMessage(parsed) || body || fallback;
-  } catch {
-    return body || fallback;
-  }
-}
-
+/**
+ * The token templates the playground's create examples offer. A failed read, or a response that
+ * is not a list of templates, comes back as `failed` with none, and the playground says so.
+ */
 async function fetchTemplates(
-  request: SdpApiClient["request"],
-  t: Awaited<ReturnType<typeof getTranslations>>
-): Promise<FetchResult<IssuanceTemplateView[]>> {
+  request: SdpApiClient["request"]
+): Promise<{ templates: IssuanceTemplateView[]; failed: boolean }> {
   try {
     const response = await request("/v1/issuance/templates");
-    if (!response.ok) {
-      const body = await response.text();
-      return {
-        ok: false,
-        status: response.status,
-        error: parseErrorMessage(body, t("DashboardIssuance.errors.unknown")),
-      };
-    }
-
-    const json = (await response.json()) as {
-      data?: {
-        templates?: Array<{ id?: string; name?: string; description?: string }>;
-      };
-    };
-
-    const templates = (json?.data?.templates ?? [])
-      .filter((entry): entry is { id: string; name: string; description?: string } => {
-        return typeof entry.id === "string" && typeof entry.name === "string";
-      })
-      .map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        description: entry.description,
-      }));
-
-    return { ok: true, data: templates };
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : t("DashboardIssuance.errors.unableToLoadTemplates"),
-    };
+    if (!response.ok) return { templates: [], failed: true };
+    const parsed = templatesResponseSchema.safeParse(await response.json());
+    return parsed.success
+      ? { templates: parsed.data.data.templates, failed: false }
+      : { templates: [], failed: true };
+  } catch {
+    return { templates: [], failed: true };
   }
-}
-
-function resolveCurrentTab(tab: string | string[] | undefined) {
-  return (Array.isArray(tab) ? tab[0] : tab) === "playground" ? "playground" : "tokens";
-}
-
-function resolveTemplatesError(
-  result: FetchResult<IssuanceTemplateView[]>,
-  t: Awaited<ReturnType<typeof getTranslations>>
-) {
-  if (result.ok) return null;
-  return t("DashboardIssuance.errors.apiRequestFailed", {
-    resource: t("DashboardIssuance.errors.templateResource"),
-    status: result.status ?? t("DashboardIssuance.errors.unavailable"),
-    error: result.error ?? t("DashboardIssuance.errors.unknown"),
-  });
 }
 
 interface IssuancePageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function IssuancePage({ searchParams }: IssuancePageProps) {
-  const [t, { userId, orgId }, resolvedSearchParams, assetProfilesEnabled] = await Promise.all([
+/**
+ * Issuance: the project's tokens, searched, filtered, sorted and paged on the server from the
+ * URL, and the API Playground's data beside them.
+ */
+export default async function IssuancePage({ searchParams }: IssuancePageProps) {
+  const [t, { userId, orgId }, resolvedSearchParams] = await Promise.all([
     getTranslations(),
     auth(),
     searchParams ?? Promise.resolve(undefined),
-    assetProfiles(),
   ]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -128,65 +63,38 @@ async function IssuancePage({ searchParams }: IssuancePageProps) {
   }
 
   const trace = createTimedTrace("dashboard.issuance.page");
+  const listQuery = parseIssuanceListQuery(resolvedSearchParams);
+  const apiClient = await trace.step("create_sdp_api_client", () =>
+    createSdpApiClient(trace.childContext("dashboard.issuance.api"))
+  );
+  const [templatesResult, tokensPage, facets] = await Promise.all([
+    trace.step("fetch_templates", () => fetchTemplates(apiClient.request)),
+    trace.step("fetch_tokens", () =>
+      fetchIssuanceTokensPage(apiClient.request, listQuery, {
+        untitledLabel: t("DashboardIssuance.management.untitledToken"),
+      })
+    ),
+    trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
+  ]);
+  trace.log({
+    ok: true,
+    tokenCount: tokensPage.tokens.length,
+    total: tokensPage.total,
+    page: tokensPage.page,
+  });
 
-  try {
-    const currentTab = resolveCurrentTab(resolvedSearchParams?.tab);
-    // Search/filter/sort/page live in the URL, so a shared or reloaded link renders
-    // the same filtered page server-side that the client would have fetched.
-    const listQuery = parseIssuanceListQuery(resolvedSearchParams);
-    const apiBaseUrl = resolvePlaygroundApiBaseUrl();
-    const apiClient = await trace.step("create_sdp_api_client", () =>
-      createSdpApiClient(trace.childContext("dashboard.issuance.api"))
-    );
-    const [templatesResult, tokensPage, facets] = await Promise.all([
-      trace.step("fetch_templates", () => fetchTemplates(apiClient.request, t)),
-      trace.step("fetch_tokens", () =>
-        fetchIssuanceTokensPage(apiClient.request, listQuery, {
-          untitledLabel: t("DashboardIssuance.management.untitledToken"),
-        })
-      ),
-      // Facet counts drive the filter options and the "no assets yet" vs "no
-      // matches" distinction, so they must not be narrowed by the active filters.
-      trace.step("fetch_token_facets", () => fetchIssuanceTokenFacets(apiClient.request)),
-    ]);
-
-    const tokens = assetProfilesEnabled
-      ? await trace.step("attach_asset_profiles", () =>
-          attachIssuanceAssetProfiles(apiClient.request, tokensPage.tokens)
-        )
-      : tokensPage.tokens;
-    const templatesError = resolveTemplatesError(templatesResult, t);
-
-    trace.log({
-      ok: true,
-      tab: currentTab,
-      tokenCount: tokens.length,
-      total: tokensPage.total,
-      page: tokensPage.page,
-      pageSize: tokensPage.pageSize,
-      templateCount: templatesResult.data?.length ?? 0,
-    });
-
-    return (
-      <IssuanceWorkspace
-        assetProfilesEnabled={assetProfilesEnabled}
-        initialQuery={listQuery}
-        initialTokens={tokens}
-        initialTotal={tokensPage.total}
-        facets={facets}
-        templates={templatesResult.data ?? []}
-        apiBaseUrl={apiBaseUrl}
-        templatesError={templatesError}
-        tokensNotice={tokensPage.error ? resolveTokenListNotice(tokensPage.status, t) : null}
-      />
-    );
-  } catch (error) {
-    trace.log({
-      ok: false,
-      error: error instanceof Error ? error.message : t("DashboardIssuance.errors.unknown"),
-    });
-    throw error;
-  }
+  return (
+    <IssuanceWorkspace
+      initialQuery={listQuery}
+      initialTokens={tokensPage.tokens}
+      initialTotal={tokensPage.total}
+      facets={facets}
+      templates={templatesResult.templates}
+      templatesError={
+        templatesResult.failed ? t("DashboardIssuance.errors.unableToLoadTemplates") : null
+      }
+      apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+      tokensNotice={tokensPage.error ? t("DashboardIssuance.errors.tokenListRetry") : null}
+    />
+  );
 }
-
-export default withLegacyDesign(RedesignIssuancePage, IssuancePage, "issuance");

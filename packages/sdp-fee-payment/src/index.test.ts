@@ -70,4 +70,32 @@ describe("assertKoraConfigured", () => {
       /Kora is half-configured for devnet: set KORA_DEVNET_RPC_URL/
     );
   });
+
+  it("requires each configured cluster's Cloud Run audience only when asked", () => {
+    const mainnet = {
+      KORA_MAINNET_URL: "https://kora-mainnet.mock.invalid",
+      KORA_MAINNET_RPC_URL: "https://kora-mainnet-upstream.mock.invalid",
+    };
+    assert.doesNotThrow(() => assertKoraConfigured(mainnet));
+    assert.throws(
+      () => assertKoraConfigured(mainnet, { requireCloudRunAudience: true }),
+      /Kora for mainnet-beta has no Cloud Run audience: set KORA_MAINNET_CLOUD_RUN_AUDIENCE/
+    );
+    assert.throws(
+      () =>
+        assertKoraConfigured(
+          { ...mainnet, KORA_MAINNET_CLOUD_RUN_AUDIENCE: "  " },
+          { requireCloudRunAudience: true }
+        ),
+      /KORA_MAINNET_CLOUD_RUN_AUDIENCE/
+    );
+    assert.doesNotThrow(() =>
+      assertKoraConfigured(
+        { ...mainnet, KORA_MAINNET_CLOUD_RUN_AUDIENCE: "https://kora-mainnet.mock.invalid" },
+        { requireCloudRunAudience: true }
+      )
+    );
+    // A cluster without Kora needs no audience.
+    assert.doesNotThrow(() => assertKoraConfigured({}, { requireCloudRunAudience: true }));
+  });
 });

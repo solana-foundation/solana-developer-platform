@@ -16,6 +16,7 @@ import * as privateChannelService from "@/services/private-channels/service";
 import * as privateChannelWallets from "@/services/private-channels/wallets";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { clerkAdminHeaders } from "@/test/helpers/clerk-member";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -146,6 +147,8 @@ async function defaultChannelId(): Promise<string> {
 }
 
 describe("Private Channels — event routes", () => {
+  installClusterRpcStub();
+
   beforeEach(async () => {
     originalEnabled = env.PRIVATE_CHANNELS_ENABLED;
     env.PRIVATE_CHANNELS_ENABLED = "true";

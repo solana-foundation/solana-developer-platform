@@ -75,10 +75,3 @@ export function asPostgresJsonObject(value: unknown): Record<string, unknown> {
   }
   return parsePostgresJson<Record<string, unknown>>(value);
 }
-
-export function asPostgresJsonArray(value: unknown): Record<string, unknown>[] {
-  if (!value) {
-    return [];
-  }
-  return parsePostgresJson<Record<string, unknown>[]>(value);
-}

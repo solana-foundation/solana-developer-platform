@@ -17,6 +17,12 @@ vi.mock("./earn-program-data", () => ({
 
 import { EarnVaultWithdrawalRequestsCard } from "./earn-vault-withdrawal-requests-card";
 
+// A member who may write; the read-only cases live with each component's own viewer tests.
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => true,
+}));
+
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
 
 function request(

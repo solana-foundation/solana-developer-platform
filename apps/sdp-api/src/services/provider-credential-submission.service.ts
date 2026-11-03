@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -14,6 +15,14 @@ import {
   CredentialSecretStoreError,
   type StoredCredentialSecret,
 } from "@/services/credential-secret-store";
+import {
+  type ByokCredentialFields,
+  credentialDisplayMetadata,
+} from "@/services/custody/byok-credential";
+import {
+  resolveRegistrationPayload,
+  retireFireblocksCsr,
+} from "@/services/custody/fireblocks-registration.service";
 import {
   admitByokCustodySetup,
   refuseCustodySetup,
@@ -35,21 +44,15 @@ import {
 import type { Env } from "@/types/env";
 
 const UNFINISHED_INSTALLATION_MESSAGE =
-  "A Privy custody installation is already in progress for this project";
+  "A custody installation is already in progress for this project";
 const REPLACEMENT_CONFLICT_MESSAGE = "Custody Connection cannot accept replacement credentials";
 
-interface PrivyCredentialFields {
-  credentialLabel: string;
-  scope: "project";
-  appId: string;
-  appSecret: string;
-}
-
-interface SubmitPrivyCredentialInput {
-  provider: "privy";
+interface SubmitByokCredentialInput {
+  provider: ByokCustodyProvider;
   requestDelayMs?: number;
   walletLabel?: string;
-  fields: PrivyCredentialFields;
+  fireblocksVaultAccountIds?: string[];
+  fields: ByokCredentialFields & { credentialLabel: string; scope: "project" };
 }
 
 export interface SafeProviderCredential {
@@ -61,7 +64,7 @@ export interface SafeProviderCredential {
   projectId: string | null;
   status: ProviderCredentialRow["status"];
   createdAt: string;
-  displayMetadata: { appIdSuffix?: string };
+  displayMetadata: { appIdSuffix?: string; apiKeySuffix?: string; primaryVaultId?: string };
 }
 
 export interface ProviderCredentialSubmissionResult {
@@ -86,13 +89,13 @@ type CompensationOutcome = "not_required" | "deferred";
 type SubmissionAuditBase = {
   organizationId: string;
   userId: string;
-  provider: "privy";
+  provider: ByokCustodyProvider;
   scope: "organization" | "project";
 };
 
 interface SubmissionContext {
   c: Context<{ Bindings: Env }>;
-  input: SubmitPrivyCredentialInput;
+  input: SubmitByokCredentialInput;
   idempotencyKey: string;
   organizationId: string;
   projectId: string;
@@ -138,24 +141,28 @@ class SubmissionOutcomeUnknown extends Error {
 
 export async function submitProviderCredential(
   c: Context<{ Bindings: Env }>,
-  input: SubmitPrivyCredentialInput,
+  input: SubmitByokCredentialInput,
   idempotencyKey: string
 ): Promise<ProviderCredentialSubmissionResult> {
-  return submitProviderCredentialIntent(c, input, idempotencyKey, null);
+  const result = await submitProviderCredentialIntent(c, input, idempotencyKey, null);
+  await retireFireblocksCsr(c, input.fields, result.providerCredential);
+  return result;
 }
 
 export async function replaceProviderCredential(
   c: Context<{ Bindings: Env }>,
   connectionId: string,
-  input: SubmitPrivyCredentialInput,
+  input: SubmitByokCredentialInput,
   idempotencyKey: string
 ): Promise<ProviderCredentialSubmissionResult> {
-  return submitProviderCredentialIntent(c, input, idempotencyKey, connectionId);
+  const result = await submitProviderCredentialIntent(c, input, idempotencyKey, connectionId);
+  await retireFireblocksCsr(c, input.fields, result.providerCredential);
+  return result;
 }
 
 async function submitProviderCredentialIntent(
   c: Context<{ Bindings: Env }>,
-  input: SubmitPrivyCredentialInput,
+  input: SubmitByokCredentialInput,
   idempotencyKey: string,
   replacementConnectionId: string | null
 ): Promise<ProviderCredentialSubmissionResult> {
@@ -172,11 +179,13 @@ async function submitProviderCredentialIntent(
   }
   const fingerprint = await computeSubmissionFingerprint(context);
 
+  const { credentialLabel: _label, scope: _scope, ...fields } = input.fields;
   const setup = await prepareSetup(context, fingerprint);
   if (setup.kind === "replay") {
     return setup.result;
   }
 
+  await resolveRegistrationPayload(c, input.provider, fields, idempotencyKey);
   return persistPreparedSubmission({
     ...context,
     fingerprint,
@@ -186,7 +195,7 @@ async function submitProviderCredentialIntent(
 
 function createSubmissionContext(
   c: Context<{ Bindings: Env }>,
-  input: SubmitPrivyCredentialInput,
+  input: SubmitByokCredentialInput,
   idempotencyKey: string,
   replacementConnectionId: string | null
 ): SubmissionContext {
@@ -464,22 +473,25 @@ async function writeSubmissionSecret(
   secretStore: CredentialSecretStore,
   existingSecretRef?: string
 ): Promise<StoredCredentialSecret> {
-  const fields = context.input.fields;
+  const { credentialLabel: _label, scope: _scope, ...fields } = context.input.fields;
   try {
     return await secretStore.write({
       orgId: context.organizationId,
       provider: context.input.provider,
       providerCredentialId,
       existingSecretRef,
-      payload: {
-        appId: fields.appId,
-        appSecret: fields.appSecret,
-      },
+      payload: await resolveRegistrationPayload(
+        context.c,
+        context.input.provider,
+        fields,
+        context.idempotencyKey
+      ),
     });
   } catch (error) {
     const upstream = error instanceof CredentialSecretStoreError && error.code === "UPSTREAM_ERROR";
     if (upstream && secretStore.storageBackend === "gcp_secret_manager") {
       logOrphanRisk({
+        provider: context.input.provider,
         providerCredentialId,
         storageBackend: secretStore.storageBackend,
         requestId: context.c.get("requestId"),
@@ -631,12 +643,12 @@ async function insertSubmissionCredential(
     id: submission.providerCredentialId,
     organizationId: submission.organizationId,
     projectId: submission.projectId,
-    provider: "privy",
+    provider: submission.input.provider,
     label: fields.credentialLabel,
     scope: "project",
     source: "stored",
     stored: submission.stored,
-    displayMetadata: fields.appId.length > 4 ? { appIdSuffix: fields.appId.slice(-4) } : {},
+    displayMetadata: credentialDisplayMetadata(fields),
     version:
       plan.kind === "replacement"
         ? await store.nextCredentialVersion(submission.organizationId, plan.currentCredential.id)
@@ -661,10 +673,12 @@ async function persistConnection(
       id: submission.connectionId,
       organizationId: submission.organizationId,
       projectId: submission.projectId,
+      provider: submission.input.provider,
       providerCredentialId: submission.providerCredentialId,
       providerCredentialScopeKey: providerCredential.scope_key,
       requestDelayMs: submission.input.requestDelayMs,
       pendingWalletLabel: submission.input.walletLabel,
+      pendingFireblocksVaultIds: submission.input.fireblocksVaultAccountIds,
       createdBy: submission.userId,
     });
     return;
@@ -677,6 +691,7 @@ async function persistConnection(
     providerCredentialScopeKey: providerCredential.scope_key,
     requestDelayMs: submission.input.requestDelayMs,
     pendingWalletLabel: submission.input.walletLabel,
+    pendingFireblocksVaultIds: submission.input.fireblocksVaultAccountIds,
   });
   if (!updated) {
     throw new SetupConflict(undefined, lockedPlan.connection.id);
@@ -774,7 +789,10 @@ function isUnfinishedInstallationUniqueViolation(error: unknown): boolean {
     typeof error === "object" &&
     error !== null &&
     "constraint" in error &&
-    error.constraint === "idx_custody_connections_privy_unfinished"
+    [
+      "idx_custody_connections_privy_unfinished",
+      "idx_custody_connections_fireblocks_unfinished",
+    ].includes(String(error.constraint ?? ""))
   );
 }
 
@@ -797,7 +815,7 @@ async function reconcileTransactionOutcome(
 async function buildProviderCredentialSubmissionFingerprint(params: {
   organizationId: string;
   projectId: string;
-  input: SubmitPrivyCredentialInput;
+  input: SubmitByokCredentialInput;
   pepper: string;
   replacementConnectionId?: string | null;
 }): Promise<string> {
@@ -815,6 +833,7 @@ async function buildProviderCredentialSubmissionFingerprint(params: {
       provider: params.input.provider,
       requestDelayMs: params.input.requestDelayMs,
       walletLabel: params.input.walletLabel,
+      fireblocksVaultAccountIds: params.input.fireblocksVaultAccountIds,
       fields: params.input.fields,
     })
   );
@@ -876,7 +895,7 @@ async function resolveLateReplay(params: {
   auditBase: {
     organizationId: string;
     userId: string;
-    provider: "privy";
+    provider: ByokCustodyProvider;
     scope: "organization" | "project";
   };
   organizationId: string;
@@ -902,14 +921,15 @@ async function resolveLateReplay(params: {
 async function classifySetup(
   context: Pick<
     SubmissionContext,
-    "store" | "organizationId" | "projectId" | "replacementConnectionId"
+    "store" | "organizationId" | "projectId" | "replacementConnectionId" | "input"
   >,
   lock = false,
   creatingCredentialId?: string
 ): Promise<SetupPlan> {
   const creating = await context.store.findCreatingSubmission(
     context.organizationId,
-    context.projectId
+    context.projectId,
+    context.input.provider
   );
   if (creating && creating.id !== creatingCredentialId) {
     throw new SetupConflict(
@@ -921,7 +941,7 @@ async function classifySetup(
     const connections = await context.store.listProjectConnections(
       context.organizationId,
       context.projectId,
-      { lock }
+      { lock, provider: context.input.provider }
     );
     const unfinished = connections.find(
       (connection) => connection.status === "pending" || connection.status === "checking"
@@ -938,7 +958,7 @@ async function classifySetup(
     context.replacementConnectionId,
     { lock, excludedCreatingCredentialId: creatingCredentialId }
   );
-  if (!connection) {
+  if (!connection || connection.provider !== context.input.provider) {
     throw notFound("Custody Connection");
   }
   const nowMs = await context.store.getDatabaseNowMs();
@@ -1012,11 +1032,20 @@ export function mapProviderCredential(row: ProviderCredentialRow): SafeProviderC
     projectId: row.project_id,
     status: row.status,
     createdAt: row.created_at,
-    displayMetadata: appIdSuffix ? { appIdSuffix } : {},
+    displayMetadata: {
+      appIdSuffix,
+      apiKeySuffix:
+        typeof storedMetadata.apiKeySuffix === "string" ? storedMetadata.apiKeySuffix : undefined,
+      primaryVaultId:
+        typeof storedMetadata.primaryVaultId === "string"
+          ? storedMetadata.primaryVaultId
+          : undefined,
+    },
   };
 }
 
 function logOrphanRisk(params: {
+  provider: ByokCustodyProvider;
   providerCredentialId: string;
   storageBackend: "gcp_secret_manager";
   providerResourceVersion?: number;
@@ -1026,7 +1055,7 @@ function logOrphanRisk(params: {
   getLogger().error(
     {
       providerCredentialId: params.providerCredentialId,
-      provider: "privy",
+      provider: params.provider,
       storageBackend: params.storageBackend,
       ...(params.providerResourceVersion !== undefined && {
         providerResourceVersion: params.providerResourceVersion,
@@ -1044,7 +1073,7 @@ async function auditFailure(
   base: {
     organizationId: string;
     userId: string;
-    provider: "privy";
+    provider: ByokCustodyProvider;
     scope: "organization" | "project";
   },
   failure: {

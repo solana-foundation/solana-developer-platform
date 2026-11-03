@@ -9,7 +9,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { DvpSettlementAvailability, DvpTradeStatus } from "@sdp/types/dvp";
 import type { Address, Signature } from "@solana/kit";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface DvpTradeRow {
   id: string;
@@ -178,10 +177,6 @@ export interface DvpTradeObservationUpdate {
   observedAt: string;
   /** The cluster clock read with this observation, Unix seconds. */
   observedClusterTimestamp: string;
-}
-
-export interface DvpTradeRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface DvpTradeRepository {

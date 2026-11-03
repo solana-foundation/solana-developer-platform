@@ -6,7 +6,6 @@ import {
   fetchPaymentRequestDetail,
   fetchPaymentRequestLinkToken,
 } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
@@ -14,7 +13,11 @@ import { requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
-async function PaymentRequestDetailRoute({ params }: { params: Promise<{ requestId: string }> }) {
+export default async function PaymentRequestDetailRoute({
+  params,
+}: {
+  params: Promise<{ requestId: string }>;
+}) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -65,14 +68,3 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
     }
   );
 }
-
-/** The previous design has no request page and no link to one request: the list it is on. */
-async function LegacyPaymentRequestDetailRoute(): Promise<never> {
-  redirect(await requestProjectHref(PAYMENT_REQUESTS_HREF));
-}
-
-export default withLegacyDesign(
-  PaymentRequestDetailRoute,
-  LegacyPaymentRequestDetailRoute,
-  "activity"
-);

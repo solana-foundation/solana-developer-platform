@@ -1,29 +1,37 @@
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { IssuanceDraftForm } from "./issuance-draft-form";
-import { CreateDraftPage } from "./page.redesign";
+import { IssuanceDraftFlow } from "./issuance-draft-flow";
 
-async function CreateAssetPage() {
-  const t = await getTranslations();
+interface CreateDraftPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/**
+ * A new draft: the flow, with the project's wallets to hold its keys.
+ * `?draft=` opens a draft kept in the browser instead of a fresh one.
+ */
+export default async function CreateDraftPage({ searchParams }: CreateDraftPageProps) {
+  const [t, resolvedSearchParams] = await Promise.all([
+    getTranslations(),
+    searchParams ?? Promise.resolve(undefined),
+  ]);
+  const resume = resolvedSearchParams?.draft;
   if (!(await assetProfiles())) notFound();
+  await redirectUnlessCanWrite("/dashboard/issuance");
   const client = await createSdpApiClient();
   const result = await fetchPaymentsWallets(client.request, {
     view: "summary",
     includeBalances: false,
   });
   return (
-    <Suspense>
-      <IssuanceDraftForm
-        wallets={result.data ?? []}
-        walletsError={result.ok ? null : t("DashboardIssuance.draftForm.walletsError")}
-      />
-    </Suspense>
+    <IssuanceDraftFlow
+      wallets={result.data ?? []}
+      walletsError={result.ok ? null : t("DashboardIssuance.draftForm.walletsError")}
+      resumeId={typeof resume === "string" && resume ? resume : null}
+    />
   );
 }
-
-export default withLegacyDesign(CreateDraftPage, CreateAssetPage, "issuance");

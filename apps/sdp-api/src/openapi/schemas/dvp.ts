@@ -31,8 +31,6 @@ export const dvpTradeIdParamSchema = withOpenApi(dvpTradeIdParamsSchemaBase.shap
   example: "dvp_4f1c2b8a9d6e4f0b8c7a1d2e3f405162",
 });
 
-export const dvpTradeIdParamsSchema = dvpTradeIdParamsSchemaBase;
-
 export const createDvpTradeRequestSchema = withOpenApi(createDvpTradeSchemaBase, {
   description:
     "Terms of the trade to create on chain. Creating a trade commits neither party: only SDP's sponsored fee payer signs, and the trade is a proposal until an escrow is funded.",
@@ -92,7 +90,7 @@ const dvpCallerWalletSchema = z
   .nullable()
   .openapi({ description: "The custody wallet, or null." });
 
-export const dvpTradePartySchema = z
+const dvpTradePartySchema = z
   .object({
     address: z.string().openapi({
       description: "Address of the party on this leg.",
@@ -208,7 +206,7 @@ const dvpTradeLegSchema = z
   })
   .openapi({ description: "One leg of the trade." });
 
-export const dvpTradeSchema = z
+const dvpTradeSchema = z
   .object({
     id: dvpTradeIdParamSchema,
     status: dvpTradeStatusSchema,

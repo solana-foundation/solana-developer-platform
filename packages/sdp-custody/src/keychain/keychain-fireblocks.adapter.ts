@@ -10,16 +10,10 @@
  * - Polling for transaction completion
  */
 
-import { scrubTelemetry } from "@sdp/redaction/scrub";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import type { Address } from "@solana/kit";
 import { BaseKeychainAdapter } from "./base-keychain.adapter";
 import type { KeychainFireblocksConfig } from "./types";
-
-type FireblocksSignerDebugHooks = {
-  __sdpDebugPatched__?: boolean;
-  request?: <T>(method: string, uri: string, body?: unknown) => Promise<T>;
-};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
@@ -77,60 +71,11 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
       pollIntervalMs: this.config.pollIntervalMs,
       maxPollAttempts: this.config.maxPollAttempts,
       requestDelayMs: this.config.requestDelayMs,
-      // Always use RAW signing - we handle broadcast separately via Kora
+      // RAW returns a signature; SDP owns fee sponsorship and broadcast.
       useProgramCall: false,
     });
-    this.attachDebugLogging(signer);
     await signer.init();
     return signer;
-  }
-
-  private attachDebugLogging(fireblocksSigner: FireblocksSigner): void {
-    const signer = fireblocksSigner as unknown as FireblocksSignerDebugHooks;
-
-    if (signer.__sdpDebugPatched__ || typeof signer.request !== "function") {
-      return;
-    }
-
-    const originalRequest = signer.request.bind(fireblocksSigner) as <T>(
-      method: string,
-      uri: string,
-      body?: unknown
-    ) => Promise<T>;
-
-    signer.request = (async <T>(method: string, uri: string, body?: unknown): Promise<T> => {
-      try {
-        console.info("sdp_fireblocks_api_request", scrubTelemetry({ method, uri, body }));
-
-        const response = await originalRequest<T>(method, uri, body);
-
-        console.info(
-          "sdp_fireblocks_api_response",
-          scrubTelemetry({ method, uri, body, response })
-        );
-
-        return response;
-      } catch (error) {
-        console.error(
-          "sdp_fireblocks_api_error",
-          scrubTelemetry({
-            method,
-            uri,
-            body,
-            error:
-              error instanceof Error
-                ? {
-                    message: error.message,
-                    stack: error.stack,
-                  }
-                : String(error),
-          })
-        );
-        throw error;
-      }
-    }) as typeof signer.request;
-
-    signer.__sdpDebugPatched__ = true;
   }
 }
 

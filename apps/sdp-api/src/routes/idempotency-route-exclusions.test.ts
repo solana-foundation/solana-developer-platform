@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { declaredIdempotency } from "@/middleware/idempotency";
@@ -18,7 +18,7 @@ const SECRET_ROUTES: readonly RegExp[] = [
 describe("idempotency route exclusions", () => {
   it("keeps the Idempotency-Key step off every route that returns a secret", () => {
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
     });
     const secretRoutes = app.routes.filter((route) =>
       SECRET_ROUTES.some((pattern) => pattern.test(route.path))

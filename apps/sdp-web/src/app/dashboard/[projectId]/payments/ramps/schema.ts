@@ -55,11 +55,6 @@ export const withdrawSelectionSchema = makeRampSelectionSchema(
 );
 
 // Per-step gating schemas.
-export const depositAmountSchema = depositSelectionSchema.pick({
-  walletId: true,
-  amount: true,
-  provider: true,
-});
 /** Deposit's details step: the amount and provider fields plus the contact picked beside them. */
 export const depositDetailsSchema = depositSelectionSchema.pick({
   walletId: true,
@@ -98,7 +93,7 @@ const onchainAmount = z
 
 export const cryptoWalletAccountDetailsSchema = z.object({ address: z.string().min(1) });
 
-export const onchainSendSelectionSchema = z.object({
+const onchainSendSelectionSchema = z.object({
   accountId: z.string().min(1, "Select a destination account."),
   walletId: z.string().min(1, "Select a source wallet."),
   asset: z.string().min(1, "Select an asset."),
@@ -122,7 +117,7 @@ export const onchainSendSchema = z.object({
 
 export type OnchainSendFields = z.input<typeof onchainSendSchema>;
 
-export const batchRecipientSchema = z.object({
+const batchRecipientSchema = z.object({
   counterpartyId: z.string().min(1),
   counterpartyAccountId: z.string().min(1),
   amount: onchainAmount,

@@ -3,17 +3,10 @@
 import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
 import type { EarnStrategy } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { Badge } from "@sdp/ui/badge";
 import { ExternalLinkIcon } from "lucide-react";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
-import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
-import {
-  type EarnDepositAvailabilityLabels,
-  earnDepositAvailabilityLabel,
-  shortenMarketAddress,
-} from "./earn-format";
-import type { EarnVaultDepositAvailability } from "./earn-surfacing";
+import { shortenMarketAddress } from "./earn-format";
 
 export interface EarnStrategyAsset {
   decimals?: number;
@@ -91,33 +84,5 @@ export function TransactionLink({
       {shortenMarketAddress(signature)}
       <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
     </a>
-  );
-}
-
-/**
- * One badge for the deposit-availability verdict, shared by the two catalogue
- * surfaces (the Treasury strategies table and the Earn Program builder) so the
- * mapping from `earnVaultDepositAvailability` to copy exists exactly once per
- * namespace. The label map is EXHAUSTIVE over the union: adding an
- * availability variant breaks both call sites' compiles instead of silently
- * collapsing to a bare "Unavailable". `cluster_unavailable` is the one reason
- * with a subject: the badge names the cluster the instrument lives on
- * (PRO-1742) from the row's own hostCluster, the server's `fundable` verdict,
- * with no cluster comparison re-derived here.
- */
-export function EarnDepositAvailabilityBadge({
-  availability,
-  labels,
-  strategy,
-}: {
-  availability: EarnVaultDepositAvailability;
-  labels: EarnDepositAvailabilityLabels;
-  strategy: EarnStrategy;
-}) {
-  const t = useTranslations();
-  return (
-    <Badge variant={availability === "available" ? "default" : "outline"}>
-      {earnDepositAvailabilityLabel(availability, labels, strategy, t)}
-    </Badge>
   );
 }

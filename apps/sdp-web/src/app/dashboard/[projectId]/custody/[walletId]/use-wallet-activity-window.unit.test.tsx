@@ -46,16 +46,14 @@ function payload(count: number, overrides: Partial<WalletActivityPayload> = {}) 
 }
 
 /** Renders over `cache`, so a test can revisit the wallet with what an earlier visit left. */
-function cachedWrapper(cache: Map<string, unknown>) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <SWRConfig
-        value={{ provider: () => cache as never, shouldRetryOnError: false, dedupingInterval: 0 }}
-      >
-        {children}
-      </SWRConfig>
-    );
-  };
+function CachedWrapper({ cache, children }: { cache: Map<string, unknown>; children: ReactNode }) {
+  return (
+    <SWRConfig
+      value={{ provider: () => cache as never, shouldRetryOnError: false, dedupingInterval: 0 }}
+    >
+      {children}
+    </SWRConfig>
+  );
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -125,7 +123,7 @@ describe("useWalletActivityWindow", () => {
     const cache = new Map<string, unknown>();
     fetchWalletActivity.mockImplementation(async (_id, options) => payload(options?.limit ?? 20));
     const firstVisit = renderHook(() => useWalletActivityWindow("wallet_one"), {
-      wrapper: cachedWrapper(cache),
+      wrapper: ({ children }) => <CachedWrapper cache={cache}>{children}</CachedWrapper>,
     });
     await waitFor(() => expect(firstVisit.result.current.data?.activityRows).toHaveLength(20));
     act(() => firstVisit.result.current.loadOlder());
@@ -139,7 +137,7 @@ describe("useWalletActivityWindow", () => {
       return payload(limit);
     });
     const { result } = renderHook(() => useWalletActivityWindow("wallet_one"), {
-      wrapper: cachedWrapper(cache),
+      wrapper: ({ children }) => <CachedWrapper cache={cache}>{children}</CachedWrapper>,
     });
     await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(20));
     const widerReadsBefore = limitsRequested().filter((limit) => limit === 120).length;

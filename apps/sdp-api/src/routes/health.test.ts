@@ -7,7 +7,7 @@ import {
   EGRESS_READINESS_STATES,
   type EgressReadiness,
 } from "@sdp/types/health";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { app } from "@/index";
@@ -15,7 +15,7 @@ import { env } from "@/test/helpers/env";
 
 function appWithEgress(readiness: EgressReadiness) {
   return createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
     egressReadiness: () => readiness,
   });
 }

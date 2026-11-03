@@ -16,6 +16,7 @@ import {
   jsonParsedTransactionMeta,
   jsonParsedTransactionResponse,
 } from "./test-fixtures";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "./transaction-version";
 
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const SHARE = "DvMCm7Xjirn7xmf3j4kWV49NGJUQqh7jVTAEvNNPAYiw";
@@ -81,7 +82,7 @@ test("answers null, not zero, when neither side names the pair", () => {
   assert.equal(tokenBalanceDelta({}, { mint: USDC, owner: OWNER }), null);
 });
 
-test("getTransaction surfaces pre/post token balances from jsonParsed meta", async () => {
+test("getTransaction surfaces v1 pre/post token balances from jsonParsed meta", async () => {
   let request: unknown;
   const rpc = {
     getTransaction: (_signature: unknown, config: unknown) => {
@@ -89,6 +90,7 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
       return {
         send: async () =>
           jsonParsedTransactionResponse({
+            version: 1,
             meta: jsonParsedTransactionMeta({
               err: null,
               preTokenBalances: [
@@ -129,7 +131,7 @@ test("getTransaction surfaces pre/post token balances from jsonParsed meta", asy
   assert.deepEqual(request, {
     commitment: "confirmed",
     encoding: "jsonParsed",
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
   });
   assert.deepEqual(parsed?.preTokenBalances, [
     { accountIndex: 1, mint: USDC, owner: OWNER, amount: "1", decimals: 6 },

@@ -44,7 +44,7 @@ const SWEEP_BUDGET_MS = 4 * MINUTE_MS;
  * How long a checkout may go without provider activity before SDP expires it.
  * Product defaults, not provider facts (HOO-2040); expiry is revivable either way.
  */
-export const RAMP_ABANDONMENT_HORIZON_MS = {
+const RAMP_ABANDONMENT_HORIZON_MS = {
   // A bank-funded buy can sit in `waitingPayment` for days. An unclaimed sale
   // moves nothing once expired: SDP holds the crypto it would deposit.
   moonpay: { onramp: 72 * HOUR_MS, offramp: 24 * HOUR_MS },

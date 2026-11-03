@@ -1,0 +1,326 @@
+/* the bench: the six kinds stacked beside one large drawing, each over a hairline that fills
+   while its drawing plays. The drawing stands on the page's own ground. */
+.inner {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  column-gap: clamp(40px, 5vw, 80px);
+  row-gap: 32px;
+  align-items: center;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.index {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 1fr;
+}
+
+.tab {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  display: block;
+  padding: 18px 0 20px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tab:focus-visible {
+  outline: 2px solid #9945ff;
+  outline-offset: 6px;
+  border-radius: 6px;
+}
+
+.bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.bar i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -0.5px;
+  height: 2px;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, #9945ff, #b65cff 60%, #dc1fff);
+}
+
+.name {
+  display: block;
+  font: 400 clamp(22px, 1.95vw, 28px) / 1.12 var(--font);
+  letter-spacing: -0.022em;
+  color: #75737e;
+  transition: color 420ms var(--e);
+}
+
+.body {
+  display: block;
+  margin-top: 10px;
+  font: 500 14.5px / 1.5 var(--font);
+  letter-spacing: -0.003em;
+  color: #6a6873;
+  max-width: 46ch;
+  text-wrap: pretty;
+  transition: color 420ms var(--e);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover .name,
+  .tab:hover .body {
+    color: var(--ink2);
+  }
+}
+
+.tabOn .name {
+  color: var(--ink);
+}
+
+.tabOn .body {
+  color: var(--ink3);
+}
+
+.stage {
+  position: relative;
+  aspect-ratio: 640 / 520;
+  isolation: isolate;
+  width: 100%;
+}
+
+/* a light on the floor that follows the pointer */
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 600ms var(--e);
+  background: radial-gradient(
+    min(380px, 60%) circle at var(--mx, 50%) var(--my, 60%),
+    #9945ff12,
+    #9945ff00 70%
+  );
+  mask: radial-gradient(closest-side, #000 55%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .stage:hover::before {
+    opacity: 1;
+  }
+}
+
+.deck {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.fig {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 420ms var(--e),
+    visibility 0s 420ms;
+}
+
+.figOn,
+.figOut {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 420ms var(--e);
+}
+
+.figOn {
+  z-index: 2;
+}
+
+.figOut {
+  z-index: 1;
+}
+
+.fig svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.play {
+  all: unset;
+  box-sizing: border-box;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font: 500 14px / 1 var(--font);
+  color: var(--ink4);
+  transition: color 240ms var(--micro);
+}
+
+.play svg {
+  width: 28px;
+  height: 28px;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: box-shadow 240ms var(--micro);
+}
+
+.play .playIcon {
+  fill: currentColor;
+  stroke: none;
+}
+
+.play:hover {
+  color: #9945ff;
+}
+
+.play:hover svg {
+  box-shadow: inset 0 0 0 1px #9945ff40;
+}
+
+.play:focus-visible {
+  outline: 2px solid #9945ff;
+  outline-offset: 4px;
+  border-radius: 99px;
+}
+
+@media (max-width: 1000px) {
+  .inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stage {
+    order: -1;
+  }
+
+  .index {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
+  }
+}
+
+/* a phone (or a phone on its side): the drawing across the whole screen, framed close on its own
+   content, its edges fading into the page; under it the kinds as one strip that scrolls
+   sideways, so the drawing, the kind and its rule are seen at once */
+@media (max-width: 600px), (max-height: 500px) and (orientation: landscape) {
+  .inner {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 20px;
+  }
+
+  .stage {
+    order: -1;
+    aspect-ratio: 4 / 3;
+    width: 100vw;
+    max-width: none;
+    margin-left: calc(50% - 50vw);
+    mask:
+      linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent),
+      linear-gradient(180deg, transparent, #000 6%, #000 94%, transparent);
+    mask-composite: intersect;
+  }
+
+  .index {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 84%;
+    grid-auto-rows: auto;
+    column-gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    margin-inline: -20px;
+    padding-inline: 20px;
+    scroll-padding-inline: 20px;
+  }
+
+  .index::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    scroll-snap-align: start;
+    padding: 6px 0 18px;
+  }
+
+  .name {
+    font-size: 24px;
+  }
+
+  .body {
+    font-size: 14.5px;
+    max-width: none;
+  }
+
+  .play {
+    padding: 8px 0;
+    min-height: 44px;
+  }
+}
+
+/* on its side there is no room for the two one above the other: the drawing at the left as tall
+   as the screen allows, the strip beside it */
+@media (max-height: 500px) and (orientation: landscape) {
+  .inner {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 24px;
+    align-items: center;
+  }
+
+  .stage {
+    width: auto;
+    height: calc(100svh - 120px);
+    margin: 0;
+    mask: none;
+  }
+
+  .side {
+    min-width: 0;
+  }
+
+  .index {
+    grid-auto-columns: 92%;
+    margin-inline: 0;
+    padding-inline: 0;
+    scroll-padding-inline: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fig,
+  .figOn,
+  .name,
+  .body {
+    transition: none;
+  }
+
+  .tabOn .bar i {
+    transform: none;
+  }
+
+  .play {
+    display: none;
+  }
+}

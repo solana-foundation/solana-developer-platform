@@ -34,8 +34,8 @@ function CredentialRow({ label, children }: { label: string; children: React.Rea
 }
 
 /** `····9f2a` — the only part of an App ID ever shown back. */
-function maskedAppId(credential: LifecycleCredential): string {
-  const suffix = credential.displayMetadata.appIdSuffix;
+function maskedCredentialId(credential: LifecycleCredential): string {
+  const suffix = credential.displayMetadata.appIdSuffix ?? credential.displayMetadata.apiKeySuffix;
   return suffix ? `····${suffix}` : "—";
 }
 
@@ -118,8 +118,14 @@ function CredentialDetails({
             {t("DashboardCustody.credentialDeploymentBadge")}
           </CredentialRow>
         )}
-        <CredentialRow label={t("DashboardCustody.credentialAppId")}>
-          <span className="font-mono text-xs">{maskedAppId(credential)}</span>
+        <CredentialRow
+          label={t(
+            credential.provider === "fireblocks"
+              ? "DashboardCustody.providerFireblocksApiKey"
+              : "DashboardCustody.credentialAppId"
+          )}
+        >
+          <span>{maskedCredentialId(credential)}</span>
         </CredentialRow>
         {managedHere ? (
           <CredentialRow label={t("DashboardCustody.credentialInUseSince")}>

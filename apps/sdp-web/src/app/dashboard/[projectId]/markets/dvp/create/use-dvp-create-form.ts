@@ -56,7 +56,7 @@ const createFormSchema = z.object({
   refString: z.string(),
 });
 
-export type DvpCreateFormValues = z.infer<typeof createFormSchema>;
+type DvpCreateFormValues = z.infer<typeof createFormSchema>;
 
 export interface DvpCreateForm {
   values: DvpCreateFormValues;

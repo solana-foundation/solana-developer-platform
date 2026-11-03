@@ -78,7 +78,3 @@ export const submitCounterpartyRequirementsSchema = z.discriminatedUnion("provid
   z.object({ provider: z.literal("moonpay"), direction: rampDirectionSchema }),
   z.object({ provider: z.literal("stripe"), direction: rampDirectionSchema }),
 ]);
-
-export type SubmitCounterpartyRequirementsInput = z.infer<
-  typeof submitCounterpartyRequirementsSchema
->;

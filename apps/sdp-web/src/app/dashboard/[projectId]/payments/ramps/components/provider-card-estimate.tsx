@@ -13,17 +13,14 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 
 /**
  * A provider card's estimate: what arrives and the fee, a payout's rate, or
- * why there is none. Both card designs show it.
+ * why there is none.
  */
 export function ProviderCardEstimate({
   estimate,
   estimateLoading,
-  minimumFractionDigits = 2,
 }: {
   estimate?: RampProviderEstimateResult;
   estimateLoading?: boolean;
-  /** The legacy card shows its figures without trailing zeros. */
-  minimumFractionDigits?: number;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -35,13 +32,9 @@ export function ProviderCardEstimate({
     const { direction, fiatCurrency, assetRail, fiatAmount, cryptoAmount, fees } =
       estimate.estimate;
     const isFiatOut = direction === "offramp";
-    const amount = formatEstimateFigure(
-      isFiatOut ? fiatAmount : cryptoAmount,
-      locale,
-      minimumFractionDigits
-    );
+    const amount = formatEstimateFigure(isFiatOut ? fiatAmount : cryptoAmount, locale);
     const unit = isFiatOut ? fiatCurrency : getCryptoRailAssetLabel(assetRail);
-    const feeLabel = estimateFeeCopy(t, fees, locale, minimumFractionDigits);
+    const feeLabel = estimateFeeCopy(t, fees, locale);
     // A payout is the crypto at the rate, less the fee; without the rate the numbers don't add up.
     const rate = isFiatOut ? estimateRateCopy(t, estimate.estimate, locale) : null;
 

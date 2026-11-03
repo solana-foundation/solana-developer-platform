@@ -1,37 +1,44 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("public auth entry e2e", () => {
-  test("signed-out homepage offers self-serve signup and a contact path", async ({ page }) => {
+  test("signed-out homepage offers self-serve signup and the docs", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByRole("link", { name: "Try SDP" })).toHaveAttribute("href", "/sign-up");
-    await expect(page.getByRole("link", { name: "Contact us" })).toHaveAttribute(
+    const banner = page.getByRole("banner");
+    await expect(banner.getByRole("link", { name: "Create account" })).toHaveAttribute(
       "href",
-      "https://solanafoundation.typeform.com/to/PLfMTDQs"
+      "/sign-up"
     );
+    await expect(banner.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
     await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Docs" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Docs" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    await expect(page.locator("#top").getByRole("link", { name: "Read the docs" })).toBeVisible();
   });
 
   test("language picker does not shift the header when it opens or closes", async ({ page }) => {
     await page.goto("/");
 
     const languagePicker = page.getByRole("button", { name: "Language" });
-    const dashboardLink = page.getByRole("link", { name: "Dashboard" });
-    const dashboardLinkX = (await dashboardLink.boundingBox())?.x;
+    const signInLink = page.getByRole("banner").getByRole("link", { name: "Sign in" });
+    const signInLinkX = (await signInLink.boundingBox())?.x;
 
-    expect(dashboardLinkX).toBeDefined();
+    expect(signInLinkX).toBeDefined();
 
     await languagePicker.click();
     await expect(page.getByText("Choose language", { exact: true })).toBeVisible();
-    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+    expect((await signInLink.boundingBox())?.x).toBe(signInLinkX);
 
     await page.keyboard.press("Escape");
     await expect(page.getByText("Choose language", { exact: true })).toBeHidden();
-    expect((await dashboardLink.boundingBox())?.x).toBe(dashboardLinkX);
+    expect((await signInLink.boundingBox())?.x).toBe(signInLinkX);
   });
 
-  test("system dark mode keeps landing artwork and Clerk sign-in legible", async ({ page }) => {
+  test("system dark mode leaves the homepage's fixed grounds and keeps Clerk sign-in legible", async ({
+    page,
+  }) => {
     const themeScriptErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error" && /script tag while rendering/i.test(message.text())) {
@@ -44,8 +51,12 @@ test.describe("public auth entry e2e", () => {
     await page.goto("/");
 
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await expect(page.getByTestId("landing-solana-logo")).toHaveCSS("filter", "invert(1)");
-    await expect(page.getByTestId("landing-hero-figure")).toHaveCSS("filter", "invert(1)");
+    // The homepage paints its own paper and night grounds whatever the theme.
+    await expect(page.locator("[data-homepage-root]")).toHaveCSS(
+      "background-color",
+      "rgb(251, 250, 249)"
+    );
+    await expect(page.locator("#top")).toHaveCSS("background-color", "rgb(251, 250, 249)");
 
     await page.goto("/sign-in");
     await expect(

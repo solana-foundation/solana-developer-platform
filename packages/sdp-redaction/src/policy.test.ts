@@ -44,7 +44,13 @@ describe("isCredentialKey", () => {
       "seedMnemonic",
       "seedPhrase",
       "seed_phrase",
+      // A bare `seed` is the exact shape a signer helper logs a derivation
+      // seed under, and `walletPassphrase` is a standard custodian spelling.
+      "seed",
+      "passphrase",
+      "walletPassphrase",
       "signingKey",
+      "__clerk_ticket",
       // Normalization strips the separators, so an exact `apikey` rule would
       // miss the header form. This is the shape that reaches Sentry as
       // `request.headers`.

@@ -12,6 +12,7 @@ import { app } from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -22,7 +23,6 @@ vi.mock("@sdp/rpc/solana", async (original) => ({
   ...(await original<typeof import("@sdp/rpc/solana")>()),
   getSignatureStatuses: signatureStatuses,
 }));
-
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
   return {
@@ -39,7 +39,6 @@ const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
-  assertClusterEndpoint: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
@@ -206,6 +205,9 @@ function requestAsProduction(path: string) {
 function encodeCursorPayload(createdAt: string, id: string): string {
   return btoa(`${createdAt}|${id}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+// The confirmation context hands its status read a real pool client, so each cluster needs one.
+installClusterRpcStub();
 
 beforeEach(async () => {
   env.MARKETS_ENABLED = "true";

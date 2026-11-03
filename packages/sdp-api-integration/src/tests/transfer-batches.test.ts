@@ -50,7 +50,11 @@ async function waitForSignatureCommitment(
   target: Exclude<Commitment, "processed">,
   timeoutMs: number
 ): Promise<void> {
-  const rpc = createRpc(env);
+  const solanaRpcUrl = env.SOLANA_RPC_URL;
+  if (!solanaRpcUrl) {
+    throw new Error("SOLANA_RPC_URL is not configured for integration tests.");
+  }
+  const rpc = createRpc(solanaRpcUrl);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const statuses = await getSignatureStatuses(rpc, signatures, {
@@ -155,6 +159,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        externalId: `batch-integration-run-${Date.now()}`,
         sourceCustodyWalletId: sourceWallet.id,
         token: "SOL",
         recipients: accountIds.map((counterpartyAccountId, index) => ({

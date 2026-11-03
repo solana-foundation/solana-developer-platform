@@ -1,13 +1,19 @@
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
+  PAYMENT_REQUEST_STATUSES,
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  RECURRING_PAYMENT_PAUSE_REASONS,
+  RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
+import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -21,7 +27,11 @@ import {
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
 } from "@/routes/payments/recurring-payments/schemas";
-import { transferIdParamsSchema as transferIdParamsSchemaBase } from "@/routes/payments/schemas";
+import {
+  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
+  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  transferIdParamsSchema as transferIdParamsSchemaBase,
+} from "@/routes/payments/schemas";
 import {
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
@@ -32,9 +42,7 @@ import {
 } from "@/routes/payments/subscription-plans/schemas";
 import {
   createSubscriptionSchema as createSubscriptionSchemaBase,
-  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
-  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
   prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
   prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
@@ -45,7 +53,6 @@ import {
   createTransferBatchSchema as createTransferBatchSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
-  priorityFeeSchema as priorityFeeSchemaBase,
   transferBatchIdParamsSchema as transferBatchIdParamsSchemaBase,
   transferBatchRecipientStatusSchema as transferBatchRecipientStatusSchemaBase,
   transferBatchStatusSchema as transferBatchStatusSchemaBase,
@@ -71,7 +78,7 @@ import {
 } from "./base";
 import { preparedTransactionSchema } from "./issuance";
 
-export const tokenAmountSchema = z.string().openapi({
+const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
   example: "100.00",
 });
@@ -103,7 +110,7 @@ export const paymentTransferBatchIdParamsSchema = transferBatchIdParamsSchemaBas
   })
   .openapi({ description: "Payment transfer batch path parameters." });
 
-export const tokenBalanceSchema = z
+const tokenBalanceSchema = z
   .object({
     token: z.string().openapi({ description: "Token symbol or mint address.", example: "USDC" }),
     mint: solanaAddressSchema.openapi({
@@ -131,7 +138,7 @@ export const tokenBalanceSchema = z
   })
   .openapi({ description: "Token balance details." });
 
-export const walletBalancesSchema = z
+const walletBalancesSchema = z
   .object({
     walletId: walletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
@@ -160,6 +167,11 @@ export const createTransferRequestSchema = createTransferSchemaBase
       description: "Destination wallet address.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
+    counterpartyAccountId: withOpenApi(createTransferSchemaBase.shape.counterpartyAccountId, {
+      description:
+        "The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.",
+      example: "cpacct_example",
+    }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
         "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",
@@ -185,31 +197,26 @@ export const createTransferRequestSchema = createTransferSchemaBase
     },
   });
 
-export const priorityFeeSchema = withOpenApi(priorityFeeSchemaBase, {
-  description: "Priority fee level.",
-  example: "auto",
-});
-
-export const transferTypeSchema = withOpenApi(transferTypeSchemaBase, {
+const transferTypeSchema = withOpenApi(transferTypeSchemaBase, {
   description: "Transfer type.",
   example: "transfer",
 });
 
-export const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
+const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
   description: "Transfer direction.",
   example: "outbound",
 });
 
-export const transferStatusSchema = withOpenApi(transferStatusSchemaBase, {
+const transferStatusSchema = withOpenApi(transferStatusSchemaBase, {
   description: "Transfer status.",
   example: "confirmed",
 });
 
-export const transferRiskLevelSchema = z
+const transferRiskLevelSchema = z
   .enum(["low", "medium", "high", "unknown"])
   .openapi({ description: "Risk level classification.", example: "low" });
 
-export const transferRiskSchema = z
+const transferRiskSchema = z
   .object({
     provider: z.string().openapi({ description: "Risk scoring provider.", example: "trm" }),
     score: z.string().openapi({ description: "Provider-specific risk score.", example: "0.12" }),
@@ -221,7 +228,7 @@ export const transferRiskSchema = z
   })
   .openapi({ description: "Risk metadata for the transfer." });
 
-export const transferInitiatorSchema = z
+const transferInitiatorSchema = z
   .object({
     type: z
       .enum(["api_key", "user", "system"])
@@ -306,6 +313,17 @@ const rampTransferSettlementSchema = moonpayRampSettlementSchema;
 
 export const transferSchema = z
   .object({
+    fireblocks: z
+      .object({
+        transactionId: z.string().nullable(),
+        status: z.string(),
+        subStatus: z.string().nullable(),
+      })
+      .optional()
+      .openapi({
+        description:
+          "Native Fireblocks transfer tracking. A processing payment may await approval in Fireblocks; network fees are paid by its source vault. A missing transaction ID means submission is still being reconciled. Do not create a replacement payment while its outcome is unknown.",
+      }),
     id: transferIdParamSchema,
     organizationId: orgIdParamSchema,
     custodyWalletId: z.string().nullable().openapi({
@@ -331,7 +349,8 @@ export const transferSchema = z
       example: "sig_example",
     }),
     serializedTx: base64Schema.nullable().openapi({
-      description: "Base64-encoded transaction payload, if available.",
+      description:
+        "Base64-encoded transaction payload, if available. Always null for transfer batch chunks, whose signed bytes stay server-side.",
       example: "base64_tx_example",
     }),
     slot: z
@@ -429,12 +448,12 @@ export const transferSchema = z
   })
   .openapi({ description: "Transfer transaction record." });
 
-export const paymentTransferBatchStatusSchema = withOpenApi(transferBatchStatusSchemaBase, {
+const paymentTransferBatchStatusSchema = withOpenApi(transferBatchStatusSchemaBase, {
   description: "Transfer batch status.",
   example: "processing",
 });
 
-export const paymentTransferBatchRecipientStatusSchema = withOpenApi(
+const paymentTransferBatchRecipientStatusSchema = withOpenApi(
   transferBatchRecipientStatusSchemaBase,
   {
     description: "Transfer batch recipient status.",
@@ -449,7 +468,8 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: "prj_example",
     }),
     externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
-      description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
+      description:
+        "Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Required: it is what stops a resend under a new Idempotency-Key from paying the same recipients twice.",
       example: "payroll_2026_06_30",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {
@@ -467,7 +487,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         {
           externalId: "payroll_row_001",
           counterpartyId: "cpty_example",
-          counterpartyAccountId: "cpa_example",
+          counterpartyAccountId: "cpacct_example",
           amount: "25.00",
         },
       ],
@@ -487,7 +507,13 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
-  .extend(createTransferBatchRequestSchema.shape)
+  .extend({
+    ...createTransferBatchRequestSchema.shape,
+    externalId: createTransferBatchRequestSchema.shape.externalId.optional().openapi({
+      description:
+        "Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.",
+    }),
+  })
   .openapi({
     description: "Estimate transaction chunking and fees for a transfer batch.",
   });
@@ -524,7 +550,7 @@ export const paymentListTransferBatchesQuerySchema = listTransferBatchesQuerySch
   })
   .openapi({ description: "Transfer batch list query parameters." });
 
-export const transferBatchRecipientSchema = z
+const transferBatchRecipientSchema = z
   .object({
     id: z.string().openapi({ description: "Transfer batch recipient identifier." }),
     batchId: z.string().openapi({ description: "Parent transfer batch identifier." }),
@@ -541,7 +567,7 @@ export const transferBatchRecipientSchema = z
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
-      example: "cpa_example",
+      example: "cpacct_example",
     }),
     destination: solanaAddressSchema.openapi({
       description: "Resolved Solana destination address.",
@@ -598,7 +624,7 @@ export const transferBatchSchema = z
   })
   .openapi({ description: "Transfer batch summary." });
 
-export const transferBatchEstimateSchema = z
+const transferBatchEstimateSchema = z
   .object({
     recipientCount: z.number().int().openapi({ description: "Requested recipient count." }),
     transactionCount: z.number().int().openapi({
@@ -624,23 +650,30 @@ export const transferBatchEstimateSchema = z
         }),
       })
       .openapi({ description: "Estimated fee components." }),
+    warnings: z
+      .array(
+        paymentTransferBatchEstimateWarningSchema.describe(
+          "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed."
+        )
+      )
+      .openapi({
+        description:
+          "What would make the batch fail. Empty when the batch can be sent as estimated.",
+      }),
   })
   .openapi({ description: "Transfer batch estimate." });
 
-export const paymentSubscriptionPlanStatusSchema = withOpenApi(
-  paymentSubscriptionPlanStatusSchemaBase,
-  {
-    description: "Subscription plan status.",
-    example: "active",
-  }
-);
+const paymentSubscriptionPlanStatusSchema = withOpenApi(paymentSubscriptionPlanStatusSchemaBase, {
+  description: "Subscription plan status.",
+  example: "active",
+});
 
-export const paymentSubscriptionStatusSchema = withOpenApi(paymentSubscriptionStatusSchemaBase, {
+const paymentSubscriptionStatusSchema = withOpenApi(paymentSubscriptionStatusSchemaBase, {
   description: "Subscription status.",
   example: "active",
 });
 
-export const paymentSubscriptionCollectionAttemptStatusSchema = withOpenApi(
+const paymentSubscriptionCollectionAttemptStatusSchema = withOpenApi(
   paymentSubscriptionCollectionAttemptStatusSchemaBase,
   {
     description: "Collection attempt status.",
@@ -648,13 +681,10 @@ export const paymentSubscriptionCollectionAttemptStatusSchema = withOpenApi(
   }
 );
 
-export const paymentRecurringPaymentStatusSchema = withOpenApi(
-  paymentRecurringPaymentStatusSchemaBase,
-  {
-    description: "Recurring payment status.",
-    example: "active",
-  }
-);
+const paymentRecurringPaymentStatusSchema = withOpenApi(paymentRecurringPaymentStatusSchemaBase, {
+  description: "Recurring payment status.",
+  example: "active",
+});
 
 export const paymentRecurringPaymentIdParamsSchema = recurringPaymentIdParamsSchemaBase
   .extend({
@@ -664,6 +694,70 @@ export const paymentRecurringPaymentIdParamsSchema = recurringPaymentIdParamsSch
     }),
   })
   .openapi({ description: "Recurring payment path parameters." });
+
+export const paymentRequestIdParamsSchema = paymentRequestParamsSchemaBase
+  .extend({
+    paymentRequestId: withOpenApi(paymentRequestParamsSchemaBase.shape.paymentRequestId, {
+      description: "SDP payment request ID.",
+      example: "preq_example",
+    }),
+  })
+  .openapi({ description: "Payment request path parameters." });
+
+const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES).openapi({
+  description:
+    "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+  example: "canceled",
+});
+
+export const paymentRequestSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
+    organizationId: z.string().openapi({ description: "Organization ID." }),
+    projectId: z.string().nullable().openapi({ description: "Project ID." }),
+    walletId: z.string().openapi({ description: "Receiving custody wallet's provider ID." }),
+    destinationAddress: solanaAddressSchema.openapi({
+      description: "Address the payment is sent to.",
+    }),
+    token: z.string().openapi({ description: "Token mint address." }),
+    amount: tokenAmountSchema,
+    reference: solanaAddressSchema.openapi({
+      description: "Solana Pay reference account that identifies the payment on chain.",
+    }),
+    status: paymentRequestStatusSchema,
+    expiresAt: isoDateTimeSchema.nullable().openapi({ description: "Expiry, if any." }),
+    fulfilledByTransferId: z
+      .string()
+      .nullable()
+      .openapi({ description: "The inbound transfer that paid the request." }),
+    paidLate: z.boolean().openapi({
+      description:
+        "Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.",
+    }),
+    lastCheckedAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "When SDP last read the chain for the payment." }),
+    canceledByApiKeyId: z.string().nullable().openapi({
+      description:
+        "The API key that canceled the request; null when a member did, or it is not canceled.",
+    }),
+    canceledByUserId: z.string().nullable().openapi({
+      description:
+        "User ID of the member who canceled the request; null when an API key did, or it is not canceled.",
+    }),
+    canceledAt: isoDateTimeSchema.nullable().openapi({ description: "When it was canceled." }),
+    lifecycle: z
+      .array(z.object({ status: paymentRequestStatusSchema, at: isoDateTimeSchema }))
+      .openapi({ description: "Every status the request entered, oldest first." }),
+    createdBy: z.string().nullable().openapi({
+      description: "User ID of the member, or of the API key's creator, who created it.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({
+    description: "A payment request. Reads never carry its link token.",
+  });
 
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({
@@ -701,7 +795,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty crypto_wallet account. It must contain Solana wallet details.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
@@ -751,7 +845,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       {
         description:
           "Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
@@ -799,7 +893,7 @@ export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuer
   })
   .openapi({ description: "Recurring payment list filters." });
 
-export const paymentRecurringPaymentSchema = z
+const paymentRecurringPaymentSchema = z
   .object({
     id: z.string().openapi({ description: "SDP recurring payment ID.", example: "prp_example" }),
     organizationId: orgIdParamSchema,
@@ -819,7 +913,7 @@ export const paymentRecurringPaymentSchema = z
       .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
     counterpartyAccountId: z
       .string()
-      .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
+      .openapi({ description: "Counterparty account ID.", example: "cpacct_example" }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Counterparty wallet owner address.",
     }),
@@ -857,6 +951,13 @@ export const paymentRecurringPaymentSchema = z
       .nullable()
       .openapi({ description: "Solana signature for subscription authorization." }),
     status: paymentRecurringPaymentStatusSchema,
+    pausedReason: z
+      .enum(RECURRING_PAYMENT_PAUSE_REASONS)
+      .nullable()
+      .openapi({
+        description: `Why SDP paused the recurring payment, set exactly while \`status\` is \`paused\`: \`custody_policy_refused\` when the custody provider's policy refused to sign a collection, \`failed_attempts\` when one due period failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Resume clears it.`,
+        example: null,
+      }),
     metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),
     createdBy: z.string().nullable().openapi({ description: "Creator user ID or API key ID." }),
     createdAt: isoDateTimeSchema,
@@ -864,9 +965,43 @@ export const paymentRecurringPaymentSchema = z
   })
   .openapi({ description: "SDP-custody outbound recurring payment record." });
 
+const paymentRecurringPaymentTokenApprovalSchema = z
+  .object({
+    status: z.enum(RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES).openapi({
+      description:
+        "`revoked` once the approval has been revoked since the cancel. `kept` while other live recurring payments on the same wallet and token, in this or another project, still use it; `sharedWith` lists the ones in this project. It is revoked once the last of them ends. `revoking` when nothing else uses it but the revoke has not confirmed yet, for example while a collection that was already processing settles; the background sweep finishes it.",
+      example: "kept",
+    }),
+    delegate: solanaAddressSchema.openapi({
+      description:
+        "The approval's delegate: the Subscriptions program's authority for this wallet and token.",
+    }),
+    sharedWith: z
+      .array(
+        z.object({
+          id: z
+            .string()
+            .openapi({ description: "SDP recurring payment ID.", example: "prp_example" }),
+          status: paymentRecurringPaymentStatusSchema,
+        })
+      )
+      .openapi({
+        description:
+          "The other live recurring payments in this project on the same wallet and token that keep the approval. Empty unless `status` is `kept`, and empty then when only recurring payments in other projects keep it.",
+      }),
+  })
+  .openapi({
+    description:
+      "Every recurring payment from one wallet in one token relies on one token approval, to the Subscriptions program's authority for that wallet and token. This says what became of it after the cancel.",
+  });
+
 export const paymentRecurringPaymentResponseSchema = z
   .object({
     recurringPayment: paymentRecurringPaymentSchema,
+    tokenApproval: paymentRecurringPaymentTokenApprovalSchema.optional().openapi({
+      description:
+        "Present when the recurring payment is canceled, on the cancel response and on get: what became of the token approval it relied on.",
+    }),
   })
   .openapi({ description: "Recurring payment response payload." });
 
@@ -960,7 +1095,7 @@ export const paymentListSubscriptionPlansQuerySchema = listSubscriptionPlansQuer
   })
   .openapi({ description: "Subscription plan list filters." });
 
-export const paymentSubscriptionPlanSchema = z
+const paymentSubscriptionPlanSchema = z
   .object({
     id: z.string().openapi({ description: "SDP subscription plan ID.", example: "psp_example" }),
     organizationId: orgIdParamSchema,
@@ -996,7 +1131,7 @@ export const paymentSubscriptionPlanResponseSchema = z
   })
   .openapi({ description: "Subscription plan response payload." });
 
-export const preparedSubscriptionTransactionSchema = preparedTransactionSchema
+const preparedSubscriptionTransactionSchema = preparedTransactionSchema
   .extend({
     requiredSigners: z.array(solanaAddressSchema).openapi({
       description:
@@ -1076,7 +1211,7 @@ export const paymentListSubscriptionsQuerySchema = listSubscriptionsQuerySchemaB
   })
   .openapi({ description: "Subscription list filters." });
 
-export const paymentSubscriptionSchema = z
+const paymentSubscriptionSchema = z
   .object({
     id: z.string().openapi({ description: "SDP subscription ID.", example: "psub_example" }),
     organizationId: orgIdParamSchema,
@@ -1190,7 +1325,7 @@ export const paymentListSubscriptionCollectionAttemptsQuerySchema =
     })
     .openapi({ description: "Collection attempt list filters." });
 
-export const paymentSubscriptionCollectionAttemptSchema = z
+const paymentSubscriptionCollectionAttemptSchema = z
   .object({
     id: z.string().openapi({ description: "Collection attempt ID.", example: "psca_example" }),
     organizationId: orgIdParamSchema,
@@ -1213,12 +1348,6 @@ export const paymentSubscriptionCollectionAttemptSchema = z
     updatedAt: isoDateTimeSchema,
   })
   .openapi({ description: "Recurring payment collection attempt record." });
-
-export const paymentSubscriptionCollectionAttemptResponseSchema = z
-  .object({
-    collectionAttempt: paymentSubscriptionCollectionAttemptSchema,
-  })
-  .openapi({ description: "Collection attempt response payload." });
 
 export const prepareSubscriptionCollectionRequestSchema = prepareSubscriptionCollectionSchemaBase
   .extend({

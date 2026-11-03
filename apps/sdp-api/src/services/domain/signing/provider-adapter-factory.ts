@@ -10,6 +10,7 @@ import { KeychainTurnkeyAdapter } from "@sdp/custody/keychain/keychain-turnkey.a
 import { KeychainUtilaAdapter } from "@sdp/custody/keychain/keychain-utila.adapter";
 import { buildKeychainUtilaConfig } from "@sdp/custody/keychain/utila-config";
 import { SigningError, type SigningPort } from "@sdp/custody/signing";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { Address } from "@solana/kit";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
@@ -183,6 +184,7 @@ const providerAdapterFactories = {
   utila: async ({ env, parsed }) => {
     return new KeychainUtilaAdapter(
       buildKeychainUtilaConfig(env, {
+        cluster: currentClusterScope().cluster,
         network: parsed.network,
         vaultId: parsed.vaultId,
       })
@@ -260,5 +262,38 @@ export function createPrivyAdapterFromCredential(
       parseOptionalRequestDelayMs(env.PRIVY_REQUEST_DELAY_MS, {
         envVarName: "PRIVY_REQUEST_DELAY_MS",
       }),
+  });
+}
+
+/** Resolve only this connection's credentials and its exact stored vault wallet. */
+export function createFireblocksAdapterFromCredential(
+  env: Env,
+  input: {
+    apiKey: string;
+    apiSecretPem: string;
+    assetId: "SOL" | "SOL_TEST";
+    walletId: string;
+    requestDelayMs?: number;
+  }
+): SigningPort {
+  assertCustodyProviderAvailable(env, "fireblocks", "byok");
+  if (
+    !input.apiKey ||
+    !input.apiSecretPem ||
+    !input.walletId ||
+    !["SOL", "SOL_TEST"].includes(input.assetId)
+  ) {
+    throw new SigningError(
+      "Fireblocks credential or wallet is unavailable",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+  return new KeychainFireblocksAdapter({
+    apiKey: input.apiKey,
+    apiSecretPem: input.apiSecretPem,
+    vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
+    assetId: input.assetId,
+    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+    requestDelayMs: input.requestDelayMs,
   });
 }

@@ -1,15 +1,13 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { AppContext } from "@/routes/earn/context";
 import { getEarnRepository } from "@/routes/earn/context";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { reconcileVaultShareHoldings } from "@/services/earn/vault-share-reconciliation.service";
 import { listReadableEarnVaultWallets } from "./vault";
@@ -34,17 +32,17 @@ import { listReadableEarnVaultWallets } from "./vault";
  * the positions read's exact wallet-binding scope: a bound key that cannot see
  * wallet B's positions must not learn wallet B's balances here either.
  *
- * The endpoint is genesis-proven before any balance read: a misconfigured or
- * wrong-cluster RPC must fail the whole pass (positions untouched, failure
- * reported as an error) rather than read the wrong chain and report every
- * position unbacked. Per-wallet read failures degrade instead to a named
+ * Every balance read goes to the environment's own cluster pool, whose genesis
+ * guard refuses a wrong-cluster endpoint before it answers: a misconfigured
+ * RPC must fail the read (the wallet goes unjudged) rather than read the wrong
+ * chain and report every position unbacked. Per-wallet read failures degrade instead to a named
  * `unreadableWallets` entry, and that wallet's claims go unjudged. The whole
  * pass shares one `VaultDeadline`, the same absolute budget every vault
  * workflow runs under, so a data-driven wallet count bounds what gets read,
  * never how long the request runs.
  */
 export async function getEarnVaultShareReconciliation(c: AppContext) {
-  const environment = resolveSdpEnvironment(c);
+  const { environment, cluster } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -65,7 +63,6 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     });
   }
 
-  const cluster = earnClusterFor(environment);
   const [claims, strategies] = await Promise.all([
     createPostgresEarnMovementsRepository(getDb(c.env)).listVaultClaimsForReconciliation({
       organizationId: auth.organizationId,
@@ -75,9 +72,7 @@ export async function getEarnVaultShareReconciliation(c: AppContext) {
     getEarnRepository(c).listShareMintedStrategies({ environment, hostCluster: cluster }),
   ]);
 
-  const rpcUrl = resolveClusterRpcUrl(c.env, cluster);
-  await assertClusterEndpoint(c.env, cluster, rpcUrl);
-  const rpc = createRpc(c.env, { rpcUrl });
+  const rpc = createClusterRpc();
 
   const report = await reconcileVaultShareHoldings({
     wallets: [...walletsById.values()],

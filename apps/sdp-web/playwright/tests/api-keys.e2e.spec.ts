@@ -47,7 +47,7 @@ test.describe
       await page.getByRole("button", { name: "Create key" }).click();
 
       await expect(page.getByText("API key generated")).toBeVisible({ timeout: 120_000 });
-      await expect(page.locator("#generated-key")).toHaveValue(/^(sk_test_|sk_live_)/);
+      await expect(page.locator("#generated-key")).toHaveValue(/^sf_[0-9a-f]{16}_[0-9A-Za-z]{49}$/);
 
       await page.getByRole("button", { name: "Dismiss", exact: true }).click();
       await page.reload();

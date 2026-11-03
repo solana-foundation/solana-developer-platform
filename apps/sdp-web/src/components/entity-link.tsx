@@ -3,7 +3,7 @@
 import { cn } from "@sdp/ui/cn";
 import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
-import type { MouseEventHandler, ReactNode } from "react";
+import type { HTMLAttributeAnchorTarget, MouseEventHandler, ReactNode } from "react";
 
 /**
  * Internal link to an entity's dashboard page: a truncating label with an
@@ -13,6 +13,7 @@ import type { MouseEventHandler, ReactNode } from "react";
  * @param props.children - The entity label.
  * @param props.onClick - Optional click handler, e.g. to stop row navigation.
  * @param props.className - Extra classes merged onto the link.
+ * @param props.target - Where the link opens, e.g. `_blank` to keep the current page.
  * @returns The entity link element.
  */
 export function EntityLink({
@@ -20,16 +21,19 @@ export function EntityLink({
   children,
   onClick,
   className,
+  target,
 }: {
   href: string;
   children: ReactNode;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
   className?: string;
+  target?: HTMLAttributeAnchorTarget;
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
+      target={target}
       className={cn(
         "inline-flex min-w-0 max-w-full items-center gap-1 underline-offset-4 hover:underline focus-visible:underline",
         className

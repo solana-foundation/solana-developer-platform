@@ -18,6 +18,10 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.json ./
 COPY apps/sdp-docs/package.json ./apps/sdp-docs/
 COPY apps/sdp-api/package.json ./apps/sdp-api/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+# The API reference model and request snippets the reference renders from.
+COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
+# The refresh palette, type scale and font files the docs render with.
+COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 COPY packages/sdp-env-config/package.json ./packages/sdp-env-config/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
@@ -38,6 +42,8 @@ COPY --from=deps /repo /repo
 COPY apps/sdp-docs ./apps/sdp-docs
 COPY apps/sdp-api ./apps/sdp-api
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-api-catalog ./packages/sdp-api-catalog
+COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-env-config ./packages/sdp-env-config
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-fee-payment ./packages/sdp-fee-payment

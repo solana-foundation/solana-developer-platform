@@ -86,13 +86,23 @@ test("skips a candidate that serves mainnet and selects the next one that serves
   globalThis.fetch = async (url, init) => {
     const { id, method, params } = JSON.parse(init.body);
     calls.push({ url, method, params });
-    const result =
-      method === "getGenesisHash"
-        ? genesisHashByUrl[url]
-        : {
-            context: { slot: 7 },
-            value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
-          };
+    let result;
+    switch (method) {
+      case "getGenesisHash":
+        result = genesisHashByUrl[url];
+        break;
+      case "getLatestBlockhash":
+        result = {
+          context: { slot: 7 },
+          value: { blockhash: "rpc-health-blockhash", lastValidBlockHeight: 9 },
+        };
+        break;
+      case "isBlockhashValid":
+        result = { context: { slot: 7 }, value: true };
+        break;
+      default:
+        throw new Error(`Unexpected RPC method: ${method}`);
+    }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
   };
 
@@ -113,5 +123,44 @@ test("skips a candidate that serves mainnet and selects the next one that serves
     { url: mainnetUrl, method: "getGenesisHash", params: [] },
     { url: devnetUrl, method: "getGenesisHash", params: [] },
     { url: devnetUrl, method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] },
+    {
+      url: devnetUrl,
+      method: "isBlockhashValid",
+      params: ["rpc-health-blockhash", { commitment: "confirmed", minContextSlot: 7 }],
+    },
   ]);
+});
+
+test("skips a devnet RPC whose latest blockhash has already expired", async (t) => {
+  const staleUrl = "https://rpc-health-stale.test/devnet";
+  const liveUrl = "https://rpc-health-live.test/devnet";
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    const { id, method } = JSON.parse(init.body);
+    let result;
+    switch (method) {
+      case "getGenesisHash":
+        result = DEVNET_GENESIS_HASH;
+        break;
+      case "getLatestBlockhash":
+        result = { context: { slot: 7 }, value: { blockhash: "rpc-health-blockhash" } };
+        break;
+      case "isBlockhashValid":
+        result = { context: { slot: 7 }, value: url === liveUrl };
+        break;
+      default:
+        throw new Error(`Unexpected RPC method: ${method}`);
+    }
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }));
+  };
+
+  const selected = await selectHealthySolanaRpcUrl({
+    SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: staleUrl,
+    SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL: liveUrl,
+  });
+
+  assert.equal(selected?.id, "quicknode");
 });

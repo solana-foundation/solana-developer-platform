@@ -7,7 +7,8 @@ import {
   SwapDvpVerificationError,
   verifySwapDvpAccount,
 } from "@sdp/dvp";
-import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
@@ -88,7 +89,7 @@ function legOfSide(trade: DvpTradeRow, side: DvpTradeSide): DvpSdpLeg {
  * every funder — creator and counterparty run the same safety properties, so
  * they cannot drift apart.
  */
-export interface DvpFundingPlan {
+interface DvpFundingPlan {
   leg: DvpSdpLeg;
   /** Whose wallet authorizes the transfer. Not necessarily the trade's author. */
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
@@ -109,7 +110,7 @@ export interface DvpFundingPlan {
  * on `dvp_leg_funding_claims` keyed (trade, side) and owned by the FUNDING
  * org — opposite legs are different rows, so they never share a lock.
  */
-export function fundingPlan(
+function fundingPlan(
   env: Env,
   trade: DvpTradeRow,
   side: DvpTradeSide,
@@ -175,7 +176,7 @@ export async function fundDvpTradeLeg(
  *
  * Shared by every funder; Kora pays while the custody wallet authorizes the transfer.
  */
-export async function executeDvpFunding(
+async function executeDvpFunding(
   c: Context<{ Bindings: Env }>,
   trade: DvpTradeRow,
   plan: DvpFundingPlan,
@@ -191,7 +192,7 @@ export async function executeDvpFunding(
 
   const { side, mint, tokenProgram, escrow, amount } = plan.leg;
 
-  const rpc = createRpc(env);
+  const rpc = createClusterRpc();
 
   // Read the escrow NOW rather than trusting the reconciler's last sweep. The
   // sweep runs once a minute, so acting on it would let two funding requests a
@@ -297,7 +298,7 @@ export async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"dvp">(
     env,
     plan.signer.organizationId,
     plan.signer.projectId,
@@ -370,7 +371,7 @@ export async function executeDvpFunding(
     );
   }
 
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"dvp">(
     env,
     await resolveProjectSponsorshipScope(env, {
       organizationId: plan.signer.organizationId,

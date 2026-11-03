@@ -2,7 +2,7 @@ import { cn } from "@sdp/ui/cn";
 import Link from "next/link";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
-export interface DashboardRouteTab {
+interface DashboardRouteTab {
   href: string;
   label: string;
 }

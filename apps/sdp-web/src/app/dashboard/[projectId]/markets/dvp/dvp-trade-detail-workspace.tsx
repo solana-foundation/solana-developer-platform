@@ -963,11 +963,25 @@ function canFundLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
   );
 }
 
+type CloseFooterKind = "partyHoldsLeg" | "closeActions" | "none";
+
+function closeFooterKind(partyView: boolean, canWrite: boolean): CloseFooterKind {
+  if (partyView) return "partyHoldsLeg";
+  if (canWrite) return "closeActions";
+  return "none";
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
+  canWrite,
 }: {
   trade: DvpTrade;
+  /**
+   * False for a read-only member (`viewer`): fund, reclaim, settle and cancel are hidden.
+   * A prop for the same reason as `cluster`.
+   */
+  canWrite: boolean;
   /**
    * Passed in rather than read from context, so this stays a pure function of
    * its props — the same split `dvp-create-client.tsx` already makes, and what
@@ -985,7 +999,7 @@ export function DvpTradeDetailWorkspace({
   // each from the wallet that holds its party address, through the unified
   // fund endpoint naming the side.
   const fundActionFor = (side: DvpTradeSide): ReactNode => {
-    if (!canFundLeg(trade.legs[side], trade.status)) {
+    if (!canWrite || !canFundLeg(trade.legs[side], trade.status)) {
       return undefined;
     }
     const wallet = trade.legs[side].party.actionWallet;
@@ -1013,7 +1027,7 @@ export function DvpTradeDetailWorkspace({
   // than moving the trade forward, and a funded trade reads as ready to settle.
   const reclaimActionFor = (side: DvpTradeSide): ReactNode => {
     const wallet = trade.legs[side].party.actionWallet;
-    return canReclaimLeg(trade.legs[side], trade.status) ? (
+    return canWrite && canReclaimLeg(trade.legs[side], trade.status) ? (
       <button
         className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
         // Any action in flight, not only this leg's: a reclaim racing a settle
@@ -1034,6 +1048,30 @@ export function DvpTradeDetailWorkspace({
       </button>
     ) : undefined;
   };
+
+  // A party reading somebody else's trade is told why it cannot close it; a read-only member
+  // gets no footer; the settlement authority gets settle and cancel.
+  const footerKind = closeFooterKind(partyView, canWrite);
+  let closeFooter: ReactNode;
+  switch (footerKind) {
+    case "partyHoldsLeg":
+      closeFooter = (
+        <p className="text-tertiary text-xs leading-relaxed">
+          {t("DashboardMarkets.dvp.partyHoldsLeg")}
+        </p>
+      );
+      break;
+    case "closeActions":
+      closeFooter = <DvpCloseActions onAct={act} pending={pending} trade={trade} />;
+      break;
+    case "none":
+      closeFooter = null;
+      break;
+    default: {
+      const exhaustive: never = footerKind;
+      throw new Error(`Unhandled trade footer: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.
@@ -1098,13 +1136,7 @@ export function DvpTradeDetailWorkspace({
             reading somebody else's trade is not it. Offering the buttons put
             two irreversible-looking actions in front of somebody whose click
             could only ever come back "trade not found". */}
-        {partyView ? (
-          <p className="text-tertiary text-xs leading-relaxed">
-            {t("DashboardMarkets.dvp.partyHoldsLeg")}
-          </p>
-        ) : (
-          <DvpCloseActions onAct={act} pending={pending} trade={trade} />
-        )}
+        {closeFooter}
 
         <OnChainDetails cluster={cluster} trade={trade} />
       </div>

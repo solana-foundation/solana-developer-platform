@@ -44,7 +44,7 @@ export type IssuedTokensByMint = Record<
 >;
 
 /** The page's tabs, in order. */
-export const WALLET_TABS = ["overview", "activity", "settings"] as const;
+const WALLET_TABS = ["overview", "activity", "settings"] as const;
 export type WalletTab = (typeof WALLET_TABS)[number];
 
 /**

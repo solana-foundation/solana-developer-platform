@@ -2,7 +2,6 @@ import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
-  ListPaymentSubscriptionCollectionAttemptsResponse,
   ListPaymentSubscriptionsResponse,
   PaymentSubscription,
   PaymentSubscriptionResponse,
@@ -28,13 +27,17 @@ import type {
 } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { badRequest, badRequestParams, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
-import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { respondWithCollectionAttemptsPage } from "@/routes/payments/mappers";
+import {
+  isOrganizationCustodyWalletAddress,
+  resolveScope,
+  resolveWallet,
+} from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -48,7 +51,6 @@ import {
 } from "@/services/sponsorship.service";
 import {
   type createSubscriptionSchema,
-  listSubscriptionCollectionAttemptsQuerySchema,
   listSubscriptionsQuerySchema,
   type prepareSubscriptionAuthorizationSchema,
   type prepareSubscriptionCollectionSchema,
@@ -86,7 +88,7 @@ async function getExpectedSubscriptionExpiresAtTs(subscriptionPda: Address): Pro
     { commitment: "confirmed" }
   );
   if (!onChainSubscription.exists) {
-    throw new AppError("CONFLICT", "Subscription was not found on-chain");
+    throw conflict("Subscription was not found on-chain");
   }
   return onChainSubscription.data.expiresAtTs;
 }
@@ -120,10 +122,7 @@ async function persistSubscriptionAuthorizationAddresses(
   });
 
   if (!updated) {
-    throw new AppError(
-      "CONFLICT",
-      "Subscription authorization state changed while preparing authorization"
-    );
+    throw conflict("Subscription authorization state changed while preparing authorization");
   }
 
   return updated;
@@ -143,7 +142,7 @@ async function getSubscriptionWithPlan(
   });
 
   if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
+    throw notFound("Subscription");
   }
 
   const plan = await repo.getPlanById({
@@ -153,10 +152,28 @@ async function getSubscriptionWithPlan(
   });
 
   if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
+    throw notFound("Subscription plan");
   }
 
   return { plan, subscription };
+}
+
+/**
+ * Refuses a subscription paid from one of the organization's SDP wallets (HOO-2339). Its payer's
+ * authorization approves the program for u64::MAX, which for a custody wallet would leave SDP-held
+ * funds unbounded and share the per-mint approval a recurring payment keeps at 0 between
+ * collections. A custody wallet pays on a schedule through a recurring payment. One database read.
+ *
+ * @param c - The request.
+ * @param subscriberAddress - The subscription's payer.
+ * @throws AppError `CONFLICT` when the payer is one of the organization's SDP wallets.
+ */
+async function refuseCustodyWalletSubscriber(c: AppContext, subscriberAddress: string) {
+  if (await isOrganizationCustodyWalletAddress(c, subscriberAddress)) {
+    throw conflict(
+      "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet."
+    );
+  }
 }
 
 export const createSubscription = async (
@@ -177,8 +194,9 @@ export const createSubscription = async (
   }
   // An inactive counterparty reads as missing, as the active-only lookup answered.
   if (counterparty.status !== "active") {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
+    throw notFound("Counterparty");
   }
+  await refuseCustodyWalletSubscriber(c, body.subscriberAddress);
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
@@ -189,7 +207,7 @@ export const createSubscription = async (
     offset: 0,
   });
   if (existing.total > 0) {
-    throw new AppError("CONFLICT", "Counterparty already has a subscription for this plan");
+    throw conflict("Counterparty already has a subscription for this plan");
   }
 
   const now = new Date().toISOString();
@@ -215,7 +233,7 @@ export const createSubscription = async (
   });
 
   if (!subscription) {
-    throw new AppError("CONFLICT", "Counterparty already has a subscription for this plan");
+    throw conflict("Counterparty already has a subscription for this plan");
   }
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };
@@ -234,14 +252,14 @@ export const prepareSubscriptionAuthorization = async (
   const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  // One created before the create route refused it: refused here, before its authorization can
+  // approve anything.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (plan.status !== "active") {
     throw badRequest("Subscription plan must be active before authorization");
   }
   if (subscription.status !== "pending_authorization") {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Subscription authorization can only be prepared while pending authorization"
-    );
+    throw badRequest("Subscription authorization can only be prepared while pending authorization");
   }
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
@@ -352,12 +370,37 @@ export const getSubscription = async (c: AppContext) => {
   });
 
   if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
+    throw notFound("Subscription");
   }
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };
   return success(c, response);
 };
+
+/**
+ * Refuses a standalone-route transaction for a subscription a recurring payment owns: SDP signs
+ * for those, and a cancel there is terminal (HOO-2339), so a prepared resume or collection would
+ * bring back or charge a schedule SDP stopped.
+ *
+ * @param c - The request.
+ * @param subscription - The subscription the route prepares a transaction for.
+ * @throws AppError `CONFLICT` when a recurring payment owns it.
+ */
+async function assertStandaloneSubscription(
+  c: AppContext,
+  subscription: PaymentSubscriptionRow
+): Promise<void> {
+  const owned = await getPaymentSubscriptionsRepository(c).isRecurringPaymentSubscription({
+    subscriptionId: subscription.id,
+    organizationId: subscription.organization_id,
+    projectId: subscription.project_id,
+  });
+  if (owned) {
+    throw conflict(
+      "This subscription belongs to a recurring payment. Manage it through /v1/payments/recurring-payments instead."
+    );
+  }
+}
 
 async function prepareSubscriptionLifecycle(
   c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>,
@@ -370,6 +413,9 @@ async function prepareSubscriptionLifecycle(
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  if (operation === "resume") {
+    await assertStandaloneSubscription(c, subscription);
+  }
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -425,6 +471,10 @@ export const prepareSubscriptionCollection = async (
   const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  await assertStandaloneSubscription(c, subscription);
+  // One authorized before the create-time refusal: a recurring collect from the same wallet now
+  // resets the shared allowance to zero, so its pull would fail on chain.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (subscription.status !== "active") {
     throw badRequest("Subscription must be active before collection");
   }
@@ -476,37 +526,21 @@ export const listSubscriptionCollectionAttempts = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const parsed = listSubscriptionCollectionAttemptsQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
-  }
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const subscription = await repo.getSubscriptionById({
-    subscriptionId: params.data.subscriptionId,
-    organizationId: auth.organizationId,
-    projectId,
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const repo = getPaymentSubscriptionsRepository(c);
+    const subscription = await repo.getSubscriptionById({
+      subscriptionId: params.data.subscriptionId,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+    if (!subscription) {
+      throw notFound("Subscription");
+    }
+    return repo.listCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      subscriptionId: params.data.subscriptionId,
+      ...page,
+    });
   });
-  if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-
-  const { page, pageSize, status } = parsed.data;
-  const { rows, total } = await repo.listCollectionAttempts({
-    organizationId: auth.organizationId,
-    projectId,
-    subscriptionId: params.data.subscriptionId,
-    status,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-  });
-
-  const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
-    collectionAttempts: rows.map(mapCollectionAttemptRow),
-    total,
-    page,
-    pageSize,
-  };
-
-  return success(c, response);
 };

@@ -5,7 +5,6 @@ The core Solana Developer Platform API, built as a Node.js service with Postgres
 ## What is SDP API?
 
 The SDP API provides a unified interface for blockchain operations on Solana, including:
-
 - **Wallets & Custody** — create and manage wallets with the built-in local signer or a custodial integration (Privy, Coinbase CDP, Turnkey, Fireblocks, Para, DFNS, IBM Digital Asset Haven, Utila). Anchorage is provisioning-only: it has no keychain signing adapter, so it can create and delete wallets but never signs.
 - **Token Issuance** — mint, freeze, and manage SPL tokens
 - **Payments** — send SOL and SPL token transfers with compliance screening
@@ -17,22 +16,18 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 ## Public API Routes
 
 The API exposes these public REST endpoints. Most require an API key or Clerk session
-token. Earn strategy reads, deposit/direct-withdrawal previews and unsigned
-instant builds, withdrawal-route discovery, and queued-withdrawal previews also
-accept anonymous requests. Submits, queued request/cancellation actions,
-positions, movements, earnings, and the rest of the tenant control plane remain
-authenticated.
+token; every Earn route does.
 
-| Family | Path | Use Case |
-|---|---|---|
-| **Health** | `GET /health` | Health check (no auth) |
-| **Wallets** | `POST/GET /v1/wallets/*` | Create, list, manage wallets |
-| **Issuance** | `POST/GET /v1/issuance/*` | Mint and manage tokens |
-| **Payments** | `POST/GET /v1/payments/*` | Transfer funds |
-| **Compliance** | `POST /v1/compliance/*` | Screen addresses/transactions |
-| **Projects** | `POST/GET /v1/projects/*` | Manage API projects |
-| **API Keys** | `POST/GET /v1/api-keys/*` | Create and manage API keys |
-| **Earn** | `GET/POST /v1/earn/*` | Discover strategies, build transactions, and manage tracked positions |
+| Family         | Path                      | Use Case                                                              |
+| -------------- | ------------------------- | --------------------------------------------------------------------- |
+| **Health**     | `GET /health`             | Health check (no auth)                                                |
+| **Wallets**    | `POST/GET /v1/wallets/*`  | Create, list, manage wallets                                          |
+| **Issuance**   | `POST/GET /v1/issuance/*` | Mint and manage tokens                                                |
+| **Payments**   | `POST/GET /v1/payments/*` | Transfer funds                                                        |
+| **Compliance** | `POST /v1/compliance/*`   | Screen addresses/transactions                                         |
+| **Projects**   | `POST/GET /v1/projects/*` | Manage API projects                                                   |
+| **API Keys**   | `POST/GET /v1/api-keys/*` | Create and manage API keys                                            |
+| **Earn**       | `GET/POST /v1/earn/*`     | Discover strategies, build transactions, and manage tracked positions |
 
 ## Internal Routes (Maintainers Only)
 
@@ -54,6 +49,7 @@ authenticated.
 ### Setup
 
 1. **Install dependencies:**
+
    ```bash
    pnpm install
    ```
@@ -61,6 +57,7 @@ authenticated.
 2. **Configure environment variables:**
 
    **Option A: Using Doppler (team members)**
+
    ```bash
    doppler login
    ```
@@ -74,6 +71,7 @@ authenticated.
    `CLERK_WEBHOOK_SECRET` and `WEBHOOK_INGEST_DOMAIN`.
 
    **Option B: Using local `.env.local` (external contributors)**
+
    ```bash
    cp apps/sdp-api/.env.local.example apps/sdp-api/.env.local
    # Edit .env.local with your values (see below)
@@ -124,12 +122,25 @@ Create `apps/sdp-api/.env.local` with at least:
 SDP_DEPLOYMENT_MODE=self_hosted
 
 # Use an RPC endpoint that supports the methods exercised by the API
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 
 # Wallet signer (generate both values with `pnpm --filter @sdp/api keygen:local`)
 SIGNING_PROVIDER=local
 CUSTODY_PRIVATE_KEY=<base58-encoded keypair>
 CUSTODY_ENCRYPTION_KEY=<base64-encoded 256-bit key>
+
+# API keys are stored as HMAC-SHA-256 under this pepper; the API refuses to
+# start without it. Generate with `openssl rand -hex 32`.
+API_KEY_PEPPER=<64 hex characters>
+```
+
+`pnpm db:seed:local` seeds the documented dev key hashed under the same pepper,
+and it runs `psql` directly, so it does not read `.env.local`. Export the value
+in the shell first, or the seed refuses to run:
+
+```bash
+export API_KEY_PEPPER=<the value in .env.local>
+pnpm -C apps/sdp-api db:seed:local
 ```
 
 Kora is a fee-payment provider, not a signing provider. `pnpm dev` starts
@@ -143,16 +154,9 @@ it reads, `KORA_<CLUSTER>_RPC_URL`, instead: both or neither, since the API refu
 start when a cluster sets only one of them. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
-Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
-`ENVIRONMENT=production` to production. Anonymous quote and build traffic has
-a separate paid-upstream budget configured with
-`EARN_ANONYMOUS_RPC_MAX_REQUESTS` and
-`EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
-project environment and authenticated quota. At startup, the API validates and
-logs the resolved anonymous Earn environment from `ENVIRONMENT`; verify that
-event before exposing a non-production deployment. Outside Cloud Run, forwarded
-client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
-behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
+Outside Cloud Run, forwarded client addresses are ignored unless
+`TRUST_PROXY_HEADERS=true`; enable it only behind an ingress that replaces
+caller-supplied `X-Forwarded-For` values.
 
 ### Release Channel (which modules run)
 
@@ -167,7 +171,6 @@ the dashboard all read it and refuse to start without it.
 The root `pnpm dev` loads that file for both the API and the dashboard, and it
 beats Doppler. Check with `curl -s localhost:8787/health`, which reports
 `releaseChannel`.
-
 - Without the line, Doppler `dev` (and the personal and CI configs that inherit
   from it) supplies `experimental`; `pnpm -C apps/sdp-api dev` alone defaults to
   `experimental` too.
@@ -222,7 +225,7 @@ KORA_DEVNET_RPC_URL=<the Solana RPC that Kora reads>
 # so wallet-balance queries will log "failed to fetch SPL balances" on every
 # refresh. Use a free Helius / Triton / QuickNode / Validation Cloud key or a
 # local solana-test-validator instead.
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
+SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL=https://devnet.helius-rpc.com/?api-key=<your-key>
 ```
 
 Generate `CUSTODY_PRIVATE_KEY` and `CUSTODY_ENCRYPTION_KEY` values:
@@ -245,14 +248,13 @@ private metadata:
 ```
 
 Set it in the Clerk dashboard (Organizations → your org → Metadata → Private;
-the `organization.updated` webhook syncs it) or with
-`pnpm --filter @sdp/api org:tier:local --clerk-org-id <org_…> --tier individual --overrides '{"custody":{"local":true}}'`.
+the `organization.updated` webhook syncs it).
 Without it, choosing the local signer returns `403 Local requires manual activation`.
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
-The webhook handler is the only path that creates `organizations` rows
-outside `pnpm db:seed:local`.
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only
+syncs the name, slug and entitlements of organizations SDP already knows.
 
 ### Optional: Compliance & Ramp Integrations
 
@@ -379,7 +381,6 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 ## Deployment
 
 The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
-
 - Every push to `main` deploys stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`; release commits deploy the same way.
 - Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
@@ -405,7 +406,6 @@ See [`docs/ops/release-operations.md`](../../docs/ops/release-operations.md) for
 ### Reconciliation cron
 
 Background work is a set of **Cron Definitions** (`src/cron/*.ts`, each built with `defineCron`; ADR 0011) run by one process: the always-on Worker service, which sets `DISABLE_CRON=false`. API replicas skip cron by default when `K_SERVICE` is set; self-hosted runtimes run it by default.
-
 - Each definition declares its `schedule`, its `scope` (`cluster`: registered once per Environment, each run inside that Environment's cluster scope; `global`: registered once), its money `effect`, and an `enabled(env)` decision made once at registration. The full list is `CRON_DEFINITIONS` in `src/cron/runner.ts`.
 - Every slot logs one `sdp_cron_run` event (`cron`, `environment`, `status`, `duration_ms`) to Loki. The statuses (`ok`, `error`, `skipped_overlap`, `disabled`) are defined on `CRON_RUN_STATUSES` in `@sdp/types/cron-runs`. A disabled definition still logs `disabled` on its schedule, and a slot that fires while the same registration's previous run is in flight logs `skipped_overlap` instead of starting a second run.
 - Money Exits (`effect: "finishes"`: transfer settlement, sponsorship budgets, Earn vault movements, DvP, ramp replay) are always enabled; the private-channels withdrawal tracker is the one flagged exception, because it cannot run without the gateway configured.

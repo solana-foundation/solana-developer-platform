@@ -96,7 +96,16 @@ function ensureClient(
       ...dedicated?.options,
     });
     // A lazy client connects here once, shared by every caller of this entry.
-    if (dedicated?.options.lazyConnect === true) await client.connect();
+    if (dedicated?.options.lazyConnect === true) {
+      try {
+        await client.connect();
+      } catch (error) {
+        // The rejected promise is evicted below. Stop its reconnect loop so a
+        // fresh lookup cannot leave an unreachable client behind each time.
+        client.disconnect();
+        throw error;
+      }
+    }
     return client;
   })();
   clientPromisesByUrl.set(cacheKey, promise);
@@ -118,6 +127,23 @@ export function getRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
     throw new Error("REDIS_URL is required for sponsorship budget admission.");
   }
   return ensureClient(url);
+}
+
+/** Shared price coordination must fail promptly, without replaying expired admissions. */
+export function getDisplayPriceRedisClient(env: Pick<Env, "REDIS_URL">): Promise<Redis> {
+  const url = env.REDIS_URL?.trim();
+  if (!url) throw new Error("REDIS_URL is required for shared display pricing.");
+  return ensureClient(url, {
+    name: "display-prices",
+    options: {
+      commandTimeout: 250,
+      connectTimeout: 250,
+      maxRetriesPerRequest: 0,
+      enableOfflineQueue: false,
+      autoResendUnfulfilledCommands: false,
+      lazyConnect: true,
+    },
+  });
 }
 
 export class RedisKVStore implements KVStore {

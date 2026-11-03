@@ -34,10 +34,10 @@ function principalFixture(
   };
 }
 
-function renderTable(principal: PrivateChannelPrincipalDto) {
+function renderTable(principal: PrivateChannelPrincipalDto, canWrite = true) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <MembersTable principals={[principal]} channels={[]} />
+      <MembersTable principals={[principal]} channels={[]} canWrite={canWrite} />
     </I18nProvider>
   );
 }
@@ -62,5 +62,22 @@ describe("Private Channels identities table", () => {
     expect(screen.getByText("EU treasury")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Actions for EU treasury" }));
     expect(screen.getByRole("menuitem", { name: "Disable identity" })).toBeDefined();
+  });
+
+  it("hides every identity control from a read-only member", () => {
+    renderTable(
+      principalFixture({
+        name: "EU treasury",
+        isDefault: false,
+        channels: [{ id: "pch_1", name: "Payouts", isDefault: false }],
+      }),
+      false
+    );
+
+    expect(screen.getByText("EU treasury")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Add identity" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions for EU treasury" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove/ })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Actions" })).toBeNull();
   });
 });

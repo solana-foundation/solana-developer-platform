@@ -5,20 +5,27 @@ import type {
   PaymentTransferStatus,
   PaymentTransferSummary,
 } from "@sdp/types/payments";
+import { ThemeScopeContext } from "@sdp/ui/theme-scope";
 import { address } from "@solana/kit";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { DEFAULT_RAMP_PAIR } from "@/lib/ramps";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import type { OfframpWizard } from "./hooks/use-offramp-wizard";
 import { OfframpRail } from "./offramp-rail";
 import type { RailProps } from "./ramp-action-page";
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+beforeEach(() => {
+  resetDashboardNavigation();
+});
+
 const mocks = vi.hoisted(() => ({ wizard: null as OfframpWizard | null }));
 
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-offramp-wizard", () => ({
   useOfframpWizard: () => {
     if (mocks.wizard === null) {
@@ -192,5 +199,36 @@ describe("OfframpRail final step before the quote lands", () => {
     );
 
     expect(screen.getByRole("button", { name: "Previous" })).toHaveProperty("disabled", false);
+  });
+});
+
+describe("OfframpRail cancel on refresh surfaces", () => {
+  function renderRefreshRail(wizard: OfframpWizard) {
+    mocks.wizard = wizard;
+    return render(
+      <ThemeScopeContext.Provider value="refresh">
+        <OfframpRail {...railProps} />
+      </ThemeScopeContext.Provider>,
+      { wrapper }
+    );
+  }
+
+  it("holds Cancel payout while a cancel is in flight", () => {
+    renderRefreshRail(offrampWizard({ isCanceling: true }));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", true);
+  });
+
+  it("keeps Cancel payout while the provider has not named a deposit address", () => {
+    renderRefreshRail(offrampWizard({ depositTarget: null, hasCryptoDepositInstruction: false }));
+
+    expect(screen.queryByRole("button", { name: /^Send/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
+  });
+
+  it("offers Cancel payout while the sale is open", () => {
+    renderRefreshRail(offrampWizard({}));
+
+    expect(screen.getByRole("button", { name: "Cancel payout" })).toHaveProperty("disabled", false);
   });
 });

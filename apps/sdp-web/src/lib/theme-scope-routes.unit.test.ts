@@ -6,6 +6,11 @@ describe("themeScopeForPath", () => {
     "/dashboard",
     "/dashboard/payments",
     "/dashboard/payments/pay",
+    "/dashboard/payments/deposit",
+    "/dashboard/payments/transactions",
+    "/dashboard/payments/requests/new",
+    "/dashboard/payments/recurring/rp_1",
+    "/dashboard/payments/counterparty/create",
     "/dashboard/payments/counterparty/cp_1",
     "/dashboard/integrations/private-channels/setup",
     "/dashboard/integrations/private-channels/inst_1/setup",
@@ -18,11 +23,19 @@ describe("themeScopeForPath", () => {
     "/dashboard/issuance",
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",
+    "/dashboard/markets",
+    "/dashboard/markets/treasury-solutions",
+    "/dashboard/markets/embedded-yield",
+    "/dashboard/markets/embedded-yield/configure",
+    "/dashboard/markets/embedded-yield/integrate",
+    "/dashboard/markets/earn",
+    "/dashboard/markets/earn/configure",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
 
   it.each([
+    "/dashboard/tokens",
     "/dashboard/wallets/connections",
     "/dashboard/wallets/switch",
     "/dashboard/wallets/fb_wallet/policy",
@@ -33,14 +46,14 @@ describe("themeScopeForPath", () => {
     "/dashboard/integrations/private-channels/overview",
     "/dashboard/integrations/private-channels/inst_1/channels",
     "/dashboard/integrations/private-channels/inst_1/setup/extra",
+    "/dashboard/markets-archive",
+    "/dashboard/markets/treasury-solutions/extra",
+    "/dashboard/markets/embedded-yield/extra",
+    "/dashboard/markets/earn/integrate",
+    "/dashboard/markets/dvp",
+    "/dashboard/markets/dvp/create",
+    "/dashboard/markets/dvp/trade_1",
   ])("keeps %s in the base design", (pathname) => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });
-
-  it.each(["/dashboard/payments", "/dashboard/integrations/private-channels/setup"])(
-    "keeps %s in the base design with NEW DESIGN off",
-    (pathname) => {
-      expect(themeScopeForPath(pathname, false)).toBeNull();
-    }
-  );
 });

@@ -2,23 +2,15 @@ import type { AssetCategory } from "@sdp/types/asset-profiles";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
-import {
-  type AccessControlMode,
-  type CapacityConfig,
-  type CapacityKey,
-  type CapacitySelection,
-  createInitialCapacities,
-  type DraftState,
-  type InvestorReportingConfig,
-  type RedemptionApprovalRule,
-  type RedemptionApprovalsConfig,
-  type ReportingCadence,
-  type ReportingFormat,
-  type TradingHoursConfig,
-  type TradingHoursSchedule,
-  type TransferApprovalRule,
-  type TransferApprovalsConfig,
-  WEEKDAYS,
+import type {
+  CapacityConfig,
+  CapacityKey,
+  InvestorReportingConfig,
+  RedemptionApprovalsConfig,
+  ReportingCadence,
+  ReportingFormat,
+  TradingHoursConfig,
+  TransferApprovalsConfig,
 } from "./issuance-draft-wizard.types";
 
 // Presentation config for the Step-2 "Asset details" form. Sections are chosen
@@ -27,7 +19,7 @@ import {
 // collateral + oracle), and equity / debt / fund each get their own instrument
 // terms.
 
-export type FieldControl = "text" | "textarea" | "number" | "select" | "toggle" | "currency";
+type FieldControl = "text" | "textarea" | "number" | "select" | "toggle" | "currency";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 // DraftState keys editable through a category detail section.
@@ -57,14 +49,14 @@ export type DetailFieldKey =
   | "propertyType"
   | "propertyLocation";
 
-export interface FieldOption {
+interface FieldOption {
   value: string;
   labelKey: MessageKey;
   /** Leading glyph for the option — jurisdictions carry their region's flag. */
   flag?: string | null;
 }
 
-export interface FieldDescriptor {
+interface FieldDescriptor {
   key: DetailFieldKey;
   labelKey: MessageKey;
   control: FieldControl;
@@ -74,7 +66,7 @@ export interface FieldDescriptor {
 }
 
 /** Option label led by its flag where the option has one, e.g. "🇺🇸 United States". */
-export function fieldOptionLabel(option: FieldOption, t: Translate): string {
+function fieldOptionLabel(option: FieldOption, t: Translate): string {
   const label = t(option.labelKey);
   return option.flag ? `${option.flag} ${label}` : label;
 }
@@ -471,18 +463,6 @@ export function impliedBackingType(
   return null;
 }
 
-// The concise "pegged to" descriptor for the summary/review, or null when the
-// asset has no peg. Prefers the explicit peg/target text (e.g. "1.00 USD",
-// "1 oz Gold") and falls back to the selected currency (e.g. "USD").
-export function getPegSummary(
-  draft: Pick<DraftState, "assetCategory" | "assetType" | "pegCurrency" | "pegTarget">
-): string | null {
-  if (!detailSectionsHaveField(draft.assetCategory, draft.assetType, "pegCurrency")) {
-    return null;
-  }
-  return draft.pegTarget.trim() || draft.pegCurrency.trim() || null;
-}
-
 // value -> option per select-backed field, derived from every (category, type)
 // section. Later sections win on key collisions, but the shared option sets
 // (backing, jurisdiction, …) are identical wherever they appear, so a flat merge
@@ -520,79 +500,12 @@ export function detailFieldOptionLabel(
   return option ? fieldOptionLabel(option, t) : undefined;
 }
 
-export const ACCESS_CONTROL_OPTIONS: readonly { value: AccessControlMode; labelKey: MessageKey }[] =
-  [
-    { value: "allowlist", labelKey: "DashboardIssuance.config.allowList" },
-    { value: "blocklist", labelKey: "DashboardIssuance.config.blockList" },
-    { value: "disabled", labelKey: "DashboardIssuance.wallet.none" },
-  ];
-
-export function getDefaultAccessControl(category: AssetCategory): AccessControlMode {
-  switch (category) {
-    case "tokenized_security":
-      return "allowlist";
-    case "stablecoin":
-      return "blocklist";
-    default:
-      return "disabled";
-  }
-}
-
-export const CAPACITY_META: Record<
-  CapacityKey,
-  { labelKey: MessageKey; descriptionKey: MessageKey }
-> = {
-  kyc: {
-    labelKey: "DashboardIssuance.config.kyc",
-    descriptionKey: "DashboardIssuance.config.kycDescription",
-  },
-  restrictTradingHours: {
-    labelKey: "DashboardIssuance.config.restrictTradingHours",
-    descriptionKey: "DashboardIssuance.config.restrictTradingHoursDescription",
-  },
-  issueRetireControls: {
-    labelKey: "DashboardIssuance.config.issueRetireControls",
-    descriptionKey: "DashboardIssuance.config.issueRetireControlsDescription",
-  },
-  redemptionApprovals: {
-    labelKey: "DashboardIssuance.config.redemptionApprovals",
-    descriptionKey: "DashboardIssuance.config.redemptionApprovalsDescription",
-  },
-  investorReporting: {
-    labelKey: "DashboardIssuance.config.investorReporting",
-    descriptionKey: "DashboardIssuance.config.investorReportingDescription",
-  },
-  transferApprovals: {
-    labelKey: "DashboardIssuance.config.transferApprovals",
-    descriptionKey: "DashboardIssuance.config.transferApprovalsDescription",
-  },
-};
-
-// Recommended capacities pre-selected when a sub-asset type is chosen (the
-// sketch's "Recommended capacities are pre-selected based on asset profile").
-export function getRecommendedCapacities(
-  category: AssetCategory,
-  type: string
-): Record<CapacityKey, CapacitySelection> {
-  const caps = createInitialCapacities();
-  caps.kyc.enabled = true;
-  caps.issueRetireControls.enabled = true;
-  if (category === "stablecoin") {
-    caps.restrictTradingHours.enabled = type === "fiat_backed";
-  }
-  if (category === "tokenized_security") {
-    caps.investorReporting.enabled = true;
-    caps.transferApprovals.enabled = true;
-  }
-  return caps;
-}
-
 // --- Off-chain policy configuration -------------------------------------------
 // Enabling a capacity (the checkbox) is the declaration layer; these helpers back
 // the *configuration* layer edited in the per-policy modal on the compliance tab.
 // Only capacities listed here expose a Configure affordance — the rest stay plain
 // declaration toggles. Keep CONFIGURABLE_CAPACITIES in sync with the modal switch.
-export const CONFIGURABLE_CAPACITIES: readonly CapacityKey[] = [
+const CONFIGURABLE_CAPACITIES: readonly CapacityKey[] = [
   "restrictTradingHours",
   "transferApprovals",
   "redemptionApprovals",
@@ -622,49 +535,17 @@ export function defaultCapacityConfig(key: CapacityKey): CapacityConfig | undefi
 const cc = (leaf: string): MessageKey =>
   `DashboardIssuance.config.capacityConfig.${leaf}` as MessageKey;
 
-export const TRADING_HOURS_SCHEDULE_OPTIONS = [
-  { value: "24_7", labelKey: cc("tradingHours.scheduleAlways") },
-  { value: "market_hours", labelKey: cc("tradingHours.scheduleMarket") },
-  { value: "custom", labelKey: cc("tradingHours.scheduleCustom") },
-] as const satisfies readonly { value: TradingHoursSchedule; labelKey: MessageKey }[];
-
-export const TRANSFER_APPROVAL_RULE_OPTIONS = [
-  { value: "all", labelKey: cc("transferApprovals.ruleAll") },
-  { value: "above_amount", labelKey: cc("transferApprovals.ruleAbove") },
-  { value: "new_counterparty", labelKey: cc("transferApprovals.ruleNewCounterparty") },
-] as const satisfies readonly { value: TransferApprovalRule; labelKey: MessageKey }[];
-
-export const REDEMPTION_APPROVAL_RULE_OPTIONS = [
-  { value: "all", labelKey: cc("redemptionApprovals.ruleAll") },
-  { value: "above_amount", labelKey: cc("redemptionApprovals.ruleAbove") },
-] as const satisfies readonly { value: RedemptionApprovalRule; labelKey: MessageKey }[];
-
-export const REPORTING_CADENCE_OPTIONS = [
+const REPORTING_CADENCE_OPTIONS = [
   { value: "monthly", labelKey: cc("investorReporting.cadenceMonthly") },
   { value: "quarterly", labelKey: cc("investorReporting.cadenceQuarterly") },
   { value: "annual", labelKey: cc("investorReporting.cadenceAnnual") },
 ] as const satisfies readonly { value: ReportingCadence; labelKey: MessageKey }[];
 
-export const REPORTING_FORMAT_OPTIONS = [
+const REPORTING_FORMAT_OPTIONS = [
   { value: "pdf", labelKey: cc("investorReporting.formatPdf") },
   { value: "csv", labelKey: cc("investorReporting.formatCsv") },
   { value: "xlsx", labelKey: cc("investorReporting.formatXlsx") },
 ] as const satisfies readonly { value: ReportingFormat; labelKey: MessageKey }[];
-
-export const TIMEZONE_OPTIONS = [
-  { value: "UTC", labelKey: cc("timezones.utc") },
-  { value: "America/New_York", labelKey: cc("timezones.newYork") },
-  { value: "America/Los_Angeles", labelKey: cc("timezones.losAngeles") },
-  { value: "Europe/London", labelKey: cc("timezones.london") },
-  { value: "Europe/Zurich", labelKey: cc("timezones.zurich") },
-  { value: "Asia/Singapore", labelKey: cc("timezones.singapore") },
-  { value: "Asia/Tokyo", labelKey: cc("timezones.tokyo") },
-] as const satisfies readonly { value: string; labelKey: MessageKey }[];
-
-export const WEEKDAY_OPTIONS = WEEKDAYS.map((day) => ({
-  value: day,
-  labelKey: cc(`weekdays.${day}`),
-}));
 
 function summarizeTradingHours(c: TradingHoursConfig, t: Translate): string {
   if (c.schedule === "24_7") {
@@ -734,20 +615,6 @@ export function summarizeCapacityConfig(
     }
     case "investorReporting":
       return summarizeInvestorReporting(config as InvestorReportingConfig, t);
-    default:
-      return null;
-  }
-}
-
-// Human label for an access-control mode (used in summary/review).
-export function accessControlLabel(mode: DraftState["accessControl"], t: Translate): string | null {
-  switch (mode) {
-    case "allowlist":
-      return t("DashboardIssuance.config.allowList");
-    case "blocklist":
-      return t("DashboardIssuance.config.blockList");
-    case "disabled":
-      return t("DashboardIssuance.wallet.none");
     default:
       return null;
   }

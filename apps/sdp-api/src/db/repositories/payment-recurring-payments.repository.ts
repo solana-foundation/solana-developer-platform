@@ -7,7 +7,10 @@ import type {
   PaymentRecurringPaymentStatus,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
+  RecurringPaymentLifecycleClaimableStatus,
+  RecurringPaymentPauseReason,
   RecurringPaymentStatusWithRecoverableCollection,
+  UnpausedRecurringPaymentStatus,
 } from "@sdp/types/payments";
 
 export interface PaymentRecurringPaymentRow {
@@ -35,6 +38,9 @@ export interface PaymentRecurringPaymentRow {
   subscription_authority_address: string | null;
   authorization_signature: string | null;
   status: PaymentRecurringPaymentStatus;
+  paused_reason: RecurringPaymentPauseReason | null;
+  /** The due period's failed collections since it became due or the schedule last resumed. */
+  failed_collection_attempts: number;
   metadata_uri: string | null;
   created_by: string | null;
   created_at: string;
@@ -42,7 +48,7 @@ export interface PaymentRecurringPaymentRow {
 }
 
 /**
- * A recurring payment as an activation, update or lifecycle claim left it: the lease that claim
+ * A recurring payment as an activation, update or cancel claim left it: the lease that claim
  * wrote names the run that holds it, until a takeover writes another.
  */
 export interface ClaimedRecurringPaymentRow extends PaymentRecurringPaymentRow {
@@ -50,10 +56,7 @@ export interface ClaimedRecurringPaymentRow extends PaymentRecurringPaymentRow {
 }
 
 /** What a run holding a claimed recurring payment calls its operation in a takeover conflict. */
-export type RecurringPaymentLeaseOperation =
-  | "activation"
-  | "update"
-  | PaymentRecurringPaymentLifecycleOperation;
+export type RecurringPaymentLeaseOperation = "activation" | "update" | "cancel";
 
 /** The lease a run holds on a claimed recurring payment. */
 export interface RecurringPaymentLease {
@@ -221,9 +224,9 @@ export interface UpdatePaymentRecurringPaymentInput {
   subscriptionPda?: string | null;
   subscriptionAuthorityAddress?: string | null;
   authorizationSignature?: string | null;
-  status?: PaymentRecurringPaymentStatus;
+  status?: UnpausedRecurringPaymentStatus;
   metadataUri?: string | null;
-  expectedStatus?: PaymentRecurringPaymentStatus;
+  expectedStatus?: UnpausedRecurringPaymentStatus;
   expectedUpdatedAt?: string;
   updatedAt: string;
 }
@@ -273,14 +276,54 @@ export type RecurringPaymentActivator =
   | { apiKeyId: string; userId: null }
   | { apiKeyId: null; userId: string };
 
-export interface ClaimPaymentRecurringPaymentLifecycleInput {
+/**
+ * A cancel's claim, a compare-and-set into `canceling`: from `claimedFrom` with `pausedReason`,
+ * the status and pause reason the caller read (running, or paused for that reason), or, when
+ * `claimedFrom` is null, a `canceling` claim last touched at or before `staleBefore`, which this
+ * takes over. Matching the reason too closes a pause, resume and pause again for another reason
+ * between the read and the claim. A lost race matches nothing. The claim clears the pause reason,
+ * which only a paused row carries.
+ */
+export interface ClaimPaymentRecurringPaymentCancelInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
-  operation: PaymentRecurringPaymentLifecycleOperation;
+  claimedFrom: RecurringPaymentLifecycleClaimableStatus | null;
+  pausedReason: RecurringPaymentPauseReason | null;
   updatedAt: string;
-  staleBefore?: string;
-  activatedBy: RecurringPaymentActivator | null;
+  staleBefore: string;
+}
+
+/**
+ * A cancel that definitely failed puts the schedule back from `canceling` to the status it claimed
+ * it from, with the pause reason it had when that was `paused`. It matches only its own claim
+ * (`claimedUpdatedAt`), so a run whose stale claim another run took over never releases the row
+ * that run may already have canceled on chain.
+ */
+export type ReleasePaymentRecurringPaymentCancelClaimInput = {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  claimedUpdatedAt: string;
+  updatedAt: string;
+} & (
+  | { status: "active"; pausedReason: null }
+  | { status: "paused"; pausedReason: RecurringPaymentPauseReason }
+);
+
+/** A collection failure's pause (HOO-2340): `active` to `paused` under compare-and-set. */
+export interface PauseRecurringPaymentInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  reason: RecurringPaymentPauseReason;
+  updatedAt: string;
+}
+
+export interface IncrementFailedCollectionAttemptsInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -300,8 +343,25 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
-  status: PaymentRecurringPaymentStatus;
-  expectedStatus: PaymentRecurringPaymentStatus;
+  status: UnpausedRecurringPaymentStatus;
+  expectedStatus: UnpausedRecurringPaymentStatus;
+  updatedAt: string;
+}
+
+/**
+ * A paused schedule's resume (HOO-2340): `paused` to `active` under compare-and-set, clearing its
+ * pause reason and recording who resumed it as its activator and the due date it collects next.
+ * The set matches only the row the request read (`expectedUpdatedAt`), so a resume that read an
+ * earlier pause never clears a later one written on the same due date.
+ */
+export interface ResumePausedRecurringPaymentInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  expectedUpdatedAt: string;
+  currentCollectionDueAt: string;
+  nextCollectionDueAt: string;
+  activatedBy: RecurringPaymentActivator | null;
   updatedAt: string;
 }
 
@@ -496,7 +556,7 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
 }
 
 /** Looks up the live (not failed) attempt a request's Idempotency-Key claimed. */
-export interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
+interface FindRecurringPaymentAttemptByIdempotencyKeyInput {
   organizationId: string;
   projectId: string;
   idempotencyKey: string;
@@ -634,15 +694,35 @@ export interface PaymentRecurringPaymentsRepository {
     input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   /** Claims under a new lease, fresh or taking over a stale claim. */
-  claimRecurringPaymentLifecycle(
-    input: ClaimPaymentRecurringPaymentLifecycleInput
+  claimRecurringPaymentCancel(
+    input: ClaimPaymentRecurringPaymentCancelInput
   ): Promise<ClaimedRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer `canceling`. */
+  releaseRecurringPaymentCancelClaim(
+    input: ReleasePaymentRecurringPaymentCancelClaimInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer `active`. */
+  pauseRecurringPayment(
+    input: PauseRecurringPaymentInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  /**
+   * Counts one more failed collection against an `active` schedule and holds its row lock until
+   * the transaction ends, so the pause that follows decides on this count.
+   * Null when the schedule is no longer `active`.
+   */
+  incrementFailedCollectionAttempts(
+    input: IncrementFailedCollectionAttemptsInput
+  ): Promise<number | null>;
   /** Claims under a new lease, fresh or taking over a stale claim. */
   claimRecurringPaymentUpdate(
     input: ClaimPaymentRecurringPaymentUpdateInput
   ): Promise<ClaimedRecurringPaymentRow | null>;
   updateRecurringPaymentLifecycle(
     input: UpdatePaymentRecurringPaymentLifecycleInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer paused at that due date. */
+  resumePausedRecurringPayment(
+    input: ResumePausedRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   createActivationAttempt(
     input: CreatePaymentRecurringPaymentActivationAttemptInput

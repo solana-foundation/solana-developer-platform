@@ -82,8 +82,6 @@ services:
       SPC_CREDENTIAL_ENCRYPTION_KEY: ${SPC_CREDENTIAL_ENCRYPTION_KEY:-}
 
       # Solana
-      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
-      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       # createClusterRpc() reads only the per-cluster pool; mainnet stays unset until named.
       SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: ${SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL:-https://api.devnet.solana.com}
       SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: ${SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL:-}
@@ -112,7 +110,6 @@ services:
       args:
         NEXT_PUBLIC_SDP_API_BASE_URL: ${NEXT_PUBLIC_SDP_API_BASE_URL:-http://localhost:8787}
         NEXT_PUBLIC_SDP_DOCS_URL: ${NEXT_PUBLIC_SDP_DOCS_URL:-http://localhost:3001}
-        NEXT_PUBLIC_SOLANA_NETWORK: ${NEXT_PUBLIC_SOLANA_NETWORK:-devnet}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     restart: unless-stopped
     ports:

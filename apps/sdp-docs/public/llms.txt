@@ -5,7 +5,7 @@
 ## Canonical URLs
 - Docs: https://platform.solana.com/docs
 - API: https://api.solana.com
-- Interactive API docs: https://api.solana.com/docs
+- API reference: https://platform.solana.com/docs/reference/api
 - OpenAPI: https://api.solana.com/openapi.json
 - AI guide: https://platform.solana.com/docs/reference/docs-for-ai
 
@@ -18,29 +18,42 @@
 - Compliance screening
 - Asset profiles and public token metadata
 
+## Public endpoint families
+- Health: https://api.solana.com/health
+- Wallets: https://api.solana.com/v1/wallets
+- Projects: https://api.solana.com/v1/projects
+- Issuance: https://api.solana.com/v1/issuance
+- Payments: https://api.solana.com/v1/payments
+- Compliance: https://api.solana.com/v1/compliance
+- Counterparties: https://api.solana.com/v1/counterparties
+- Asset Profiles: https://api.solana.com/v1/issuance
+
 ## Start here
-- [What is SDP?](https://platform.solana.com/docs/introduction): One API in front of interchangeable providers for building on Solana.
-- [Set Up Your Organization & Projects](https://platform.solana.com/docs/guides/setup-organization): Set up your SDP organization and see how projects scope work within it.
-- [Set Up Wallets](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
+- [What is SDP?](https://platform.solana.com/docs/introduction): One project-scoped API for building on Solana with your chosen providers.
+- [Set up your workspace](https://platform.solana.com/docs/guides/setup-organization): Create an organization and a sandbox project.
+- [Create a wallet](https://platform.solana.com/docs/guides/setup-wallets): Initialize a custody provider and create wallets for signing transactions.
+- [Go to mainnet](https://platform.solana.com/docs/guides/go-to-mainnet): Request mainnet access, connect your own custody account, and go live.
 - [Manage API Keys](https://platform.solana.com/docs/developing-with-sdp/manage-api-keys): Create, rotate, and revoke API keys with explicit grants by module, a signing wallet scope, and zero-downtime rotation.
 - [Tokenize an Asset](https://platform.solana.com/docs/tokens/tokenize-an-asset): Map a real-world asset to the right SDP token model, authorities, and implementation flow.
 - [Create a Token](https://platform.solana.com/docs/tokens/create-a-token): Define a new token using a template or custom configuration.
 - [Deploy a Token](https://platform.solana.com/docs/tokens/deploy-a-token): Deploy a created token to the Solana blockchain.
 - [Mint and Burn](https://platform.solana.com/docs/tokens/mint-and-burn): Increase or decrease token supply by minting to an address or burning from an account you control.
-- [Overview](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, sending, and accepting payments.
+- [Payments](https://platform.solana.com/docs/payments): Build payments on Solana with SDP — concepts, sending, and accepting payments.
 - [Basic payment](https://platform.solana.com/docs/payments/send-basic-payment): Send a single token transfer with SDP.
 - [Tokenization Templates](https://platform.solana.com/docs/reference/issuance-token-types): How to choose a token template, and the default controls each one applies.
 - [End-to-end Payment Flow](https://platform.solana.com/docs/tutorials/end-to-end-payment-flow): A high-level payment flow from quote to settlement.
 - [Infrastructure Provider Onboarding](https://platform.solana.com/docs/reference/provider-onboarding): Add an infrastructure provider integration to SDP through the self-service contribution process.
-- [Documentation for AI](https://platform.solana.com/docs/reference/docs-for-ai): Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+- [AI resources](https://platform.solana.com/docs/reference/docs-for-ai): Machine-readable docs and setup guidance for coding agents.
+- [API conventions](https://platform.solana.com/docs/reference/conventions): What every SDP API call has in common, from how it authenticates to how it fails.
 - [Postman Collection](https://platform.solana.com/docs/reference/postman-collection): Download the public SDP API Postman collection generated from the OpenAPI contract.
-- [API Reference](https://platform.solana.com/docs/reference/api): Endpoint index from the repository OpenAPI spec.
+- [API Reference](https://platform.solana.com/docs/reference/api): Choose an API family to explore its endpoints.
 - [Health](https://platform.solana.com/docs/reference/api/health): Service health and readiness endpoints.
 - [Wallets](https://platform.solana.com/docs/reference/api/wallets): Wallet signing provider configuration and wallet management.
 - [Projects](https://platform.solana.com/docs/reference/api/projects): Projects and their provider availability. Project members and keys are managed in the dashboard.
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfers, and payment flows.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
+- [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide
@@ -49,8 +62,9 @@
 ## Machine-readable resources
 - [llms.txt](https://platform.solana.com/docs/ai/llms.txt)
 - [llms-full.txt](https://platform.solana.com/docs/ai/llms-full.txt)
+- [SKILL.md](https://platform.solana.com/SKILL.md): Agent skill with the rules for building on SDP.
+- Any docs page as Markdown: add `.md` to its URL.
 - [OpenAPI](https://api.solana.com/openapi.json)
-- [Swagger UI](https://api.solana.com/docs)
 
 ## Scope
 - Public AI artifacts intentionally exclude hidden or internal-only API families.

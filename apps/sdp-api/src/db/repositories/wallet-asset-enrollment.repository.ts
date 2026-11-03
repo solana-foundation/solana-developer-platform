@@ -1,5 +1,4 @@
 import type { ReviewMode, WalletEnrollmentStatus } from "@sdp/types/kyc";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generateWalletAssetEnrollmentId(): string {
   return `wallet_asset_enrollment_${crypto.randomUUID()}`;
@@ -32,10 +31,6 @@ export interface UpsertWalletAssetEnrollmentInput {
 export interface EnrolledWalletRow extends WalletAssetEnrollmentRow {
   wallet_address: string;
   kyc_status: string;
-}
-
-export interface WalletAssetEnrollmentsRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface WalletAssetEnrollmentsRepository {

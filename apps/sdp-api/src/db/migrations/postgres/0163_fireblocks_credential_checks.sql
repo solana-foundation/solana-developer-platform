@@ -1,0 +1,2 @@
+ALTER TABLE provider_credentials VALIDATE CONSTRAINT provider_credentials_creating_location_check;
+ALTER TABLE provider_credentials VALIDATE CONSTRAINT provider_credentials_scan_owner_check;

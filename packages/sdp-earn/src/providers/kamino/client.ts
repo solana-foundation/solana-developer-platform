@@ -3,6 +3,7 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { providerUnavailable } from "#/errors";
 import { providerFetchJson } from "#/fetch";
 import { StubEarnClient } from "#/providers/stub";
+import { resolveCatalogueRpcUrl } from "#/solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnLiveMetricsProvider,
@@ -444,9 +445,9 @@ export function distillKaminoVault(
  * Two facts shape everything else here (measured 2026-08-14):
  *
  * - **No API credential.** The REST shelf is public — there is no
- *   `KAMINO_API_KEY` anywhere. The one `ctx.env` read is `SOLANA_RPC_URL`, on
- *   the devnet path, and a blank one fails closed with
- *   PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
+ *   `KAMINO_API_KEY` anywhere. The devnet path reads the endpoint the caller
+ *   supplies for devnet (`ctx.catalogueRpcUrl`), and a missing one fails closed
+ *   with PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
  * - **Two clusters, two SOURCES.** `ctx.environment` selects between them:
  *   production reads the mainnet REST shelf (`hostCluster: "mainnet-beta"`),
  *   every other environment reads the devnet kvault program on-chain
@@ -607,8 +608,7 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    *   non-production (see `getStrategyMetrics`).
    */
   async _listDevnetStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
-    const rpcUrl = ctx.env.SOLANA_RPC_URL ?? "";
-    const vaults = await listKaminoDevnetVaults(rpcUrl);
+    const vaults = await listKaminoDevnetVaults(resolveCatalogueRpcUrl(ctx, "devnet"));
 
     return (
       vaults

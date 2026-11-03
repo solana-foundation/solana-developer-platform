@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FIELDS, SECTIONS } from "./fields";
+import { FIELDS, isFieldVisible, SECTIONS } from "./fields";
 import { defaultValues } from "./generate";
 import type { SectionId } from "./types";
 
@@ -40,4 +40,22 @@ test("multiselect default values are a subset of options", () => {
       assert.ok(allowed.has(v), `${f.key} default ${v} not in options`);
     }
   }
+});
+
+test("Kora mainnet fields show only once a mainnet RPC endpoint is set", () => {
+  const koraMainnetFields = FIELDS.filter((f) => f.key.startsWith("KORA_MAINNET_"));
+  const kora = { ...defaultValues(), FEE_PAYMENT_PROVIDER: "kora" };
+  const withMainnetRpc = {
+    ...kora,
+    SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://mainnet.rpc.example.test",
+  };
+
+  assert.deepEqual(
+    koraMainnetFields.map((f) => isFieldVisible(f, kora)),
+    [false, false]
+  );
+  assert.deepEqual(
+    koraMainnetFields.map((f) => isFieldVisible(f, withMainnetRpc)),
+    [true, true]
+  );
 });

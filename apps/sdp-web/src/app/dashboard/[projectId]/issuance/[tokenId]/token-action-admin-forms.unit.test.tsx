@@ -119,7 +119,7 @@ async function renderControlList(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={<div>Loading workspace</div>}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: true,
           compliance: false,
@@ -132,7 +132,6 @@ async function renderControlList(
           payments: false,
           privateChannels: false,
           releaseChannel: "experimental",
-          newDesign: true,
           ramps: false,
         }}
         serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}

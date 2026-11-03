@@ -9,13 +9,15 @@ import type {
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
+import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -26,8 +28,10 @@ import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotenc
 import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
+import { EarnErrorNote } from "./earn-error-note";
 import { formatProviderAmount, formatTokenValue, shortenMarketAddress } from "./earn-format";
 import { TransactionLink } from "./earn-market-presentation";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import {
   cancelEarnVaultWithdrawalRequest,
   createEarnVaultWithdrawalRequest,
@@ -46,6 +50,7 @@ import {
   isEarnVaultParRedemptionCancelable,
   isEarnVaultParRedemptionTerminal,
 } from "./earn-vault-par-redemption-presentation";
+import { earnStatusTextTone } from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
@@ -361,33 +366,28 @@ function ParRedemptionResultDetails({
   const t = useTranslations();
   const locale = useLocale();
   return (
-    <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.parRedemption.quotedAmount")}</dt>
-        <dd className="text-right tabular-nums text-primary">
+    <DetailList className="mt-5" variant="summary">
+      <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.quotedAmount")}>
+        <span className="tabular-nums">
           {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
-        </dd>
-      </div>
+        </span>
+      </DetailRow>
       {request.intermediateAmount && request.intermediateMint ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
-          <dd className="text-right tabular-nums text-primary">
+        <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.intermediateAmount")}>
+          <span className="tabular-nums">
             {formatTokenValue(request.intermediateAmount, request.intermediateMint, locale)}
-          </dd>
-        </div>
+          </span>
+        </DetailRow>
       ) : null}
       {request.creationSignature ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-          <dd className="text-right">
-            <TransactionLink
-              cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-              signature={request.creationSignature}
-            />
-          </dd>
-        </div>
+        <DetailRow label={t("DashboardEarn.vaultWithdraw.transaction")}>
+          <TransactionLink
+            cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+            signature={request.creationSignature}
+          />
+        </DetailRow>
       ) : null}
-    </dl>
+    </DetailList>
   );
 }
 
@@ -419,36 +419,28 @@ function ParRedemptionResult({
   return (
     <>
       {terminal ? <EarnOutcomeMark tone={presentation.tone} /> : null}
-      <div className="flex items-center gap-2 pr-8">
-        <h2 className="text-base font-medium text-primary">
+      <div className="flex items-center gap-3 pr-8">
+        <h2 className="text-subheading font-medium text-primary">
           {t("DashboardEarn.parRedemption.resultTitle")}
         </h2>
-        <Badge variant={presentation.variant}>{t(presentation.labelKey)}</Badge>
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(presentation.variant)}>
+          {t(presentation.labelKey)}
+        </StatusText>
       </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{t(presentation.bodyKey)}</p>
+      <p className="mt-2 text-body text-secondary">{t(presentation.bodyKey)}</p>
       <ParRedemptionResultDetails environment={environment} request={request} />
       {request.status === "failed" && request.failureReason ? (
-        <div
-          className="mt-4 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
+        <Callout className="mt-4 break-words" live variant="danger">
           {request.failureReason}
-        </div>
+        </Callout>
       ) : null}
       {!presentation.terminal ? (
-        <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
+        <div className="mt-4 grid gap-2 text-meta text-tertiary">
           <p>{t(PAR_SOURCE_COPY[source].operatorNotice)}</p>
           <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
         </div>
       ) : null}
-      {cancelError ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {cancelError}
-        </p>
-      ) : null}
+      {cancelError ? <EarnErrorNote message={cancelError} /> : null}
       <div className="mt-5 flex justify-end gap-2">
         {cancelable ? (
           <Button
@@ -503,9 +495,14 @@ function ParRedemptionDetails({
   const amountInvalid = amount.trim() !== "" && validation.kind !== "valid";
   const copy = PAR_SOURCE_COPY[source];
   const minimum = formatProviderAmount(parMinimum(terms, source), locale, t(copy.unit));
+  // A form, so Enter in the amount continues to the review as the button does.
+  const continueFromForm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (detailsValid) onContinue();
+  };
   return (
-    <>
-      <p className="mt-2 text-sm leading-5 text-secondary">{t(copy.detailsBody)}</p>
+    <form noValidate onSubmit={continueFromForm}>
+      <p className="mt-2 text-body text-secondary">{t(copy.detailsBody)}</p>
       <div className="mt-5 grid gap-2">
         <Label htmlFor="earn-par-redemption-amount">
           {t("DashboardEarn.vaultWithdraw.amountLabel")}
@@ -527,7 +524,7 @@ function ParRedemptionDetails({
           placeholder="0.00"
           value={amount}
         />
-        <p className="text-xs text-tertiary">
+        <p className="text-meta text-tertiary">
           {availableAmount
             ? t("DashboardEarn.vaultWithdraw.amountAvailable", {
                 amount: formatTokenValue(availableAmount, tokenMint, locale),
@@ -535,34 +532,34 @@ function ParRedemptionDetails({
             : t("DashboardEarn.vaultWithdraw.amountUnavailable")}
         </p>
         {amountInvalid ? (
-          <p className="text-xs text-error" role="alert">
+          <p className="text-meta text-error" role="alert">
             {t("DashboardEarn.vaultWithdraw.amountInvalid")}
           </p>
         ) : belowMinimum ? (
-          <p className="text-xs text-error" role="alert">
+          <p className="text-meta text-error" role="alert">
             {t("DashboardEarn.parRedemption.minimumShares", { amount: minimum })}
           </p>
         ) : overAvailableAmount ? (
-          <p className="text-xs text-warning" role="status">
+          <p className="text-meta text-warning" role="status">
             {t("DashboardEarn.vaultWithdraw.overAmount")}
           </p>
         ) : null}
         {belowBatchMinimum ? (
-          <p className="text-xs leading-5 text-warning" role="status">
+          <p className="text-meta text-warning" role="status">
             {t("DashboardEarn.parRedemption.belowBatchMinimum")}
           </p>
         ) : null}
       </div>
-      <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
+      <div className="mt-4 grid gap-2 text-meta text-tertiary">
         <p>{t(copy.operatorNotice)}</p>
         <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
       </div>
       <div className="mt-6">
-        <Button className="!w-full" disabled={!detailsValid} onClick={onContinue}>
+        <Button className="!w-full" disabled={!detailsValid} type="submit">
           {t("DashboardEarn.deposit.continueAction")}
         </Button>
       </div>
-    </>
+    </form>
   );
 }
 
@@ -590,60 +587,47 @@ function ParRedemptionReview({
     compareUnsignedDecimals(preview.assets, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1;
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t(PAR_SOURCE_COPY[source].reviewBody)}</p>
+      <p className="mt-1 text-body text-secondary">{t(PAR_SOURCE_COPY[source].reviewBody)}</p>
       {loading ? (
-        <div className="mt-5 flex items-center gap-2 text-sm text-secondary" role="status">
+        <div className="mt-5 flex items-center gap-2 text-body text-secondary" role="status">
           <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
           {t("DashboardEarn.parRedemption.previewLoading")}
         </div>
       ) : preview ? (
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.parRedemption.expectedAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
+        <DetailList className="mt-5" variant="summary">
+          <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.expectedAmount")}>
+            <span className="tabular-nums">
               {formatTokenValue(preview.assets, preview.assetMint, locale)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.parRedemption.intermediateAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
+            </span>
+          </DetailRow>
+          <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.intermediateAmount")}>
+            <span className="tabular-nums">
               {formatTokenValue(preview.intermediateAmount, preview.intermediateMint, locale)}
-            </dd>
-          </div>
-        </dl>
+            </span>
+          </DetailRow>
+        </DetailList>
       ) : null}
       {preview && preview.blockingIssues.length > 0 ? (
-        <div
-          className="mt-4 rounded-lg border border-warning-border bg-warning-bg p-3 text-sm text-warning"
-          role="alert"
+        <Callout
+          className="mt-4"
+          live
+          title={t("DashboardEarn.parRedemption.previewBlocked")}
+          variant="warning"
         >
-          <p>{t("DashboardEarn.parRedemption.previewBlocked")}</p>
-          <ul className="mt-1 list-disc space-y-1 pl-5">
+          <ul className="list-disc space-y-1 pl-5">
             {preview.blockingIssues.map((issue) => (
               <li key={`${issue.code}:${issue.message}`}>{issue.message}</li>
             ))}
           </ul>
-        </div>
+        </Callout>
       ) : null}
       {belowBatchMinimum ? (
-        <p
-          className="mt-4 rounded-lg border border-warning-border bg-warning-bg p-3 text-sm text-warning"
-          role="alert"
-        >
+        <Callout className="mt-4" live variant="warning">
           {t("DashboardEarn.parRedemption.belowBatchMinimum")}
-        </p>
+        </Callout>
       ) : null}
-      <p className="mt-4 text-xs leading-5 text-tertiary">
-        {t(PAR_SOURCE_COPY[source].reviewNotice)}
-      </p>
-      {error ? (
-        <p
-          className="mt-3 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
+      <p className="mt-4 text-meta text-tertiary">{t(PAR_SOURCE_COPY[source].reviewNotice)}</p>
+      {error ? <EarnErrorNote message={error} /> : null}
       <div className="mt-6 flex gap-2">
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
           {t("DashboardEarn.deposit.back")}
@@ -709,7 +693,7 @@ function ParRedemptionForm({
   return (
     <>
       <h2
-        className="pr-8 text-lg font-medium leading-6 text-primary"
+        className="pr-8 text-subheading font-medium text-primary"
         data-modal-focus-target
         tabIndex={-1}
       >
@@ -779,7 +763,13 @@ export function EarnVaultParRedemptionModal({
   const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
+    <Modal
+      isOpen
+      ariaLabel={modalLabel}
+      closeDisabled={submitting}
+      onClose={onClose}
+      {...EARN_TRANSACTION_MODAL_FRAME}
+    >
       <div className="p-6">
         <EarnFlowStepper
           currentStep={parRedemptionStepIndex(outcome, step)}

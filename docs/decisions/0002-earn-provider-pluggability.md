@@ -78,13 +78,13 @@ Independent switches, all runtime-safe:
 - **Surfacing (2026-08-14 addendum):** `EARN_PROVIDER_SURFACING` declares which
   registered providers SDP currently OFFERS. An un-surfaced provider keeps its
   code, credentials, crons and catalogue rows, but its strategies vanish from
-  every public read and `POST /programs` refuses it. This is the *product*
+  every public read and `POST /programs` refuses it. This is the _product_
   switch — the four above are deployment and customer switches — and it is the
   only one that no per-organization override can lift.
 
 ### Invariants that make disabling safe
 
-- **Money out always beats money off.** Deposits require an *active* strategy
+- **Money out always beats money off.** Deposits require an _active_ strategy
   and the full entitled+configured provider gate. Withdrawals ignore strategy
   status (paused/deprecated stop money in, never money out) and only require
   provider credentials (`assertEarnProviderConfigured`) — a commercial
@@ -99,7 +99,7 @@ Independent switches, all runtime-safe:
   remain readable regardless of provider entitlement, and the withdrawal
   ledger list carries no provider gate at all (2026-08-11 addendum), so
   dashboards and partner integrations keep working while a provider is off.
-  Surfacing is the one exception, and only for the *catalogue* read: an
+  Surfacing is the one exception, and only for the _catalogue_ read: an
   un-surfaced provider's strategies are hidden, while every route that reads or
   exits an existing program stays open (2026-08-14 addendum). Hiding a shelf
   nobody may buy from is presentation; hiding a position someone holds would be
@@ -148,7 +148,7 @@ stands, these tighten how it is enforced:
 
 Ground is the first provider to move past the stub: a live `listStrategies`
 plus a **portfolio-wallet capability** that extends — never widens — the base
-contract. The pluggability decision holds; this records how an *optional*
+contract. The pluggability decision holds; this records how an _optional_
 capability slots in without burdening providers that lack it.
 
 - **Optional capability, all-or-nothing guard.** `EarnPortfolioWalletProvider`
@@ -156,13 +156,13 @@ capability slots in without burdening providers that lack it.
   portfolio surface (wallet create/get, strategy update, deposits page,
   withdrawal preview/create/status, address-book entry). Callers never probe
   individual methods: `supportsPortfolioWallets`
-  (`@sdp/earn/capabilities`) is a type guard that requires the *entire*
+  (`@sdp/earn/capabilities`) is a type guard that requires the _entire_
   method set, so a half-implemented capability is invisible rather than a
   runtime landmine. Providers that don't opt in keep the exact base contract
   — zero added lift, per the original decision.
-- **Shared-wallet-per-org model.** *(Superseded — see the 2026-08-11
+- **Shared-wallet-per-org model.** _(Superseded — see the 2026-08-11
   many-programs addendum: an organization now holds N programs, and the
-  uniqueness moved onto the provider wallet itself.)* One provider wallet per
+  uniqueness moved onto the provider wallet itself.)_ One provider wallet per
   `(organization, environment, provider)` — DB-enforced by the unique
   constraint in migration `0049_earn_provider_wallets.sql` and read/written
   through `EarnRepository.getProviderWallet`/`insertProviderWallet`.
@@ -180,7 +180,7 @@ capability slots in without burdening providers that lack it.
   surfacing its Solana deposit address and tracking deposits via the
   provider's deposits API — no SDP-side transaction building or signing.
 - **Exit safety preserved.** Portfolio withdrawals gate on
-  *configured*, not *available*: a missing API key fails closed with
+  _configured_, not _available_: a missing API key fails closed with
   `PROVIDER_NOT_CONFIGURED` before any request, while a commercial
   disablement (entitlement off) still lets money out. `buy_only` yield
   sources are excluded from the catalogue outright — listing one would let
@@ -232,7 +232,6 @@ prunes the surfaces the answer makes false. The governing principle, applied
 per surface:
 
 > **SDP ledgers what SDP initiates; SDP reads live what the provider observes.**
-
 - **Positions and balances are live-only, permanently.** Every balance surface
   in the platform reads live (custody, payments, private channels — which
   states it as doctrine); Earn now matches. `earn_positions` is dropped
@@ -329,7 +328,7 @@ multiplicity exists is PRO-1670's design decision.
 **Multiplicity is not cut.** Concurrent exposure to several strategies
 arrives as separate single-vault programs — one per strategy (PRO-1670, which
 relaxes the 0049 one-per-org constraint). This addendum caps allocations
-*within* a program; multiplicity lives between programs.
+_within_ a program; multiplicity lives between programs.
 
 ## Addendum — 2026-08-11 Many programs per organization (PRO-1670)
 
@@ -466,7 +465,7 @@ second shape that the pluggability constraint has to absorb without a rewrite.
 ## Addendum (2026-08-14) — surfacing: which registered providers SDP actually offers
 
 The switches above (credentials, org entitlement, strategy status, feature flag)
-answer *deployment* and *customer* questions. None answers the **product**
+answer _deployment_ and _customer_ questions. None answers the **product**
 question — "is SDP selling this provider right now?" — and the first time it was
 asked, the honest options were all bad: delete a working integration, remove its
 credentials and let a `PROVIDER_NOT_CONFIGURED` stand in for a business
@@ -484,7 +483,7 @@ is "what this deployment can talk to", the former is "what we offer today".
   (`assertProviderAvailable`, `provider_not_offered`); the dashboard derives
   `EARN_PROGRAM_CREATION_ENABLED` and drops every create affordance. Hiding at
   the API rather than in the browser is deliberate — the API is the surface the
-  dashboard *and* every partner integration read, and a client-side copy of a
+  dashboard _and_ every partner integration read, and a client-side copy of a
   visibility rule is the second thing that drifts toward permissive.
 - **Exhaustive on purpose.** A provider added to `EARN_PROVIDERS` without an
   entry is a compile error, so "we registered a provider and never decided
@@ -495,7 +494,7 @@ is "what this deployment can talk to", the former is "what we offer today".
   surfacing entirely. This is the money-out-beats-money-off invariant applied to
   a new switch: an organization holding a position taken while a provider was
   offered keeps every route that reads or exits it, and un-surfacing can never
-  trap funds. `POST /programs` is the only route that opens a *new* commitment,
+  trap funds. `POST /programs` is the only route that opens a _new_ commitment,
   so it is the only one that refuses.
 - **Its 403 is not the entitlement 403.** `assertProviderAvailable` answers an
   organization-scoped question and tells the caller to request manual
@@ -541,7 +540,7 @@ Measured 2026-08-14, on-chain:
 
 - Kamino runs a **separate devnet kvault program**,
   `devkRngFnfp4gBc5a3LsadgbQKdPo8MSZ4prFiNSVmY` — not mainnet's `KvauGM…`, which
-  is *also* deployed to devnet but owns **zero** accounts there. Pointing at the
+  is _also_ deployed to devnet but owns **zero** accounts there. Pointing at the
   wrong one returns a confident empty shelf rather than an error.
 - **21 K-Vaults exist on devnet**, all with shares issued. Nine are denominated
   in the official devnet USDC mint (`4zMMC…`, what the Circle faucet dispenses),
@@ -571,9 +570,9 @@ about cluster deployment. Check the chain for a per-cluster program id.
   production.** Provider-neutral, at the single writer of `earn_strategies`. It
   does not trust a client to get this right, and it is independent of the
   delist pass — which would otherwise leave stale mainnet rows behind whenever a
-  devnet read failed. *(Superseded 2026-08-26, PRO-1742 addendum below: mainnet
+  devnet read failed. _(Superseded 2026-08-26, PRO-1742 addendum below: mainnet
   rows now DO enter non-production, but only through the sync's browse-only
-  mirror lane; the refusal survives as the own-lane foreign-cluster drop.)*
+  mirror lane; the refusal survives as the own-lane foreign-cluster drop.)_
 - **No metrics outside production.** The bulk metrics endpoint is mainnet's, so
   `listStrategyMetrics` returns `[]` elsewhere and sandbox rows render no rate.
   A devnet APY would mean blending devnet Klend reserve rates — SDK-sized work
@@ -583,7 +582,7 @@ about cluster deployment. Check the chain for a per-cluster program id.
 ### What did NOT change, deliberately
 
 `hostCluster`, `fundable`, and `isClusterFundableInEnvironment` all stay. They
-stop *firing* for Kamino — its rows now match their environment's cluster in
+stop _firing_ for Kamino — its rows now match their environment's cluster in
 both — but they still guard production Kamino, rows already stored under
 the old behaviour, and the next genuinely single-cluster provider. The
 simplification here is to the mental model ("catalogued but not fundable" was a
@@ -613,7 +612,7 @@ Two earlier plans of record, both explicitly:
 
 - **This addendum's own 2026-08-11 note** that 0048's `earn_movements` was
   "dropped rather than retrofitted", with a movements ledger deferred to the
-  execution era. The execution era arrived (0059), and it arrived as a *second*
+  execution era. The execution era arrived (0059), and it arrived as a _second_
   ledger. The name is reclaimed; the 0048 SHAPE is not — that table was
   position-scoped with base-unit amounts, a nullable provider, no environment, no
   fingerprint, and a foreign key into the delist-pruned catalogue.
@@ -937,13 +936,13 @@ serve orphaned "production catalogue" rows forever after production stopped
 vouching for them. The repository enforces that an authorized-empty delist is
 cluster-scoped, never environment-wide.
 
-PRO-1943 changed the storage half of delisting without changing that active-set
-contract. An unlisted active row is now marked `deprecated` with a
+Migration 0099 changed the storage half of delisting without changing that
+active-set contract. An unlisted active row is now marked `deprecated` with a
 `catalogue_delisted_at` tombstone instead of being deleted. It remains absent
-from catalogue lists and deposit admission, but preserves the stable provider,
-vault, and mint identity required to build an anonymous exit. A later provider
-relist clears only this sync-owned marker and reactivates the same id; an
-operator pause or deprecation has no marker and remains sticky.
+from catalogue lists and deposit admission, while its stable id keeps resolving
+to the provider, vault, and mint identity. A later provider relist clears only
+this sync-owned marker and reactivates the same id; an operator pause or
+deprecation has no marker and remains sticky.
 
 **Accepted cap: the mirror is faithful only for cluster-distinct references.**
 The upsert key stays (provider, provider_reference, environment) with no
@@ -994,11 +993,7 @@ throughout.
 
 ## Addendum — 2026-08-26 External wallets: caller-signed vault movements (PRO-1722)
 
-This section describes the authenticated build-and-submit contract. The
-PRO-1943 addendum below adds an anonymous unsigned-build tier whose caller
-broadcasts directly and whose build is not persisted.
-
-The B2B2C money path ships. An *external wallet* is a **non-custodial wallet**
+The B2B2C money path ships. An _external wallet_ is a **non-custodial wallet**
 the partner's platform connects — SDP holds no key for it, and its owner is
 not an SDP tenant. Every prior vault money path resolved an exact custody
 wallet and signed from it. The contract decided here: **SDP builds and returns
@@ -1209,14 +1204,14 @@ claim there when the report can attribute it, and the claim carries
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26
-addendum for authenticated callers. Both authenticated external-wallet BUILD
-routes now take an optional `feePayer`: a
+addendum. Both external-wallet BUILD routes now take an optional `feePayer`: a
 wallet the API caller (the partner) controls, which becomes the transaction's
 fee payer and, through the provider's `rentPayer`, funds the share-ATA rent an
 account creation needs. The compiled transaction then requires the partner's
 signature alongside the owner's; the partner co-signs OUTSIDE SDP before the
 submit. This is deliberately not PRO-1744 (Kora, SDP paying): no paymaster, no
-budget, no SDP co-signature. The partner funds and signs with its own wallet,
+budget, no SDP co-signature, and the build's `sponsored` field (SDP paid) stays
+`false`. The partner funds and signs with its own wallet,
 which is why no new policy gate exists — the same authorization-by-signature
 rule the surface was built on, now with two signatures.
 
@@ -1260,79 +1255,13 @@ swap-funded builds fall to the split flow slightly more often; and the
 blockhash window now has to fit the partner's co-signature too, which is why
 the docs tell partners to co-sign programmatically.
 
-## Addendum: 2026-09-14 Keyless catalogue and unsigned builds (PRO-1943)
-
-The hosted Earn API now has two access tiers over one set of route handlers.
-A valid SDP credential enriches a request with its existing organization,
-project, permission, entitlement, and environment context. With no credential,
-only this deliberate keyless subset is reachable:
-
-- `GET /v1/earn/strategies`
-- `GET /v1/earn/strategies/:strategyId`
-- `POST /v1/earn/vault-deposit-previews`
-- `POST /v1/earn/external-wallet/deposit-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-previews`
-- `POST /v1/earn/external-wallet/withdrawal-transactions`
-
-Submits, movements, positions, earnings, programs, custody vault operations,
-and the aggregate movement feed remain authenticated. No second anonymous
-route tree exists; duplicating endpoint definitions would let the two contracts
-drift.
-
-Anonymous calls have no tenant identity. They use the operator-controlled
-`SDP_ENVIRONMENT`, may not supply a different fee payer, and do not evaluate an
-organization entitlement. Most importantly, they never persist an external
-wallet build, split-swap advisory, movement, or position. The owner pays, signs,
-broadcasts, and tracks the returned transaction. `sponsored` means SDP paid and
-is therefore `false`; a caller-provided fee payer on a keyed build is not SDP
-sponsorship.
-
-Withdrawal lookup follows the identity boundary. A keyed request names a
-tenant-scoped `positionId`. A keyless request names `{strategyId,
-ownerAddress, shares}` and never probes the position table. Both paths enforce
-the provider's withdrawal capability and live quote floor without turning a
-money-in entitlement into a money-out gate.
-
-Abuse controls are also tiered. Public catalogue reads receive a generous
-per-IP limit and cache headers. Anonymous previews and builds receive a tighter
-per-IP limit plus a separate RPC budget that fails closed. Authenticated
-metering continues to use the project API key. Structured request and rejection
-logs carry the normalized route and access tier so operations can derive
-traffic and saturation counters without route-specific code.
-
-The OpenAPI document, generated API reference, Embedded Yield guide, and AI
-discovery files are one public contract. Changing an operation's OpenAPI
-`security` declaration still requires the named security review mandated by
-PRO-1872 before those generated artifacts are published.
-
 ## Addendum: 2026-09-22 Queued withdrawals enter the Embedded Yield contract
 
 PR #1987 completed the PRO-1872 / EARN-027 security gate at exact head
 `b2d313803`, with named approval from `cutbow7`, and published the
 external-wallet queued-withdrawal lifecycle. The public Earn document now pins
-21 operations. Exactly eight are optional-auth:
-
-- `GET /v1/earn/strategies`
-- `GET /v1/earn/strategies/{strategyId}`
-- `POST /v1/earn/vault-deposit-previews`
-- `POST /v1/earn/external-wallet/deposit-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-previews`
-- `POST /v1/earn/external-wallet/withdrawal-transactions`
-- `POST /v1/earn/external-wallet/withdrawal-options`
-- `POST /v1/earn/external-wallet/queued-withdrawal-previews`
-
-This supersedes two details in the 2026-09-14 addendum. Anonymous strategy
-lists accept `?environment=sandbox|production` and default to production;
-preview and build requests inherit the environment from the named strategy.
-For authenticated requests, the API-key project environment remains
-authoritative. The optional-auth list also grew from six to the eight
-operations pinned above.
-
-Queued request and cancellation builds, submits, list/detail history, movement
-and position reads, and earnings remain API-keyed. Anonymous callers can inspect
-live route and queue terms but cannot create a durable escrow lifecycle. A
-presented invalid credential still fails with 401 rather than falling back to
-anonymous access.
+21 operations, every one requiring an API key; the project behind the key
+decides the environment.
 
 A queued request transaction escrows shares and is not a payout. A cancellation
 returns shares and is not a payout. Only a verified provider fulfilment projects
@@ -1341,9 +1270,10 @@ Clients restore non-terminal requests through the cursor-paginated history,
 poll until a terminal state, and expose recovery only when server state is
 `expiredCancelable`; a client clock does not authorize cancellation.
 
-Custody queue routes remain internal. Any future operation-list or OpenAPI
-security change is another EARN-027 scope change and requires a new named
-security approval.
+Custody queue routes remain internal. The OpenAPI document, generated API
+reference, Embedded Yield guide, and AI discovery files are one public
+contract. Any future operation-list or OpenAPI security change is another
+EARN-027 scope change and requires a new named security approval.
 
 
 ## Addendum: 2026-09-29 Kamino observed deposits and rent provenance

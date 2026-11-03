@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
+import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -499,6 +503,50 @@ describe("Earn queued withdrawal repository", () => {
       .bind(requestAddress)
       .first<{ lease_token: string; occupied: boolean }>();
     expect(occupancy).toEqual({ lease_token: signed.requestId, occupied: true });
+  });
+
+  it("reports unconsumed builds per environment until the cleanup expires them", async () => {
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
+    await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "CleanupGateQueueRequest11111111111111111",
+      shares: "1",
+      quotedAssets: "0.99",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      discountBps: 25,
+      maturityTimestamp: "1700000060",
+      deadlineTimestamp: "1700000120",
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "100",
+      currentBlockHeight: "50",
+    });
+
+    // The gate and the DELETE share one predicate: unconsumed, in this environment.
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      true
+    );
+    await expect(
+      repository.hasUnconsumedExternalBuilds({ environment: "production" })
+    ).resolves.toBe(false);
+    await expect(
+      repository.cleanupExpiredExternalBuilds({ environment: "sandbox", currentBlockHeight: "101" })
+    ).resolves.toBe(1);
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
   });
 
   it("lets another tenant take over an expired build through the shared PDA lease", async () => {
@@ -1502,19 +1550,19 @@ describe("Earn queued withdrawal repository", () => {
       nonce: "9",
       creationTimestamp: "1700000000",
     });
-    const claimed = await repository.claimOpenRequests(16);
+    const claimed = await repository.claimOpenRequests({ environment: "sandbox", limit: 16 });
     expect(claimed.map(({ id }) => id)).toContain(created.request.id);
 
     // The claim itself is a lease. A second worker cannot pick up the same
     // provider read until either the worker schedules it or the lease expires.
-    const overlapping = await repository.claimOpenRequests(16);
+    const overlapping = await repository.claimOpenRequests({ environment: "sandbox", limit: 16 });
     expect(overlapping.map(({ id }) => id)).not.toContain(created.request.id);
 
     await getDb(env)
       .prepare("UPDATE earn_vault_withdrawal_requests SET next_check_at = ? WHERE id = ?")
       .bind("2020-01-01T00:00:00.000Z", created.request.id)
       .run();
-    const retried = await repository.claimOpenRequests(16);
+    const retried = await repository.claimOpenRequests({ environment: "sandbox", limit: 16 });
     expect(retried.map(({ id }) => id)).toContain(created.request.id);
   });
 
@@ -1532,7 +1580,7 @@ describe("Earn queued withdrawal repository", () => {
       nonce: "9",
       creationTimestamp: "1700000000",
     });
-    const [claimed] = await repository.claimOpenRequests(1);
+    const [claimed] = await repository.claimOpenRequests({ environment: "sandbox", limit: 1 });
     if (!claimed) throw new Error("Expected one due queued withdrawal");
     expect(claimed.next_check_at).not.toBeNull();
 
@@ -1600,7 +1648,7 @@ describe("Earn queued withdrawal repository", () => {
       });
     }
 
-    const [failed] = await repository.claimOpenRequests(1);
+    const [failed] = await repository.claimOpenRequests({ environment: "sandbox", limit: 1 });
     if (!failed) throw new Error("Expected one due queued withdrawal");
     await repository.recordIndexError({
       withdrawalRequestId: failed.id,
@@ -1608,7 +1656,7 @@ describe("Earn queued withdrawal repository", () => {
       retryAt: "2099-01-01T00:00:00.000Z",
     });
 
-    const [next] = await repository.claimOpenRequests(1);
+    const [next] = await repository.claimOpenRequests({ environment: "sandbox", limit: 1 });
     const expectedNext = [first.request.id, second.request.id].find((id) => id !== failed.id);
     expect(next?.id).toBe(expectedNext);
     await expect(
@@ -1663,5 +1711,222 @@ describe("Earn queued withdrawal repository", () => {
         throw rollback;
       })
     ).rejects.toBe(rollback);
+  });
+
+  describe("environment scope", () => {
+    // Each environment's vault sweep registration (a `cluster` Cron Definition)
+    // claims and cleans only its own rows. Every case seeds the same state in
+    // both environments, works one, and proves the other's rows were neither
+    // returned nor touched. Owner-signed requests keep the fixture free of
+    // custody: managed custody is Sandbox-only (ADR 0006).
+    const PRODUCTION_EXTERNAL_POSITION = "earn_position_queued_withdrawal_repo_production_external";
+    const SCOPE = {
+      sandbox: { projectId: PROJECT, positionId: EXTERNAL_POSITION },
+      production: { projectId: `${PROJECT}_production`, positionId: PRODUCTION_EXTERNAL_POSITION },
+    } as const satisfies Record<SdpEnvironment, { projectId: string; positionId: string }>;
+
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO earn_positions (
+             id, organization_id, project_id, environment, provider, kind,
+             owner_address, vault_address, share_mint, token_mint, label,
+             activated_at
+           ) VALUES (?, ?, ?, 'production', 'veda', 'vault_direct', ?, ?, ?, ?,
+                     'Production external Veda queued vault', sdp_iso_now())`
+        )
+        .bind(
+          PRODUCTION_EXTERNAL_POSITION,
+          ORG,
+          SCOPE.production.projectId,
+          EXTERNAL_OWNER,
+          VAULT,
+          SHARE_MINT,
+          TOKEN_MINT
+        )
+        .run();
+    });
+
+    function otherThan(environment: SdpEnvironment): SdpEnvironment {
+      return environment === "sandbox" ? "production" : "sandbox";
+    }
+
+    async function lastCheckedAt(table: string, id: string): Promise<string | null> {
+      const row = await getDb(env)
+        .prepare(`SELECT last_checked_at FROM ${table} WHERE id = ?`)
+        .bind(id)
+        .first<{ last_checked_at: string | null }>();
+      if (row === null) throw new Error(`${table} row ${id} is missing`);
+      return row.last_checked_at;
+    }
+
+    async function countIn(table: string, environment: SdpEnvironment): Promise<number> {
+      const row = await getDb(env)
+        .prepare(`SELECT COUNT(*) AS rows FROM ${table} WHERE environment = ?`)
+        .bind(environment)
+        .first<{ rows: number | string }>();
+      if (row === null) throw new Error(`COUNT over ${table} returned no row`);
+      return Number(row.rows);
+    }
+
+    async function expiredReservationIn(environment: SdpEnvironment): Promise<void> {
+      sequence += 1;
+      await repository.acquireRequestReservation({
+        id: `earn_vault_withdrawal_reservation_scope_${sequence}`,
+        organizationId: ORG,
+        projectId: SCOPE[environment].projectId,
+        environment,
+        provider: "veda",
+        vaultAddress: VAULT,
+        ownerAddress: EXTERNAL_OWNER,
+        requestAddress: `ScopeReservationAddress${String(sequence).padStart(16, "1")}`,
+        clientRequestId: `scope-reservation-key-${sequence}`,
+        idempotencyFingerprint: `scope-reservation-fingerprint-${sequence}`,
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      });
+    }
+
+    /** An unconsumed owner-signed request build in `environment`. */
+    async function buildIn(environment: SdpEnvironment, lastValidBlockHeight = "20000") {
+      sequence += 1;
+      return repository.createExternalWalletTransaction({
+        id: `earn_external_wallet_withdrawal_request_transaction_scope_${sequence}`,
+        organizationId: ORG,
+        projectId: SCOPE[environment].projectId,
+        environment,
+        provider: "veda",
+        positionId: SCOPE[environment].positionId,
+        action: "request",
+        ownerAddress: EXTERNAL_OWNER,
+        vaultAddress: VAULT,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        requestAddress: `ScopeQueueRequestAddress${String(sequence).padStart(16, "1")}`,
+        shares: "1",
+        quotedAssets: "0.99",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        discountBps: 25,
+        maturityTimestamp: "1700000060",
+        deadlineTimestamp: "1700000120",
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight,
+        currentBlockHeight: "10000",
+      });
+    }
+
+    /** A signed request in `environment` whose create was submitted, so both claims take it. */
+    async function openRequestIn(environment: SdpEnvironment) {
+      const build = await buildIn(environment);
+      const created = await repository.createSignedRequest(
+        requestInput({
+          projectId: SCOPE[environment].projectId,
+          environment,
+          positionId: SCOPE[environment].positionId,
+          custodyWalletId: null,
+          ownerAddress: EXTERNAL_OWNER,
+          requestAddress: build.request_address,
+          pdaLeaseToken: build.id,
+          externalWalletTransactionId: build.id,
+        })
+      );
+      await repository.advanceAction({
+        actionId: created.action.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      return created;
+    }
+
+    it.each(SDP_ENVIRONMENTS)("claims only %s unsettled actions", async (environment) => {
+      const own = await openRequestIn(environment);
+      const other = await openRequestIn(otherThan(environment));
+
+      const claimed = await repository.claimUnsettledActions({ environment, limit: 128 });
+
+      expect(claimed.map(({ id }) => id)).toEqual([own.action.id]);
+      expect(
+        await lastCheckedAt("earn_vault_withdrawal_request_actions", other.action.id)
+      ).toBeNull();
+    });
+
+    it.each(SDP_ENVIRONMENTS)("claims only %s open requests", async (environment) => {
+      const own = await openRequestIn(environment);
+      const other = await openRequestIn(otherThan(environment));
+
+      const claimed = await repository.claimOpenRequests({ environment, limit: 16 });
+
+      expect(claimed.map(({ id }) => id)).toEqual([own.request.id]);
+      expect(await lastCheckedAt("earn_vault_withdrawal_requests", other.request.id)).toBeNull();
+    });
+
+    it.each(SDP_ENVIRONMENTS)("expires only %s abandoned reservations", async (environment) => {
+      for (const reserved of SDP_ENVIRONMENTS) {
+        await expiredReservationIn(reserved);
+      }
+
+      await repository.cleanupExpiredReservations({ environment });
+
+      for (const table of [
+        "earn_vault_withdrawal_request_reservations",
+        "earn_vault_withdrawal_request_pda_leases",
+      ]) {
+        expect(await countIn(table, environment)).toBe(0);
+        expect(await countIn(table, otherThan(environment))).toBe(1);
+      }
+    });
+
+    it.each(SDP_ENVIRONMENTS)(
+      "gates and expires only %s unconsumed builds",
+      async (environment) => {
+        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await buildIn(otherThan(environment), "100");
+        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await buildIn(environment, "100");
+        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(true);
+
+        await expect(
+          repository.cleanupExpiredExternalBuilds({ environment, currentBlockHeight: "101" })
+        ).resolves.toBe(1);
+
+        await expect(repository.hasUnconsumedExternalBuilds({ environment })).resolves.toBe(false);
+        await expect(
+          repository.hasUnconsumedExternalBuilds({ environment: otherThan(environment) })
+        ).resolves.toBe(true);
+      }
+    );
+
+    describe("queued-withdrawal sweep", () => {
+      const clusterRpc = installClusterRpcResponder();
+
+      it.each(ENVIRONMENT_CLUSTER_CASES)(
+        "a $environment sweep claims, cleans and reads nothing of the other environment",
+        async ({ environment }) => {
+          const other = otherThan(environment);
+          const open = await openRequestIn(other);
+          await buildIn(other, "100");
+          await expiredReservationIn(other);
+          const reservations = await countIn("earn_vault_withdrawal_request_reservations", other);
+          const leases = await countIn("earn_vault_withdrawal_request_pda_leases", other);
+
+          await runInEnvironmentClusterScope(environment, () =>
+            reconcileEarnVaultQueuedWithdrawals(env)
+          );
+
+          expect(
+            await lastCheckedAt("earn_vault_withdrawal_request_actions", open.action.id)
+          ).toBeNull();
+          expect(await lastCheckedAt("earn_vault_withdrawal_requests", open.request.id)).toBeNull();
+          expect(await countIn("earn_vault_withdrawal_request_reservations", other)).toBe(
+            reservations
+          );
+          expect(await countIn("earn_vault_withdrawal_request_pda_leases", other)).toBe(leases);
+          await expect(
+            repository.hasUnconsumedExternalBuilds({ environment: other })
+          ).resolves.toBe(true);
+          expect(clusterRpc.calls).toEqual([]);
+        }
+      );
+    });
   });
 });

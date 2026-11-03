@@ -2,11 +2,11 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { BatchSendStepContent } from "./components/batch-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
-import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
 import { type BatchSendWizard, useBatchSendWizard } from "./hooks/use-batch-send-wizard";
 
 interface BatchSendRailProps {
@@ -14,8 +14,6 @@ interface BatchSendRailProps {
   walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   onExit: () => void;
-  sendMode: SendMode;
-  onSendModeChange: (mode: SendMode) => void;
 }
 
 function batchPrimaryLabel(wizard: BatchSendWizard, t: ReturnType<typeof useTranslations>): string {
@@ -27,7 +25,7 @@ function batchPrimaryLabel(wizard: BatchSendWizard, t: ReturnType<typeof useTran
     case wizard.isLastStep:
       return t("DashboardPayments.sendBatch");
     default:
-      return t("DashboardPayments.reviewAction");
+      return t("DashboardPayments.batchSend.reviewPayments");
   }
 }
 
@@ -36,8 +34,6 @@ export function BatchSendRail({
   walletsError,
   issuedTokenSymbolsByMint,
   onExit,
-  sendMode,
-  onSendModeChange,
 }: BatchSendRailProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
@@ -48,26 +44,48 @@ export function BatchSendRail({
     cluster: CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment],
     onExit,
   });
+  const finished = Boolean(wizard.batchResult);
+  // A result can be a refusal before signing, so the final step claims no send.
+  const steps = [
+    ...wizard.steps,
+    {
+      label: t("DashboardPayments.batchSend.resultStep"),
+      title: "",
+    },
+  ];
 
   return (
     <RampWizardShell
-      steps={wizard.steps}
-      stepIndex={wizard.stepIndex}
-      primaryDisabled={wizard.submitting || !wizard.canProceed}
+      steps={steps}
+      stepIndex={finished ? wizard.stepIndex + 1 : wizard.stepIndex}
+      primaryDisabled={wizard.submitting || wizard.retrying || !wizard.canProceed}
       primaryLabel={batchPrimaryLabel(wizard, t)}
-      secondaryLabel={t("DashboardPayments.counterparty.cancel")}
-      confirmSecondary={wizard.isLastStep && !wizard.batchResult}
       secondaryDisabled={wizard.submitting}
-      hideSecondary={Boolean(wizard.batchResult)}
+      hideSecondary={finished}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
-      onSecondary={wizard.handleSecondary}
-      counterpartyDialog={null}
-      header={
-        wizard.stepIndex === 0 ? (
-          <SendModeToggle value={sendMode} onChange={onSendModeChange} />
-        ) : undefined
+      onSecondary={wizard.stepIndex === 0 ? wizard.handleSecondary : wizard.handleBack}
+      onCancel={finished || wizard.submitting ? undefined : onExit}
+      footerHint={
+        wizard.stepIndex === 0 && wizard.recipients.length === 0
+          ? t("DashboardPayments.batchSend.addRowsHint")
+          : undefined
       }
+      footerActions={
+        finished && wizard.failedRecipientCount > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={wizard.retrying}
+            onClick={() => void wizard.retryFailedRecipients()}
+          >
+            {wizard.retrying
+              ? t("DashboardPayments.batchSend.retryingFailedRecipients")
+              : t("DashboardPayments.batchSend.retryFailedRecipients")}
+          </Button>
+        ) : null
+      }
+      counterpartyDialog={null}
     >
       <BatchSendStepContent wizard={wizard} />
     </RampWizardShell>

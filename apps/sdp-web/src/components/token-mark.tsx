@@ -46,7 +46,7 @@ const SIZE_STYLES = {
   lg: { box: "size-9", text: "text-[11px]", px: 36 },
 } as const;
 
-export type TokenMarkSize = keyof typeof SIZE_STYLES;
+type TokenMarkSize = keyof typeof SIZE_STYLES;
 
 interface TokenMarkProps {
   /** Mint address; resolves a well-known token when it matches one. */

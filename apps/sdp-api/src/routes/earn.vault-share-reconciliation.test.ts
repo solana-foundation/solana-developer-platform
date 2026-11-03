@@ -7,6 +7,7 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -18,21 +19,9 @@ vi.mock("@/routes/payments/token-accounts", async (importOriginal) => ({
   getSplTokenBalances,
 }));
 
-// The endpoint genesis-proof and per-cluster URL resolution are chain-facing;
-// balances themselves come from the mocked read above, so no RPC request is
-// ever issued by these tests.
-const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
-  assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
-}));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl,
-}));
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  assertClusterEndpoint,
-}));
+// Balances come from the mocked read above, so the scope's pool client the handler builds is
+// never asked anything; the stub gives each cluster a pool and keeps the network out.
+installClusterRpcStub();
 
 // Lets one test shrink the pass budget to prove the deadline posture; null
 // keeps the handler's real default.
@@ -214,6 +203,8 @@ async function finalizeMovement(movementId: string): Promise<void> {
  * solver queue escrows the claim's shares, a Hastra operator redemption burns
  * them for delegated wYLDS. Terminal rows stamp the metadata 0113 requires.
  */
+let lastWithdrawalTimestamp = 0;
+
 async function seedCustodyWithdrawalRequest(params: {
   position: {
     id: string;
@@ -230,6 +221,10 @@ async function seedCustodyWithdrawalRequest(params: {
 }): Promise<string> {
   const requestId = generateEarnVaultWithdrawalRequestId();
   const solverQueue = params.mechanism === "solver_queue";
+  // These fixtures describe successive lifecycle events. Equal millisecond
+  // timestamps fall back to random IDs and can reverse a cancellation/fulfillment.
+  lastWithdrawalTimestamp = Math.max(Date.now(), lastWithdrawalTimestamp + 1);
+  const timestamp = new Date(lastWithdrawalTimestamp).toISOString();
   await getDb(env)
     .prepare(
       `INSERT INTO earn_vault_withdrawal_requests (
@@ -264,10 +259,10 @@ async function seedCustodyWithdrawalRequest(params: {
       solverQueue ? null : (params.intermediateAmount ?? "1.01"),
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
-      params.status === "cancelled" ? (params.closedAt ?? new Date().toISOString()) : null,
+      params.status === "cancelled" ? (params.closedAt ?? timestamp) : null,
       params.status === "failed" ? "request never landed" : null,
-      params.status === "fulfilled" ? (params.closedAt ?? new Date().toISOString()) : null,
-      params.createdAt ?? new Date().toISOString()
+      params.status === "fulfilled" ? (params.closedAt ?? timestamp) : null,
+      params.createdAt ?? timestamp
     )
     .run();
   return requestId;
@@ -295,6 +290,7 @@ interface ReportBody {
 }
 
 beforeEach(async () => {
+  lastWithdrawalTimestamp = 0;
   env.MARKETS_ENABLED = "true";
   env.EARN_ENABLED = "true";
   await seedTestDatabase(env);
@@ -302,8 +298,6 @@ beforeEach(async () => {
   await seedScope();
   vi.clearAllMocks();
   deadlineTimeoutOverride.ms = null;
-  assertClusterEndpoint.mockResolvedValue(undefined);
-  resolveClusterRpcUrl.mockReturnValue("http://127.0.0.1:8899");
   getSplTokenBalances.mockResolvedValue([]);
 });
 

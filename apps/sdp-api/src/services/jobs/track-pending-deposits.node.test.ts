@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 
@@ -28,11 +29,8 @@ vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
 const { emitDepositEvent } = vi.hoisted(() => ({ emitDepositEvent: vi.fn() }));
 vi.mock("@/services/private-channels/deposit-events", () => ({ emitDepositEvent }));
 
-const { createRpc, getSignatureStatuses } = vi.hoisted(() => ({
-  createRpc: vi.fn(() => ({})),
-  getSignatureStatuses: vi.fn(),
-}));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc, getSignatureStatuses }));
+const { getSignatureStatuses } = vi.hoisted(() => ({ getSignatureStatuses: vi.fn() }));
+vi.mock("@sdp/rpc/solana", () => ({ getSignatureStatuses }));
 
 const { loadProjectRpcClient, PROJECT_RPC } = vi.hoisted(() => {
   const PROJECT_RPC = { __projectRpc: true };
@@ -47,6 +45,12 @@ const { loadProjectRpcClient, PROJECT_RPC } = vi.hoisted(() => {
 vi.mock("@/services/private-channels/project-rpc", () => ({ loadProjectRpcClient }));
 
 import { trackPendingDeposits } from "./track-pending-deposits";
+
+function trackInSandbox() {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    trackPendingDeposits({} as Env)
+  );
+}
 
 const NOW_ISO = "2026-07-17T00:00:00.000Z";
 const STALE_ISO = "2026-07-16T23:00:00.000Z"; // > 5 min in the past
@@ -103,9 +107,15 @@ beforeEach(() => {
 });
 
 describe("trackPendingDeposits", () => {
-  it("does nothing when there are no non-terminal deposits", async () => {
+  it("sweeps the open scope's environment and does nothing when it has no non-terminal deposits", async () => {
     depositRepo.listNonTerminal.mockResolvedValueOnce([]);
-    await trackPendingDeposits({} as Env);
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      trackPendingDeposits({} as Env)
+    );
+    expect(depositRepo.listNonTerminal).toHaveBeenCalledExactlyOnceWith({
+      environment: "production",
+      limit: 100,
+    });
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
     expect(loadProjectRpcClient).not.toHaveBeenCalled();
   });
@@ -116,7 +126,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(loadProjectRpcClient).toHaveBeenCalledWith({
       env: expect.anything(),
@@ -144,7 +154,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([{ err: { InstructionError: [0, "Custom"] } }]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d2", status: "failed", expectedStatus: "submitted" })
@@ -164,7 +174,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([undefined]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
   });
@@ -175,7 +185,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([undefined]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d4", status: "failed", expectedStatus: "submitted" })
@@ -187,7 +197,7 @@ describe("trackPendingDeposits", () => {
       depositRow({ id: "d5", status: "pending", signature: null, updated_at: STALE_ISO }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d5", status: "failed", expectedStatus: "pending" })
@@ -200,7 +210,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7", status: "submitted", expectedStatus: "pending" })
@@ -223,7 +233,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "finalized", err: null }]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, expect.any(Array), {
       searchTransactionHistory: true,
@@ -238,7 +248,7 @@ describe("trackPendingDeposits", () => {
       depositRow({ id: "d8", status: "pending", signature: "sig8", updated_at: NOW_ISO }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
   });
@@ -248,10 +258,10 @@ describe("trackPendingDeposits", () => {
       depositRow({ id: "d6", status: "confirmed", signature: "sig6" }),
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(getSignatureStatuses).not.toHaveBeenCalled();
   });
 
   it("stalls a submitted deposit whose instance was deleted, then fails it past the stale window", async () => {
@@ -260,7 +270,7 @@ describe("trackPendingDeposits", () => {
     ]);
     instanceRepo.getById.mockResolvedValueOnce(null);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ id: "d7", status: "failed", expectedStatus: "submitted" })
@@ -279,7 +289,7 @@ describe("trackPendingDeposits", () => {
       undefined,
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     // One batched read for the whole tick, not one RPC per row.
     expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
@@ -313,7 +323,7 @@ describe("trackPendingDeposits", () => {
       { confirmationStatus: "confirmed" },
     ]);
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
     expect(getSignatureStatuses).toHaveBeenCalledWith(PROJECT_RPC, ["sig1", "sig2"], {
@@ -333,7 +343,7 @@ describe("trackPendingDeposits", () => {
     ]);
     getSignatureStatuses.mockRejectedValueOnce(new Error("rpc unavailable"));
 
-    await trackPendingDeposits({} as Env);
+    await trackInSandbox();
 
     expect(depositRepo.updateDeposit).not.toHaveBeenCalled();
     expect(emitDepositEvent).not.toHaveBeenCalled();

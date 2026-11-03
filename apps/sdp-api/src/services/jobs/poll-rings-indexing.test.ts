@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   createKeyPairFromPrivateKeyBytes,
   getAddressFromPublicKey,
@@ -8,7 +10,7 @@ import {
   type SignatureBytes,
   signBytes,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {
   createHeliusRingsOperationRepository,
@@ -28,6 +30,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
+  type PollRingsIndexingDependencies,
   pollRingsIndexing,
   RINGS_INDEXING_TIMEOUT_MS,
   RINGS_UNSIGNED_GRACE_MS,
@@ -83,14 +86,22 @@ const CHAIN_HAS_NOTHING = async () => "absent" as const;
 let walletId: string;
 let jobEnv: typeof env;
 
+const DEVNET_JOB_SCOPE = { projectId: null, environment: "sandbox" } as const;
+
 function serviceWith(gateway: InMemoryRingsGateway) {
-  return createHeliusRingsService(env, tenant, {
-    gateway,
-    validateOuterTransaction: async () => {},
-    signOuterTransaction: async ({ unsignedTxBase64 }) =>
-      (await signOuterTransaction(unsignedTxBase64)).signedTxBase64,
-    submitOuterTransaction: async () => OUTER_TX.signature,
-  });
+  return runInClusterScope(DEVNET_JOB_SCOPE, () =>
+    createHeliusRingsService(env, tenant, {
+      gateway,
+      validateOuterTransaction: async () => {},
+      signOuterTransaction: async ({ unsignedTxBase64 }) =>
+        (await signOuterTransaction(unsignedTxBase64)).signedTxBase64,
+      submitOuterTransaction: async () => OUTER_TX.signature,
+    })
+  );
+}
+
+function pollInDevnet(dependencies: PollRingsIndexingDependencies) {
+  return runInClusterScope(DEVNET_JOB_SCOPE, () => pollRingsIndexing(jobEnv, dependencies));
 }
 
 describe("pollRingsIndexing", () => {
@@ -191,13 +202,13 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-complete",
     });
     expect(operation.state).toBe("indexing");
     gateway.recordSubmission(OUTER_TX.signature);
 
-    await pollRingsIndexing(jobEnv, {
+    await pollInDevnet({
       createService: () => serviceWith(gateway),
       readBlockHeight: NO_HEIGHT,
     });
@@ -214,14 +225,14 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-timeout",
     });
     expect(operation.state).toBe("indexing");
 
     // Sweep from a clock beyond the budget, with the chain height unavailable
     // so the reconciliation pass is skipped and this backstop is what runs.
-    await pollRingsIndexing(jobEnv, {
+    await pollInDevnet({
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
       readBlockHeight: NO_HEIGHT,
@@ -245,12 +256,12 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-timeout-landed",
     });
     expect(operation.state).toBe("indexing");
 
-    await pollRingsIndexing(jobEnv, {
+    await pollInDevnet({
       createService: () => serviceWith(gateway),
       now: () => new Date(Date.now() + RINGS_INDEXING_TIMEOUT_MS + 60_000),
       readBlockHeight: NO_HEIGHT,
@@ -272,7 +283,7 @@ describe("pollRingsIndexing", () => {
     const operation = await serviceWith(gateway).prepareOperation({
       walletId,
       opType: "shield",
-      asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
       clientNonce: "job-stranded",
     });
     expect(operation.state).toBe("indexing");
@@ -286,7 +297,7 @@ describe("pollRingsIndexing", () => {
       .bind(operation.id)
       .run();
 
-    await pollRingsIndexing(jobEnv, {
+    await pollInDevnet({
       createService: () => serviceWith(gateway),
       readBlockHeight: NO_HEIGHT,
     });
@@ -312,7 +323,7 @@ describe("pollRingsIndexing", () => {
       const operation = await serviceWith(gateway).prepareOperation({
         walletId,
         opType,
-        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        asset: { mint: SOL_MINT, amountRaw: "1000" },
         ...(opType === "withdraw" ? { to: OWNER } : {}),
         clientNonce: nonce,
       });
@@ -330,7 +341,7 @@ describe("pollRingsIndexing", () => {
     it("refuses to offer a retry for a stranded spend", async () => {
       const id = await strand("withdraw", "job-strand-spend");
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
         readSignatureStatus: CHAIN_HAS_NOTHING,
@@ -349,7 +360,7 @@ describe("pollRingsIndexing", () => {
     it("refuses to offer a retry for a stranded shield either", async () => {
       const id = await strand("shield", "job-strand-shield");
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
         readSignatureStatus: CHAIN_HAS_NOTHING,
@@ -375,7 +386,7 @@ describe("pollRingsIndexing", () => {
     it("spares a shield the chain confirms, however far behind Photon is", async () => {
       const id = await strand("shield", "job-strand-landed");
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
         readSignatureStatus: async () => "landed",
@@ -392,7 +403,7 @@ describe("pollRingsIndexing", () => {
     it("waits rather than escalating when the chain cannot be asked", async () => {
       const id = await strand("withdraw", "job-strand-unaskable");
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
         readSignatureStatus: async () => null,
@@ -421,7 +432,7 @@ describe("pollRingsIndexing", () => {
       const gateway = ringsGateway();
       gateway.recordSubmission(OUTER_TX.signature);
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(gateway),
         readBlockHeight: NO_HEIGHT,
       });
@@ -451,7 +462,7 @@ describe("pollRingsIndexing", () => {
       // A gateway that reports nothing indexed. Absence from an indexer is
       // never proof a transaction is dead, so this pass must leave it alone
       // and wait for an operator to check the chain.
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: NO_HEIGHT,
       });
@@ -477,7 +488,7 @@ describe("pollRingsIndexing", () => {
       // Bytes still exist and the failure code is not yet reconcilable, so
       // the row holds the wallet's slot forever. The reconcile pass upgrades
       // it to manual_reconciliation_required so an operator can void.
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
       });
@@ -508,7 +519,7 @@ describe("pollRingsIndexing", () => {
         .bind(id)
         .run();
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: async () => "5000",
       });
@@ -536,7 +547,7 @@ describe("pollRingsIndexing", () => {
         const operation = await serviceWith(gateway).prepareOperation({
           walletId,
           opType: "shield",
-          asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+          asset: { mint: SOL_MINT, amountRaw: "1000" },
           clientNonce: nonce,
         });
 
@@ -558,7 +569,7 @@ describe("pollRingsIndexing", () => {
       it("broadcasts the recorded bytes for an operation stranded after signing", async () => {
         const { id, gateway } = await strandIn("ready_to_sign", "job-strand-signed", true);
 
-        await pollRingsIndexing(jobEnv, {
+        await pollInDevnet({
           createService: () => serviceWith(gateway),
           readBlockHeight: NO_HEIGHT,
         });
@@ -575,7 +586,7 @@ describe("pollRingsIndexing", () => {
       it("fails an operation stranded before signing, so it can be retried", async () => {
         const { id, gateway } = await strandIn("ready_to_sign", "job-strand-unsigned", false);
 
-        await pollRingsIndexing(jobEnv, {
+        await pollInDevnet({
           createService: () => serviceWith(gateway),
           // Past the grace: without bytes, a crashed owner and one still
           // waiting on custody look identical until the row stops being fresh.
@@ -602,7 +613,7 @@ describe("pollRingsIndexing", () => {
       it("leaves an unsigned operation alone while its owner may still be working", async () => {
         const { id, gateway } = await strandIn("ready_to_sign", "job-strand-fresh", false);
 
-        await pollRingsIndexing(jobEnv, {
+        await pollInDevnet({
           createService: () => serviceWith(gateway),
           readBlockHeight: NO_HEIGHT,
         });
@@ -618,7 +629,7 @@ describe("pollRingsIndexing", () => {
       it("resumes the build for an operation stranded while proving", async () => {
         const { id, gateway } = await strandIn("proving", "job-strand-proving", false);
 
-        await pollRingsIndexing(jobEnv, {
+        await pollInDevnet({
           createService: () => serviceWith(gateway),
           // Past the grace, so this is a crashed build rather than one the
           // owning request is still running.
@@ -638,7 +649,7 @@ describe("pollRingsIndexing", () => {
     it("leaves everything alone when the chain height is unknown", async () => {
       const id = await strand("withdraw", "job-strand-unknown");
 
-      await pollRingsIndexing(jobEnv, {
+      await pollInDevnet({
         createService: () => serviceWith(stalled()),
         readBlockHeight: NO_HEIGHT,
       });
@@ -652,22 +663,27 @@ describe("pollRingsIndexing", () => {
     });
   });
 
-  it("never hands a tenant connection's RPC to its chain reads", async () => {
-    // The fixture seeds an active default connection, which an earlier
-    // implementation resolved globally and handed to both readers. The
-    // judgments those reads back — expiry escalation, manual reconciliation —
-    // must come from the platform endpoint, so the reader input carries no
-    // tenant URL even while a resolvable connection exists.
-    const seen: Array<Record<string, unknown>> = [];
-    await pollRingsIndexing(jobEnv, {
-      createService: () => serviceWith(ringsGateway({})),
-      readBlockHeight: async (input) => {
-        seen.push({ ...input });
-        return null;
-      },
+  it("does nothing in a mainnet-beta scope", async () => {
+    const gateway = ringsGateway({ indexingDelayMs: 0 });
+    const operation = await serviceWith(gateway).prepareOperation({
+      walletId,
+      opType: "shield",
+      asset: { mint: SOL_MINT, amountRaw: "1000" },
+      clientNonce: "job-mainnet-scope",
     });
+    gateway.recordSubmission(OUTER_TX.signature);
+    const readBlockHeight = vi.fn(NO_HEIGHT);
 
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toEqual({ env: jobEnv });
+    await runInClusterScope({ projectId: null, environment: "production" }, () =>
+      pollRingsIndexing(jobEnv, { createService: () => serviceWith(gateway), readBlockHeight })
+    );
+
+    expect(readBlockHeight).not.toHaveBeenCalled();
+    expect(
+      await createHeliusRingsOperationRepository(env).getOperationById({
+        ...tenant,
+        id: operation.id,
+      })
+    ).toMatchObject({ state: "indexing" });
   });
 });

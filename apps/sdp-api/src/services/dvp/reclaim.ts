@@ -10,7 +10,8 @@
  */
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
@@ -108,7 +109,7 @@ export async function reclaimDvpTradeLeg(
   const tokenProgram = isA ? trade.tokenProgramA : trade.tokenProgramB;
   const escrow = isA ? trade.escrowA : trade.escrowB;
 
-  const rpc = createRpc(env);
+  const rpc = createClusterRpc();
   const held = await readReclaimableEscrow(rpc, trade, side);
 
   await refuseTransferHookMint(rpc, trade.id, mint);
@@ -116,7 +117,7 @@ export async function reclaimDvpTradeLeg(
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"dvp">(
     env,
     params.organizationId,
     params.projectId,
@@ -136,7 +137,7 @@ export async function reclaimDvpTradeLeg(
   const [destination] = await findAssociatedTokenPda({ owner: party, mint, tokenProgram });
 
   // Sponsorship only after every refusal above, as in fund and settle.
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"dvp">(
     env,
     await resolveProjectSponsorshipScope(env, {
       organizationId: params.organizationId,
@@ -258,7 +259,7 @@ export async function reclaimDvpTradeLeg(
 }
 
 type FundingClaims = ReturnType<typeof createPostgresDvpLegFundingClaimRepository>;
-type Rpc = ReturnType<typeof createRpc>;
+type Rpc = SolanaRpc;
 
 /**
  * Reads the leg's escrow live and refuses anything reclaim cannot act on: a

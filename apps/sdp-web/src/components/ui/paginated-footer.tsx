@@ -3,49 +3,10 @@
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import { cn } from "@sdp/ui/cn";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { type ReactNode, useCallback } from "react";
+import type { ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { replaceDashboardSearchParams, useDashboardSearchParam } from "@/lib/dashboard-url-state";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
-
-function parsePaginationParam(value: string | null, fallback: number, maximum: number): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : fallback;
-}
-
-/**
- * URL-backed pagination state (`?page=` / `?pageSize=`) for client-paginated
- * lists rendering a PaginatedFooter, written shallowly like the rest of the
- * dashboard URL state. Invalid or missing params resolve to page 1 and the
- * caller's default page size; default values are omitted from the URL, and
- * changing the page size snaps back to page 1.
- *
- * @param defaultPageSize - Page size used when the URL carries no `pageSize`.
- * @returns The current page and page size plus setters that rewrite the URL.
- */
-export function usePaginationUrlState(defaultPageSize: number): {
-  page: number;
-  pageSize: number;
-  setPage: (page: number) => void;
-  setPageSize: (pageSize: number) => void;
-} {
-  const page = parsePaginationParam(useDashboardSearchParam("page"), 1, Number.MAX_SAFE_INTEGER);
-  const pageSize = parsePaginationParam(useDashboardSearchParam("pageSize"), defaultPageSize, 100);
-  const setPage = useCallback(
-    (next: number) => replaceDashboardSearchParams({ page: next === 1 ? null : String(next) }),
-    []
-  );
-  const setPageSize = useCallback(
-    (next: number) =>
-      replaceDashboardSearchParams({
-        pageSize: next === defaultPageSize ? null : String(next),
-        page: null,
-      }),
-    [defaultPageSize]
-  );
-  return { page, pageSize, setPage, setPageSize };
-}
 
 interface PaginatedFooterProps {
   page: number;

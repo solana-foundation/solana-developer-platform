@@ -52,6 +52,10 @@ export type ActionOwner = SdpModule | "core";
  * private_channels, helius_rings, onramp, offramp, ramp_transfers) carry
  * a coarse mapping: GET is `read`, a mutation is `manage`, `execute` or
  * `configure` by the rule above. Review each before its module is promoted.
+ *
+ * The beta `subscriptions` module (direct subscription plans and subscriptions)
+ * borrows `recurring.*`. Before it is promoted to stable, give it its own action
+ * module or record a deliberate decision to keep the reuse.
  */
 export const ACTION_MODULES = {
   // Payments (V1)
@@ -293,10 +297,15 @@ function isAdminOnlyAction(action: Action): boolean {
   );
 }
 
-/** The actions a signed-in person holds through their organization role. */
+/**
+ * The actions a signed-in person holds through their organization role. A
+ * `viewer` holds every `read` and nothing else: no money, no issuance, no
+ * keys, no members.
+ */
 export const ORGANIZATION_ROLE_ACTIONS = {
   admin: ACTIONS,
   member: ACTIONS.filter((action) => !isAdminOnlyAction(action)),
+  viewer: ACTIONS.filter((action) => actionVerbOf(action) === "read"),
 } as const satisfies Record<OrganizationRole, readonly Action[]>;
 
 export function organizationRoleMayPerform(role: OrganizationRole, action: Action): boolean {

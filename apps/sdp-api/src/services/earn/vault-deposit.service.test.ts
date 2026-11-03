@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino/errors";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SdpVedaError } from "@sdp/veda/errors";
 import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
@@ -22,25 +23,12 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
-
-// The confirmed block height the broadcast tail reads before it may call a
-// preflight blockhash refusal definitive.
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-}));
-
 // `prependSwapLegToVaultPlan` stays real; only the Jupiter HTTP boundary is stubbed.
 vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
   fetchJupiterSwapLeg,
 }));
 
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
@@ -65,7 +53,14 @@ vi.mock("./vault-sponsorship", async (importOriginal) => ({
   resolveVaultSponsorship,
 }));
 
-const { depositIntoVault } = await import("./vault-deposit.service");
+const service = await import("./vault-deposit.service");
+
+/** A custody deposit, in the cluster scope the project middleware opens for its project. */
+function depositIntoVault(...args: Parameters<typeof service.depositIntoVault>) {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    service.depositIntoVault(...args)
+  );
+}
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 const ORG = "org_vault_deposit";
@@ -89,7 +84,6 @@ function depositInput(overrides: Partial<VaultDepositInput> = {}): VaultDepositI
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox" as const,
     provider: "kamino",
     providerReference: VAULT_A,
     wallet,
@@ -193,7 +187,6 @@ beforeEach(async () => {
   });
   broadcastVaultTransaction.mockResolvedValue(undefined);
   // Inside the stubbed signature's window (lastValidBlockHeight 12345).
-  getBlockHeight.mockResolvedValue(12_000n);
 });
 
 afterEach(() => {
@@ -203,7 +196,7 @@ afterEach(() => {
 describe("depositIntoVault — idempotency", () => {
   it("records three back-to-back same-amount deposits as separate intents", async () => {
     const memos: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       memos.push(
         Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
       );
@@ -344,7 +337,7 @@ describe("depositIntoVault — idempotency", () => {
 
   it("binds independent request keys into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, input) => {
+    signVaultPlan.mockImplementation(async (input) => {
       const encoded = input.plan.instructions.at(-1)?.data;
       if (!encoded) throw new Error("missing request memo");
       memoPayloads.push(Buffer.from(encoded, "base64").toString("utf8"));
@@ -541,19 +534,16 @@ describe("depositIntoVault — signed persistence boundary", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
     const deadline = resolveVaultDirectClient.mock.calls[0]?.[2];
     expect(deadline).toBeDefined();
-    expect(simulateVaultPlan.mock.calls[0]?.[1]).toMatchObject({
-      cluster: "devnet",
+    expect(simulateVaultPlan.mock.calls[0]?.[0]).toMatchObject({
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
     });
-    expect(signVaultPlan.mock.calls[0]?.[1]).toMatchObject({
-      cluster: "devnet",
+    expect(signVaultPlan.mock.calls[0]?.[0]).toMatchObject({
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
       fee: { kind: "wallet-pays" },
     });
-    expect(broadcastVaultTransaction.mock.calls[0]?.[1]).toMatchObject({
-      cluster: "devnet",
+    expect(broadcastVaultTransaction.mock.calls[0]?.[0]).toMatchObject({
       deadline,
     });
     expect(movementAtBroadcast).toMatchObject({
@@ -686,7 +676,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
   it("leaves an expired-blockhash refusal for signature reconciliation", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValue(12_346n);
 
     const result = await depositIntoVault(env, depositInput());
 
@@ -706,7 +695,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
     // A too-NEW blockhash draws the same preflight answer from a lagging
     // node; the reconciler's rebroadcast is what lands it.
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValue(12_345n);
 
     const result = await depositIntoVault(env, depositInput());
 
@@ -715,7 +703,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
   it("leaves a preflight blockhash refusal reconcilable when the height is unreadable", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
 
     const result = await depositIntoVault(env, depositInput());
 
@@ -1184,13 +1171,11 @@ describe("earn vault project attribution", () => {
         return plan({ createsShareAccount: true });
       });
       const sponsorBySignature = new Map<string, string>();
-      signVaultPlan.mockImplementation(
-        async (_env: unknown, input: { fee: { sponsor: string } }) => {
-          const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
-          sponsorBySignature.set(signature, input.fee.sponsor);
-          return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
-        }
-      );
+      signVaultPlan.mockImplementation(async (input: { fee: { sponsor: string } }) => {
+        const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
+        sponsorBySignature.set(signature, input.fee.sponsor);
+        return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
+      });
 
       const results = await Promise.all([
         depositIntoVault(env, depositInput()),
@@ -1266,7 +1251,7 @@ describe("depositIntoVault — swap-funded (Jupiter)", () => {
     // consumption was unreported by the mocked simulation, so the maximum),
     // then swap → provider deposit → request memo, with the swap's lookup
     // tables carried along.
-    const signedPlan = signVaultPlan.mock.calls[0]?.[1]?.plan;
+    const signedPlan = signVaultPlan.mock.calls[0]?.[0]?.plan;
     expect(signedPlan.instructions[0].programAddress).toBe(
       "ComputeBudget111111111111111111111111111111"
     );

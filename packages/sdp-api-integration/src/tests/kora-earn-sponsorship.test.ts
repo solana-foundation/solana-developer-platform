@@ -27,8 +27,11 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { EARN_DEPOSIT_TOKEN_SYMBOLS } from "@sdp/types/earn";
-import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SDP_ENVIRONMENT_BY_CLUSTER, SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -157,14 +160,12 @@ describe.skipIf(!ENABLED)("Earn vault sponsorship against live Kora", () => {
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
       mint: USDC_DEVNET,
     });
-    const { blockhash, lastValidBlockHeight } = await client
-      .getBlockhash()
-      .then((result: { blockhash: string }) => ({
-        blockhash: result.blockhash as Parameters<
-          typeof setTransactionMessageLifetimeUsingBlockhash
-        >[0]["blockhash"],
-        lastValidBlockHeight: 2n ** 63n - 1n,
-      }));
+    // CI selects an RPC whose confirmed blockhash is valid; use that same
+    // commitment so the signing check tests Kora's fee-payer policy.
+    const { blockhash, lastValidBlockHeight } = await runInClusterScope(
+      { projectId: null, environment: SDP_ENVIRONMENT_BY_CLUSTER[CLUSTER] },
+      () => getRecentBlockhash(createClusterRpc(), "confirmed")
+    );
 
     const message = pipe(
       createTransactionMessage({ version: 0 }),

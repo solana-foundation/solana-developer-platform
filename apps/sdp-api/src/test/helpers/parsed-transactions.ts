@@ -206,12 +206,13 @@ export function parsedTokenBalance(balance: {
 
 /**
  * A successful `getTransaction` result in `jsonParsed` encoding, as the RPC serves it with
- * `maxSupportedTransactionVersion: 0`.
+ * `maxSupportedTransactionVersion: 1`.
  *
  * @param transaction - The transaction's placement, accounts, instructions and token balances.
  * @param transaction.signature - The transaction's signature.
  * @param transaction.slot - The slot it landed in.
  * @param transaction.blockTime - Its block time in Unix seconds.
+ * @param transaction.version - The message version; defaults to v0 for existing fixtures.
  * @param transaction.accountKeys - Its account keys; the first is the fee payer.
  * @param transaction.instructions - Its top-level parsed instructions.
  * @param transaction.innerInstructions - Its `meta.innerInstructions` groups, each `{ index, instructions }`.
@@ -223,6 +224,7 @@ export function parsedTransactionResult(transaction: {
   signature: string;
   slot: number;
   blockTime: number;
+  version?: 0 | 1;
   accountKeys: readonly string[];
   instructions: readonly JsonRpcResult[];
   innerInstructions: readonly JsonRpcResult[];
@@ -232,7 +234,7 @@ export function parsedTransactionResult(transaction: {
   return {
     slot: transaction.slot,
     blockTime: transaction.blockTime,
-    version: 0,
+    version: transaction.version === 1 ? 1 : 0,
     meta: {
       err: null,
       status: { Ok: null },

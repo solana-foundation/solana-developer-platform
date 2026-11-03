@@ -7,6 +7,8 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { createTransferBatchSchema } from "./schemas";
 
 export type CreateTransferBatchInput = z.infer<typeof createTransferBatchSchema>;
+/** What resolving and checking a batch reads: everything but its run name. */
+export type TransferBatchMovementInput = Omit<CreateTransferBatchInput, "externalId">;
 export type TransferBatchRecipientInput = CreateTransferBatchInput["recipients"][number];
 export type Rpc = SolanaRpc;
 export type RecentBlockhash = Awaited<ReturnType<typeof getRecentBlockhash>>;

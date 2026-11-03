@@ -1,4 +1,3 @@
-import { FIELDS } from "@sdp/env-config/fields";
 import { generateEnv } from "@sdp/env-config/generate";
 import { describe, expect, it } from "vitest";
 import { collectFromEnv, getOutPath, resolveMultiSelectTokens } from "@/scripts/configure";
@@ -133,15 +132,5 @@ describe("collectFromEnv", () => {
 
   it("emits the self_hosted deployment mode constant", () => {
     expect(generateEnv(collectFromEnv({}))).toContain("SDP_DEPLOYMENT_MODE=self_hosted");
-  });
-
-  it("emits derived fields without taking them from input", () => {
-    // The interactive loop skips any field with a derive (they are computed),
-    // yet generate still emits them from the values they depend on.
-    const network = FIELDS.find((f) => f.key === "NEXT_PUBLIC_SOLANA_NETWORK");
-    expect(network?.derive).toBeTypeOf("function");
-
-    const env = generateEnv(collectFromEnv({ SOLANA_NETWORK: "mainnet-beta" }));
-    expect(env).toContain("NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta");
   });
 });

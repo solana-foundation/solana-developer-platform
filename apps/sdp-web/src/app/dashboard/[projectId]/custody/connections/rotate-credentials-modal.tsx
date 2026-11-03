@@ -8,6 +8,7 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
+import { FireblocksCredentialFields } from "@/app/dashboard/[projectId]/custody/setup/fireblocks-credential-fields";
 import { useTranslations } from "@/i18n/provider";
 import { rotateCredentialsAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
@@ -41,6 +42,9 @@ export function RotateCredentialsModal({
   const t = useTranslations();
   const { pending, run } = useCustodyAction();
   // Keep the attempt outside Modal's children, which unmount while it is hidden.
+  const [childPending, setChildPending] = useState(false);
+  const [fireblocksReady, setFireblocksReady] = useState(false);
+  const [csrAttempt, setCsrAttempt] = useState(0);
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
@@ -48,14 +52,18 @@ export function RotateCredentialsModal({
 
   const connectionCount = lifecycle.impact.connections.length;
   const fieldsDisabled = pending || attempt !== null || !canRotate;
-  const handleClose = () => onClose(attempt !== null);
+  const inFlight = pending || childPending;
+  const handleClose = () => {
+    if (!inFlight) onClose(attempt !== null);
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pending || (!attempt && !canRotate)) return;
+    if (inFlight || (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady))))
+      return;
     // Keep fields, key and target together: a refresh may replace the current
     // credential while the original request's response is still unknown.
-    const formData = attempt ?? new FormData();
+    const formData = attempt ?? new FormData(event.currentTarget);
     if (!attempt) {
       formData.set("credentialId", lifecycle.providerCredential.id);
       formData.set("connectionId", connectionId);
@@ -82,6 +90,7 @@ export function RotateCredentialsModal({
     // Only a conclusive refusal permits a corrected intent under a fresh key.
     if (result.status === "failed") {
       setIdempotencyKey(crypto.randomUUID());
+      setCsrAttempt((value) => value + 1);
     }
 
     if (result.status === "success") {
@@ -92,8 +101,8 @@ export function RotateCredentialsModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={pending ? undefined : handleClose}
-      closeDisabled={pending}
+      onClose={inFlight ? undefined : handleClose}
+      closeDisabled={inFlight}
       size="lg"
       ariaLabel={t("DashboardCustody.rotateTitle")}
     >
@@ -106,34 +115,52 @@ export function RotateCredentialsModal({
           <Callout variant="warning">{t("DashboardCustody.rotateRetryHint")}</Callout>
         ) : null}
 
-        <div className="space-y-2">
-          <Label htmlFor="custody-rotate-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-          <Input
-            id="custody-rotate-app-id"
-            name="appId"
-            required
+        {provider === "fireblocks" ? (
+          <FireblocksCredentialFields
+            multiple={false}
+            key={csrAttempt}
+            onReadyChange={setFireblocksReady}
+            onPendingChange={setChildPending}
+            primaryVaultId={lifecycle.providerCredential.displayMetadata.primaryVaultId}
             disabled={fieldsDisabled}
-            value={appId}
-            onChange={(event) => setAppId(event.target.value)}
           />
-        </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="custody-rotate-app-id">
+                {t("DashboardCustody.providerPrivyAppId")}
+              </Label>
+              <Input
+                id="custody-rotate-app-id"
+                name="appId"
+                required
+                disabled={fieldsDisabled}
+                value={appId}
+                onChange={(event) => setAppId(event.target.value)}
+              />
+            </div>
 
-        <SecretField
-          name="appSecret"
-          label={t("DashboardCustody.rotateNewSecretLabel")}
-          hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
-          value={appSecret}
-          onChange={setAppSecret}
-          disabled={fieldsDisabled}
-        />
+            <SecretField
+              name="appSecret"
+              label={t("DashboardCustody.rotateNewSecretLabel")}
+              hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+              value={appSecret}
+              onChange={setAppSecret}
+              disabled={fieldsDisabled}
+            />
+          </>
+        )}
 
         <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={handleClose} disabled={pending}>
+          <Button type="button" variant="secondary" onClick={handleClose} disabled={inFlight}>
             {t(attempt ? "DashboardCustody.close" : "DashboardCustody.cancel")}
           </Button>
           <Button
             type="submit"
-            disabled={pending || (!attempt && !canRotate)}
+            disabled={
+              inFlight ||
+              (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady)))
+            }
             iconLeft={
               pending ? (
                 <Loader2Icon aria-hidden className="size-4 animate-spin" />

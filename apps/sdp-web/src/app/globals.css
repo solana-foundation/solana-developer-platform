@@ -1,3 +1,6 @@
+/* Clerk's component styles go in the clerk layer (cssLayerName in clerk-client-provider), under
+   utilities, so the appearance classes on the auth pages win over Clerk's own. */
+@layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 @import "@solana/design-system/styles";
 /* SDP tokens (palettes, refresh scope, scale) and their Tailwind utilities, then the app's
@@ -9,9 +12,8 @@
 /* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an
    explicit, persisted preference, so utilities must follow the root class. */
 @custom-variant dark (&:where(.dark, .dark *));
-/* Changes outside the refresh scope that belong to the new design (NEW DESIGN flag): the shell
-   marks itself with data-sdp-new-design while the flag is on. */
-@custom-variant new-design (&:where([data-sdp-new-design], [data-sdp-new-design] *));
+/* Styles that hold only inside the dashboard shell, which marks itself with data-sdp-dashboard-shell. */
+@custom-variant dashboard-shell (&:where([data-sdp-dashboard-shell], [data-sdp-dashboard-shell] *));
 
 /* Ensure Tailwind scans app source files */
 @source "../**/*.{ts,tsx}";
@@ -345,6 +347,6 @@ vercel-live-feedback {
 
 /* A flow's footer holds its Back, Cancel and primary action. Toasts (app-toaster.tsx) sit
    above it with sonner's usual 24px gap instead of covering them. */
-:root:has([data-sdp-new-design] [data-wizard-actions]) {
+:root:has([data-sdp-dashboard-shell] [data-wizard-actions]) {
   --app-toast-offset-bottom: calc(6rem + env(safe-area-inset-bottom));
 }

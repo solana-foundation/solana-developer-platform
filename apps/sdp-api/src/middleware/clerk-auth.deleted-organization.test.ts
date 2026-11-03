@@ -11,6 +11,8 @@ import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { ensureTestClerkIssuer, seedClerkIdentity, signTestClerkJwt } from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedInvitation } from "@/test/helpers/invitations";
+import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -81,27 +83,40 @@ describe("Clerk auth into a deleted organization", () => {
       .prepare("DELETE FROM organization_members WHERE organization_id = ?")
       .bind(ORG_ID)
       .run();
+    await seedDefaultProjects(db, { organizationId: ORG_ID, createdBy: USER_ID, members: [] });
+    await seedInvitation(db, {
+      id: "inv_deleted_org",
+      organizationId: ORG_ID,
+      email: EMAIL,
+      role: "member",
+      invitedBy: USER_ID,
+      status: "pending",
+      expiresInDays: 7,
+    });
   });
 
   afterEach(async () => {
     await clearKVStores(env);
   });
 
-  async function provisionedRows(): Promise<{ memberships: number; projects: number }> {
+  async function provisionedRows(): Promise<{ memberships: number; projectMembers: number }> {
     const memberships = await getDb(env)
       .prepare(
         "SELECT COUNT(*) AS total FROM organization_members WHERE organization_id = ? AND status = 'active'"
       )
       .bind(ORG_ID)
       .first<{ total: number }>();
-    const projects = await getDb(env)
-      .prepare("SELECT COUNT(*) AS total FROM projects WHERE organization_id = ?")
-      .bind(ORG_ID)
+    const projectMembers = await getDb(env)
+      .prepare("SELECT COUNT(*) AS total FROM project_members WHERE user_id = ?")
+      .bind(USER_ID)
       .first<{ total: number }>();
 
     assert(memberships !== null);
-    assert(projects !== null);
-    return { memberships: Number(memberships.total), projects: Number(projects.total) };
+    assert(projectMembers !== null);
+    return {
+      memberships: Number(memberships.total),
+      projectMembers: Number(projectMembers.total),
+    };
   }
 
   async function deleteOrganization(): Promise<void> {
@@ -122,7 +137,7 @@ describe("Clerk auth into a deleted organization", () => {
     );
 
     expect(res.status).toBe(401);
-    expect(await provisionedRows()).toEqual({ memberships: 0, projects: 0 });
+    expect(await provisionedRows()).toEqual({ memberships: 0, projectMembers: 0 });
   });
 
   it("refuses a membership re-activated after the deletion", async () => {
@@ -145,6 +160,32 @@ describe("Clerk auth into a deleted organization", () => {
     );
 
     expect(res.status).toBe(401);
+  });
+
+  it("refuses an active member while the organization is still provisioning", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('om_provisioning', ?, ?, 'admin', 'active')`
+      )
+      .bind(ORG_ID, USER_ID)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'provisioning' WHERE id = ?")
+      .bind(ORG_ID)
+      .run();
+    const { app, token } = await createApp();
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED", message: "Organization is not active" },
+    });
   });
 
   it("refuses to provision a membership when the deletion lands after the door's read", async () => {

@@ -23,6 +23,7 @@
  */
 
 import { getSignatureStatuses, type SolanaRpc } from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import {
   type Address,
@@ -137,7 +138,7 @@ export function createDvpEscrowHistoryReader(rpc: SolanaRpc): DvpEscrowHistoryRe
           .getTransaction(transactionSignature, {
             commitment: "confirmed",
             encoding: "jsonParsed",
-            maxSupportedTransactionVersion: 0,
+            maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
           })
           .send()
       );

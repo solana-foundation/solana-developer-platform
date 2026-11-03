@@ -4,16 +4,19 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  zod: 4.6.6
+
 importers:
 
   .:
     dependencies:
       ai:
         specifier: 7.0.28
-        version: 7.0.28(zod@4.4.3)
+        version: 7.0.28(zod@4.6.6)
       eve:
         specifier: 0.24.4
-        version: 0.24.4(ai@7.0.28(zod@4.4.3))
+        version: 0.24.4(ai@7.0.28(zod@4.6.6))
     devDependencies:
       '@types/node':
         specifier: 24.13.3
@@ -28,13 +31,13 @@ packages:
     resolution: {integrity: sha512-m3PdYs0yqSxswsrEhVj64wDLgFs35Zxl8liLNuWGzE7bwBLF6Mhu0E5rPpDNJbIjyQpA4aMKOOWBfjERw2zvPw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
+      zod: 4.6.6
 
   '@ai-sdk/provider-utils@5.0.10':
     resolution: {integrity: sha512-uPyec0+85dwxZYXtb8qe8gCjhjDfxP4LCDo/uRQS/iG+FIgYbHPRhr/ys281udG90bTaE18+5cxWraYaf8oHCw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
+      zod: 4.6.6
 
   '@ai-sdk/provider@4.0.3':
     resolution: {integrity: sha512-e0CpNWJUY7OxAFAnCZkw+ri9QOHWwTs1tXP42782KFGCU07qt8NiXCrCVowyCB5dP2r5/Uls+g2oPd8kOJn9dw==}
@@ -296,7 +299,7 @@ packages:
     resolution: {integrity: sha512-RtynA4e6rWH2YiMX0OJz2h2i+sdJgiItuwqmstYZAiTZ0ZkZzQ8s4KVh7tQfZuDCfzIhRTg+q1h1xirT8AClkw==}
     engines: {node: '>=22'}
     peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
+      zod: 4.6.6
 
   consola@3.4.2:
     resolution: {integrity: sha512-5IKcdX0nnYavi6G7TtOhwkYzyjfJlatbjMjuLSfE2kYT5pMDOilZ4OvMhi637CcDICTmz3wARPoyhqyX1Y+XvA==}
@@ -544,25 +547,25 @@ packages:
       uploadthing:
         optional: true
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
-  '@ai-sdk/gateway@4.0.20(zod@4.4.3)':
+  '@ai-sdk/gateway@4.0.20(zod@4.6.6)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
-      '@ai-sdk/provider-utils': 5.0.10(zod@4.4.3)
+      '@ai-sdk/provider-utils': 5.0.10(zod@4.6.6)
       '@vercel/oidc': 3.2.0
-      zod: 4.4.3
+      zod: 4.6.6
 
-  '@ai-sdk/provider-utils@5.0.10(zod@4.4.3)':
+  '@ai-sdk/provider-utils@5.0.10(zod@4.6.6)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
-      zod: 4.4.3
+      zod: 4.6.6
 
   '@ai-sdk/provider@4.0.3':
     dependencies:
@@ -719,12 +722,12 @@ snapshots:
 
   '@workflow/serde@4.1.0': {}
 
-  ai@7.0.28(zod@4.4.3):
+  ai@7.0.28(zod@4.6.6):
     dependencies:
-      '@ai-sdk/gateway': 4.0.20(zod@4.4.3)
+      '@ai-sdk/gateway': 4.0.20(zod@4.6.6)
       '@ai-sdk/provider': 4.0.3
-      '@ai-sdk/provider-utils': 5.0.10(zod@4.4.3)
-      zod: 4.4.3
+      '@ai-sdk/provider-utils': 5.0.10(zod@4.6.6)
+      zod: 4.6.6
 
   consola@3.4.2: {}
 
@@ -741,9 +744,9 @@ snapshots:
       httpxy: 0.5.5
       srvx: 0.11.22
 
-  eve@0.24.4(ai@7.0.28(zod@4.4.3)):
+  eve@0.24.4(ai@7.0.28(zod@4.6.6)):
     dependencies:
-      ai: 7.0.28(zod@4.4.3)
+      ai: 7.0.28(zod@4.6.6)
       nitro: 3.0.260610-beta
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -924,4 +927,4 @@ snapshots:
       db0: 0.3.4
       ofetch: 2.0.0-alpha.3
 
-  zod@4.4.3: {}
+  zod@4.6.6: {}

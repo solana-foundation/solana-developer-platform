@@ -38,6 +38,7 @@ import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
 } from "@/db/repositories/repository-factory";
+import type { SubscriptionAuthorityRevokeFence } from "@/db/repositories/subscription-authority-revocations.repository";
 import { AppError, badRequest, conflict, internalError } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -55,10 +56,12 @@ import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  approveSubscriptionAuthority,
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
+  keepAttemptRevokeFence,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -549,6 +552,7 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   mint: Address;
   tokenProgram: Address;
   feePayer: Address;
+  revokeFence: SubscriptionAuthorityRevokeFence;
 }) {
   if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
     return input.subscriptionAuthority;
@@ -582,13 +586,27 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     sourceSigner: input.sourceSigner,
     instructions: [
       ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      ...(initAuthorityInstruction
+        ? [
+            initAuthorityInstruction,
+            // The setup approves the authority for u64::MAX; collections approve their own
+            // amount, so it holds nothing at rest (HOO-2339).
+            approveSubscriptionAuthority({
+              tokenAccount: input.sourceTokenAccount.tokenAccount,
+              authority: input.subscriptionAuthorityAddress,
+              owner: input.sourceSigner,
+              amount: 0n,
+              tokenProgram: input.tokenProgram,
+            }),
+          ]
+        : []),
     ],
     feePayer: input.feePayer,
     submissionStore: createSubscriptionStepStore({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      revokeFence: input.revokeFence,
       lease: input.lease,
       save: async (send, tx) => {
         requireUpdatedAttempt(
@@ -695,7 +713,7 @@ export async function activateRecurringPayment(input: {
       recurringPaymentId: input.recurringPayment.id,
       custodyWalletIds: [input.sourceWallet.id],
     });
-    await refuseWhileSubscriptionAuthorityRevokes(tx, {
+    const claimFence = await refuseWhileSubscriptionAuthorityRevokes(tx, {
       projectId: input.projectId,
       custodyWalletIds: [input.sourceWallet.id],
     });
@@ -718,7 +736,14 @@ export async function activateRecurringPayment(input: {
       recoveringStaleActivation,
       idempotencyKey: input.idempotencyKey,
     });
-    return { claimed, attempt };
+    const revokeFence = await keepAttemptRevokeFence(tx, {
+      attempt: "activation",
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      fence: claimFence,
+    });
+    return { claimed, attempt, revokeFence };
   });
 
   if (!claimResult) {
@@ -731,7 +756,7 @@ export async function activateRecurringPayment(input: {
     });
     throw conflict("Recurring payment activation is already processing");
   }
-  const { attempt, claimed } = claimResult;
+  const { attempt, claimed, revokeFence } = claimResult;
   const lease = recurringPaymentLease(claimed, "activation");
 
   let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
@@ -761,7 +786,7 @@ export async function activateRecurringPayment(input: {
     if (recoveringStaleActivation) {
       await input.admitStart();
     }
-    const signer = await createOrgSignerForCustodyWallet(
+    const signer = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1016,7 +1041,7 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayment = createSponsorshipFeePayment(
+      const feePayment = createSponsorshipFeePayment<"recurring_payments">(
         input.env,
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
@@ -1045,6 +1070,7 @@ export async function activateRecurringPayment(input: {
         mint,
         tokenProgram,
         feePayer,
+        revokeFence,
       });
       if (!subscriptionAuthority.exists) {
         throw new ResumedStepUnsettledError(
@@ -1074,6 +1100,7 @@ export async function activateRecurringPayment(input: {
         feePayer,
         submissionStore: createSubscriptionStepStore({
           ...authorizationStep,
+          revokeFence,
           save: async (send, tx) => {
             const signatureUpdatedAt = new Date().toISOString();
             const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);

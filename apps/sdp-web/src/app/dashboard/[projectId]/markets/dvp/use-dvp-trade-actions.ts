@@ -33,13 +33,13 @@ import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
-export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
+type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
 /**
  * Settle and cancel act on the trade; fund and reclaim name the leg they move,
  * and that leg's symbol so a refusal can name the token instead of its mint.
  */
-export type DvpTradeActionCall =
+type DvpTradeActionCall =
   | [action: "settle" | "cancel"]
   | [
       action: "fund" | "reclaim",

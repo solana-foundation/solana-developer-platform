@@ -1,13 +1,13 @@
+import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import type { Context, Next } from "hono";
-import { getLogger, runWithLogContext } from "@/runtime/logger";
+import { routePath } from "hono/route";
+import { getOptionalAuth } from "@/lib/auth";
+import { runWithLogContext } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
 const TRACE_SOURCE_HEADER = "X-SDP-Trace-Source";
-const MAX_TRACE_ID_LENGTH = 128;
-const MAX_TRACE_SOURCE_LENGTH = 64;
-const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const TRACE_SOURCE_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
@@ -17,72 +17,62 @@ function appendServerTiming(existingValue: string | null, nextEntry: string): st
   return existingValue ? `${existingValue}, ${nextEntry}` : nextEntry;
 }
 
-function normalizeHeaderValue(
-  value: string | null | undefined,
-  maxLength: number,
-  pattern: RegExp
-): string | null {
-  if (!value) {
-    return null;
+function traceSource(value: string | undefined): string {
+  if (value === "sdp-web") return "sdp-web";
+  if (value?.startsWith("route.playground.")) return "playground";
+  if (value?.startsWith("route.dashboard.") || value?.startsWith("dashboard.")) {
+    return "dashboard";
   }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const candidate = trimmed.slice(0, maxLength);
-  if (!pattern.test(candidate)) {
-    return null;
-  }
-
-  return candidate;
+  return "unknown";
 }
 
 export function requestTracingMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const startedAt = performance.now();
     const requestId = c.get("requestId");
-    const traceId =
-      normalizeHeaderValue(c.req.header(TRACE_ID_HEADER), MAX_TRACE_ID_LENGTH, TRACE_ID_PATTERN) ||
-      requestId;
-    const requestSource =
-      normalizeHeaderValue(
-        c.req.header(TRACE_SOURCE_HEADER),
-        MAX_TRACE_SOURCE_LENGTH,
-        TRACE_SOURCE_PATTERN
-      ) || "unknown";
+    const traceId = requestId;
+    const requestSource = traceSource(c.req.header(TRACE_SOURCE_HEADER));
+    const webTraceHash = await hashWebTraceId(c.req.header(TRACE_ID_HEADER)).catch(() => null);
 
     c.set("traceId", traceId);
     c.set("requestSource", requestSource);
 
-    await runWithLogContext({ request_id: requestId, trace_id: traceId }, async () => {
-      try {
-        await next();
-      } finally {
-        if (c.res) {
-          const durationMs = roundDuration(performance.now() - startedAt);
-          const pathname = new URL(c.req.url).pathname;
+    await runWithLogContext(
+      {
+        request_id: requestId,
+        trace_id: traceId,
+        web_trace_hash: webTraceHash ?? undefined,
+      },
+      async () => {
+        try {
+          await next();
+        } finally {
+          if (c.res) {
+            const durationMs = roundDuration(performance.now() - startedAt);
+            const auth = getOptionalAuth(c);
+            const path = routePath(c, -1) || "unmatched";
 
-          c.header(TRACE_ID_HEADER, traceId);
-          c.header(
-            "Server-Timing",
-            appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
-          );
+            c.header(TRACE_ID_HEADER, traceId);
+            c.header(
+              "Server-Timing",
+              appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
+            );
 
-          getLogger().info(
-            {
+            logEvent("info", {
               event: "sdp_api_request_timing",
               source: requestSource,
               method: c.req.method,
-              path: pathname,
+              path,
               status: c.res.status,
               duration_ms: durationMs,
-            },
-            "request completed"
-          );
+              organization_id: auth?.organizationId,
+              project_id: auth?.projectId,
+              api_key_id: auth?.apiKeyId,
+              auth_type: auth?.authType,
+            });
+          }
         }
       }
-    });
+    );
   };
 }

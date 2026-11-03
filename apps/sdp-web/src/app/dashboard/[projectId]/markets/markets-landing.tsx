@@ -1,70 +1,33 @@
-import { cn } from "@sdp/ui/cn";
-import {
-  providerSelectionCardIconClassName,
-  providerSelectionCardTitleClassName,
-  providerSelectionCardTitleUnderlineClassName,
-} from "@sdp/ui/provider-selection-card";
-import {
-  ArrowLeftRightIcon,
-  ArrowRightIcon,
-  LandmarkIcon,
-  type LucideIcon,
-  UsersRoundIcon,
-} from "lucide-react";
-import Link from "next/link";
+import { ArrowLeftRightIcon, LandmarkIcon, UsersRoundIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { RecordStack } from "@/components/refresh-record";
+import { ActionTile } from "@/components/ui/action-tile";
 import { dvp, earn } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { requestProjectHref } from "@/lib/sdp-api";
 
-function MarketsPathCard({
-  audience,
-  description,
-  href,
-  icon: Icon,
+/**
+ * One group of paths: an 18px heading over its tiles, two to a row as Payments sets its
+ * actions. The heading names the section for assistive tech.
+ */
+function MarketsPathGroup({
+  headingId,
   title,
+  children,
 }: {
-  audience?: string;
-  description: string;
-  href: string;
-  icon: LucideIcon;
+  headingId: string;
   title: string;
+  children: ReactNode;
 }) {
   return (
-    <Link
-      className="group flex h-full items-center justify-between gap-5 rounded-2xl border border-border-default bg-surface-raised p-6 transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
-      href={href}
-    >
-      <span className="flex min-w-0 items-start gap-4">
-        <span className={providerSelectionCardIconClassName}>
-          <Icon aria-hidden="true" className="h-5 w-5" />
-        </span>
-        <span className="min-w-0 flex-1 space-y-2">
-          {audience ? (
-            <span className="block text-xs font-medium uppercase tracking-wide text-tertiary">
-              {audience}
-            </span>
-          ) : null}
-          <span
-            className={cn(
-              providerSelectionCardTitleClassName,
-              "text-primary",
-              providerSelectionCardTitleUnderlineClassName
-            )}
-          >
-            {title}
-          </span>
-          <span className="block max-w-md pt-0.5 text-sm leading-6 text-tertiary">
-            {description}
-          </span>
-        </span>
-      </span>
-      <ArrowRightIcon
-        aria-hidden="true"
-        className="h-4 w-4 shrink-0 text-tertiary transition duration-200 group-hover:translate-x-0.5 group-hover:text-primary motion-reduce:transition-none"
-      />
-    </Link>
+    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
+      <h2 className="text-subheading font-medium text-primary" id={headingId}>
+        {title}
+      </h2>
+      <div className="grid min-w-0 grid-cols-2 gap-2">{children}</div>
+    </section>
   );
 }
 
@@ -75,53 +38,51 @@ function MarketsPathCard({
  * is on: the same check its segment layout 404s on.
  */
 export async function MarketsLanding() {
-  const [t, earnEnabled, dvpEnabled] = await Promise.all([getTranslations(), earn(), dvp()]);
+  const [t, earnEnabled, dvpEnabled, treasuryHref, earnProgramHref, dvpHref] = await Promise.all([
+    getTranslations(),
+    earn(),
+    dvp(),
+    requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions),
+    requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram),
+    requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp),
+  ]);
 
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-4xl space-y-10">
+      <RecordStack>
         {earnEnabled ? (
-          <section aria-labelledby="markets-earn-heading" className="space-y-4">
-            <h2 className="text-lg font-medium leading-6 text-primary" id="markets-earn-heading">
-              {t("DashboardMarkets.landing.earnHeading")}
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              <MarketsPathCard
-                audience={t("DashboardMarkets.landing.treasuryAudience")}
-                description={t("DashboardMarkets.landing.treasuryDescription")}
-                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions)}
-                icon={LandmarkIcon}
-                title={t("Shared.dashboardShell.treasurySolutions")}
-              />
-              <MarketsPathCard
-                audience={t("DashboardMarkets.landing.programAudience")}
-                description={t("DashboardMarkets.landing.programDescription")}
-                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram)}
-                icon={UsersRoundIcon}
-                title={t("Shared.dashboardShell.earnProgram")}
-              />
-            </div>
-          </section>
+          <MarketsPathGroup
+            headingId="markets-earn-heading"
+            title={t("DashboardMarkets.landing.earnHeading")}
+          >
+            <ActionTile
+              href={treasuryHref}
+              icon={LandmarkIcon}
+              label={t("Shared.dashboardShell.treasurySolutions")}
+              description={t("DashboardMarkets.landing.treasuryTileDescription")}
+            />
+            <ActionTile
+              href={earnProgramHref}
+              icon={UsersRoundIcon}
+              label={t("Shared.dashboardShell.earnProgram")}
+              description={t("DashboardMarkets.landing.programTileDescription")}
+            />
+          </MarketsPathGroup>
         ) : null}
         {dvpEnabled ? (
-          <section aria-labelledby="markets-settlement-heading" className="space-y-4">
-            <h2
-              className="text-lg font-medium leading-6 text-primary"
-              id="markets-settlement-heading"
-            >
-              {t("DashboardMarkets.landing.settlementHeading")}
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              <MarketsPathCard
-                description={t("DashboardMarkets.dvp.landingDescription")}
-                href={await requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp)}
-                icon={ArrowLeftRightIcon}
-                title={t("DashboardMarkets.dvp.navLabel")}
-              />
-            </div>
-          </section>
+          <MarketsPathGroup
+            headingId="markets-settlement-heading"
+            title={t("DashboardMarkets.landing.settlementHeading")}
+          >
+            <ActionTile
+              href={dvpHref}
+              icon={ArrowLeftRightIcon}
+              label={t("DashboardMarkets.dvp.navLabel")}
+              description={t("DashboardMarkets.dvp.landingTileDescription")}
+            />
+          </MarketsPathGroup>
         ) : null}
-      </div>
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }

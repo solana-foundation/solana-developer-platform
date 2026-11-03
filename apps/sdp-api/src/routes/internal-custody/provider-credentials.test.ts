@@ -1278,7 +1278,7 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
       expect(await response.json()).toEqual({
         error: {
           code: "CONFLICT",
-          message: "A Privy custody installation is already in progress for this project",
+          message: "A custody installation is already in progress for this project",
           details: { reason: "unfinished_installation_exists" },
         },
         meta: { requestId: "req_provider_credential_submit" },

@@ -50,6 +50,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch, dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { useCadencedSWR } from "@/lib/use-cadenced-swr";
 import { earnQueryKeys } from "./earn-query-key";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
@@ -136,6 +137,27 @@ const LIVE_FEED_REFRESH_MS = 15_000;
 const LEDGER_REFRESH_MS = 30_000;
 
 /**
+ * Where both back off to once their last read came back empty: no position to
+ * value, no movement to discover. A first position only arrives through a
+ * movement, which Treasury watches from its own submit (or this discovery)
+ * and then reads directly, and discovery keeps running at this pace so a
+ * reload or another tab still surfaces an in-flight movement.
+ */
+const IDLE_REFRESH_MS = 120_000;
+
+/** Position values poll at the live cadence while any position exists, and idle while none does. */
+export function earnVaultPositionsRefreshInterval(
+  read: EarnVaultPositionsRead | undefined
+): number {
+  return read?.positions.length === 0 ? IDLE_REFRESH_MS : LIVE_FEED_REFRESH_MS;
+}
+
+/** A discovery ledger polls at its own cadence while it lists a movement, and idle while empty. */
+export function earnLedgerRefreshInterval<Row>(rows: readonly Row[] | undefined): number {
+  return rows?.length === 0 ? IDLE_REFRESH_MS : LEDGER_REFRESH_MS;
+}
+
+/**
  * The paging shape every paged earn read shares. The API caps `pageSize` at
  * 100, so a full collection pages at EARN_PAGE_SIZE, and every loop stops hard
  * at EARN_PAGE_LIMIT: a bad `total` or a cursor that never advances must never
@@ -220,7 +242,9 @@ const WALLET_POLL_MS: Partial<Record<EarnPortfolioWalletStatus, number>> = {
 /**
  * Poll cadence for the program read; 0 means stop. Exported so the rule is
  * assertable — a browser cannot prove it, because SWR suspends the interval
- * whenever the tab is hidden.
+ * whenever the tab is hidden. `useCadencedSWR` re-evaluates it on every read,
+ * so the `0` before the first read only means "nothing to poll yet": the
+ * mount read lands and the cadence starts from it.
  *
  * One read serves every program, so the cadence is the FASTEST any single
  * program asks for (a `creating` program among settled ones must still converge
@@ -243,16 +267,14 @@ export function earnProgramsRefreshInterval(state: EarnProgramsState | undefined
  * 10s, which is the busy cadence itself, and a poll landing inside its own
  * dedupe window is dropped — freezing the status exactly while it moves.
  */
-export const EARN_PROGRAM_DEDUPING_MS = 2_000;
+const EARN_PROGRAM_DEDUPING_MS = 2_000;
 
 export function useEarnPrograms() {
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useCadencedSWR(
     earnQueryKeys.programs(),
     () => fetchEarnProgramsState(),
-    {
-      refreshInterval: earnProgramsRefreshInterval,
-      dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
-    }
+    earnProgramsRefreshInterval,
+    { dedupingInterval: EARN_PROGRAM_DEDUPING_MS }
   );
   return { state: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -298,10 +320,14 @@ export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   // keepPreviousData → a cluster-toggle key flip keeps the current rows on
   // screen while the full paged fetch reruns, instead of tearing the table to
   // skeletons (same pattern as activity-tab and wallet-card-balance-value).
+  //
+  // No focus refetch: catalogue figures move only on the five-minute metrics
+  // cron, so a focus would re-page the whole shelf for nothing new. A reload
+  // or the page's own Refresh reads it again.
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.strategies({ cluster: cluster ?? "environment-default" }),
     () => fetchEarnStrategies(cluster),
-    { keepPreviousData: true }
+    { keepPreviousData: true, revalidateOnFocus: false }
   );
   return { strategies: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -554,9 +580,9 @@ function vaultPositionsReadKey(
 }
 
 /**
- * Live position values refresh while the surface is mounted; `reads` keeps the recent history,
- * newest last. The poll and explicit refreshes share one in-flight read when their requests are
- * identical.
+ * Live position values refresh while the surface is mounted, idling while none exists
+ * (`earnVaultPositionsRefreshInterval`); `reads` keeps the recent history, newest last. The poll
+ * and explicit refreshes share one in-flight read when their requests are identical.
  */
 export function useEarnVaultPositions() {
   const afterMovementIds = useRef<readonly string[]>([]);
@@ -576,9 +602,11 @@ export function useEarnVaultPositions() {
     started.then(settle, settle);
     return started;
   }, []);
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.vaultPositions(), read, {
-    refreshInterval: LIVE_FEED_REFRESH_MS,
-  });
+  const { data, error, isLoading, mutate } = useCadencedSWR(
+    earnQueryKeys.vaultPositions(),
+    read,
+    earnVaultPositionsRefreshInterval
+  );
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
   useEffect(() => {
     if (data) setHistory((current) => appendVaultPositionsRead(current, data));
@@ -804,7 +832,7 @@ const earnVaultDepositResponseSchema = z.object({
  * that failed says nothing about whether the deposit landed, and treating it
  * as an outcome would announce a settlement the API never reported.
  */
-export async function fetchEarnVaultDeposit(
+async function fetchEarnVaultDeposit(
   movementId: string
 ): Promise<EarnVaultDepositRecord | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -869,7 +897,7 @@ async function fetchAllVaultMovementPages<T>(input: {
  * workspace busy enough to push an in-flight deposit past the first page is
  * exactly the case a single request got wrong.
  */
-export async function fetchEarnVaultDeposits(
+async function fetchEarnVaultDeposits(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultDepositRecord[]> {
   return fetchAllVaultMovementPages({
@@ -989,13 +1017,15 @@ export async function fetchEarnVaultWithdrawalPreview(
  * runs its own fast poll. It is also how a deposit signed before a reload — or
  * in another tab — becomes
  * visible again, which is the whole reason it is a server read rather than
- * browser state.
+ * browser state. An empty list backs off to the idle cadence
+ * (`earnLedgerRefreshInterval`): a deposit submitted here is watched straight
+ * from its submit, so only another tab's waits for the slower discovery.
  */
 export function useEarnVaultDeposits() {
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useCadencedSWR(
     earnQueryKeys.vaultDepositsInFlight(),
     () => fetchEarnVaultDeposits({ settled: false }),
-    { refreshInterval: LEDGER_REFRESH_MS }
+    earnLedgerRefreshInterval
   );
   return { deposits: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1224,7 +1254,7 @@ const earnVaultWithdrawalResponseSchema = z.object({
  * deliberately NOT terminal — the caller keeps polling, because a read that
  * failed says nothing about whether the exit landed.
  */
-export async function fetchEarnVaultWithdrawal(
+async function fetchEarnVaultWithdrawal(
   movementId: string
 ): Promise<EarnVaultWithdrawal | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -1248,7 +1278,7 @@ const earnVaultWithdrawalsPageSchema = z.object({
  * and fails loudly rather than truncating, exactly like the deposits reader —
  * a silently short page here is an exit that stops being tracked.
  */
-export async function fetchEarnVaultWithdrawals(
+async function fetchEarnVaultWithdrawals(
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawal[]> {
   return fetchAllVaultMovementPages({
@@ -1267,16 +1297,16 @@ export async function fetchEarnVaultWithdrawals(
 }
 
 /**
- * The DISCOVERY tier for in-flight withdrawals, 30s, mirroring
- * `useEarnVaultDeposits`, and the reason an exit signed before a reload or in
- * another tab becomes
+ * The DISCOVERY tier for in-flight withdrawals, 30s and idling while empty,
+ * mirroring `useEarnVaultDeposits`, and the reason an exit signed before a
+ * reload or in another tab becomes
  * visible (and watched) again.
  */
 export function useEarnVaultWithdrawals() {
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useCadencedSWR(
     earnQueryKeys.vaultWithdrawalsInFlight(),
     () => fetchEarnVaultWithdrawals({ settled: false }),
-    { refreshInterval: LEDGER_REFRESH_MS }
+    earnLedgerRefreshInterval
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1587,7 +1617,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
 }
 
-export async function fetchEarnVaultWithdrawalRequest(
+async function fetchEarnVaultWithdrawalRequest(
   withdrawalRequestId: string
 ): Promise<EarnVaultWithdrawalRequestRecord | undefined> {
   const result = await dashboardFetch<unknown>(
@@ -1637,20 +1667,19 @@ export async function fetchEarnVaultWithdrawalRequests(
   });
 }
 
-export function isEarnVaultWithdrawalRequestInFlight(
-  request: EarnVaultWithdrawalRequestRecord
-): boolean {
+function isEarnVaultWithdrawalRequestInFlight(request: EarnVaultWithdrawalRequestRecord): boolean {
   return !isEarnVaultQueuedWithdrawalTerminal(request.status);
 }
 
+/** The open queued requests, 30s and idling while none is open, like the movement discovery reads. */
 export function useEarnVaultWithdrawalRequests() {
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useCadencedSWR(
     earnQueryKeys.vaultWithdrawalRequestsOpen(),
     async () =>
       (await fetchEarnVaultWithdrawalRequests({ settled: false })).filter(
         isEarnVaultWithdrawalRequestInFlight
       ),
-    { refreshInterval: LEDGER_REFRESH_MS }
+    earnLedgerRefreshInterval
   );
   return { withdrawalRequests: data, error, isLoading, refresh: () => void mutate() };
 }
@@ -1733,7 +1762,7 @@ export function createEarnWithdrawal(
   return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
 }
 
-export function fetchEarnWithdrawal(
+function fetchEarnWithdrawal(
   programId: string,
   withdrawalRef: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {

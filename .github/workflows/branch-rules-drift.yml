@@ -5,8 +5,8 @@ on:
     - cron: "23 */6 * * *"
   pull_request:
     paths:
-      - '.github/branch-rules-baseline.json'
-      - '.github/workflows/branch-rules-drift.yml'
+      - ".github/branch-rules-baseline.json"
+      - ".github/workflows/branch-rules-drift.yml"
   workflow_dispatch:
 
 permissions:

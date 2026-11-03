@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import {
   getRecurringPaymentDetailState,
+  recurringPaymentReadFailureOutcome,
   refreshIfOutcomeUnknown,
 } from "./recurring-payment-detail-state";
 
@@ -113,5 +114,25 @@ describe("refreshIfOutcomeUnknown", () => {
 
     refreshIfOutcomeUnknown(new IdempotencyOutcomeUnknownError("check the list"), refresh);
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("recurringPaymentReadFailureOutcome", () => {
+  it("is not found when the API has no such schedule", () => {
+    expect(recurringPaymentReadFailureOutcome("prp_unknown", 404)).toBe("not_found");
+  });
+
+  it("goes back to the list for a demo schedule once demo mode is off", () => {
+    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", 404)).toBe("list");
+    expect(recurringPaymentReadFailureOutcome("demo_new_rp_0123456789ab", 404)).toBe("list");
+  });
+
+  it.each([
+    ["a server error", 500],
+    ["a rate limit", 429],
+    ["a failed request", null],
+  ])("keeps the error boundary for %s", (_case, status) => {
+    expect(recurringPaymentReadFailureOutcome("prp_unknown", status)).toBe("failed");
+    expect(recurringPaymentReadFailureOutcome("demo_rp_northwind_supply", status)).toBe("failed");
   });
 });

@@ -17,30 +17,29 @@ affordances for the example.
 
 ## Screenshots
 
-| Overview | Move to savings | SDP project portfolio |
-| --- | --- | --- |
+| Overview                                                     | Move to savings                                                | SDP project portfolio                                                           |
+| ------------------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | ![Northstar overview](./screenshots/northstar-dashboard.jpg) | ![Move to savings dialog](./screenshots/northstar-deposit.jpg) | ![SDP Embedded Yield dashboard](./screenshots/sdp-embedded-yield-dashboard.jpg) |
 
 ## How the bank maps to SDP
 
-| Northstar | SDP |
-| --- | --- |
-| Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
-| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first fundable DeFi USDC strategy on `SOLANA_CLUSTER` (with none qualifying, every page load fails until fixed) |
+| Northstar                    | SDP                                                                                                                                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Checking balance             | The demo wallet's balance of the strategy's deposit token, read over RPC                                                                                                                |
+| Savings account              | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first fundable DeFi USDC strategy on `SOLANA_CLUSTER` (with none qualifying, every page load fails until fixed)             |
 | Savings balance and earnings | The wallet's open position plus valued shares held in a queued request; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
-| Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
-| Move to checking | Discover live withdrawal routes, then use the selected direct or queued flow without silent fallback |
-| Queued withdrawals | Preview live limits, escrow shares, restore every unfinished request after refresh, and offer owner-signed recovery only after `expiredCancelable` |
-| Recent activity | External-wallet movements whose provider and vault match the strategy, shown in the deposit token, kept after the position closes |
+| Move to savings              | Deposit preview when the strategy requires a floor, then build, server-side sign, submit                                                                                                |
+| Move to checking             | Discover live withdrawal routes, then use the selected direct or queued flow without silent fallback                                                                                    |
+| Queued withdrawals           | Preview live limits, escrow shares, restore every unfinished request after refresh, and offer owner-signed recovery only after `expiredCancelable`                                      |
+| Recent activity              | External-wallet movements whose provider and vault match the strategy, shown in the deposit token, kept after the position closes                                                       |
 
 The customer never sees shares or providers. For a queued exit they do see the
 financial choices that matter: accepted discount, maturity, solver window, and
 the fact that the first transaction escrows shares rather than paying assets.
-Northstar demonstrates the authenticated tier because it submits signed
-transactions to SDP and reads the resulting tenant movements, positions, and
-durable withdrawal requests. A keyless integration can discover and preview a
-queue, but queue builds and recovery are keyed so they cannot lose the durable
-status needed to get the customer's shares back.
+Northstar submits signed transactions to SDP and reads the resulting tenant
+movements, positions, and durable withdrawal requests with its project's API
+key, like every Earn integration. Queue builds and recovery go through SDP so
+the durable status needed to get the customer's shares back is never lost.
 
 The SDP client lives in [`server/sdp-client.ts`](server/sdp-client.ts), the
 bank rules (strategy choice, amount to shares) in
@@ -157,9 +156,11 @@ development configuration described in
    API syncs the Earn strategy catalogue at startup and hourly afterward, so a
    fresh database lists strategies within a few seconds.
 
-4. In the local SDP dashboard, select a sandbox project and create a Developer
-   API key from **API keys** in the sidebar. The Developer role includes
-   `earn:read` and `earn:write`. Copy the full key when it is shown.
+4. In the local SDP dashboard, select a sandbox project and create an API key
+   from **API keys** in the sidebar. Grant **Earn** Read, Execute and Manage
+   (Manage builds the owner-signed recovery of an expired queued withdrawal).
+   Northstar never signs with a custody wallet, so give it the narrowest wallet
+   access the form allows. Copy the full key when it is shown.
 
 5. Generate the demo customer's managed wallet:
 
@@ -230,17 +231,17 @@ uncommitted changes ship too. Run the [validation](#validation) commands before 
 
 ## Configuration
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `SDP_API_BASE_URL` | No | SDP API origin. Defaults to local port `8787`; Vercel needs a reachable origin. |
-| `SDP_API_KEY` | Yes | Project key with Embedded Yield read and write permissions. Use a sandbox key for devnet or production key for mainnet. |
-| `DEMO_ACCESS_USERNAME` | No | HTTP Basic username. Defaults to `northstar`. |
-| `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
-| `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
-| `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded keypair on `SOLANA_CLUSTER` that co-signs and pays network fees and account rent. This is the partner fee-payer path and does not use Kora. |
-| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first fundable DeFi USDC strategy on `SOLANA_CLUSTER`; with none qualifying, every page load fails until fixed. |
-| `SOLANA_CLUSTER` | No | `devnet` by default, or `mainnet-beta` for a controlled production-project canary. |
-| `SOLANA_RPC_URL` | No | RPC used for direct wallet balance reads and transaction submission. Its genesis hash must match `SOLANA_CLUSTER`. |
+| Variable                     | Required | Purpose                                                                                                                                                                    |
+| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SDP_API_BASE_URL`           | No       | SDP API origin. Defaults to local port `8787`; Vercel needs a reachable origin.                                                                                            |
+| `SDP_API_KEY`                | Yes      | Project key with Embedded Yield read and write permissions. Use a sandbox key for devnet or production key for mainnet.                                                    |
+| `DEMO_ACCESS_USERNAME`       | No       | HTTP Basic username. Defaults to `northstar`.                                                                                                                              |
+| `DEMO_ACCESS_PASSWORD`       | Yes      | HTTP Basic password protecting the page and all API routes.                                                                                                                |
+| `DEMO_WALLET_PRIVATE_KEY`    | Yes      | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking.                                                                                |
+| `DEMO_FEE_PAYER_PRIVATE_KEY` | No       | Different funded keypair on `SOLANA_CLUSTER` that co-signs and pays network fees and account rent. This is the partner fee-payer path and does not use Kora.               |
+| `DEMO_STRATEGY_ID`           | No       | Catalogue id of the strategy behind savings. Otherwise the first fundable DeFi USDC strategy on `SOLANA_CLUSTER`; with none qualifying, every page load fails until fixed. |
+| `SOLANA_CLUSTER`             | No       | `devnet` by default, or `mainnet-beta` for a controlled production-project canary.                                                                                         |
+| `SOLANA_RPC_URL`             | No       | RPC used for direct wallet balance reads and transaction submission. Its genesis hash must match `SOLANA_CLUSTER`.                                                         |
 
 ## Controlled mainnet canary
 

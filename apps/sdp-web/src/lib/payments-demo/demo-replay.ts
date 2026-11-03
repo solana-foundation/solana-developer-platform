@@ -1,8 +1,10 @@
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRampQuoteDeliveryMode,
-  PaymentRecurringPayment,
-  PaymentTransferRecipient,
+import {
+  isPendingActivationRecurringPaymentStatus,
+  isRecurringPaymentLifecycleClaimableStatus,
+  type PaymentRampQuoteDeliveryMode,
+  type PaymentRecurringPayment,
+  type PaymentTransferRecipient,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
@@ -34,7 +36,7 @@ import { isDemoRampRail, railAsset } from "./demo-ramp-assets";
  */
 
 /** How long after its pay-in a ramp shows as settling before it completes. */
-export const DEMO_SETTLE_MS = 5_000;
+const DEMO_SETTLE_MS = 5_000;
 /** Recipients per transaction in a demo batch, as the API packs them. */
 export const DEMO_BATCH_RECIPIENTS_PER_TRANSACTION = 8;
 
@@ -270,12 +272,12 @@ function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
 }
 
 /** Where the demo provider asks an off-ramp's crypto to be sent. */
-export function rampDepositAddress(rampId: string): string {
+function rampDepositAddress(rampId: string): string {
   return demoAddress(`ramp-deposit:${rampId}`);
 }
 
 /** How each provider hands a ramp over, and the prefix of the reference it gives it. */
-export const DEMO_RAMP_PROVIDERS: Record<
+const DEMO_RAMP_PROVIDERS: Record<
   RampProviderId,
   { deliveryMode: PaymentRampQuoteDeliveryMode; reference: string }
 > = {
@@ -284,7 +286,7 @@ export const DEMO_RAMP_PROVIDERS: Record<
 };
 
 /** The reference a provider shows for a demo quote. */
-export function rampReference(provider: RampProviderId, quoteId: string): string {
+function rampReference(provider: RampProviderId, quoteId: string): string {
   return `${DEMO_RAMP_PROVIDERS[provider].reference}-${quoteId.slice(-10).toUpperCase()}`;
 }
 
@@ -363,12 +365,26 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     status: "awaiting_payment",
     expiresAt: op.expires,
     fulfilledByTransferId: null,
-    canceledBy: null,
+    paidLate: false,
+    canceledByApiKeyId: null,
+    canceledByUserId: null,
+    canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: createdAt }],
     createdBy: CREATED_BY,
     createdAt,
     updatedAt: createdAt,
   });
+}
+
+function applyRequestCancel(world: DemoWorld, op: DemoOpOf<"request-cancel">): void {
+  const request = world.requests.find((candidate) => candidate.id === op.id);
+  if (request?.status !== "awaiting_payment") return;
+  const canceledAt = iso(op.at);
+  request.status = "canceled";
+  request.canceledByUserId = CREATED_BY;
+  request.canceledAt = canceledAt;
+  request.lifecycle = [...request.lifecycle, { status: "canceled", at: canceledAt }];
+  request.updatedAt = canceledAt;
 }
 
 function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
@@ -400,6 +416,7 @@ function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
     subscriptionAuthorityAddress: null,
     authorizationSignature: null,
     status: "pending_activation",
+    pausedReason: null,
     metadataUri: null,
     createdBy: CREATED_BY,
     createdAt: iso(op.at),
@@ -475,14 +492,19 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
       if (schedule.status === "active") collect(world, schedule, op.at);
       break;
     case "cancel":
-      if (schedule.status === "pending_activation" || schedule.status === "active") {
+      if (
+        isPendingActivationRecurringPaymentStatus(schedule.status) ||
+        isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
+      ) {
         schedule.status = "canceled";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = null;
       }
       break;
     case "resume":
-      if (schedule.status === "canceled" && schedule.subscriptionId) {
+      if (isRecurringPaymentLifecycleClaimableStatus("resume", schedule.status)) {
         schedule.status = "active";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = iso(op.at + schedule.periodHours * HOUR_MS);
       }
       break;
@@ -538,6 +560,9 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
       return;
     case "request":
       applyRequest(world, op);
+      return;
+    case "request-cancel":
+      applyRequestCancel(world, op);
       return;
     case "schedule":
       applySchedule(world, op);

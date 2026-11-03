@@ -2,7 +2,6 @@ import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { CounterpartyEntityType, CounterpartyProviderData } from "@sdp/types/counterparties";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface CreateCounterpartyInput {
   organizationId: string;
@@ -48,10 +47,6 @@ export interface MutateCounterpartyProviderDataInput {
   organizationId: string;
   projectId: string;
   mutate: (current: CounterpartyProviderData) => CounterpartyProviderData;
-}
-
-export interface CounterpartiesRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface CounterpartiesRepository {

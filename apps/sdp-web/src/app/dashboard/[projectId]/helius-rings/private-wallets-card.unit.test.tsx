@@ -66,6 +66,7 @@ function renderCard(wallets: readonly RingsWallet[], onWalletsChanged = vi.fn(as
         selectedWalletId={null}
         onSelect={vi.fn()}
         balancesTick={0}
+        canWrite
         onWalletsChanged={onWalletsChanged}
       />
     </I18nProvider>

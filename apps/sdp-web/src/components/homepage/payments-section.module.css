@@ -1,0 +1,5 @@
+/* payments: the bench of kinds across the band, right under issuance's sheet */
+.row {
+  padding: var(--pad) 0 calc(var(--pad) * 0.2);
+  border-top: 1px solid var(--line);
+}

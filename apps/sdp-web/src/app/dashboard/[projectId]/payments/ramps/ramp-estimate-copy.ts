@@ -12,18 +12,14 @@ import type { TranslationValues } from "@/i18n/translate";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
- * An estimate figure: two places at least so money reads as money (the legacy
- * cards show none), up to six for dust.
+ * An estimate figure: two places at least so money reads as money, up to six
+ * for dust.
  */
-export function formatEstimateFigure(
-  value: string,
-  locale: string,
-  minimumFractionDigits = 2
-): string {
+export function formatEstimateFigure(value: string, locale: string): string {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return value;
   return new Intl.NumberFormat(locale, {
-    minimumFractionDigits,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(parsed);
 }
@@ -68,8 +64,7 @@ export function estimateRateCopy(
 export function estimateFeeCopy(
   t: Translate,
   fees: PaymentRampEstimateFees,
-  locale: string,
-  minimumFractionDigits = 2
+  locale: string
 ): string {
   const { provider, network, providerCurrency, networkCurrency } = fees;
   if (
@@ -82,9 +77,9 @@ export function estimateFeeCopy(
     providerCurrency !== networkCurrency
   ) {
     return t("DashboardPayments.ramps.fees", {
-      providerFee: formatEstimateFigure(provider, locale, minimumFractionDigits),
+      providerFee: formatEstimateFigure(provider, locale),
       providerCurrency,
-      networkFee: formatEstimateFigure(network, locale, minimumFractionDigits),
+      networkFee: formatEstimateFigure(network, locale),
       networkCurrency,
     });
   }
@@ -92,7 +87,7 @@ export function estimateFeeCopy(
     return t("DashboardPayments.ramps.noFees");
   }
   return t("DashboardPayments.ramps.fee", {
-    amount: formatEstimateFigure(fees.total, locale, minimumFractionDigits),
+    amount: formatEstimateFigure(fees.total, locale),
     currency: fees.currency,
   });
 }

@@ -38,15 +38,16 @@ const STATUS_BADGE: Record<ProjectRingStatus, BadgeVariant> = {
  */
 export function RingCard({
   rings,
+  canWrite,
   onChanged,
 }: {
   rings: ProjectRing[];
+  /** False for a read-only member: the create form and retry are hidden. */
+  canWrite: boolean;
   onChanged: () => Promise<void> | void;
 }) {
   const t = useTranslations();
 
-  const [name, setName] = useState("");
-  const [ringProgramId, setRingProgramId] = useState("");
   const [submittingName, setSubmittingName] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -73,12 +74,6 @@ export function RingCard({
     },
     [onChanged, t]
   );
-
-  const trimmedName = name.trim();
-  const formComplete =
-    RING_NAME_PATTERN.test(trimmedName) &&
-    trimmedName !== DEFAULT_RING_NAME &&
-    ringProgramId.trim().length > 0;
 
   // Keep the page flat as rings grow: the list lives in a dialog, and the
   // selection survives a refresh (retry) as long as the ring is still there.
@@ -108,45 +103,13 @@ export function RingCard({
           </Callout>
         ) : null}
 
-        <div className="flex flex-col gap-2">
-          {rings.length > 0 ? (
-            <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.repointHint")}</p>
-          ) : null}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-48 flex-col gap-1.5">
-              <Label htmlFor="rings-ring-name">{t("DashboardHeliusRings.ring.nameLabel")}</Label>
-              <Input
-                id="rings-ring-name"
-                value={name}
-                placeholder={t("DashboardHeliusRings.ring.namePlaceholder")}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-            <div className="flex min-w-96 flex-col gap-1.5">
-              <Label htmlFor="rings-ring-program-id">
-                {t("DashboardHeliusRings.ring.programIdLabel")}
-              </Label>
-              <Input
-                id="rings-ring-program-id"
-                value={ringProgramId}
-                placeholder={t("DashboardHeliusRings.ring.programIdPlaceholder")}
-                onChange={(event) => setRingProgramId(event.target.value)}
-              />
-            </div>
-            <Button
-              disabled={submittingName !== null || !formComplete}
-              onClick={() =>
-                void handleSubmit({ name: trimmedName, ringProgramId: ringProgramId.trim() })
-              }
-            >
-              {t(
-                submittingName !== null
-                  ? "DashboardHeliusRings.ring.submitting"
-                  : "DashboardHeliusRings.ring.submit"
-              )}
-            </Button>
-          </div>
-        </div>
+        {canWrite ? (
+          <RingCreateForm
+            hasRings={rings.length > 0}
+            submitting={submittingName !== null}
+            onSubmit={(submitted) => void handleSubmit(submitted)}
+          />
+        ) : null}
       </CardContent>
 
       {selectedRing === null ? null : (
@@ -195,25 +158,17 @@ export function RingCard({
                 {/* Retry resumes bring-up with the recorded name and id; the
                     card's form re-points a never-active ring at a corrected id
                     by re-using its name. */}
-                {selectedRing.status !== "active" ? (
-                  <div>
-                    <Button
-                      variant="secondary"
-                      disabled={submittingName !== null}
-                      onClick={() =>
-                        void handleSubmit({
-                          name: selectedRing.name,
-                          ringProgramId: selectedRing.ringProgramId,
-                        })
-                      }
-                    >
-                      {t(
-                        submittingName === selectedRing.name
-                          ? "DashboardHeliusRings.ring.submitting"
-                          : "DashboardHeliusRings.ring.retry"
-                      )}
-                    </Button>
-                  </div>
+                {canWrite && selectedRing.status !== "active" ? (
+                  <RingRetryButton
+                    ring={selectedRing}
+                    submittingName={submittingName}
+                    onRetry={() =>
+                      void handleSubmit({
+                        name: selectedRing.name,
+                        ringProgramId: selectedRing.ringProgramId,
+                      })
+                    }
+                  />
                 ) : null}
               </div>
             </div>
@@ -221,6 +176,92 @@ export function RingCard({
         </Modal>
       )}
     </Card>
+  );
+}
+
+/**
+ * Records a new ring, or re-points a never-active one by re-using its name. Owns its fields;
+ * the card owns the submit so the list's retry shares its pending state.
+ */
+function RingCreateForm({
+  hasRings,
+  submitting,
+  onSubmit,
+}: {
+  hasRings: boolean;
+  submitting: boolean;
+  onSubmit: (submitted: { name: string; ringProgramId: string }) => void;
+}) {
+  const t = useTranslations();
+  const [name, setName] = useState("");
+  const [ringProgramId, setRingProgramId] = useState("");
+
+  const trimmedName = name.trim();
+  const formComplete =
+    RING_NAME_PATTERN.test(trimmedName) &&
+    trimmedName !== DEFAULT_RING_NAME &&
+    ringProgramId.trim().length > 0;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {hasRings ? (
+        <p className="text-sm text-secondary">{t("DashboardHeliusRings.ring.repointHint")}</p>
+      ) : null}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex min-w-48 flex-col gap-1.5">
+          <Label htmlFor="rings-ring-name">{t("DashboardHeliusRings.ring.nameLabel")}</Label>
+          <Input
+            id="rings-ring-name"
+            value={name}
+            placeholder={t("DashboardHeliusRings.ring.namePlaceholder")}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+        <div className="flex min-w-96 flex-col gap-1.5">
+          <Label htmlFor="rings-ring-program-id">
+            {t("DashboardHeliusRings.ring.programIdLabel")}
+          </Label>
+          <Input
+            id="rings-ring-program-id"
+            value={ringProgramId}
+            placeholder={t("DashboardHeliusRings.ring.programIdPlaceholder")}
+            onChange={(event) => setRingProgramId(event.target.value)}
+          />
+        </div>
+        <Button
+          disabled={submitting || !formComplete}
+          onClick={() => onSubmit({ name: trimmedName, ringProgramId: ringProgramId.trim() })}
+        >
+          {t(
+            submitting ? "DashboardHeliusRings.ring.submitting" : "DashboardHeliusRings.ring.submit"
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Resumes a ring's bring-up with its recorded name and program id. */
+function RingRetryButton({
+  ring,
+  submittingName,
+  onRetry,
+}: {
+  ring: ProjectRing;
+  submittingName: string | null;
+  onRetry: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div>
+      <Button variant="secondary" disabled={submittingName !== null} onClick={onRetry}>
+        {t(
+          submittingName === ring.name
+            ? "DashboardHeliusRings.ring.submitting"
+            : "DashboardHeliusRings.ring.retry"
+        )}
+      </Button>
+    </div>
   );
 }
 

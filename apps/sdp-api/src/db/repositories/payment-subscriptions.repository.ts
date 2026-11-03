@@ -4,7 +4,6 @@ import type {
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
 } from "@sdp/types/payments";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface PaymentSubscriptionPlanRow {
   id: string;
@@ -199,6 +198,15 @@ export interface ListPaymentSubscriptionCollectionAttemptsInput {
   offset: number;
 }
 
+export interface ListRecurringPaymentCollectionAttemptsInput {
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  limit: number;
+  offset: number;
+}
+
 export interface GetPaymentSubscriptionCollectionAttemptByDueInput {
   organizationId: string;
   projectId: string;
@@ -222,10 +230,6 @@ export interface ListPaymentSubscriptionCollectionAttemptsResult {
   total: number;
 }
 
-export interface PaymentSubscriptionsRepositoryContext {
-  db: RepositoryDbClient;
-}
-
 export interface PaymentSubscriptionsRepository {
   createPlan(input: CreatePaymentSubscriptionPlanInput): Promise<PaymentSubscriptionPlanRow | null>;
   updatePlan(input: UpdatePaymentSubscriptionPlanInput): Promise<PaymentSubscriptionPlanRow | null>;
@@ -242,6 +246,15 @@ export interface PaymentSubscriptionsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<PaymentSubscriptionRow | null>;
+  /**
+   * Whether a recurring payment owns the subscription: it names it, or an update attempt created
+   * or replaced it. SDP signs for those; the standalone routes do not.
+   */
+  isRecurringPaymentSubscription(params: {
+    subscriptionId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<boolean>;
   listSubscriptions(params: ListPaymentSubscriptionsInput): Promise<ListPaymentSubscriptionsResult>;
   getCollectionAttemptByDue(
     params: GetPaymentSubscriptionCollectionAttemptByDueInput
@@ -279,5 +292,12 @@ export interface PaymentSubscriptionsRepository {
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   listCollectionAttempts(
     params: ListPaymentSubscriptionCollectionAttemptsInput
+  ): Promise<ListPaymentSubscriptionCollectionAttemptsResult>;
+  /**
+   * Lists a recurring payment's collection attempts across its whole history: its current
+   * subscription and every subscription an edit replaced or created for it, newest first.
+   */
+  listRecurringPaymentCollectionAttempts(
+    params: ListRecurringPaymentCollectionAttemptsInput
   ): Promise<ListPaymentSubscriptionCollectionAttemptsResult>;
 }

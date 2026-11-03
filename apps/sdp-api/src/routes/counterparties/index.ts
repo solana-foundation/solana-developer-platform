@@ -31,7 +31,7 @@ import {
 export const counterparties = new Hono<{ Bindings: Env }>();
 
 /** Why counterparty create runs `authorizeNone` (route inventory pins it). */
-export const CREATES_IN_SCOPE =
+const CREATES_IN_SCOPE =
   "creates a counterparty in the caller's own project; it names no existing resource";
 
 // Ramp onboarding (provider KYC requirements, provider-owned accounts) lives here,

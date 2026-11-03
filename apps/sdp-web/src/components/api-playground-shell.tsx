@@ -1,10 +1,12 @@
 "use client";
 
+import { buildSnippets } from "@sdp/api-catalog/snippets";
 import { canonicalJson } from "@sdp/types/idempotency";
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Input } from "@sdp/ui/input";
+import { HighlightedCode, type HighlightLanguage } from "@sdp/ui/shiki-code";
 import { useThemeScope } from "@sdp/ui/theme-scope";
 import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
@@ -15,7 +17,6 @@ import {
   ApiPlaygroundEndpointOptions,
   ApiPlaygroundRefreshLayout,
 } from "@/components/api-playground-refresh-layout";
-import { buildSnippets } from "@/components/api-playground-snippets";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -35,7 +36,6 @@ import {
 } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { setNestedValue } from "@/lib/set-nested-value";
-import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -58,6 +58,8 @@ export interface ApiPlaygroundFieldConfig {
 
 export interface ApiPlaygroundEndpointConfig {
   id: string;
+  /** The generated reference ID, when a curated form uses an older ID. */
+  referenceEndpointId?: string;
   title: string;
   method: ApiPlaygroundMethod;
   path: string;
@@ -1203,9 +1205,10 @@ function useApiPlaygroundState({
   const endpointsRef = useRef(endpoints);
   const endpointParam = searchParams.get("endpoint");
 
-  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === endpointParam)
-    ? (endpointParam ?? "")
-    : initialEndpointId;
+  const activeEndpointId =
+    endpoints.find((endpoint) => endpoint.id === endpointParam)?.id ??
+    endpoints.find((endpoint) => endpoint.referenceEndpointId === endpointParam)?.id ??
+    initialEndpointId;
   const activeEndpoint =
     endpoints.find((endpoint) => endpoint.id === activeEndpointId) ?? initialEndpoint;
   const effectiveApiBaseUrl = useMemo(
@@ -1277,6 +1280,10 @@ function useApiPlaygroundState({
           activeEndpoint && requestBody && hasRequestBody(activeEndpoint.method)
             ? requestBody
             : null,
+        // Keep existing dashboard snippets stable; the docs use each route's auth metadata.
+        auth: "apiKey",
+        // Send keys every write; the displayed snippets keep their existing body rule.
+        takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );
@@ -1335,14 +1342,17 @@ export function ApiPlaygroundShell({
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
-  const releaseChannel = useOptionalDashboardWorkspace()?.flags.releaseChannel;
-  const endpoints = useMemo(
-    () =>
+  const workspace = useOptionalDashboardWorkspace();
+  const releaseChannel = workspace?.flags.releaseChannel;
+  // A read-only member runs reads only; the API would refuse every other call.
+  const readsOnly = workspace?.dashboardAccess.capabilities.canWrite === false;
+  const endpoints = useMemo(() => {
+    const published =
       releaseChannel === undefined
         ? offeredEndpoints
-        : filterPlaygroundEndpointsToReleaseChannel(offeredEndpoints, releaseChannel),
-    [offeredEndpoints, releaseChannel]
-  );
+        : filterPlaygroundEndpointsToReleaseChannel(offeredEndpoints, releaseChannel);
+    return readsOnly ? published.filter((endpoint) => endpoint.method === "GET") : published;
+  }, [offeredEndpoints, releaseChannel, readsOnly]);
   const refresh = useThemeScope() === "refresh";
   const {
     activeEndpoint,
@@ -1378,9 +1388,16 @@ export function ApiPlaygroundShell({
 
   if (!activeEndpoint) {
     // Every operation this surface offers is outside the published catalog.
-    return endpoints.length === 0 && offeredEndpoints.length > 0 ? (
-      <EmptyState>{t("Shared.SharedComponents.noPublishedPlaygroundOperations")}</EmptyState>
-    ) : null;
+    if (endpoints.length === 0 && offeredEndpoints.length > 0) {
+      return (
+        <EmptyState>
+          {readsOnly
+            ? t("Shared.SharedComponents.noReadOnlyPlaygroundOperations")
+            : t("Shared.SharedComponents.noPublishedPlaygroundOperations")}
+        </EmptyState>
+      );
+    }
+    return null;
   }
 
   const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);

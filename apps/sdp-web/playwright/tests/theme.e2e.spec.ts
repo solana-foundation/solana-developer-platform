@@ -23,7 +23,7 @@ async function clearThemePreferenceBeforeNavigation(page: Page) {
 }
 
 /** The account-menu trigger renders in both the desktop sidebar and the mobile
- *  More sheet, so target whichever copy the current viewport actually shows. */
+ *  navigation drawer, so target whichever copy the current viewport actually shows. */
 function accountMenuTrigger(page: Page) {
   return page.getByRole("button", { name: "Account menu" }).filter({ visible: true });
 }
@@ -239,13 +239,10 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
 
-    // The new design's playground (new-design on) puts the request's code behind a Code tab, and
-    // that view renders before the response body, so first() is the snippet. The previous design
-    // shows the code at once, in a line-numbered block.
-    const newDesignCodePanel = page.getByTestId("api-playground-code").first();
-    const previousCodePanel = page.locator(".code-block-line-numbers").first();
+    // The playground puts the request's code behind a Code tab, and that view renders before the
+    // response body, so first() is the snippet.
+    const codePanel = page.getByTestId("api-playground-code").first();
     const codeTab = page.getByRole("tab", { name: "Code", exact: true });
-    let codePanel = newDesignCodePanel;
     const readCodeTokens = () =>
       codePanel.evaluate((element) => {
         const styles = getComputedStyle(element);
@@ -258,13 +255,7 @@ test.describe("dashboard theme e2e", () => {
     const openPlayground = async () => {
       await page.goto(projectHref(projectId, "/dashboard/payments"));
       await page.getByRole("tab", { name: "API Playground" }).click();
-      await expect(codeTab.or(previousCodePanel).first()).toBeVisible();
-      if (await codeTab.isVisible()) {
-        await codeTab.click();
-        codePanel = newDesignCodePanel;
-      } else {
-        codePanel = previousCodePanel;
-      }
+      await codeTab.click();
       await expect(codePanel).toBeVisible();
     };
 
@@ -329,14 +320,13 @@ test.describe("dashboard theme e2e", () => {
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
 
-    // On a phone NEW DESIGN opens the navigation drawer, which carries the account menu, from the
-    // header's menu button; the previous design keeps the menu in the bottom bar's More sheet.
-    const openNavigation = page
+    // On a phone the header's menu button opens the navigation drawer, which carries the account
+    // menu.
+    await page
       .getByRole("button", { name: "Open navigation" })
-      .filter({ visible: true });
-    const more = page.getByRole("button", { name: "More" }).filter({ visible: true });
-    await expect(openNavigation.or(more).first()).toBeVisible();
-    await ((await openNavigation.count()) > 0 ? openNavigation : more).first().click();
+      .filter({ visible: true })
+      .first()
+      .click();
     await openAccountMenu(page);
 
     // All three segments stay on one row, inside the viewport, with no horizontal scroll.

@@ -99,7 +99,8 @@ function runReleaseWeb({ curlScript, ghExitCode }) {
     fs.writeFileSync(path.join(dir, name), script);
     fs.chmodSync(path.join(dir, name), 0o755);
   }
-  const result = spawnSync("bash", ["-c", releaseWebScript], {
+  // Startup files can prepend system binaries ahead of the fixture stubs.
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-c", releaseWebScript], {
     env: {
       PATH: `${dir}:${process.env.PATH}`,
       GITHUB_REPOSITORY: repository,

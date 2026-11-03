@@ -3,14 +3,19 @@ import {
   loadChannelBalances,
   loadWalletVerification,
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestMemberRole } from "@/lib/sdp-api";
 import { WalletsTable } from "./wallets-table";
 
 export default async function PrivateChannelsWalletsPage() {
   await requirePrivateChannelsAccess();
 
   const client = await createSdpApiClient();
-  const wallets = await loadWalletVerification(client);
+  const [wallets, memberRole] = await Promise.all([
+    loadWalletVerification(client),
+    requestMemberRole(),
+  ]);
+  const { canWrite } = resolveDashboardAccess(memberRole).capabilities;
 
   // Channel balances only exist for verified wallets — unverified reads would 403.
   const channelBalances = wallets.ok
@@ -24,6 +29,7 @@ export default async function PrivateChannelsWalletsPage() {
         custodyWallets={wallets.ok ? wallets.data.custody : []}
         channelBalances={channelBalances}
         loadError={!wallets.ok}
+        canWrite={canWrite}
       />
     </div>
   );

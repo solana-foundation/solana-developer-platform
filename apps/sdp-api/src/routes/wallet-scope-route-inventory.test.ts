@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { actionVerbOf, isAction, isApiKeyGrantableAction } from "@sdp/types/actions";
 import { MOVEMENTS } from "@sdp/types/movements";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpModule } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY, type SdpModule } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { registeredRouteAuthorizations } from "@/routes/route-actions";
@@ -87,7 +87,14 @@ const WALLET_SCOPE_ROUTES = {
       test: "refuses a batch from a wallet outside the key's scope before writing anything",
     },
   },
+  "POST /v1/payments/transfer-batches/:batchId/retry": {
+    refusedEarly: {
+      file: "routes/payments/transfer-batches/handlers.test.ts",
+      test: "refuses a retry from a wallet outside the key's scope before writing anything",
+    },
+  },
   "POST /v1/payments/requests": { exempt: "a `/pay` link: SDP signs only as fee sponsor" },
+  "POST /v1/payments/requests/:paymentRequestId/cancel": { exempt: SIGNS_NOTHING },
   "POST /v1/counterparties": { exempt: SIGNS_NOTHING },
   "PATCH /v1/counterparties/:counterpartyId": { exempt: SIGNS_NOTHING },
   "DELETE /v1/counterparties/:counterpartyId": { exempt: SIGNS_NOTHING },
@@ -138,16 +145,6 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/payments/recurring-payments/:id/cancel": {
     refusedEarly: { file: RECURRING, test: RECURRING_ACTIVE },
   },
-  "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
-  "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": { exempt: SPONSOR_ONLY },
 
   // DvP
   "POST /v1/dvp/trades": {
@@ -323,7 +320,7 @@ const MOVEMENT_MODULES: ReadonlySet<SdpModule> = new Set(
 );
 
 function valueMovingRoutes(): string[] {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+  const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
   return registeredRouteAuthorizations(app)
     .flatMap((route) => {
       if (!MUTATING_METHODS.has(route.method) || !route.path.startsWith("/v1/")) return [];

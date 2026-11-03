@@ -1,5 +1,5 @@
 import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
-import { API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
+import { API_KEY_STATUSES, API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
 import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
@@ -14,36 +14,36 @@ import {
   withOpenApi,
 } from "./base";
 
-export const apiKeyGrantSchema = z.enum(API_KEY_GRANTABLE_ACTIONS).openapi({
+const apiKeyGrantSchema = z.enum(API_KEY_GRANTABLE_ACTIONS).openapi({
   description:
     "An action the key may perform, `module.verb`. `manage` and `execute` each imply the same module's `read`; nothing else implies another action.",
   example: "transfers.execute",
 });
 
-export const apiKeyGrantsSchema = z.array(apiKeyGrantSchema).openapi({
+const apiKeyGrantsSchema = z.array(apiKeyGrantSchema).openapi({
   description:
     "The actions this key holds. An explicit list: there is no role and no wildcard, and an action added to SDP later is granted to no existing key.",
   example: ["transfers.execute", "counterparties.read", "wallets.read"],
 });
 
-export const apiKeyEnvironmentSchema = z
+const apiKeyEnvironmentSchema = z
   .enum(["sandbox", "production"])
   .openapi({ description: "API key environment.", example: "sandbox" });
 
-export const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
+const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
   description:
     "Which custody wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs with no custody wallet (the fee sponsor is outside wallet scope). The scope applies when SDP signs; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
   example: "selected",
 });
 
-export const apiKeyWalletIdsSchema = z.array(z.string()).openapi({
+const apiKeyWalletIdsSchema = z.array(z.string()).openapi({
   description:
     "The custody wallets (`id` from `GET /v1/wallets`, `cwlt_...`) a `selected` key may sign with. Empty for `all`.",
   example: ["cwlt_0f2c8c1e"],
 });
 
-export const apiKeyStatusSchema = z
-  .enum(["active", "revoked", "expired", "deactivated"])
+const apiKeyStatusSchema = z
+  .enum(API_KEY_STATUSES)
   .openapi({ description: "API key status.", example: "active" });
 
 export const apiKeyListItemSchema = z
@@ -75,6 +75,19 @@ export const apiKeyListItemSchema = z
     }),
   })
   .openapi({ description: "API key list item." });
+
+export const memberApiKeysResponseSchema = z
+  .object({
+    apiKeys: z.array(
+      apiKeyListItemSchema
+        .pick({ id: true, name: true, keyPrefix: true, environment: true, createdAt: true })
+        .extend({
+          projectId: projectIdParamSchema,
+          projectName: z.string().openapi({ description: "Project name.", example: "Payments" }),
+        })
+    ),
+  })
+  .openapi({ description: "The active API keys a member created, newest first." });
 
 export const apiKeyDetailSchema = z
   .object({
@@ -136,7 +149,7 @@ export const apiKeyResponseSchema = z
         name: z.string().openapi({ description: "API key name.", example: "Primary Key" }),
         key: z.string().openapi({
           description: "Full API key. Only returned once.",
-          example: "sk_test_example",
+          example: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
         }),
         keyPrefix: apiKeyPrefixSchema,
         grants: apiKeyGrantsSchema,
@@ -162,7 +175,7 @@ export const rotateApiKeyResponseSchema = z
         name: z.string().openapi({ description: "API key name.", example: "Primary Key" }),
         key: z.string().openapi({
           description: "Full API key. Only returned once.",
-          example: "sk_test_example",
+          example: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
         }),
         keyPrefix: apiKeyPrefixSchema,
         grants: apiKeyGrantsSchema,

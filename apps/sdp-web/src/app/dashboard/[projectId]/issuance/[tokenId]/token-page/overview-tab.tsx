@@ -17,7 +17,7 @@ import {
   TOKEN_LIFECYCLE_BAND,
   TOKEN_LIFECYCLE_LABEL,
   TOKEN_LIFECYCLE_WHY,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordAmount } from "@/app/dashboard/[projectId]/payments/payments-record";
 import {

@@ -20,6 +20,11 @@ import {
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "./markets-route-skeletons";
+import {
+  TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGIES_BODY,
+  TREASURY_WALLETS_BODY,
+} from "./treasury-solutions/treasury-layout";
 
 /**
  * The text a reader would actually hear, i.e. everything outside a tag.
@@ -75,6 +80,52 @@ function occurrences(markup: string, needle: string): number {
   return markup.split(needle).length - 1;
 }
 
+// Treasury loads into the footprint it ends with: the same summary, tiles and tables the page
+// draws, so nothing under them moves when the reads land.
+describe("Treasury route skeleton", () => {
+  const html = renderToStaticMarkup(<TreasurySolutionsSkeleton />);
+
+  it("draws the summary, the wallet tiles and both tables in the page column's stack", () => {
+    expect(html).toContain('data-loading-layout="treasury"');
+    expect(html).toContain('data-earn-loading="summary"');
+    expect(html).toContain('data-treasury-loading="wallets"');
+    expect(occurrences(html, 'data-earn-loading="table"')).toBe(2);
+    expect(html).not.toContain("max-w-[90rem]");
+  });
+
+  it("draws one wallet tile where tiles stack and two where they pair", () => {
+    const wallets = html.slice(html.indexOf('data-treasury-loading="wallets"'));
+    expect(occurrences(wallets, "rounded-card bg-surface-tile")).toBe(2);
+    expect(wallets).toContain("hidden @xl:flex");
+  });
+
+  it("holds each section's ready footprint", () => {
+    expect(html).toContain(TREASURY_WALLETS_BODY);
+    expect(html).toContain(TREASURY_POSITIONS_BODY);
+    expect(html).toContain(TREASURY_STRATEGIES_BODY);
+    // The positions and strategies heads, five columns each.
+    expect(occurrences(html, "<th ")).toBe(10);
+  });
+});
+
+// Embedded Yield loads into its populated footprint: the summary Treasury shares, then the
+// strategy table in the columns its rows render into.
+describe("Embedded Yield route skeleton", () => {
+  const html = renderToStaticMarkup(<EmbeddedYieldPortfolioSkeleton />);
+
+  it("draws the summary and the strategy table in the page column's stack", () => {
+    expect(html).toContain('data-embedded-yield-loading="portfolio"');
+    expect(html).toContain('data-earn-loading="summary"');
+    expect(occurrences(html, 'data-earn-loading="table"')).toBe(1);
+    expect(html).not.toContain("max-w-[90rem]");
+  });
+
+  it("draws the strategy table's six columns and two rows", () => {
+    expect(occurrences(html, "<th ")).toBe(6);
+    expect(occurrences(html, "<tr ")).toBe(3);
+  });
+});
+
 // Each DvP skeleton mirrors the page it stands in for. These pin the parts
 // that went stale before: a five-step wizard with a side rail stood in for a
 // two-step create form, and two coarse blocks for the trade page.
@@ -112,11 +163,16 @@ describe("DvP route skeletons", () => {
   });
 
   it.each([
-    [{ earn: true, dvp: true }, 3],
-    [{ earn: true, dvp: false }, 2],
-    [{ earn: false, dvp: true }, 1],
-  ])("draws a landing path block per card the page renders for %o", (modules, cards) => {
-    const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
-    expect(html.match(/h-40 w-full rounded-2xl/g)).toHaveLength(cards);
-  });
+    [{ earn: true, dvp: true }, 2, 3],
+    [{ earn: true, dvp: false }, 1, 2],
+    [{ earn: false, dvp: true }, 1, 1],
+  ])(
+    "draws a landing group and a tile per path the page renders for %o",
+    (modules, groups, tiles) => {
+      const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
+      expect(occurrences(html, "<section")).toBe(groups);
+      // The ActionTile's 120px height and its control corners.
+      expect(html.match(/h-30 w-full rounded-control/g)).toHaveLength(tiles);
+    }
+  );
 });

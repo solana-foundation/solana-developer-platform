@@ -97,7 +97,9 @@ setup("authenticate admin test user and save auth state", async ({ page, browser
 
   await target.goto("/dashboard");
   // Local suites seed the SDP organization in beforeAll, after this auth-only
-  // setup. A Clerk session without that mapping must stop at the sync gate.
+  // setup. Until then the API refuses the unmapped Clerk organization (401) and
+  // this landing errors in place at /dashboard; only the Clerk session is saved,
+  // and each suite's first navigation after seeding resolves the organization.
   await expect(target).toHaveURL(
     env.useExternalApi ? /\/dashboard/ : /\/(dashboard|workspace-loading)(?:[/?]|$)/
   );

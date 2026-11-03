@@ -22,7 +22,7 @@ describe("custody provider catalog", () => {
     ).toEqual([
       { id: "local", visible: true, availability: "general", mode: "none" },
       { id: "privy", visible: true, availability: "general", mode: "self_service" },
-      { id: "fireblocks", visible: true, availability: "manual", mode: "none" },
+      { id: "fireblocks", visible: true, availability: "manual", mode: "self_service" },
       { id: "coinbase_cdp", visible: true, availability: "general", mode: "none" },
       { id: "para", visible: true, availability: "general", mode: "none" },
       { id: "turnkey", visible: true, availability: "general", mode: "none" },
@@ -97,6 +97,6 @@ describe("providerSupportsStoredCredentialSetup", () => {
       providerSupportsStoredCredentialSetup(provider.id)
     ).map((provider) => provider.id);
 
-    expect(supported).toEqual(["privy"]);
+    expect(supported).toEqual(["privy", "fireblocks"]);
   });
 });

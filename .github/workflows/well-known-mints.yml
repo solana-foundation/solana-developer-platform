@@ -5,9 +5,9 @@ name: Well-Known Mints
 on:
   pull_request:
     paths:
-      - 'packages/sdp-types/src/well-known-tokens.ts'
-      - 'scripts/check-well-known-mints.mjs'
-      - '.github/workflows/well-known-mints.yml'
+      - "packages/sdp-types/src/well-known-tokens.ts"
+      - "scripts/check-well-known-mints.mjs"
+      - ".github/workflows/well-known-mints.yml"
 
 permissions:
   contents: read

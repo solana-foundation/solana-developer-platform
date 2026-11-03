@@ -49,6 +49,7 @@ function renderCard(operations: RingsOperationSummary[]) {
       <ActivityCard
         operations={operations}
         projectRings={[]}
+        canWrite
         onChanged={onChanged}
         onSelect={onSelect}
       />

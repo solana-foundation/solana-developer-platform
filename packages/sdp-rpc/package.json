@@ -9,11 +9,6 @@
       "import": "./src/blocked-address.ts",
       "default": "./src/blocked-address.ts"
     },
-    "./config": {
-      "types": "./src/config.ts",
-      "import": "./src/config.ts",
-      "default": "./src/config.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",
@@ -44,6 +39,16 @@
       "import": "./src/socket-retry.ts",
       "default": "./src/socket-retry.ts"
     },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
+    },
+    "./transaction-version": {
+      "types": "./src/transaction-version.ts",
+      "import": "./src/transaction-version.ts",
+      "default": "./src/transaction-version.ts"
+    },
     "./solana": {
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",
@@ -72,7 +77,8 @@
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
-    "@solana/kit": "catalog:"
+    "@solana/kit": "catalog:",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "tsx": "4.23.15"

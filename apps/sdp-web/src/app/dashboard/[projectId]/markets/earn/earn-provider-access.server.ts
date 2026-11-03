@@ -1,6 +1,5 @@
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
-import { createOrgSdpApiClient } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, requestOnboardingStatus } from "@/lib/sdp-api";
 import type { EarnProviderAccess } from "./earn-surfacing";
 
 /**
@@ -8,14 +7,15 @@ import type { EarnProviderAccess } from "./earn-surfacing";
  *
  * A catalogue row only says a strategy exists. It does not authorize this
  * organization to fund it, so every deposit-facing page consumes this result
- * and fails closed when access cannot be verified.
+ * and fails closed when access cannot be verified. The onboarding status is
+ * the request's shared read, so the layout's quick start does not repeat it.
  */
 export async function loadEarnProviderAccess(): Promise<EarnProviderAccess | null> {
   try {
-    const client = await createOrgSdpApiClient();
-    const onboarding = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status");
+    const onboarding = await requestOnboardingStatus();
     if (!onboarding.linked || !onboarding.organization) return null;
 
+    const client = await createOrgSdpApiClient();
     const availability = await fetchProviderAvailability(
       client.request,
       onboarding.organization.id

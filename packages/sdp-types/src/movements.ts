@@ -223,6 +223,11 @@ export const MOVEMENTS = {
 
 export type MovementId = keyof typeof MOVEMENTS;
 
+/** Parse operator and stored movement ids against the signing-waist inventory. */
+export function isMovementId(value: string): value is MovementId {
+  return Object.hasOwn(MOVEMENTS, value);
+}
+
 /** The movements that start new exposure, each with the actions that may sign it. */
 export type StartMovementId = {
   [Id in MovementId]: (typeof MOVEMENTS)[Id]["kind"] extends "start" ? Id : never;
@@ -253,14 +258,14 @@ export function movementAllowsWalletPurpose(
  * A recurring payment is a mandate (APE-343): the scheduler signs for it as
  * the mandate, not as whoever created or activated it. Each movement it may
  * sign, and the recurring-payment statuses that admit it: a scheduled
- * collection needs an `active` mandate; the job's recovery of an activation or
- * a resume needs the row still in that operation. Anything else, `canceled`
- * above all, refuses. A key's revocation does not stop its mandates.
+ * collection needs an `active` mandate; the job's recovery of an activation
+ * needs the row still `activating`. Anything else, `canceled` above all,
+ * refuses: resume signs nothing and only a request resumes, so no mandate
+ * starts one. A key's revocation does not stop its mandates.
  */
 export const MANDATE_MOVEMENT_STATUSES = {
   "recurring.collect": ["active"],
   "recurring.activate": ["activating"],
-  "recurring.resume": ["resuming"],
 } as const satisfies Partial<Record<StartMovementId, readonly PaymentRecurringPaymentStatus[]>>;
 
 /**
@@ -275,6 +280,17 @@ export const PAYMENT_REQUEST_MOVEMENT_STATUSES = {
 export type MovementOf<Module extends SdpModule> = {
   [Id in MovementId]: (typeof MOVEMENTS)[Id]["module"] extends Module ? Id : never;
 }[MovementId];
+
+/**
+ * The movement a signing waist takes (HOO-2098). Each waist is generic over
+ * the calling module, with no inference and a `never` default, so every call
+ * names its module (`createOrgSignerForCustodyWallet<"dvp">(…)`) and another
+ * module's id does not compile: an exit is never refused for the
+ * organization, so passing one module's exit from another would skip
+ * admission. `SdpModule` admits every movement, for code that serves no single
+ * module.
+ */
+export type WaistMovement<Module extends SdpModule> = NoInfer<MovementOf<Module>>;
 
 /**
  * The movement each Rings operation signs for. A new operation type does not

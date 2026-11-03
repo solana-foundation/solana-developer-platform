@@ -1,5 +1,5 @@
 /** Default ceiling for API-owned vault RPC, provider, and custody calls. */
-export const VAULT_EXTERNAL_CALL_TIMEOUT_MS = 20_000;
+const VAULT_EXTERNAL_CALL_TIMEOUT_MS = 20_000;
 
 /**
  * One absolute budget for a vault workflow.

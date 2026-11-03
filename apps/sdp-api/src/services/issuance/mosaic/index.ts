@@ -6,7 +6,8 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import type { MovementId } from "@sdp/types/movements";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import type { MovementOf } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import { createIssuanceSponsor } from "@/services/issuance/sponsored-submitter";
@@ -21,7 +22,7 @@ export type MosaicFee =
   | {
       mode: "sponsored";
       scope: SponsorshipScope;
-      movement: MovementId;
+      movement: MovementOf<"issuance">;
       /** The custody wallet that signs; the sponsor decides the principal's scope on it. */
       custodyWalletId: string;
     };
@@ -50,7 +51,7 @@ export function createMosaicService(
           custodyWalletId: fee.custodyWalletId,
         })
       : undefined;
-  return new MosaicService(env, signer, sponsor, {
+  return new MosaicService(env, createClusterRpc(), signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
     // the app's error handler maps them to 400 responses.
     transactionFailedError: transactionFailed,

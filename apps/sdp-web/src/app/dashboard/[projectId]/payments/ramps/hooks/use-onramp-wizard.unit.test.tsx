@@ -11,10 +11,12 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
 const mocks = vi.hoisted(() => ({
+  push: vi.fn(),
   toastDismiss: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -63,7 +65,7 @@ const MOONPAY_QUOTE = {
 
 function transferFixture(
   status: PaymentTransferSummary["status"],
-  overrides: Partial<PaymentTransferSummary>
+  overrides: Partial<PaymentTransferSummary> = {}
 ): PaymentTransferSummary {
   return {
     id: TRANSFER_ID,
@@ -89,7 +91,9 @@ const PROPS: UseRampWizardProps = {
   onExit: vi.fn(),
 };
 
-let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment", {});
+let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment");
+let currentQuote: object = MOONPAY_QUOTE;
+let demoMode = false;
 const fetchMock = vi.fn<typeof fetch>();
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -97,7 +101,7 @@ function wrapper({ children }: { children: ReactNode }) {
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={null}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: false,
           compliance: false,
@@ -115,7 +119,11 @@ function wrapper({ children }: { children: ReactNode }) {
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
       >
-        <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
+        <PaymentsDemoProvider value={demoMode}>
+          <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+            {children}
+          </SWRConfig>
+        </PaymentsDemoProvider>
       </DashboardWorkspaceProvider>
     </I18nProvider>
   );
@@ -131,7 +139,9 @@ beforeEach(() => {
   // A failed quote keeps its key (APE-689), so each spec starts clean.
   window.sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
-  currentTransfer = transferFixture("awaiting_payment", {});
+  currentTransfer = transferFixture("awaiting_payment");
+  currentQuote = MOONPAY_QUOTE;
+  demoMode = false;
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -146,7 +156,7 @@ beforeEach(() => {
     }
     if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
       return Promise.resolve(
-        Response.json({ data: { quote: MOONPAY_QUOTE, transferId: TRANSFER_ID } })
+        Response.json({ data: { quote: currentQuote, transferId: TRANSFER_ID } })
       );
     }
     if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
@@ -168,9 +178,9 @@ type WizardRender = RenderHookResult<ReturnType<typeof useOnrampWizard>, unknown
 /**
  * Drives the real wizard from the deposit step to the transaction stage: pick
  * the MOONPAY provider, fund the deposit form, advance through the memo (which
- * POSTs the requirements advance and lands on the PROVIDER step), let the
- * readiness effect fire the quote POST, and wait for the transfer-status poll
- * to deliver the scenario transfer.
+ * POSTs the requirements advance and lands on the REVIEW step), continue past
+ * the review to the PROVIDER step, let the readiness effect fire the quote
+ * POST, and wait for the transfer-status poll to deliver the scenario transfer.
  */
 async function driveToTransferStatus(rendered: WizardRender) {
   await act(async () => {});
@@ -181,6 +191,12 @@ async function driveToTransferStatus(rendered: WizardRender) {
   await act(async () => {
     await rendered.result.current.handlePrimary();
   });
+  await act(async () => {
+    await rendered.result.current.handlePrimary();
+  });
+  // Nothing is quoted while the user reviews; the quote waits for the last step.
+  expect(rendered.result.current.currentStepId).toBe("REVIEW");
+  expect(rendered.result.current.quoteTransferId).toBeNull();
   await act(async () => {
     await rendered.result.current.handlePrimary();
   });
@@ -218,7 +234,7 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
   });
 
   it("keeps the complete screen hidden while settling without a settlement", async () => {
-    const { result } = await renderAtTransfer(transferFixture("settling", {}));
+    const { result } = await renderAtTransfer(transferFixture("settling"));
 
     expect(result.current.transferStatus?.status).toBe("settling");
     expect(result.current.transferStatus?.settlement).toBeUndefined();
@@ -249,7 +265,7 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
   });
 
   it("turns the complete screen off for a failed transfer and stops polling", async () => {
-    const { result } = await renderAtTransfer(transferFixture("failed", {}));
+    const { result } = await renderAtTransfer(transferFixture("failed"));
 
     expect(result.current.transferStatus?.status).toBe("failed");
     expect(result.current.showCompleteScreen).toBe(false);
@@ -257,6 +273,22 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     const callsBefore = transferStatusCalls();
     await allowPollingTick();
     expect(transferStatusCalls()).toBe(callsBefore);
+  });
+});
+
+describe("useOnrampWizard — demo funding simulation", () => {
+  it("simulates the quoted transfer by its transferId", async () => {
+    demoMode = true;
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await driveToTransferStatus(rendered);
+    await act(async () => {
+      await rendered.result.current.simulateCurrentQuote();
+    });
+    const calls = fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/dashboard/payments/ramps/sandbox/simulate"
+    );
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ transferId: TRANSFER_ID });
   });
 });
 
@@ -269,7 +301,7 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
     label: "Wallet B",
   };
   // Primary presses from the deposit step to the transaction stage.
-  const STEPS_TO_TRANSACTION_STAGE = 2;
+  const STEPS_TO_TRANSACTION_STAGE = 3;
   const quoteCreated = () =>
     Response.json({ data: { quote: MOONPAY_QUOTE, transferId: TRANSFER_ID } });
   const quoteFailed = () =>
@@ -429,5 +461,31 @@ describe("useOnrampWizard: Previous while the quote is in flight (APE-466)", () 
     await respondToQuote(1, quoteCreated());
     await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
     expect(rendered.result.current.selectedWallet?.id).toBe(WALLET_B.id);
+  });
+
+  it("waits on the transaction stage for a complete selection, with Previous free", async () => {
+    const rendered = renderWizard();
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("moonpay"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    act(() => rendered.result.current.setField("amount", "100"));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    for (let press = 0; press < STEPS_TO_TRANSACTION_STAGE - 1; press += 1) {
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+    // The review step has no gate, so this stands in for a selection that turns incomplete
+    // before the stage, such as a wallet leaving the live list.
+    act(() => rendered.result.current.setField("amount", ""));
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    expect(rendered.result.current.isLastStep).toBe(true);
+    expect(rendered.result.current.quoteInFlight).toBe(false);
+
+    act(() => rendered.result.current.setField("amount", "100"));
+    await waitFor(() => expect(quoteCalls).toHaveLength(1));
+    expect(rendered.result.current.quoteInFlight).toBe(true);
   });
 });

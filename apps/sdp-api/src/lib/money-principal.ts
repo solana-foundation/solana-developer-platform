@@ -23,7 +23,7 @@ import { AppError } from "@/lib/errors";
  *   source wallet), never by whoever created or activated it.
  * - `payment_request`: a `/pay` link, admitted by its own open request.
  */
-export const moneyPrincipalSchema = z.discriminatedUnion("kind", [
+const moneyPrincipalSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("api_key"), apiKeyId: z.string() }),
   z.object({ kind: z.literal("member"), userId: z.string() }),
   z.object({ kind: z.literal("mandate"), recurringPaymentId: z.string() }),

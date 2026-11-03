@@ -123,6 +123,16 @@ async function assertSolanaRpcHealthy(rpcUrl, options) {
   if (!payload?.value?.blockhash) {
     throw new Error("missing latest blockhash");
   }
+
+  const validity = await solanaJsonRpc(
+    rpcUrl,
+    "isBlockhashValid",
+    [payload.value.blockhash, { commitment: "confirmed", minContextSlot: payload.context.slot }],
+    options
+  );
+  if (validity?.value !== true) {
+    throw new Error("latest blockhash is not valid on this RPC");
+  }
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {

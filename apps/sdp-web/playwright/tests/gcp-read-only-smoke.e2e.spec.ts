@@ -235,17 +235,12 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     await gotoProjectPage(page, fixture.project.id, "/dashboard");
     expect((await activityResponse).status()).toBe(200);
-    // The stage serves the Overview or the previous Home, whichever its flags say, and before its
-    // first wallet an organization sees the wallet prompt instead of the list.
-    const overviewActivity = page.locator('[data-overview-section="activity"]');
-    const legacyActivity = page
-      .locator('[data-slot="card"]')
-      .filter({ has: page.getByText("Recent transactions", { exact: true }) });
+    // Before its first wallet an organization sees the wallet prompt instead of the list.
+    const activity = page.locator('[data-overview-section="activity"]');
     const firstWalletPrompt = page.getByRole("heading", { name: "Start with a wallet" });
-    await expect(overviewActivity.or(legacyActivity).or(firstWalletPrompt).first()).toBeVisible();
-    const activity = (await overviewActivity.isVisible()) ? overviewActivity : legacyActivity;
+    await expect(activity.or(firstWalletPrompt).first()).toBeVisible();
     if (await activity.isVisible()) {
-      await expect(activity.getByText(/^Recent (activity|transactions)$/)).toBeVisible();
+      await expect(activity.getByText("Recent activity", { exact: true })).toBeVisible();
       const firstActivityRow = activity.locator("tbody tr").first();
       const emptyActivity = activity.getByText(
         /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
@@ -290,8 +285,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       .locator("article")
       .filter({ hasText: drillDownWallet.publicKey })
       .first();
-    // The card's link says "Open <wallet>" with new-design-wallets on and "Manage" with it off.
-    await walletCard.getByRole("link", { name: /^(Open .+|Manage)$/ }).click();
+    await walletCard.getByRole("link", { name: /^Open .+$/ }).click();
 
     await expect(page).toHaveURL(
       projectHref(
@@ -300,7 +294,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
       ),
       { timeout: 20_000 }
     );
-    // Both designs head the page with the wallet's label, or "Untitled wallet" without one.
+    // The page is headed with the wallet's label, or "Untitled wallet" without one.
     const walletHeading = drillDownWallet.label?.trim() || "Untitled wallet";
     await expect(
       page.getByRole("heading", { name: walletHeading, exact: true }).first()

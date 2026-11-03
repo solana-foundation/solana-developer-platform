@@ -1,217 +1,114 @@
+import type { InvitationStatus } from "@sdp/types/organizations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { invitationWasRevoked } from "@/lib/invitations";
-import { TEST_ORG } from "@/test/fixtures/organizations";
-import { clerkHeaders, ensureTestClerkIssuer, signTestClerkJwt } from "@/test/helpers/clerk";
+import { readAuditActions } from "@/test/helpers/audit-logs";
+import { clerkHeaders } from "@/test/helpers/clerk";
+import { type ClerkBackend, stubClerkBackend } from "@/test/helpers/clerk-backend";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
+import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
+import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-const CLERK_API_URL = "https://clerk.example.test/v1";
-const CLERK_ORG_ID = "org_clerk_invitation_revocation";
-const ORGANIZATION_ID = TEST_ORG.id;
-const INVITEE_EMAIL = "duplicate-invite@example.com";
-
-/** The invitation the local row was created for. */
+const ORGANIZATION = { id: "org_invitation_revocation", slug: "invitation-revocation" };
+const FOREIGN_ORGANIZATION = { id: "org_revocation_foreign", slug: "revocation-foreign" };
+const CLERK_ORG_ID = `clerk_org_${ORGANIZATION.id}`;
+const ADMIN = organizationMember("revocation_admin", "admin");
+const FOREIGN_ADMIN = organizationMember("revocation_foreign_admin", "admin");
+const INVITATION_ID = "inv_revocation_target";
+const INVITEE_EMAIL = "revocation-invitee@example.com";
 const OUR_CLERK_INVITATION_ID = "orginv_ours";
-/** A second invitation raised for the same address by someone else. */
 const OTHER_CLERK_INVITATION_ID = "orginv_theirs";
+const LIST_PATH = `/organizations/${CLERK_ORG_ID}/invitations?status=pending&limit=100&offset=0`;
 
-const LOCAL_INVITATION_ID = "inv_revocation_target";
-const INVITER_USER_ID = "usr_revocation_inviter";
-const ADMIN_USER_ID = "usr_revocation_admin";
-const ADMIN_CLERK_USER_ID = "clerk_user_admin";
-const ADMIN_PROJECT_ID = "prj_invitation_revocation";
+let clerk: ClerkBackend;
 let adminToken: string;
+let sandboxProjectId: string;
 
-interface ClerkInvitationStub {
-  id: string;
-  email_address: string;
-  status: string;
-  inviter_id: string;
-  url: string;
+function clerkInvitation(id: string) {
+  return { id, email_address: INVITEE_EMAIL, role: "org:member", status: "pending" };
 }
 
-function clerkInvitation(id: string): ClerkInvitationStub {
+function listAnswer(ids: readonly string[]) {
+  return { status: 200, body: { data: ids.map(clerkInvitation) } };
+}
+
+function revokeRequest(clerkInvitationId: string) {
   return {
-    id,
-    email_address: INVITEE_EMAIL,
-    status: "pending",
-    inviter_id: "clerk_user_inviter",
-    url: `https://accept.example.test/${id}`,
+    method: "POST",
+    path: `/organizations/${CLERK_ORG_ID}/invitations/${clerkInvitationId}/revoke`,
+    body: null,
   };
 }
 
-/**
- * Stands in for Clerk's organization-invitation endpoints.
- *
- * `pendingByCall` supplies the pending list per call, so a test can have the
- * follow-up reconciliation lookup see a different world than the first read —
- * which is the whole situation being exercised here.
- */
-function stubClerk(options: {
-  pendingByCall: ClerkInvitationStub[][];
-  revokeStatus?: number;
-  /** Makes the follow-up reconciliation lookup fail, leaving the outcome unknown. */
-  failListAfterFirst?: boolean;
-}): {
-  revokedIds: string[];
-  requestingUserIds: string[];
-} {
-  const revokedIds: string[] = [];
-  const requestingUserIds: string[] = [];
-  let listCall = 0;
+const LIST_REQUEST = { method: "GET", path: LIST_PATH, body: null };
 
-  const realFetch = globalThis.fetch;
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = typeof input === "string" ? input : String(input);
-    // The admin's session token verifies against the local test issuer.
-    if (env.CLERK_JWKS_URL && url.startsWith(env.CLERK_JWKS_URL)) {
-      return realFetch(input, init);
-    }
-
-    if (url.includes("/invitations?status=pending")) {
-      if (options.failListAfterFirst && listCall > 0) {
-        throw new TypeError("network error");
-      }
-      const page = options.pendingByCall[listCall] ?? options.pendingByCall.at(-1) ?? [];
-      listCall += 1;
-      return new Response(JSON.stringify({ data: page }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    const revokeMatch = url.match(/\/invitations\/([^/]+)\/revoke$/);
-    if (revokeMatch && init?.method === "POST") {
-      const status = options.revokeStatus ?? 200;
-      if (status >= 400) {
-        return new Response(JSON.stringify({ errors: [] }), { status });
-      }
-      revokedIds.push(revokeMatch[1] as string);
-      requestingUserIds.push(
-        (JSON.parse(String(init?.body ?? "{}")) as { requesting_user_id?: string })
-          .requesting_user_id ?? ""
-      );
-      return new Response(JSON.stringify({ id: revokeMatch[1], status: "revoked" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    throw new Error(`Unexpected fetch in test: ${init?.method ?? "GET"} ${url}`);
-  });
-
-  return { revokedIds, requestingUserIds };
-}
-
-async function seedInvitation(clerkInvitationId: string | null): Promise<void> {
+async function seedTarget(input: {
+  organizationId: string;
+  invitedBy: string;
+  status: InvitationStatus;
+  clerkInvitationId: string | null;
+}): Promise<void> {
   const db = getDb(env);
-
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Invitation Revocation', 'invitation-revocation', 'individual', 'active')"
-      )
-      .bind(ORGANIZATION_ID),
-    db
-      .prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revocation-inviter@example.com', 1, 'active')"
-      )
-      .bind(INVITER_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-         VALUES ('aoi_revocation', 'clerk', ?, ?, 'invitation-revocation')`
-      )
-      .bind(CLERK_ORG_ID, ORGANIZATION_ID),
-    db
-      .prepare(
-        `INSERT INTO invitations
-           (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
-         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending', ?)`
-      )
-      .bind(
-        LOCAL_INVITATION_ID,
-        ORGANIZATION_ID,
-        INVITEE_EMAIL,
-        INVITER_USER_ID,
-        "hash_revocation_target",
-        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        clerkInvitationId
-      ),
+  await seedInvitation(db, {
+    id: INVITATION_ID,
+    organizationId: input.organizationId,
+    email: INVITEE_EMAIL,
+    role: "member",
+    invitedBy: input.invitedBy,
+    status: input.status,
+    expiresInDays: 7,
+  });
+  await db.execute("UPDATE invitations SET clerk_invitation_id = ? WHERE id = ?", [
+    input.clerkInvitationId,
+    INVITATION_ID,
   ]);
-
-  await signInAdmin();
 }
 
-/**
- * Signs in an organization admin: invitations are revoked by a signed-in
- * person, never an API key (HOO-2099), and Clerk is told that person asked.
- */
-async function signInAdmin(): Promise<void> {
-  const db = getDb(env);
-  await db.batch([
-    db
-      .prepare(
-        "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revocation-admin@example.com', 1, 'active')"
-      )
-      .bind(ADMIN_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
-         VALUES ('aui_revocation_admin', 'clerk', ?, ?, 'revocation-admin@example.com')`
-      )
-      .bind(ADMIN_CLERK_USER_ID, ADMIN_USER_ID),
-    db
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES ('mem_revocation_admin', ?, ?, 'admin', 'active')`
-      )
-      .bind(ORGANIZATION_ID, ADMIN_USER_ID),
-  ]);
-  await seedDefaultProjects(db, {
-    organizationId: ORGANIZATION_ID,
-    createdBy: ADMIN_USER_ID,
-    members: [ADMIN_USER_ID],
-    ids: { sandbox: ADMIN_PROJECT_ID, production: `${ADMIN_PROJECT_ID}_production` },
-  });
-  await ensureTestClerkIssuer(env);
-  adminToken = await signTestClerkJwt({
-    clerkUserId: ADMIN_CLERK_USER_ID,
-    clerkOrgId: CLERK_ORG_ID,
-    orgRole: "admin",
-    orgSlug: "invitation-revocation",
-    email: "revocation-admin@example.com",
-    expiresInSeconds: 300,
+function seedOwnPendingTarget(clerkInvitationId: string | null) {
+  return seedTarget({
+    organizationId: ORGANIZATION.id,
+    invitedBy: ADMIN.userId,
+    status: "pending",
+    clerkInvitationId,
   });
 }
 
-async function revoke(): Promise<Response> {
+async function revoke(idempotencyKey: string): Promise<Response> {
   return app.request(
-    `/v1/members/invitations/${LOCAL_INVITATION_ID}`,
-    { method: "DELETE", headers: clerkHeaders(adminToken, ADMIN_PROJECT_ID) },
+    `/v1/members/invitations/${INVITATION_ID}`,
+    {
+      method: "DELETE",
+      headers: { ...clerkHeaders(adminToken, sandboxProjectId), "Idempotency-Key": idempotencyKey },
+    },
     env
   );
 }
 
-async function invitationStatus(): Promise<string | undefined> {
-  const row = await getDb(env)
-    .prepare("SELECT status FROM invitations WHERE id = ?")
-    .bind(LOCAL_INVITATION_ID)
-    .first<{ status: string }>();
-
-  return row?.status;
+function revokeAudits() {
+  return readAuditActions(getDb(env), { type: "invitation", id: INVITATION_ID });
 }
 
-describe("invitation revocation identity", () => {
+describe("DELETE /v1/members/invitations/:invitationId", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    await clearKVStores(env);
-    env.CLERK_SECRET_KEY = "sk_test_invitation_revocation";
-    env.CLERK_API_URL = CLERK_API_URL;
+    const db = getDb(env);
+    await seedOrganizationMembers(db, { organization: ORGANIZATION, members: [ADMIN] });
+    await seedOrganizationMembers(db, {
+      organization: FOREIGN_ORGANIZATION,
+      members: [FOREIGN_ADMIN],
+    });
+    const projects = await seedDefaultProjects(db, {
+      organizationId: ORGANIZATION.id,
+      createdBy: ADMIN.userId,
+      members: [ADMIN.userId],
+    });
+    sandboxProjectId = projects.sandbox.id;
+    adminToken = await signSeededClerkMember(env, db, ADMIN.userId, ORGANIZATION.id);
+    clerk = stubClerkBackend(env);
   });
 
   afterEach(async () => {
@@ -221,113 +118,147 @@ describe("invitation revocation identity", () => {
     env.CLERK_API_URL = undefined;
   });
 
-  it("revokes only the Clerk invitation this row was created for", async () => {
-    await seedInvitation(OUR_CLERK_INVITATION_ID);
-    const clerk = stubClerk({
-      pendingByCall: [
-        [clerkInvitation(OUR_CLERK_INVITATION_ID), clerkInvitation(OTHER_CLERK_INVITATION_ID)],
-      ],
+  it("revokes in SDP and audits, then revokes only this row's Clerk invitation naming no user", async () => {
+    await seedOwnPendingTarget(OUR_CLERK_INVITATION_ID);
+    clerk.answer(listAnswer([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]), {
+      status: 200,
+      body: { id: OUR_CLERK_INVITATION_ID, status: "revoked" },
     });
 
-    const response = await revoke();
-
-    expect(response.status).toBe(204);
-    // The second invitation belongs to someone else's request for the same
-    // address; revoking it would cancel an invite nobody asked to withdraw.
-    expect(clerk.revokedIds).toEqual([OUR_CLERK_INVITATION_ID]);
-    expect(clerk.requestingUserIds).toEqual([ADMIN_CLERK_USER_ID]);
-    expect(await invitationStatus()).toBe("revoked");
+    expect((await revoke("idem_revocation_ours")).status).toBe(204);
+    expect(clerk.requests).toEqual([LIST_REQUEST, revokeRequest(OUR_CLERK_INVITATION_ID)]);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
+    expect(await revokeAudits()).toEqual(["revoke"]);
   });
 
-  it("keeps the invitation revoked when only a different invitation for the same address survives", async () => {
-    await seedInvitation(OUR_CLERK_INVITATION_ID);
-    stubClerk({
-      pendingByCall: [
-        [clerkInvitation(OUR_CLERK_INVITATION_ID), clerkInvitation(OTHER_CLERK_INVITATION_ID)],
-        // Reconciliation after the ambiguous failure: ours is gone, so Clerk did
-        // apply the revocation. Only the unrelated invitation is left.
-        [clerkInvitation(OTHER_CLERK_INVITATION_ID)],
-      ],
-      revokeStatus: 500,
+  it("keeps the invitation revoked when Clerk fails, and a retry re-runs only the Clerk half", async () => {
+    await seedOwnPendingTarget(OUR_CLERK_INVITATION_ID);
+    clerk.answer(listAnswer([OUR_CLERK_INVITATION_ID]), { status: 500, body: { errors: [] } });
+
+    expect((await revoke("idem_revocation_retry")).status).toBe(500);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
+
+    clerk.answer(listAnswer([OUR_CLERK_INVITATION_ID]), {
+      status: 200,
+      body: { id: OUR_CLERK_INVITATION_ID, status: "revoked" },
     });
 
-    await revoke();
-
-    // Matching on email would read the surviving invitation as proof ours was
-    // still live and reopen a token Clerk had already revoked.
-    expect(await invitationStatus()).toBe("revoked");
+    expect((await revoke("idem_revocation_retry")).status).toBe(204);
+    expect(clerk.requests).toEqual([
+      LIST_REQUEST,
+      revokeRequest(OUR_CLERK_INVITATION_ID),
+      LIST_REQUEST,
+      revokeRequest(OUR_CLERK_INVITATION_ID),
+    ]);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
+    expect(await revokeAudits()).toEqual(["revoke"]);
   });
 
-  it("reopens the invitation when its own Clerk invitation is still pending", async () => {
-    await seedInvitation(OUR_CLERK_INVITATION_ID);
-    stubClerk({
-      pendingByCall: [[clerkInvitation(OUR_CLERK_INVITATION_ID)]],
-      revokeStatus: 500,
+  it("calls no revoke when Clerk no longer holds the invitation as pending", async () => {
+    await seedOwnPendingTarget(OUR_CLERK_INVITATION_ID);
+    clerk.answer(listAnswer([OTHER_CLERK_INVITATION_ID]));
+
+    expect((await revoke("idem_revocation_gone")).status).toBe(204);
+    expect(clerk.requests).toEqual([LIST_REQUEST]);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
+  });
+
+  it("revokes every pending Clerk invitation for the address when the row has no Clerk id", async () => {
+    await seedOwnPendingTarget(null);
+    clerk.answer(
+      listAnswer([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]),
+      { status: 200, body: { id: OUR_CLERK_INVITATION_ID, status: "revoked" } },
+      { status: 200, body: { id: OTHER_CLERK_INVITATION_ID, status: "revoked" } }
+    );
+
+    expect((await revoke("idem_revocation_unlinked")).status).toBe(204);
+    expect(clerk.requests).toEqual([
+      LIST_REQUEST,
+      revokeRequest(OUR_CLERK_INVITATION_ID),
+      revokeRequest(OTHER_CLERK_INVITATION_ID),
+    ]);
+  });
+
+  it("leaves an address-matched Clerk invitation another SDP invitation recorded when the row has no Clerk id", async () => {
+    await seedOwnPendingTarget(null);
+    await seedInvitation(getDb(env), {
+      id: "inv_revocation_earlier",
+      organizationId: ORGANIZATION.id,
+      email: INVITEE_EMAIL,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "expired",
+      expiresInDays: -1,
+    });
+    await getDb(env).execute("UPDATE invitations SET clerk_invitation_id = ? WHERE id = ?", [
+      OTHER_CLERK_INVITATION_ID,
+      "inv_revocation_earlier",
+    ]);
+    clerk.answer(listAnswer([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]), {
+      status: 200,
+      body: { id: OUR_CLERK_INVITATION_ID, status: "revoked" },
     });
 
-    await revoke();
-
-    // Clerk never applied it, so the acceptance link is still live and the local
-    // row must not claim otherwise.
-    expect(await invitationStatus()).toBe("pending");
+    expect((await revoke("idem_revocation_recorded_elsewhere")).status).toBe(204);
+    expect(clerk.requests).toEqual([LIST_REQUEST, revokeRequest(OUR_CLERK_INVITATION_ID)]);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
   });
 
-  it("keeps the token dead when the revocation and its verification both fail", async () => {
-    await seedInvitation(OUR_CLERK_INVITATION_ID);
-    stubClerk({
-      pendingByCall: [[clerkInvitation(OUR_CLERK_INVITATION_ID)]],
-      revokeStatus: 500,
-      failListAfterFirst: true,
+  it("does not match newer Clerk invitations by address when retrying a revoked row with no Clerk id", async () => {
+    await seedTarget({
+      organizationId: ORGANIZATION.id,
+      invitedBy: ADMIN.userId,
+      status: "revoked",
+      clerkInvitationId: null,
     });
-
-    await revoke();
-
-    // Nothing is known about whether Clerk applied it. Reopening would leave a
-    // token we issued redeemable after a revocation that may have succeeded,
-    // and would not close the Clerk side either — clerk-auth provisions from
-    // Clerk org membership regardless of this row.
-    expect(await invitationStatus()).toBe("revoked");
-  });
-
-  it("locks the invitation rows so a revocation cannot commit mid-check", async () => {
-    await seedInvitation(OUR_CLERK_INVITATION_ID);
-    const db = getDb(env);
-
-    await db.transaction(async (tx) => {
-      expect(await invitationWasRevoked(tx, ORGANIZATION_ID, INVITEE_EMAIL, { lock: true })).toBe(
-        false
-      );
-
-      // NOWAIT fails outright rather than blocking, so this asserts the rows are
-      // genuinely locked without depending on a timeout. Without the lock the
-      // revocation would commit between the check and the membership write.
-      await expect(
-        db
-          .prepare(
-            `SELECT id FROM invitations
-              WHERE organization_id = ? AND email = ?
-              FOR UPDATE NOWAIT`
-          )
-          .bind(ORGANIZATION_ID, INVITEE_EMAIL)
-          .all()
-      ).rejects.toThrow();
+    await seedInvitation(getDb(env), {
+      id: "inv_revocation_newer",
+      organizationId: ORGANIZATION.id,
+      email: INVITEE_EMAIL,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "pending",
+      expiresInDays: 7,
     });
+    await getDb(env).execute("UPDATE invitations SET clerk_invitation_id = ? WHERE id = ?", [
+      OTHER_CLERK_INVITATION_ID,
+      "inv_revocation_newer",
+    ]);
+
+    expect((await revoke("idem_revocation_unlinked_retry")).status).toBe(204);
+    expect(clerk.requests).toEqual([]);
+    expect(await readInvitationStatus(getDb(env), "inv_revocation_newer")).toBe("pending");
   });
 
-  it("revokes every invitation for the address when the row predates the stored id", async () => {
-    await seedInvitation(null);
-    const clerk = stubClerk({
-      pendingByCall: [
-        [clerkInvitation(OUR_CLERK_INVITATION_ID), clerkInvitation(OTHER_CLERK_INVITATION_ID)],
-      ],
-    });
+  it.each([
+    {
+      target: "an accepted invitation",
+      organizationId: ORGANIZATION.id,
+      invitedBy: ADMIN.userId,
+      status: "accepted",
+      expected: 400,
+    },
+    {
+      target: "another organization's invitation",
+      organizationId: FOREIGN_ORGANIZATION.id,
+      invitedBy: FOREIGN_ADMIN.userId,
+      status: "pending",
+      expected: 404,
+    },
+  ] as const)(
+    "refuses $target without calling Clerk",
+    async ({ organizationId, invitedBy, status, expected }) => {
+      await seedTarget({
+        organizationId,
+        invitedBy,
+        status,
+        clerkInvitationId: OUR_CLERK_INVITATION_ID,
+      });
 
-    const response = await revoke();
-
-    expect(response.status).toBe(204);
-    // Without the id there is no way to tell which one is ours, so the invariant
-    // enforced is that none survive.
-    expect(clerk.revokedIds).toEqual([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]);
-    expect(await invitationStatus()).toBe("revoked");
-  });
+      expect((await revoke("idem_revocation_refused")).status).toBe(expected);
+      expect(clerk.requests).toEqual([]);
+      expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe(status);
+      expect(await revokeAudits()).toEqual([]);
+    }
+  );
 });

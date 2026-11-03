@@ -1,11 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
+import { setRpcTelemetrySink } from "@sdp/rpc/telemetry";
 import pino, { type Logger, type LoggerOptions } from "pino";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
 export interface LogContext {
   request_id?: string;
   trace_id?: string;
+  web_trace_hash?: string;
 }
 
 const store = new AsyncLocalStorage<LogContext>();
@@ -68,8 +70,8 @@ export function baseLoggerOptions(): LoggerOptions {
     // that depends on each caller remembering to wrap its payload is a denylist
     // that holds until the next handler is written. Everything a caller passes —
     // merged object, message, interpolation arguments — goes through it. The
-    // `mixin` context (request_id, trace_id) bypasses hooks but only ever holds
-    // generated ids.
+    // `mixin` context bypasses hooks but only holds generated ids and a hash
+    // of a strictly validated, server-generated web id.
     hooks: {
       logMethod(args, method) {
         method.apply(this, args.map((argument) => scrubTelemetry(argument)) as typeof args);
@@ -82,6 +84,10 @@ export function baseLoggerOptions(): LoggerOptions {
 }
 
 export const rootLogger: Logger = pino(baseLoggerOptions());
+
+setRpcTelemetrySink((event) => {
+  rootLogger.info(event, event.event);
+});
 
 export function getLogger(): Logger {
   return rootLogger;

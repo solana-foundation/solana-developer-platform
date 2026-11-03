@@ -7,13 +7,18 @@ import {
   loadSignableWallets,
   loadTokenEligibility,
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
-import { PRIVATE_CHANNELS_SETUP_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import {
+  PRIVATE_CHANNELS_OVERVIEW_PATH,
+  PRIVATE_CHANNELS_SETUP_PATH,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getTranslations } from "@/i18n/server";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { WithdrawForm } from "./withdraw-form";
 
 export default async function PrivateChannelsWithdrawPage() {
   await requirePrivateChannelsAccess();
+  await redirectUnlessCanWrite(PRIVATE_CHANNELS_OVERVIEW_PATH);
 
   const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
   const [instance, wallets, tokenEligibility] = await Promise.all([

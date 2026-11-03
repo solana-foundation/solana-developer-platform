@@ -50,19 +50,19 @@ export function VaultSlippageSection({
   const summary = t("DashboardEarn.deposit.vaultSlippageToggle", { percent });
 
   return (
-    <section className="mt-3 overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+    <section className="mt-4 overflow-hidden rounded-card border border-border-default">
       <button
         aria-controls={`${idPrefix}-slippage-section`}
         aria-expanded={expanded}
         aria-label={`${title}. ${summary}`}
-        className="flex min-h-20 w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-border-strong focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-border-strong focus-visible:-outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={submitting}
         onClick={onToggle}
         type="button"
       >
         <span className="flex min-w-0 flex-col gap-1">
-          <span className="text-sm font-semibold text-primary">{title}</span>
-          <span className="text-sm text-secondary">{summary}</span>
+          <span className="text-body font-medium text-primary">{title}</span>
+          <span className="text-meta text-secondary">{summary}</span>
         </span>
         <ChevronDownIcon
           aria-hidden="true"
@@ -90,13 +90,13 @@ export function VaultSlippageSection({
             value={input}
           />
           {invalid ? (
-            <p className="text-xs text-error" role="alert">
+            <p className="text-meta text-error" role="alert">
               {t("DashboardEarn.deposit.vaultSlippageInvalid", {
                 max: MAX_SLIPPAGE_TOLERANCE_BPS,
               })}
             </p>
           ) : (
-            <p className="text-xs leading-5 text-tertiary">{help}</p>
+            <p className="text-meta text-tertiary">{help}</p>
           )}
         </div>
       ) : null}
@@ -131,14 +131,14 @@ export function VaultQuoteNotices<Preview extends { blockingIssues: { message: s
   const t = useTranslations();
   if (quote.kind === "loading") {
     return (
-      <p className="mt-2 text-xs text-tertiary" role="status">
+      <p className="mt-2 text-meta text-tertiary" role="status">
         {t(keys.loading)}
       </p>
     );
   }
   if (quote.kind === "unavailable") {
     return (
-      <p className="mt-2 text-xs text-error" role="alert">
+      <p className="mt-2 text-meta text-error" role="alert">
         {t(keys.unavailable)}
       </p>
     );
@@ -146,14 +146,14 @@ export function VaultQuoteNotices<Preview extends { blockingIssues: { message: s
   const blockingIssue = quote.kind === "quoted" ? quote.preview.blockingIssues[0] : undefined;
   if (blockingIssue) {
     return (
-      <p className="mt-2 text-xs text-error" role="alert">
+      <p className="mt-2 text-meta text-error" role="alert">
         {t(keys.blocked, { message: blockingIssue.message })}
       </p>
     );
   }
   if (quote.kind === "quoted" && isZeroQuote(quantity(quote.preview), decimals(quote.preview))) {
     return (
-      <p className="mt-2 text-xs text-error" role="alert">
+      <p className="mt-2 text-meta text-error" role="alert">
         {t(keys.zero)}
       </p>
     );

@@ -144,25 +144,34 @@ describe("OndoEarnClient.listStrategies", () => {
 
   /**
    * The production pass runs in EVERY deployment (it feeds the sandbox mirror),
-   * and in a devnet deployment the process endpoint serves the wrong chain. The
-   * per-cluster override is what lets that pass succeed; without it the genesis
-   * proof refuses the default rather than reading devnet as if it were mainnet.
+   * so it must read the endpoint the caller supplies for MAINNET. A devnet
+   * endpoint answered for mainnet fails the genesis proof rather than reading
+   * devnet as if it were mainnet, and no endpoint at all fails closed.
    */
-  it("reads mainnet through SOLANA_MAINNET_RPC_URL when the process endpoint serves devnet", async () => {
+  it("reads mainnet through the caller's mainnet endpoint and refuses any other", async () => {
     const urls = { devnet: "https://devnet.rpc.test", mainnet: "https://mainnet.rpc.test" };
     stubTwoClusterRpc(urls);
+    const askedFor: string[] = [];
 
     const snapshots = await client.listStrategies({
-      env: { SOLANA_RPC_URL: urls.devnet, SOLANA_MAINNET_RPC_URL: urls.mainnet },
+      env: {},
       environment: "production",
+      catalogueRpcUrl: (cluster) => {
+        askedFor.push(cluster);
+        return cluster === "devnet" ? urls.devnet : urls.mainnet;
+      },
     });
     assert.equal(snapshots.length, 1);
     assert.equal(snapshots[0]?.hostCluster, "mainnet-beta");
+    assert.deepEqual(askedFor, ["mainnet-beta"]);
 
-    await assert.rejects(
-      client.listStrategies({ env: { SOLANA_RPC_URL: urls.devnet }, environment: "production" }),
-      (error: unknown) => error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
-    );
+    for (const catalogueRpcUrl of [() => urls.devnet, undefined]) {
+      await assert.rejects(
+        client.listStrategies({ env: {}, environment: "production", catalogueRpcUrl }),
+        (error: unknown) =>
+          error instanceof SdpEarnError && error.code === "PROVIDER_NOT_CONFIGURED"
+      );
+    }
   });
 
   it("maps the USDY instrument into one rwa strategy row", async () => {

@@ -7,7 +7,9 @@ import type { OfframpWizard } from "@/app/dashboard/[projectId]/payments/ramps/h
 import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
+import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OfframpOutcome, OfframpSendError } from "./offramp-final-step";
@@ -15,39 +17,14 @@ import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { WalletAssetBreakdown } from "./wallet-asset-breakdown";
 
-export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
+function OfframpWalletStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
-  const {
-    currentStepId,
-    enabledRampProviders,
-    rampProviderAccess,
-    selectedCounterparty,
-    liveWallets,
-    walletsLoading,
-    selectedWallet,
-    selectedRampPair,
-    fields,
-    quote,
-    transferStatus,
-    setField,
-    selectProvider,
-    handlePairChange,
-    requirementFields,
-    collectedData,
-    setCollectedField,
-    requirementsBlocker,
-    quoteCreationError,
-    quoteCreationRetrying,
-    retryQuoteCreation,
-    isAdvancing,
-    memoRows,
-    setMemoRows,
-    sourceWalletHint,
-  } = wizard;
-
+  const { liveWallets, walletsLoading, selectedWallet, fields, setField, sourceWalletHint } =
+    wizard;
   const walletOptions = useMemo(
     () =>
       walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
@@ -56,112 +33,146 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     [liveWallets, t]
   );
 
-  if (currentStepId === "WALLET") {
+  return (
+    <div className="space-y-4">
+      <Combobox
+        label={t("DashboardPayments.ramps.sourceWallet")}
+        value={fields.walletId || null}
+        onChange={(walletId) => setField("walletId", walletId)}
+        options={walletOptions}
+        placeholder={t("DashboardPayments.ramps.selectSourceWallet")}
+        searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
+        icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
+        isLoading={walletsLoading}
+      />
+      <p hidden={!sourceWalletHint} className="text-sm text-warning">
+        {sourceWalletHint}
+      </p>
+      {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
+    </div>
+  );
+}
+
+function RequirementsBlocker({ message }: { message: string | null }) {
+  return message ? (
+    <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+      {message}
+    </div>
+  ) : null;
+}
+
+function OfframpWithdrawStep({ wizard }: { wizard: OfframpWizard }) {
+  const t = useTranslations();
+  const {
+    enabledRampProviders,
+    rampProviderAccess,
+    selectedCounterparty,
+    liveWallets,
+    walletsLoading,
+    selectedWallet,
+    selectedRampPair,
+    fields,
+    setField,
+    selectProvider,
+    handlePairChange,
+    requirementsBlocker,
+  } = wizard;
+
+  if (!hasEnabledRampProvider(rampProviderAccess)) {
     return (
-      <div className="space-y-4">
-        <Combobox
-          label={t("DashboardPayments.ramps.sourceWallet")}
-          value={fields.walletId || null}
-          onChange={(walletId) => setField("walletId", walletId)}
-          options={walletOptions}
-          placeholder={t("DashboardPayments.ramps.selectSourceWallet")}
-          searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
-          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
-          isLoading={walletsLoading}
-        />
-        <p hidden={!sourceWalletHint} className="text-sm text-warning">
-          {sourceWalletHint}
-        </p>
-        {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
+      <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
+        {t("DashboardPayments.ramps.noPayoutProviders")}
       </div>
     );
   }
 
-  if (currentStepId === "WITHDRAW") {
-    if (!hasEnabledRampProvider(rampProviderAccess)) {
+  return (
+    <div className="space-y-4">
+      <RampPairProviderSelector
+        direction="offramp"
+        enabledRampProviders={enabledRampProviders}
+        rampProviderAccess={rampProviderAccess}
+        selectedCounterparty={selectedCounterparty}
+        wallets={liveWallets}
+        walletsLoading={walletsLoading}
+        selectedWallet={selectedWallet}
+        showWallet={false}
+        selectedPair={selectedRampPair}
+        selectedProvider={fields.provider}
+        amount={fields.amount}
+        onAmountChange={(value) => setField("amount", value)}
+        onAmountBlur={() => {}}
+        onWalletChange={(walletId) => setField("walletId", walletId)}
+        onPairChange={handlePairChange}
+        onProviderSelect={selectProvider}
+      />
+      <RequirementsBlocker message={requirementsBlocker} />
+    </div>
+  );
+}
+
+function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
+  const { requirementFields, collectedData, setCollectedField, requirementsBlocker, isAdvancing } =
+    wizard;
+  return (
+    <div className="space-y-4">
+      <RequirementsBlocker message={requirementsBlocker} />
+      <fieldset disabled={isAdvancing} className="min-w-0">
+        <RequirementsFields
+          fields={requirementFields}
+          values={collectedData}
+          onChange={setCollectedField}
+        />
+      </fieldset>
+    </div>
+  );
+}
+
+function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
+  const t = useTranslations();
+  const demo = usePaymentsDemo();
+  const { quote, transferStatus, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } =
+    wizard;
+
+  if (!quote) {
+    if (quoteCreationError) {
       return (
-        <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
-          {t("DashboardPayments.ramps.noPayoutProviders")}
-        </div>
+        <RampQuoteError
+          error={quoteCreationError}
+          retrying={quoteCreationRetrying}
+          onRetry={() => void retryQuoteCreation()}
+        />
       );
     }
-
-    return (
-      <div className="space-y-4">
-        <RampPairProviderSelector
-          direction="offramp"
-          enabledRampProviders={enabledRampProviders}
-          rampProviderAccess={rampProviderAccess}
-          selectedCounterparty={selectedCounterparty}
-          wallets={liveWallets}
-          walletsLoading={walletsLoading}
-          selectedWallet={selectedWallet}
-          showWallet={false}
-          selectedPair={selectedRampPair}
-          selectedProvider={fields.provider}
-          amount={fields.amount}
-          onAmountChange={(value) => setField("amount", value)}
-          onAmountBlur={() => {}}
-          onWalletChange={(walletId) => setField("walletId", walletId)}
-          onPairChange={handlePairChange}
-          onProviderSelect={selectProvider}
-        />
-        {requirementsBlocker ? (
-          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {requirementsBlocker}
-          </div>
-        ) : null}
-      </div>
-    );
+    return <RampQuoteSkeleton />;
   }
 
-  if (currentStepId === "MEMO") {
-    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
-  }
-
-  if (currentStepId === "REQUIREMENTS") {
-    return (
-      <div className="space-y-4">
-        {requirementsBlocker ? (
-          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {requirementsBlocker}
-          </div>
-        ) : null}
-        <fieldset disabled={isAdvancing} className="min-w-0">
-          <RequirementsFields
-            fields={requirementFields}
-            values={collectedData}
-            onChange={setCollectedField}
-          />
-        </fieldset>
-      </div>
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && !quote && quoteCreationError) {
-    return (
-      <RampQuoteError
-        error={quoteCreationError}
-        retrying={quoteCreationRetrying}
-        onRetry={() => void retryQuoteCreation()}
-      />
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && quote && transferStatus?.status === "completed") {
+  if (transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
 
   // A sale that ended another way has nothing left to do in the provider's window.
-  if (
-    currentStepId === "COMPLETE" &&
-    transferStatus &&
-    getRampTransferState(transferStatus.status).terminal
-  ) {
+  if (transferStatus && getRampTransferState(transferStatus.status).terminal) {
     return <OfframpOutcome wizard={wizard} />;
   }
 
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
+  // A provider's own page or widget can't open on sample data; the demo stands in for it.
+  if (demo) {
+    return (
+      <div className="space-y-6">
+        <DemoProviderCheckout
+          direction="offramp"
+          provider={quote.provider}
+          transfer={transferStatus}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="offramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
+  if (quote.deliveryMode === "hosted") {
     return (
       <div className="space-y-4">
         <OfframpSendError message={wizard.onchainSendError} />
@@ -174,4 +185,21 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   }
 
   return <RampQuoteSkeleton />;
+}
+
+export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
+  switch (wizard.currentStepId) {
+    case "WALLET":
+      return <OfframpWalletStep wizard={wizard} />;
+    case "WITHDRAW":
+      return <OfframpWithdrawStep wizard={wizard} />;
+    case "MEMO":
+      return <MemoStepContent rows={wizard.memoRows} onChange={wizard.setMemoRows} />;
+    case "REQUIREMENTS":
+      return <OfframpRequirementsStep wizard={wizard} />;
+    case "COMPLETE":
+      return <OfframpCompleteStep wizard={wizard} />;
+    default:
+      return <RampQuoteSkeleton />;
+  }
 }

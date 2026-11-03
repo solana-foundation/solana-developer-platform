@@ -762,6 +762,45 @@ describe("Payments routes — list transfers", () => {
       expect(rpc.calls).toEqual([]);
     });
 
+    it("withholds a batch chunk's signed transaction bytes, keeping its signature", async () => {
+      await seedTransfer({ id: "xfr_bytes_plain", status: "confirmed", signature: "sig_plain" });
+      await seedTransfer({
+        id: "xfr_bytes_batch",
+        status: "confirmed",
+        type: "transfer_batch",
+        signature: "sig_batch",
+      });
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET serialized_tx = ? WHERE id IN (?, ?)")
+        .bind("AQID", "xfr_bytes_plain", "xfr_bytes_batch")
+        .run();
+
+      const res = await app.request(
+        "/v1/payments/transfers",
+        { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = z
+        .object({
+          data: z.array(
+            z.object({
+              id: z.string(),
+              signature: z.string().nullable(),
+              serializedTx: z.string().nullable(),
+            })
+          ),
+        })
+        .parse(await res.json());
+      const byId = new Map(body.data.map((transfer) => [transfer.id, transfer]));
+      expect(byId.get("xfr_bytes_batch")).toMatchObject({
+        signature: "sig_batch",
+        serializedTx: null,
+      });
+      expect(byId.get("xfr_bytes_plain")).toMatchObject({ serializedTx: "AQID" });
+    });
+
     it("scopes database-backed history to the exact wallet row", async () => {
       await seedTransfer({
         id: "xfr_address_resolved_outbound",

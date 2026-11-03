@@ -27,7 +27,7 @@ vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
 
 const reviewWizard = {
   summaryDetails: [],
-  stepIndex: 2,
+  stepIndex: 1,
   currentStepId: "REVIEW",
   isLastStep: true,
   canProceed: true,
@@ -80,7 +80,7 @@ function wrapper({ children }: { children: ReactNode }) {
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={null}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: false,
           compliance: false,

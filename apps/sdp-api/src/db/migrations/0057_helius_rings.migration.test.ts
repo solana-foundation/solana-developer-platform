@@ -318,8 +318,9 @@ describe("0057_helius_rings tenant isolation", () => {
       );
       expect(rows.rows[0]?.count).toBe("0");
     }
+    // Only this test's events: other suites commit events to the same test database.
     const events = await client.query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM helius_rings_events`
+      `SELECT count(*)::text AS count FROM helius_rings_events WHERE id = 'hre_cascade'`
     );
     expect(events.rows[0]?.count).toBe("0");
   });

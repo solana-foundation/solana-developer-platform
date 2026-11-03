@@ -5,7 +5,7 @@ import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 type ReleaseChannelsModule = typeof ReleaseChannels;
 
 /** One (custody provider, mode) pair whose stage a test replaces. */
-export interface CustodyStageOverride {
+interface CustodyMaturityOverride {
   provider: CustodyProvider;
   mode: CustodyMode;
   stage: SdpReleaseChannel;
@@ -13,7 +13,7 @@ export interface CustodyStageOverride {
 
 export interface CustodyReleaseChannelToggle {
   outOfChannelMode: CustodyMode | null;
-  stageOverride: CustodyStageOverride | null;
+  stageOverride: CustodyMaturityOverride | null;
 }
 
 /**

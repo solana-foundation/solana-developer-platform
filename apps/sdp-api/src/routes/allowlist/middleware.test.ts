@@ -89,7 +89,6 @@ describe("allowlist adminAuth", () => {
         clerkOrgId: "clerk_org",
         email: "admin@platform.test",
         orgSlug: null,
-        orgRole: "admin",
       });
     });
 
@@ -107,7 +106,6 @@ describe("allowlist adminAuth", () => {
         clerkOrgId: "clerk_org",
         email: "admin@other.test",
         orgSlug: null,
-        orgRole: "admin",
       });
     });
 

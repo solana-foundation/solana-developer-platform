@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
+import {
+  IDEMPOTENCY_REQUIRED_ROUTES,
+  INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
+} from "@sdp/types/idempotency-required-routes";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
+import {
+  ANONYMOUS_MAX_REQUESTS,
+  RATE_LIMIT_TIERS,
+  RATE_LIMIT_WINDOW_MS,
+} from "@/middleware/rate-limit";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 import {
@@ -49,14 +58,6 @@ function getJsonSchema(value: unknown): TestJsonSchema {
   ].schema;
 }
 
-function getJsonExamples(value: unknown) {
-  return (
-    value as {
-      content: Record<string, { examples?: Record<string, { value?: unknown }> }>;
-    }
-  ).content["application/json"].examples;
-}
-
 function getWalletResponseSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
 }
@@ -72,6 +73,17 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
+  it("requires no project header to leave an organization", () => {
+    const doc = createOpenApiDocument();
+    for (const [path, method] of [["/v1/members/me", "delete"]] as const) {
+      const operation = doc.paths?.[path]?.[method];
+      expect(operation).toBeDefined();
+      expect(operation?.parameters).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ in: "header", name: "x-project-id" })])
+      );
+    }
+  });
+
   it("documents API key and Clerk access for shared private-channel operations", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
@@ -118,16 +130,15 @@ describe("OpenAPI spec", () => {
       ["/v1/projects/{projectId}/api-keys", "get"],
       ["/v1/projects/{projectId}/api-keys", "post"],
       ["/v1/projects/{projectId}/members", "get"],
-      ["/v1/projects/{projectId}/members", "post"],
-      ["/v1/projects/{projectId}/members/{memberId}", "patch"],
-      ["/v1/projects/{projectId}/members/{memberId}", "delete"],
       ["/v1/members", "get"],
+      ["/v1/members/me", "get"],
+      ["/v1/members/me", "delete"],
       ["/v1/members/invite", "post"],
-      ["/v1/members/accept", "post"],
       ["/v1/members/invitations/{invitationId}", "delete"],
+      ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],
       ["/v1/organizations/{orgId}", "patch"],
-      ["/v1/organizations/{orgId}", "delete"],
+      ["/v1/organizations", "post"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
         { clerkBearerAuth: [] },
@@ -155,13 +166,6 @@ describe("OpenAPI spec", () => {
     expect(doc.info.version).toBe("0.1.0");
     expect(doc.info.description).toContain("API versioning is path-based");
     expect(doc.info.description).toContain("/v1");
-  });
-
-  it("does not document local organization self-registration", () => {
-    const doc = createOpenApiDocument();
-
-    expect(doc.components?.securitySchemes?.organizationRegistrationToken).toBeUndefined();
-    expect(doc.paths?.["/v1/organizations"]?.post).toBeUndefined();
   });
 
   it("documents token supply refresh endpoint", () => {
@@ -221,10 +225,9 @@ describe("OpenAPI spec", () => {
     expect(publicDocument.components?.securitySchemes?.clerkBearerAuth).toBeUndefined();
 
     // SECURITY REVIEW GATE (PRO-1872, threat model EARN-027)
-    // The public/preview split is a publication boundary. Earn also has a
-    // narrower keyless runtime tier, but changing either the operation list or
-    // an operation's public security declaration is a threat-model revisit
-    // trigger. This list is the route-publication gate: a PR that grows it must
+    // The public/preview split is a publication boundary. Changing either the
+    // operation list or an operation's public security declaration is a
+    // threat-model revisit trigger. This list is the route-publication gate: a PR that grows it must
     // carry security sign-off (routes/earn/CLAUDE.md, "Public OpenAPI
     // promotion"). Do not widen the list to make a red test pass.
     const publicEarnOperations = Object.entries(publicDocument.paths ?? {})
@@ -273,70 +276,19 @@ describe("OpenAPI spec", () => {
       );
     }
 
-    // Pin the runtime's exact optional-auth boundary in both documents. An
-    // empty security requirement means the request may be anonymous; the
-    // named alternatives preserve the authenticated behavior of the same
-    // handler. Any route moving between these lists is a threat-model revisit.
-    const optionalAuthOperations = [
-      { method: "get", path: "/v1/earn/strategies" },
-      { method: "get", path: "/v1/earn/strategies/{strategyId}" },
-      { method: "post", path: "/v1/earn/vault-deposit-previews" },
-      { method: "post", path: "/v1/earn/external-wallet/deposit-transactions" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawal-previews" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawal-transactions" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawal-options" },
-      { method: "post", path: "/v1/earn/external-wallet/queued-withdrawal-previews" },
-    ] as const;
-    const keyedOnlyOperations = [
-      { method: "get", path: "/v1/earn/external-wallet/positions/summary" },
-      { method: "get", path: "/v1/earn/external-wallet/positions" },
-      { method: "get", path: "/v1/earn/external-wallet/movements" },
-      { method: "get", path: "/v1/earn/external-wallet/movements/{movementId}" },
-      { method: "get", path: "/v1/earn/external-wallet/earnings" },
-      { method: "post", path: "/v1/earn/external-wallet/deposits" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawals" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawal-request-transactions" },
-      { method: "post", path: "/v1/earn/external-wallet/withdrawal-requests" },
-      { method: "get", path: "/v1/earn/external-wallet/withdrawal-requests" },
-      {
-        method: "get",
-        path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
-      },
-      {
-        method: "post",
-        path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-      },
-      {
-        method: "post",
-        path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
-      },
-    ] as const;
-
-    expect(
-      [...optionalAuthOperations, ...keyedOnlyOperations]
-        .map(({ method, path }) => `${method.toUpperCase()} ${path}`)
-        .sort()
-    ).toEqual(publicEarnOperations);
-
-    for (const { method, path } of optionalAuthOperations) {
-      const publicOperation = publicDocument.paths?.[path]?.[method];
-      expect(publicOperation?.operationId).toBeDefined();
-      expect(publicOperation?.security).toEqual([{ apiKeyAuth: [] }, {}]);
-
-      const internalOperation = internal.paths?.[path]?.[method];
-      expect(internalOperation?.security).toEqual([
-        { apiKeyAuth: [] },
-        { clerkBearerAuth: [] },
-        {},
-      ]);
-    }
-
-    for (const { method, path } of keyedOnlyOperations) {
-      expect(publicDocument.paths?.[path]?.[method]?.security).toEqual([{ apiKeyAuth: [] }]);
-      expect(internal.paths?.[path]?.[method]?.security).toEqual([
-        { apiKeyAuth: [] },
-        { clerkBearerAuth: [] },
-      ]);
+    // Every Earn operation requires a credential in both documents: no empty
+    // security requirement, so no request may be anonymous.
+    for (const [path, item] of Object.entries(publicDocument.paths ?? {})) {
+      if (!path.startsWith("/v1/earn")) continue;
+      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        expect(operation.security, `${method} ${path}`).toEqual([{ apiKeyAuth: [] }]);
+        expect(internal.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
+          { apiKeyAuth: [] },
+          { clerkBearerAuth: [] },
+        ]);
+      }
     }
 
     const depositPreviewRequest = getJsonSchema(
@@ -354,56 +306,16 @@ describe("OpenAPI spec", () => {
     const withdrawalBuildRequest = getJsonSchema(
       publicDocument.paths?.["/v1/earn/external-wallet/withdrawal-transactions"]?.post?.requestBody
     );
-    expect(withdrawalBuildRequest.anyOf).toEqual([
-      expect.objectContaining({
-        required: expect.arrayContaining(["positionId", "shares"]),
-      }),
-      expect.objectContaining({
-        required: expect.arrayContaining(["strategyId", "ownerAddress", "shares"]),
-      }),
-    ]);
+    expect(withdrawalBuildRequest.required).toEqual(
+      expect.arrayContaining(["positionId", "shares"])
+    );
+    expect(withdrawalBuildRequest.properties).not.toHaveProperty("strategyId");
 
     expect(
       JSON.stringify(
         publicDocument.paths?.["/v1/earn/external-wallet/positions"]?.get?.responses?.["200"]
       )
     ).toContain('"unlockTimestamp"');
-
-    const anonymousRequestExamples = [
-      {
-        path: "/v1/earn/external-wallet/deposit-transactions",
-        value: {
-          strategyId: "earn_strategy_example",
-          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-          amount: "25",
-          minSharesOut: "24.9",
-        },
-      },
-      {
-        path: "/v1/earn/external-wallet/withdrawal-previews",
-        value: {
-          strategyId: "earn_strategy_example",
-          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-          shares: "10",
-        },
-      },
-      {
-        path: "/v1/earn/external-wallet/withdrawal-transactions",
-        value: {
-          strategyId: "earn_strategy_example",
-          ownerAddress: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-          shares: "10",
-          minAmountOut: "24.9",
-        },
-      },
-    ];
-
-    for (const { path, value } of anonymousRequestExamples) {
-      const examples = getJsonExamples(publicDocument.paths?.[path]?.post?.requestBody);
-      expect(examples?.anonymous?.value).toEqual(value);
-      expect(examples?.anonymous?.value).not.toHaveProperty("feePayer");
-      expect(examples?.anonymous?.value).not.toHaveProperty("positionId");
-    }
 
     for (const path of [
       "/v1/earn/external-wallet/deposit-transactions",
@@ -490,21 +402,17 @@ describe("OpenAPI spec", () => {
     const options = getJsonSchema(
       doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
     );
-    const optionsVariants = options.properties?.data?.anyOf ?? [];
-    expect(optionsVariants).toHaveLength(2);
-    for (const variant of optionsVariants) {
-      expect(variant.properties?.parRedemption).toMatchObject({
-        nullable: true,
-        required: expect.arrayContaining([
-          "intermediateMint",
-          "assetMint",
-          "minimumShares",
-          "minimumIntermediateAmount",
-          "cancelable",
-          "operatorSettled",
-        ]),
-      });
-    }
+    expect(options.properties?.data?.properties?.parRedemption).toMatchObject({
+      nullable: true,
+      required: expect.arrayContaining([
+        "intermediateMint",
+        "assetMint",
+        "minimumShares",
+        "minimumIntermediateAmount",
+        "cancelable",
+        "operatorSettled",
+      ]),
+    });
 
     const preview = getJsonSchema(
       doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
@@ -690,10 +598,12 @@ describe("OpenAPI spec", () => {
     );
     const ownerConstraint = [
       {
+        description: "Owned by a Managed config.",
         required: ["custodyConfigId"],
         not: { required: ["custodyConnectionId"] },
       },
       {
+        description: "Owned by a Custody Connection.",
         required: ["custodyConnectionId"],
         not: { required: ["custodyConfigId"] },
       },
@@ -848,6 +758,26 @@ describe("OpenAPI spec", () => {
     });
   }
 
+  // Provider availability lists every family in one response, so a channel
+  // without Compliance must name neither the family nor its providers there,
+  // in values or prose; the runtime response omits those entries to match.
+  for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+    it(`${releaseChannel}: names Compliance in provider availability only when the channel runs it`, () => {
+      const operation = createPublicOpenApiDocument({ releaseChannel }).paths?.[
+        "/v1/projects/{projectId}/provider-availability"
+      ]?.get;
+      expect(operation).toBeDefined();
+      const published = JSON.stringify(operation);
+      const runsCompliance = SDP_RELEASE_CHANNELS[releaseChannel].includes("compliance");
+      const complianceValues = ["compliance", ...COMPLIANCE_PROVIDERS];
+
+      expect(complianceValues.filter((value) => published.includes(`"${value}"`))).toEqual(
+        runsCompliance ? complianceValues : []
+      );
+      expect(/compliance/i.test(published)).toBe(runsCompliance);
+    });
+  }
+
   // A deployment stores values a narrower channel no longer documents (a key
   // saved with `tokens:read` before a downgrade, or created on another
   // channel's dashboard). Response enums therefore open up rather than narrow,
@@ -875,6 +805,16 @@ describe("OpenAPI spec", () => {
         expect(published).not.toContain(`"${value}"`);
       }
       expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
+    }
+  });
+
+  it("gives the docs the rate limits the API enforces, the same on every channel", () => {
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(createPublicSurfaceManifest(releaseChannel).rateLimits).toEqual({
+        windowSeconds: RATE_LIMIT_WINDOW_MS / 1000,
+        apiKeyTiers: RATE_LIMIT_TIERS,
+        unauthenticatedPerIp: ANONYMOUS_MAX_REQUESTS,
+      });
     }
   });
 
@@ -985,7 +925,11 @@ function operationFor(document: ReturnType<typeof createOpenApiDocument>, route:
 
 describe("OpenAPI Idempotency-Key headers", () => {
   // Declared routes with no public operation yet; adding one is deliberate.
-  const UNDOCUMENTED: readonly string[] = ["POST /v1/payments/requests"];
+  const UNDOCUMENTED: readonly string[] = [
+    "POST /v1/payments/requests",
+    // Dashboard-only CSR registration must not be promoted to a public API.
+    ...INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
+  ];
 
   function declaredModes() {
     const modes = new Map<string, ReturnType<typeof declaredIdempotency>>();
@@ -1070,6 +1014,13 @@ describe("OpenAPI Idempotency-Key headers", () => {
  * to the list fails here until each surface says so.
  */
 describe("Idempotency-Key required routes on public surfaces", () => {
+  it("keeps internal key-generation routes out of public API surfaces", () => {
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
+    for (const route of INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES) {
+      expect(operationFor(publicDocument, route)).toBeUndefined();
+    }
+  });
+
   const postmanItemSchema = z.object({
     get item() {
       return z.array(postmanItemSchema).optional();

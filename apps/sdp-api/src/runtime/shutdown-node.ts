@@ -25,7 +25,7 @@ import { closeDatabasePools } from "@/db/client";
 import type { BackgroundRunner } from "./background";
 import { closeAllRedisClients } from "./kv-redis";
 
-export interface Closable {
+interface Closable {
   close(callback: (err?: Error) => void): void;
   // http.Server.close() stops accepting new connections but lets existing
   // idle keep-alive sockets time out on their own — minutes by default

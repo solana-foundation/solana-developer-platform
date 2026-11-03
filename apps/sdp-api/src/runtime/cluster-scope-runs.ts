@@ -2,20 +2,20 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 
 /**
- * Run one chain-touching job for one environment, inside that environment's cluster scope
+ * Run chain-touching job work for one environment, inside that environment's cluster scope
  * (ADR 0007, Jobs). The Worker opens one per registration of a `cluster` Cron Definition, so
  * the work selects only that environment's rows and reads the chain through
- * `createClusterRpc()`.
+ * `createClusterRpc()`; the global catalogue sync opens one per lane fetch.
  *
  * @param environment - The environment whose cluster the work runs on.
  * @param work - The job work, reading the open scope through `currentClusterScope()`.
- * @returns Resolves once the work has; a scope conflict rejects instead of throwing.
+ * @returns What the work resolves to; a scope conflict rejects instead of throwing.
  */
-export async function runInEnvironmentClusterScope(
+export async function runInEnvironmentClusterScope<TResult>(
   environment: SdpEnvironment,
-  work: () => Promise<void>
-): Promise<void> {
-  await runInClusterScope({ projectId: null, environment }, work);
+  work: () => Promise<TResult>
+): Promise<TResult> {
+  return runInClusterScope({ projectId: null, environment }, work);
 }
 
 /**

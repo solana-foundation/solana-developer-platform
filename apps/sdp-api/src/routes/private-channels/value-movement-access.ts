@@ -86,9 +86,7 @@ export interface PrivateChannelActorContext {
  * `auth.userId` finds nothing and every deposit and withdrawal on a project
  * created after that change would answer 403.
  */
-export async function resolvePrivateChannelActor(
-  c: AppContext
-): Promise<PrivateChannelActorContext> {
+async function resolvePrivateChannelActor(c: AppContext): Promise<PrivateChannelActorContext> {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const instanceRow = await requireActiveInstance(c);

@@ -1,5 +1,7 @@
 import type { SolanaRpcProbeResult } from "@sdp/private-channels/rpc";
-import { createClusterRpc, type SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
@@ -32,12 +34,13 @@ export interface LoadProjectRpcClientInput {
  * serializes them on its instance records.
  *
  * @param input - The project to load the client for.
- * @param input.env - Process env carrying the managed RPC pool.
+ * @param input.env - Process env for the project lookup.
  * @param input.organizationId - Organization that owns the project.
  * @param input.projectId - Project whose environment picks the cluster.
  * @param input.environment - The project's environment when the caller already knows it; otherwise read from the active project row.
- * @returns The project's cluster, an RPC client for that cluster, and a deployment probe bound to both.
- * @throws Error when the project is not active in the organization, or when the deployment has no RPC endpoint for the project's cluster.
+ * @returns The project's cluster, the open scope's RPC client, and a deployment probe bound to both.
+ * @throws Error when the project is not active in the organization, or runs on a cluster other than the open scope's.
+ * @throws RpcUnavailableError `not_configured` when the deployment has no RPC endpoint for the cluster.
  */
 export async function loadProjectRpcClient(
   input: LoadProjectRpcClientInput
@@ -61,7 +64,13 @@ export async function loadProjectRpcClient(
   }
 
   const cluster = CLUSTER_BY_SDP_ENVIRONMENT[environment];
-  const rpc = createClusterRpc(input.env, cluster);
+  const scopeCluster = currentClusterScope().cluster;
+  if (cluster !== scopeCluster) {
+    throw new Error(
+      `Project ${input.projectId} runs on ${cluster} but the open cluster scope is ${scopeCluster}`
+    );
+  }
+  const rpc = createClusterRpc();
 
   return {
     cluster,

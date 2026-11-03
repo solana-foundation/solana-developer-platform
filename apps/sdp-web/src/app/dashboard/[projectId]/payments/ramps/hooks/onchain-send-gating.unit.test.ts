@@ -1,7 +1,5 @@
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { canProceedOnchainReceive } from "./use-onchain-receive-wizard";
 import {
   canProceedOnchainSend,
   nextAssetAfterWalletChange,
@@ -17,22 +15,13 @@ const completeFields = {
   memo: "",
 };
 
-const wallet: PaymentsDashboardWallet = {
-  id: "wallet-1",
-  walletId: "custody-wallet-1",
-  isRuntimeExecutionAllowed: true,
-  custodyConfigId: "cc_test",
-  publicKey: "wallet-address",
-  label: "Treasury",
-};
-
 describe("onchain wizard gating", () => {
   it.each([
     {
-      name: "accepts a valid destination",
+      name: "accepts a details step with a valid destination",
       run: () =>
         canProceedOnchainSend({
-          stepId: "DESTINATION",
+          stepId: "DETAILS",
           fields: completeFields,
           destinationAddress: "destination-address",
           exceedsBalance: false,
@@ -42,10 +31,10 @@ describe("onchain wizard gating", () => {
       expected: true,
     },
     {
-      name: "rejects a missing destination",
+      name: "rejects a details step without a destination",
       run: () =>
         canProceedOnchainSend({
-          stepId: "DESTINATION",
+          stepId: "DETAILS",
           fields: completeFields,
           destinationAddress: null,
           exceedsBalance: false,
@@ -130,18 +119,15 @@ describe("onchain wizard gating", () => {
       run: () => nextAssetAfterWalletChange("old-mint", [{ value: SOL_MINT }]),
       expected: SOL_MINT,
     },
-    {
-      name: "rejects a stale receive wallet selection",
-      run: () => canProceedOnchainReceive("WALLET", null),
-      expected: false,
-    },
-    {
-      name: "accepts a live receive wallet selection",
-      run: () => canProceedOnchainReceive("WALLET", wallet),
-      expected: true,
-    },
   ])("$name", ({ run, expected }) => {
     expect(run()).toBe(expected);
+  });
+
+  it("ties a ready submission to the contact account it pays", () => {
+    expect(resolveReadySubmission(completeFields, "destination-address", SOL_MINT)).toMatchObject({
+      destination: "destination-address",
+      counterpartyAccountId: "account-1",
+    });
   });
 
   it.each([

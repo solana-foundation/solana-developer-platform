@@ -8,7 +8,8 @@ import {
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { PRIVATE_CHANNELS_SETUP_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 import { ChannelsManager } from "./channels-manager";
 
 export default async function PrivateChannelsChannelsPage() {
@@ -25,7 +26,8 @@ export default async function PrivateChannelsChannelsPage() {
     redirect(await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH));
   }
 
-  const channels = await loadChannels(client);
+  const [channels, memberRole] = await Promise.all([loadChannels(client), requestMemberRole()]);
+  const { canWrite } = resolveDashboardAccess(memberRole).capabilities;
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -36,7 +38,7 @@ export default async function PrivateChannelsChannelsPage() {
         </CardHeader>
         <CardContent>
           {channels.ok ? (
-            <ChannelsManager initialChannels={channels.data} />
+            <ChannelsManager initialChannels={channels.data} canWrite={canWrite} />
           ) : (
             <PrivateChannelsLoadError message={channels.error} />
           )}

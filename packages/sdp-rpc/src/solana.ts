@@ -23,16 +23,11 @@ import {
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import {
-  explicitClusterRpcUrl,
-  getSolanaConfig,
-  resolveDefaultCluster,
-  resolveSolanaRpcProviderUrls,
-} from "./config";
-import { RpcTimeoutError, solanaRpcError } from "./errors";
+import { MinContextSlotNotReachedError, RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
+import { markRpcAttemptDeadline } from "./telemetry";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "./transaction-version";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
-import type { RpcEnv } from "./types";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -63,7 +58,6 @@ export type RpcRequestHeaders = NonNullable<
 >;
 
 export interface RpcClientOptions {
-  rpcUrl?: string;
   headers?: RpcRequestHeaders;
   /**
    * Per-request transport deadline. A stalled HTTP request (socket open, no
@@ -71,7 +65,7 @@ export interface RpcClientOptions {
    * Callers that pass their own `abortSignal` to `.send()` keep full control.
    */
   requestTimeoutMs?: number;
-  /** Optional caller-owned transport middleware, applied to every provider. */
+  /** Optional caller-owned transport middleware. */
   wrapTransport?: (transport: RpcTransport) => RpcTransport;
 }
 
@@ -99,6 +93,7 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
     // AbortController + setTimeout (not AbortSignal.timeout) so the timer is
     // cleared on settle and behaves consistently in Node and test environments.
     const controller = new AbortController();
+    markRpcAttemptDeadline(controller.signal);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await transport<TResponse>({ ...config, signal: controller.signal });
@@ -113,117 +108,24 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
   };
 }
 
-const lastGoodTransportIndex = new Map<string, number>();
-
 /**
- * Wrap an ordered set of provider transports in per-request failover: a
- * transient failure (429/5xx/transport error) advances to the next provider,
- * and the last index that answered is remembered per `stickyKey` so later
- * requests start on the healthy provider instead of rediscovering the outage.
+ * A client for one explicit endpoint outside the managed pool: a Private Channels gateway or a
+ * Rings tenant connection. Cluster RPC goes through `createClusterRpc()` from `@sdp/rpc/factory`.
  *
- * `sendTransaction` never fails over: a transient-looking failure can arrive
- * after the transaction reached the leader, and resubmitting through another
- * provider risks a double-send. It runs once, against the sticky provider.
+ * @param endpointUrl - The complete endpoint URL.
+ * @param options - Transport behaviour for the endpoint.
+ * @param options.headers - Headers sent with every request.
+ * @param options.requestTimeoutMs - Per-request deadline; defaults to `DEFAULT_RPC_REQUEST_TIMEOUT_MS`.
+ * @param options.wrapTransport - Caller-owned middleware applied below the deadline.
+ * @returns The endpoint's RPC client.
  */
-export function createFailoverTransport(
-  transports: readonly RpcTransport[],
-  options: { stickyKey?: string } = {}
-): RpcTransport {
-  if (transports.length === 1) {
-    return transports[0];
-  }
-  const key = options.stickyKey;
-  return async <TResponse>(request: Parameters<RpcTransport>[0]): Promise<TResponse> => {
-    const payload = request.payload as { method?: unknown } | null | undefined;
-    const method = payload && typeof payload.method === "string" ? payload.method : undefined;
-    const start = (key ? lastGoodTransportIndex.get(key) : undefined) ?? 0;
-    const attempts = method === "sendTransaction" ? 1 : transports.length;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const index = (start + attempt) % transports.length;
-      try {
-        const result = await transports[index]<TResponse>(request);
-        if (key !== undefined && index !== start) {
-          lastGoodTransportIndex.set(key, index);
-        }
-        return result;
-      } catch (error) {
-        lastError = error;
-        if (attempt === attempts - 1 || !isTransientRpcError(error)) {
-          throw error;
-        }
-      }
-    }
-    throw lastError;
-  };
-}
-
-/**
- * Create a configured Solana RPC client from environment
- */
-export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
-  const timeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
-
-  // The socket retry sits below caller middleware, so a read-context scope
-  // only ever observes the attempt that answered.
-  const buildTransport = (url: string): RpcTransport => {
-    if (options?.headers && Object.keys(options.headers).length > 0) {
-      const transport = withReadSocketRetry(
-        createDefaultRpcTransport({ headers: options.headers, url })
-      );
-      return options.wrapTransport?.(transport) ?? transport;
-    }
-    const transport = withReadSocketRetry(createDefaultRpcTransport({ url }));
-    return options?.wrapTransport?.(transport) ?? transport;
-  };
-
-  // An explicit URL is already the complete endpoint selection. Do not force
-  // callers with a per-request/per-cluster URL to also configure the legacy
-  // process default merely to construct a client for that explicit endpoint.
-  if (options?.rpcUrl) {
-    return createRpcFromTransport(buildTransport(options.rpcUrl), {
-      requestTimeoutMs: timeoutMs,
-    });
-  }
-
-  const urls = resolveSolanaRpcProviderUrls(env);
-  if (urls.length === 0) {
-    // Preserves the single-URL error message callers have always seen.
-    getSolanaConfig(env);
-  }
-  // The deadline sits on each provider attempt, not around the whole failover:
-  // an outer deadline lets one stalled provider consume the entire budget and
-  // hands every later attempt an already-aborted signal. A stall costs at most
-  // timeoutMs per provider before the hop.
-  const transports = urls.map((url) => withRequestTimeout(buildTransport(url), timeoutMs));
-  return createSolanaRpcFromTransport(
-    createFailoverTransport(transports, { stickyKey: urls.join("|") })
+export function createRpc(endpointUrl: string, options?: RpcClientOptions): SolanaRpc {
+  const transport = withReadSocketRetry(
+    options?.headers && Object.keys(options.headers).length > 0
+      ? createDefaultRpcTransport({ headers: options.headers, url: endpointUrl })
+      : createDefaultRpcTransport({ url: endpointUrl })
   );
-}
-
-/**
- * An RPC client for `cluster` on a process that may serve both clusters. An
- * explicit `SOLANA_<CLUSTER>_RPC_URL` wins for any cluster, the default
- * cluster included, so a pinned private endpoint is used for every read of
- * that cluster (Earn execution and sponsorship reconciliation must observe the
- * same chain). Without one, the process default cluster keeps the full
- * failover client `createRpc` builds, and the other cluster throws, so a
- * caller never silently reads or prices against the wrong chain.
- *
- * @deprecated Use `createClusterRpc()` from `@sdp/rpc/factory`, which reads the cluster from the
- * open cluster scope; this one is deleted once its callers move (HOO-1879).
- */
-export function createClusterRpc(
-  env: RpcEnv,
-  cluster: "devnet" | "mainnet-beta",
-  options?: Omit<RpcClientOptions, "rpcUrl">
-): SolanaRpc {
-  const rpcUrl = explicitClusterRpcUrl(env, cluster);
-  if (rpcUrl) return createRpc(env, { ...options, rpcUrl });
-  if (cluster === resolveDefaultCluster(env)) return createRpc(env, options);
-  throw new Error(
-    `No RPC endpoint is configured for ${cluster}: set SOLANA_${cluster === "devnet" ? "DEVNET" : "MAINNET"}_RPC_URL`
-  );
+  return createRpcFromTransport(transport, options);
 }
 
 /** Build the standard SDP Solana client around a caller-owned egress transport. */
@@ -239,13 +141,15 @@ export function createRpcFromTransport(
 
 export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;
 
-export function createRpcForSdk<TSdkRpc>(
-  env: RpcEnv,
-  options?: RpcClientOptions
-): SolanaRpcSdkBridge<TSdkRpc> {
-  // Mosaic SDK still publishes Solana Kit v5 RPC types. The runtime client shape is
-  // compatible, so keep the cross-version cast at the boundary where SDK code is called.
-  return createRpc(env, options) as unknown as SolanaRpcSdkBridge<TSdkRpc>;
+/**
+ * Hand an SDP client to Mosaic SDK code, the one place its RPC type is bridged.
+ *
+ * @param rpc - The client to hand over.
+ * @returns The same client, typed for the SDK.
+ */
+export function toSdkRpc<TSdkRpc>(rpc: SolanaRpc): SolanaRpcSdkBridge<TSdkRpc> {
+  // SAFETY: Mosaic SDK publishes Solana Kit v5 RPC types; the runtime client shape is identical.
+  return rpc as unknown as SolanaRpcSdkBridge<TSdkRpc>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -260,7 +164,7 @@ export function createRpcForSdk<TSdkRpc>(
  * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
  * instead of answering.
  * @returns The latest blockhash and its last valid block height.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * @throws MinContextSlotNotReachedError when the response comes from a slot below
  * `minContextSlot`, so an upstream that ignores the option cannot answer stale.
  */
 export async function getRecentBlockhash(
@@ -270,10 +174,7 @@ export async function getRecentBlockhash(
 ): Promise<BlockhashWithExpiry> {
   const response = await rpc.getLatestBlockhash({ commitment, minContextSlot }).send();
   if (minContextSlot !== undefined && response.context.slot < minContextSlot) {
-    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
-      contextSlot: response.context.slot.toString(),
-      minContextSlot: minContextSlot.toString(),
-    });
+    throw new MinContextSlotNotReachedError(response.context.slot, minContextSlot);
   }
 
   return {
@@ -670,10 +571,15 @@ function numericTransactionError(err: TransactionError): TransactionError {
  * @param options.searchTransactionHistory - Search ledger history beyond the recent status cache.
  * @param options.minContextSlot - With history search, the lowest slot the answering node may be
  * at; a node behind it errors instead of answering.
+ * @param options.commitment - With history search, the bank that answers and that
+ * `minContextSlot` is checked against. Agave 4.4 and later honor it; older nodes ignore it and
+ * answer from their processed bank.
  * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
  * @returns Each signature's status, or null where the node has none.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * @throws MinContextSlotNotReachedError when the response comes from a slot below
  * `minContextSlot`, so an upstream that ignores the option cannot report a landed signature absent.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response is short a status, which would
+ * otherwise read as absence.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
@@ -683,6 +589,7 @@ export async function getSignatureStatuses(
     | {
         searchTransactionHistory: true;
         minContextSlot?: Slot;
+        commitment?: Commitment;
         retryDelaysMs?: readonly number[];
       } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
@@ -696,10 +603,12 @@ export async function getSignatureStatuses(
         ? rpc.getSignatureStatuses(
             signatures,
             // SAFETY: Agave's RpcSignatureStatusConfig accepts minContextSlot (a node behind it
-            // errors instead of answering); kit's config type lags the server and omits it.
+            // errors instead of answering) and, from 4.4, commitment; kit's config type lags the
+            // server and omits both.
             {
               searchTransactionHistory: true,
               minContextSlot: options.minContextSlot,
+              commitment: options.commitment,
             } as Parameters<SolanaRpc["getSignatureStatuses"]>[1]
           )
         : rpc.getSignatureStatuses(signatures)
@@ -711,10 +620,12 @@ export async function getSignatureStatuses(
     options.minContextSlot !== undefined &&
     response.context.slot < options.minContextSlot
   ) {
-    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
-      contextSlot: response.context.slot.toString(),
-      minContextSlot: options.minContextSlot.toString(),
-    });
+    throw new MinContextSlotNotReachedError(response.context.slot, options.minContextSlot);
+  }
+  if (response.value.length !== signatures.length) {
+    throw solanaRpcError(
+      `getSignatureStatuses returned ${response.value.length} statuses for ${signatures.length} signatures`
+    );
   }
 
   return response.value.map((item) =>
@@ -727,6 +638,46 @@ export async function getSignatureStatuses(
         }
       : null
   );
+}
+
+/** A batch row whose blockhash a height read shows expired while its batch status was null. */
+export interface ExpiredUnseenSignature {
+  /** The row's position in the batch. */
+  index: number;
+  signature: Signature;
+}
+
+/**
+ * Re-read the status of every expired, unseen signature from a node at least as current as the
+ * height read that proved the expiry (`minContextSlot`), as sponsorship budget reconciliation
+ * does. Per-request pool failover can answer the batch statuses from an endpoint behind the one
+ * that answered the height, so a null batch status alone never proves a transaction absent.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param statuses - The batch statuses, by row index.
+ * @param expired - The rows to re-read.
+ * @param minContextSlot - The slot the height read was answered at.
+ * @returns The batch statuses with each re-read status in place.
+ * @throws When no node at `minContextSlot` answered (a served `-32016`, or
+ * `MinContextSlotNotReachedError` from SDP's own check); the caller leaves those rows unjudged.
+ */
+export async function reReadExpiredStatuses(
+  rpc: SolanaRpc,
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  expired: readonly ExpiredUnseenSignature[],
+  minContextSlot: Slot
+): Promise<Array<SignatureStatusInfo | null>> {
+  const reRead = [...statuses];
+  if (expired.length === 0) return reRead;
+  const current = await getSignatureStatuses(
+    rpc,
+    expired.map(({ signature }) => signature),
+    { searchTransactionHistory: true, minContextSlot }
+  );
+  for (const [position, { index }] of expired.entries()) {
+    reRead[index] = current[position];
+  }
+  return reRead;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -793,7 +744,7 @@ function fetchJsonParsedTransaction(
     .getTransaction(signature, {
       commitment,
       encoding: "jsonParsed",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     .send();
 }

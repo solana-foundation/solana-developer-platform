@@ -1,5 +1,3 @@
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
-
 export interface SecretRetirementRow {
   id: string;
   organization_id: string;
@@ -79,8 +77,4 @@ export interface SecretRetirementsRepository {
   // The claim already counted the attempt and set the next one; this only
   // records why it failed.
   recordRetirementFailure(params: { id: string; error: string }): Promise<void>;
-}
-
-export interface SecretRetirementsRepositoryContext {
-  db: RepositoryDbClient;
 }

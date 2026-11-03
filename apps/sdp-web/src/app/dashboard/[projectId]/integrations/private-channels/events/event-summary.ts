@@ -3,7 +3,7 @@ import type {
   PrivateChannelEventDto,
 } from "@sdp/types/private-channels";
 
-export type PrivateChannelEventSummaryKind =
+type PrivateChannelEventSummaryKind =
   | "deposit"
   | "withdrawal"
   | "transfer"
@@ -15,7 +15,7 @@ export type PrivateChannelEventSummaryKind =
   | "error"
   | "unknown";
 
-export interface PrivateChannelEventSummaryIds {
+interface PrivateChannelEventSummaryIds {
   depositId?: string;
   withdrawalId?: string;
   transferId?: string;

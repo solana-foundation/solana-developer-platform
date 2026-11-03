@@ -7,6 +7,7 @@
 export const IDEMPOTENCY_REQUIRED_ROUTES = [
   "POST /v1/payments/transfers",
   "POST /v1/payments/transfer-batches",
+  "POST /v1/payments/transfer-batches/:batchId/retry",
   "POST /v1/payments/recurring-payments",
   "PATCH /v1/payments/recurring-payments/:id",
   "POST /v1/payments/recurring-payments/:id/activate",
@@ -16,3 +17,8 @@ export const IDEMPOTENCY_REQUIRED_ROUTES = [
 ] as const;
 
 export type IdempotencyRequiredRoute = (typeof IDEMPOTENCY_REQUIRED_ROUTES)[number];
+
+/** Dashboard-only key generation; deliberately absent from public API surfaces. */
+export const INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES = [
+  "POST /internal/dashboard/custody/fireblocks/csr",
+] as const;

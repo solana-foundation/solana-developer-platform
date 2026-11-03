@@ -36,6 +36,8 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/sdp-web/package.json ./apps/sdp-web/
 COPY packages/sdp-types/package.json ./packages/sdp-types/
+# The request snippets the API playground writes.
+COPY packages/sdp-api-catalog/package.json ./packages/sdp-api-catalog/
 # Tokens and Tailwind theme imported by globals.css.
 COPY packages/sdp-design-tokens/package.json ./packages/sdp-design-tokens/
 # The UI primitives behind every components/ui import (re-export shims).
@@ -62,6 +64,7 @@ WORKDIR /repo
 COPY --from=deps /repo /repo
 COPY apps/sdp-web ./apps/sdp-web
 COPY packages/sdp-types ./packages/sdp-types
+COPY packages/sdp-api-catalog ./packages/sdp-api-catalog
 COPY packages/sdp-design-tokens ./packages/sdp-design-tokens
 COPY packages/sdp-ui ./packages/sdp-ui
 COPY packages/sdp-rpc ./packages/sdp-rpc
@@ -76,7 +79,6 @@ COPY packages/sdp-private-channels ./packages/sdp-private-channels
 ARG NEXT_PUBLIC_API_BASE_URL
 ARG NEXT_PUBLIC_SDP_API_BASE_URL=__SDP_RT_NEXT_PUBLIC_SDP_API_BASE_URL__
 ARG NEXT_PUBLIC_SDP_DOCS_URL=__SDP_RT_NEXT_PUBLIC_SDP_DOCS_URL__
-ARG NEXT_PUBLIC_SOLANA_NETWORK=__SDP_RT_NEXT_PUBLIC_SOLANA_NETWORK__
 ARG NEXT_PUBLIC_SENTRY_DSN
 ARG NEXT_PUBLIC_ENABLE_NETWORK_DEBUG
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=__SDP_RT_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY__
@@ -87,7 +89,6 @@ ARG NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     NEXT_PUBLIC_SDP_API_BASE_URL=$NEXT_PUBLIC_SDP_API_BASE_URL \
     NEXT_PUBLIC_SDP_DOCS_URL=$NEXT_PUBLIC_SDP_DOCS_URL \
-    NEXT_PUBLIC_SOLANA_NETWORK=$NEXT_PUBLIC_SOLANA_NETWORK \
     NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
     NEXT_PUBLIC_ENABLE_NETWORK_DEBUG=$NEXT_PUBLIC_ENABLE_NETWORK_DEBUG \
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \

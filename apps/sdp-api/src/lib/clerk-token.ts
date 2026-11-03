@@ -10,11 +10,9 @@ export interface ClerkJwtPayload extends JWTPayload {
   v?: number;
   o?: {
     id?: string | null;
-    rol?: string | null;
     slg?: string | null;
   } | null;
   org_id?: string | null;
-  org_role?: string | null;
   org_slug?: string | null;
   email?: string;
   email_addresses?: Array<{ email_address: string }>;
@@ -22,29 +20,26 @@ export interface ClerkJwtPayload extends JWTPayload {
 
 export interface ClerkOrganizationClaims {
   organizationId: string | null;
-  organizationRole: string | null;
   organizationSlug: string | null;
 }
 
 /**
  * Read organization context from both Clerk JWT formats.
  *
- * Version 2 session tokens compact the organization fields under `o`, with
- * role values such as `admin` that need the `org:` prefix restored. Older
- * tokens and customized templates expose the long-form `org_*` claims.
+ * Version 2 session tokens compact the organization fields under `o`; older
+ * tokens and customized templates expose the long-form `org_*` claims. The
+ * Clerk role claim is not read: SDP holds the only Organization Role (ADR 0012).
  */
 export function resolveClerkOrganizationClaims(payload: ClerkJwtPayload): ClerkOrganizationClaims {
   if (payload.v === 2 && payload.o) {
     return {
       organizationId: payload.o.id ?? null,
-      organizationRole: payload.o.rol ? `org:${payload.o.rol}` : null,
       organizationSlug: payload.o.slg ?? null,
     };
   }
 
   return {
     organizationId: payload.org_id ?? null,
-    organizationRole: payload.org_role ?? null,
     organizationSlug: payload.org_slug ?? null,
   };
 }
@@ -150,7 +145,7 @@ export function resolveClerkEmail(payload: ClerkJwtPayload): string | null {
   return isPlausibleEmail(first) ? first : null;
 }
 
-export function resolveClerkConfig(env: Env) {
+function resolveClerkConfig(env: Env) {
   const issuer = env.CLERK_ISSUER?.trim();
   const jwksUrl = env.CLERK_JWKS_URL?.trim();
 
@@ -167,7 +162,38 @@ export function resolveClerkConfig(env: Env) {
   return {
     issuer,
     jwksUrl: resolvedJwksUrl,
+    authorizedParty: resolveClerkAuthorizedParty(env),
   };
+}
+
+// A non-web scheme serializes its origin as "null", which is also the Origin a
+// browser sends from a sandboxed iframe or a data: page.
+const dashboardUrlSchema = z.url({ protocol: /^https?$/ });
+
+/**
+ * The dashboard origin a production session token must name in `azp`, so a
+ * token minted by any other page on the Clerk instance's domain is refused.
+ * Development deployments accept every origin: their PR previews run on
+ * per-deployment Vercel URLs against a separate Clerk instance.
+ */
+function resolveClerkAuthorizedParty(env: Env): string | null {
+  if (env.ENVIRONMENT !== "production") {
+    return null;
+  }
+  const frontendUrl = dashboardUrlSchema.safeParse(env.FRONTEND_URL?.trim());
+  if (!frontendUrl.success) {
+    throw internalError(
+      "FRONTEND_URL must be the dashboard's http(s) URL for Clerk auth in production"
+    );
+  }
+  return new URL(frontendUrl.data).origin;
+}
+
+/** Fails boot on Clerk configuration every session token would be refused under. */
+export function assertClerkConfigured(env: Env): void {
+  if (env.CLERK_ISSUER?.trim()) {
+    resolveClerkConfig(env);
+  }
 }
 
 /**
@@ -194,6 +220,18 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
     clockTolerance: CLERK_CLOCK_TOLERANCE_SECONDS,
   });
 
+  if (config.authorizedParty !== null && payload.azp !== config.authorizedParty) {
+    getLogger().error(
+      {
+        event: "sdp_api_clerk_session_azp_refused",
+        azp: payload.azp ?? null,
+        clerk_user_id: payload.sub ?? null,
+      },
+      "Clerk session refused: not issued to the dashboard"
+    );
+    throw new Error("Clerk session was not issued to the dashboard");
+  }
+
   return payload as ClerkJwtPayload;
 }
 
@@ -207,6 +245,19 @@ export async function verifyClerkJwtForRequest(
   }
 
   const payload = await verifyClerkJwt(token, c.env);
+  // A session presented alongside a gateway identity must be the session the
+  // gateway authenticated (HOO-2256): its user and its active organization,
+  // where an identity with no organization matches only a session with none.
+  // The gateway limits and meters by that organization, so it must be the
+  // one SDP serves; the role still comes from SDP's own membership row.
+  const gatewayIdentity = c.get("gatewayIdentity");
+  if (
+    gatewayIdentity &&
+    (gatewayIdentity.clerkUserId !== payload.sub ||
+      gatewayIdentity.orgId !== resolveClerkOrganizationClaims(payload).organizationId)
+  ) {
+    throw new Error("Clerk session does not match the gateway identity");
+  }
   c.set("verifiedClerkJwt", { token, payload });
   return payload;
 }

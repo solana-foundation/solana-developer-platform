@@ -60,7 +60,7 @@ function useDelayedFlag(value: boolean, delayMs: number): boolean {
 }
 
 /** Unfiltered slice for surfaces that need the project, not the filtered page. */
-export const ISSUANCE_UNFILTERED_QUERY: IssuanceListQuery = {
+const ISSUANCE_UNFILTERED_QUERY: IssuanceListQuery = {
   ...DEFAULT_ISSUANCE_LIST_QUERY,
   pageSize: 100,
 };

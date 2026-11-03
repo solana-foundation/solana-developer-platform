@@ -35,13 +35,3 @@ export async function setupTestAuth(
     keyHash,
   };
 }
-
-/**
- * Creates authenticated request headers
- */
-export function authHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: token,
-    "Content-Type": "application/json",
-  };
-}

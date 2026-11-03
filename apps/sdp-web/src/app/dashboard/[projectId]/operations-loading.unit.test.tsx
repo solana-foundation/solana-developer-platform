@@ -9,16 +9,11 @@ import NewApiKeyLoading from "./api-keys/new/loading";
 import IssuanceOverviewLoading from "./issuance/(overview)/loading";
 import IssuanceDetailLoading from "./issuance/[tokenId]/loading";
 import IssuanceCreateLoading from "./issuance/create/loading";
-import { IssuancePageSkeleton } from "./issuance/issuance-page-skeleton";
-import { IssuancePlaygroundLoading } from "./issuance/issuance-playground-loading";
 import SettingsLoading from "./settings/loading";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const EXPECTED_ROUTE_LAYOUTS = [
-  "issuance-overview",
-  "issuance-create",
-  "issuance-detail",
   "api-keys-list",
   "api-key-new",
   "api-key-edit",
@@ -29,9 +24,6 @@ const EXPECTED_ROUTE_LAYOUTS = [
 function renderAllRouteLoadingStates(): string {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <IssuanceOverviewLoading />
-      <IssuanceCreateLoading />
-      <IssuanceDetailLoading />
       <ApiKeysLoading />
       <NewApiKeyLoading />
       <EditApiKeyLoading />
@@ -39,10 +31,6 @@ function renderAllRouteLoadingStates(): string {
       <SettingsLoading />
     </I18nProvider>
   );
-}
-
-function renderIssuancePlaygroundLoading(): string {
-  return renderToStaticMarkup(<IssuancePlaygroundLoading />);
 }
 
 describe("operations route loading states", () => {
@@ -54,82 +42,12 @@ describe("operations route loading states", () => {
     }
   });
 
-  it("announces the issuance overview as busy while it is loading", () => {
-    const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <IssuanceOverviewLoading />
-      </I18nProvider>
-    );
-
-    expect(markup).toContain('data-loading-layout="issuance-overview"');
-    expect(markup).toContain('aria-busy="true"');
-  });
-
-  it("disables issuance token-card pulses when reduced motion is requested", () => {
-    const markup = renderToStaticMarkup(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <IssuanceOverviewLoading />
-      </I18nProvider>
-    );
-    const cards = [
-      ...markup.matchAll(/<article class="[^"]*" data-loading-card="issuance-token"/g),
-    ];
-    const pulsingClasses = [...markup.matchAll(/class="([^"]*animate-pulse[^"]*)"/g)].map(
-      (match) => match[1] ?? ""
-    );
-
-    expect(cards).toHaveLength(6);
-    expect(pulsingClasses.length).toBeGreaterThan(0);
-    expect(
-      pulsingClasses.every((className) => className.includes("motion-reduce:animate-none"))
-    ).toBe(true);
-  });
-
-  it("draws the issuance overview skeleton as a grid of cards", () => {
-    const markup = renderToStaticMarkup(<IssuancePageSkeleton assetProfilesEnabled />);
-
-    expect([...markup.matchAll(/data-loading-card="issuance-token"/g)]).toHaveLength(6);
-  });
-
-  it("uses the asset-profile overview skeleton by default for navigation", () => {
-    const markup = renderToStaticMarkup(<IssuancePageSkeleton />);
-
-    expect(markup).toContain('data-testid="issuance-grid-skeleton"');
-    expect(markup).not.toContain("min-h-[340px]");
-  });
-
-  it("matches the simplified issuance creation flow", () => {
-    const markup = renderToStaticMarkup(<IssuanceCreateLoading />);
-
-    expect(markup.match(/data-loading-card="issuance-classification"/g)).toHaveLength(2);
-    expect(markup).not.toContain("data-loading-summary-rail");
-    expect(markup).toContain("max-w-xl");
-  });
-
-  it("matches the single-column detail sections instead of the retired tab rail", () => {
-    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-    expect(markup).not.toContain("data-loading-tab-list");
-    expect(markup).toContain("data-loading-header-stats");
-    expect(markup.match(/data-loading-section=/g)).toHaveLength(4);
-    expect(markup).toContain('data-loading-section="operations"');
-    expect(markup).toContain('data-loading-section="permissions"');
-  });
-
-  it("reserves the settled issuance-detail header shell, mark and actions", () => {
-    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-
-    expect(markup).toMatch(/size-11[^"]*rounded-full/);
-    expect(markup).toContain("h-7 w-40 max-w-full sm:h-8 sm:w-52");
-    expect(markup).toContain("h-5 w-16 rounded-md");
-    expect(markup.match(/h-8 w-\d+ rounded-lg/g)).toHaveLength(2);
-  });
-
-  it("reserves only the public mint address in the issuance-detail header", () => {
-    const markup = renderToStaticMarkup(<IssuanceDetailLoading />);
-
-    expect(markup).toContain('data-loading-meta-line="issuance-detail"');
-    expect(markup).toContain("data-loading-address-row");
-    expect(markup).not.toContain("data-loading-token-id-row");
+  it.each([
+    ["list", IssuanceOverviewLoading],
+    ["token", IssuanceDetailLoading],
+    ["flow", IssuanceCreateLoading],
+  ])("paints the Issuance %s skeleton", (layout, Loading) => {
+    expect(renderToStaticMarkup(<Loading />)).toContain(`data-issuance-loading-layout="${layout}"`);
   });
 
   it("preserves the responsive and sticky geometry of the final routes", () => {
@@ -140,13 +58,6 @@ describe("operations route loading states", () => {
     expect(markup).toContain("data-loading-settings-onboarding");
     expect(markup).toContain("data-loading-settings-members");
     expect(markup.match(/data-loading-summary-rail/g)).toHaveLength(2);
-    expect(markup.match(/data-loading-action-bar/g)).toHaveLength(3);
-  });
-
-  it("keeps a local loading state for the lazy issuance API playground", () => {
-    const markup = renderIssuancePlaygroundLoading();
-
-    expect(markup).toContain('data-loading-layout="issuance-playground"');
-    expect(markup).toContain("lg:grid-cols-2");
+    expect(markup.match(/data-loading-action-bar/g)).toHaveLength(2);
   });
 });

@@ -35,9 +35,10 @@ export class SdpEarnError extends Error {
   constructor(
     public readonly code: SdpEarnErrorCode,
     message?: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super(message || DEFAULT_ERROR_MESSAGES[code]);
+    super(message || DEFAULT_ERROR_MESSAGES[code], options);
     this.name = "SdpEarnError";
     this.statusCode = ERROR_STATUS_CODES[code];
   }
@@ -51,8 +52,8 @@ export function internalError(message?: string): SdpEarnError {
   return new SdpEarnError("INTERNAL_ERROR", message);
 }
 
-export function providerNotConfigured(message?: string): SdpEarnError {
-  return new SdpEarnError("PROVIDER_NOT_CONFIGURED", message);
+export function providerNotConfigured(message?: string, options?: ErrorOptions): SdpEarnError {
+  return new SdpEarnError("PROVIDER_NOT_CONFIGURED", message, undefined, options);
 }
 
 export function providerUnavailable(

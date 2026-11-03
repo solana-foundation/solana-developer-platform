@@ -4,59 +4,40 @@ import type {
   CounterpartyProviderAccount,
   CounterpartyProviderCustomerLink,
 } from "@sdp/types/counterparties";
-import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import type { PersistedRampProviderId } from "@sdp/types/provider-access";
-import { Badge, type BadgeVariant } from "@sdp/ui/badge";
-import { cn } from "@sdp/ui/cn";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
-import { ChevronDownIcon, LoaderCircleIcon, WalletIcon } from "lucide-react";
-import Image from "next/image";
-import { useState } from "react";
-import { formatRelativeTime, toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
+import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import { TableCell } from "@sdp/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import {
-  formatDisplayAmount,
-  formatTimestamp,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDisplayAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
-import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";
-import {
-  type FundingWalletAccount,
-  groupProviderAccounts,
-  type ProviderCustomerGroup,
-} from "./counterparty-provider-accounts.utils";
+import { getRampProviderLabel } from "@/lib/ramps";
 
-const PROVIDER_ACCOUNT_STATUS_VARIANT: ReadonlyMap<string, BadgeVariant> = new Map([
-  ["active", "success"],
-  ["completed", "success"],
-  ["ready", "success"],
-  ["archived", "danger"],
-  ["failed", "danger"],
-  ["rejected", "danger"],
-  ["provisioned_funding_wallet", "success"],
+const PROVIDER_ACCOUNT_STATUS_TONE: ReadonlyMap<string, StatusTone> = new Map([
+  ["active", "positive"],
+  ["completed", "positive"],
+  ["ready", "positive"],
+  ["verified", "positive"],
+  ["provisioned_funding_wallet", "positive"],
+  ["archived", "critical"],
+  ["failed", "critical"],
+  ["rejected", "critical"],
 ]);
 
-/**
- * Renders a provider-side status string as a badge. Provider statuses are an
- * open vocabulary, so anything outside the known success/danger set reads as
- * in progress.
- *
- * @param props.status - Raw status string from SDP or the provider.
- * @param props.label - Translated label to show instead of the title-cased status.
- * @returns The status badge.
- */
-function ProviderAccountStatusBadge({ status, label }: { status: string; label?: string }) {
-  const variant = PROVIDER_ACCOUNT_STATUS_VARIANT.get(status.toLowerCase());
-  return (
-    <Badge variant={variant === undefined ? "warning" : variant}>
-      {label === undefined ? toTitleCase(status) : label}
-    </Badge>
-  );
-}
+/** The table's columns, left to right, as the message keys of their headers. */
+const PROVIDER_ACCOUNT_COLUMN_KEYS = [
+  "DashboardPayments.counterparty.detail.provider",
+  "DashboardPayments.counterparty.detail.corridor",
+  "DashboardPayments.counterparty.detail.rail",
+  "DashboardPayments.counterparty.detail.account",
+  "DashboardPayments.counterparty.detail.status",
+] as const;
 
 /**
- * Picks the status to display for a provider account: the provider's own
- * status when one exists, otherwise SDP's.
+ * Picks the status to display for a provider account: the provider's own status when one
+ * exists, otherwise SDP's.
  *
  * @param account - The provider account or customer link.
  * @returns The status string to render.
@@ -67,258 +48,260 @@ function providerAccountStatus(
   return account.providerStatus === null ? account.status : account.providerStatus;
 }
 
-function ProviderCustomerHeader({
-  provider,
-  customerLink,
-}: {
-  provider: PersistedRampProviderId;
-  customerLink: CounterpartyProviderCustomerLink | undefined;
-}) {
-  const t = useTranslations();
-  const logo = getRampProviderLogo(provider);
-  return (
-    <>
-      {logo === undefined ? null : (
-        <Image src={logo} alt="" width={20} height={20} className="size-5 rounded" />
-      )}
-      <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
-      {customerLink !== undefined ? (
-        <>
-          <span className="text-xs uppercase tracking-wide text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountCustomer")}
-          </span>
-          <ProviderAccountStatusBadge status={providerAccountStatus(customerLink)} />
-        </>
-      ) : null}
-    </>
-  );
-}
-
-function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProviderCustomerLink }) {
-  const t = useTranslations();
-  const customerReference = customerLink.providerCustomerReference;
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      {customerReference !== null ? (
-        <WalletMetadataCopyButton
-          value={customerReference}
-          label={t("DashboardPayments.counterparty.customerIdLabel")}
-          tooltip={customerReference}
-        />
-      ) : null}
-      <span
-        className="whitespace-nowrap text-xs text-tertiary"
-        title={formatTimestamp(customerLink.createdAt, t)}
-      >
-        {formatRelativeTime(customerLink.createdAt)}
-      </span>
-    </div>
-  );
-}
-
 /**
- * Renders the live-balance cell of a funding-wallet row: the formatted amount
- * plus currency when available, a muted badge when the provider read failed,
- * and an em dash while no provider wallet exists yet.
- *
- * @param props.balance - The row's just-in-time balance, absent during provisioning.
- * @returns The balance cell content.
+ * A provider-side status in words. Provider statuses are an open vocabulary, so anything outside
+ * the known settled/failed set reads as still in progress.
  */
-function ProviderWalletBalanceCell({
-  balance,
-}: {
-  balance: CounterpartyProviderAccount["balance"];
-}) {
-  const t = useTranslations();
-  if (balance === undefined) {
-    return <span className="text-sm text-tertiary">—</span>;
-  }
-  if (balance.state === "unavailable") {
-    return (
-      <Badge variant="default">
-        {t("DashboardPayments.counterparty.providerAccountBalanceUnavailable")}
-      </Badge>
-    );
-  }
+function ProviderAccountStatus({ status }: { status: string }) {
+  const tone = PROVIDER_ACCOUNT_STATUS_TONE.get(status.toLowerCase());
   return (
-    <span className="whitespace-nowrap text-sm tabular-nums text-primary">
-      {formatDisplayAmount(balance.amount, balance.currency)}
+    <StatusText tone={tone === undefined ? "attention" : tone}>{toTitleCase(status)}</StatusText>
+  );
+}
+
+function Missing() {
+  return <span className="text-tertiary">—</span>;
+}
+
+/** A funding wallet's live balance, a note when the provider read failed, a dash before it exists. */
+function FundingWalletBalance({ account }: { account: CounterpartyProviderAccount }) {
+  const t = useTranslations();
+  const balance = account.balance;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {balance === undefined ? (
+        <Missing />
+      ) : balance.state === "unavailable" ? (
+        <span className="text-tertiary">
+          {t("DashboardPayments.counterparty.providerAccountBalanceUnavailable")}
+        </span>
+      ) : (
+        <span className="tabular-nums">
+          {formatDisplayAmount(balance.amount, balance.currency)}
+        </span>
+      )}
+      {account.providerAccountReference === undefined ? null : (
+        <WalletMetadataCopyButton
+          value={account.providerAccountReference}
+          label={t("DashboardPayments.counterparty.walletIdLabel")}
+          tooltip={account.providerAccountReference}
+        />
+      )}
     </span>
   );
 }
 
-function FundingWalletsList({ accounts }: { accounts: FundingWalletAccount[] }) {
+/** A funding wallet's cells: its currency, no rail, and its balance in the account column. */
+function FundingWalletCells({ account }: { account: CounterpartyProviderAccount }) {
   const t = useTranslations();
   return (
-    <ul className="border-t border-border-default">
-      {accounts.map((account) => {
-        const walletStatus = providerAccountStatus(account);
-        return (
-          <li
-            key={account.id}
-            className="flex items-center gap-3 border-b border-border-default px-4 py-3 last:border-b-0"
-          >
-            <span className="text-sm text-primary">
-              {t("DashboardPayments.counterparty.providerAccountFundingWallet", {
-                currency: account.fiatCurrency,
-              })}
-            </span>
-            {account.providerAccountReference !== undefined ? (
-              <WalletMetadataCopyButton
-                value={account.providerAccountReference}
-                label={t("DashboardPayments.counterparty.walletIdLabel")}
-                tooltip={account.providerAccountReference}
-              />
-            ) : null}
-            <span className="ml-auto">
-              <ProviderWalletBalanceCell balance={account.balance} />
-            </span>
-            <ProviderAccountStatusBadge status={walletStatus} />
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function PayoutAccountsTable({ accounts }: { accounts: CounterpartyProviderAccount[] }) {
-  const t = useTranslations();
-  const headers = [
-    t("DashboardPayments.counterparty.providerAccountCorridor"),
-    t("DashboardPayments.counterparty.providerAccountRail"),
-    t("DashboardPayments.counterparty.providerAccountStatus"),
-  ];
-  return (
-    <div className="overflow-x-auto border-t border-border-default">
-      <table className="w-full min-w-max border-collapse text-left">
-        <thead>
-          <tr className="border-b border-border-default">
-            {headers.map((header) => (
-              <th
-                key={header}
-                className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
-              >
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {accounts.map((account) => (
-            <tr key={account.id} className="border-b border-border-default last:border-b-0">
-              <td className="whitespace-nowrap px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-primary">
-                  <span>{account.fiatCurrency}</span>
-                  {account.destinationCountry !== null ? (
-                    <>
-                      <span aria-hidden="true">{regionFlagEmoji(account.destinationCountry)}</span>
-                      <span className="sr-only">{account.destinationCountry}</span>
-                    </>
-                  ) : null}
-                </div>
-              </td>
-              <td className="whitespace-nowrap px-4 py-3">
-                {account.paymentRail !== null ? (
-                  <Badge variant="outline">{account.paymentRail}</Badge>
-                ) : null}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3">
-                <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
-  const [open, setOpen] = useState(false);
-  const { provider, customerLink, payoutAccounts, fundingWallets } = group;
-  const expandable = payoutAccounts.length > 0 || fundingWallets.length > 0;
-
-  return (
-    <div className="rounded-lg border border-border-default bg-surface-raised">
-      <div className="flex items-center gap-2 px-4 py-3">
-        {expandable ? (
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          >
-            <ChevronDownIcon
-              className={cn(
-                "size-4 shrink-0 text-secondary transition-transform",
-                !open && "-rotate-90"
-              )}
-            />
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
-          </button>
+    <>
+      <TableCell className="text-body text-secondary">
+        {account.fiatCurrency === null ? (
+          <Missing />
         ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
-          </div>
+          t("DashboardPayments.counterparty.providerAccountFundingWallet", {
+            currency: account.fiatCurrency,
+          })
         )}
-        {customerLink !== undefined ? <CustomerLinkMeta customerLink={customerLink} /> : null}
-      </div>
-      {expandable && open ? (
-        <>
-          {fundingWallets.length > 0 ? <FundingWalletsList accounts={fundingWallets} /> : null}
-          {payoutAccounts.length > 0 ? <PayoutAccountsTable accounts={payoutAccounts} /> : null}
-        </>
-      ) : null}
-    </div>
+      </TableCell>
+      <TableCell className="text-body">
+        <Missing />
+      </TableCell>
+      <TableCell className="text-body text-secondary">
+        <FundingWalletBalance account={account} />
+      </TableCell>
+    </>
   );
+}
+
+/** A stored payout account's cells: its corridor and rail; nothing in the account column. */
+function PayoutAccountCells({ account }: { account: CounterpartyProviderAccount }) {
+  return (
+    <>
+      <TableCell className="truncate text-body text-secondary">
+        {account.fiatCurrency === null ? (
+          <Missing />
+        ) : account.destinationCountry === null ? (
+          account.fiatCurrency
+        ) : (
+          `${account.fiatCurrency} → ${account.destinationCountry}`
+        )}
+      </TableCell>
+      <TableCell className="truncate text-body text-secondary">
+        {account.paymentRail === null ? <Missing /> : account.paymentRail}
+      </TableCell>
+      <TableCell className="text-body">
+        <Missing />
+      </TableCell>
+    </>
+  );
+}
+
+/** The provider's customer record for this contact: where it is registered, and its id. */
+function CustomerLinkCells({ link }: { link: CounterpartyProviderCustomerLink | undefined }) {
+  const t = useTranslations();
+  return (
+    <>
+      <TableCell className="text-body text-secondary">
+        <Missing />
+      </TableCell>
+      <TableCell className="text-body">
+        <Missing />
+      </TableCell>
+      <TableCell className="text-body text-secondary">
+        <span className="inline-flex items-center gap-1.5">
+          {t("DashboardPayments.counterparty.detail.customerProfile")}
+          {link === undefined || link.providerCustomerReference === null ? null : (
+            <WalletMetadataCopyButton
+              value={link.providerCustomerReference}
+              label={t("DashboardPayments.counterparty.customerIdLabel")}
+              tooltip={link.providerCustomerReference}
+            />
+          )}
+        </span>
+      </TableCell>
+    </>
+  );
+}
+
+/** The corridor, rail and account cells of one provider-account row, by its kind. */
+function ProviderAccountCells({ account }: { account: CounterpartyProviderAccount }) {
+  if (account.kind === "funding_wallet") {
+    return <FundingWalletCells account={account} />;
+  }
+  if (account.kind === "payout_account") {
+    return <PayoutAccountCells account={account} />;
+  }
+  return <CustomerLinkCells link={account.customerLink} />;
+}
+
+/** One row of the table: a provider's customer record, or one account the provider holds. */
+type ProviderAccountRow = { key: string; provider: PersistedRampProviderId } & (
+  | { kind: "customer"; link: CounterpartyProviderCustomerLink }
+  | { kind: "account"; account: CounterpartyProviderAccount }
+);
+
+/**
+ * The table's rows: each provider's customer record once, ahead of that provider's accounts.
+ * The API sends a separate customer-link row only when the provider holds no accounts for the
+ * contact; otherwise the link rides on each account, so it is lifted into its own row here.
+ *
+ * @param accounts - Provider-account rows from the API.
+ * @returns The rows to render, in the API's order.
+ */
+function providerAccountRows(accounts: CounterpartyProviderAccount[]): ProviderAccountRow[] {
+  const rows: ProviderAccountRow[] = [];
+  const linkedProviders = new Set<PersistedRampProviderId>();
+  for (const account of accounts) {
+    const link = account.customerLink;
+    if (link !== undefined && !linkedProviders.has(account.provider)) {
+      linkedProviders.add(account.provider);
+      rows.push({ kind: "customer", key: `customer:${link.id}`, provider: account.provider, link });
+    }
+    if (account.kind !== "customer_link" || link === undefined) {
+      rows.push({ kind: "account", key: account.id, provider: account.provider, account });
+    }
+  }
+  return rows;
 }
 
 /**
- * Renders the counterparty's provider accounts grouped by provider, covering
- * the loading, error, and empty states of the fetch the workspace owns.
+ * The contact's provider accounts as the design's table, one row per account the providers
+ * hold for this contact: payout accounts (corridor, rail, bank, account), funding wallets
+ * (with their live balance) and customer records. Agreements a provider wants accepted follow
+ * the table. Covers the loading, error and empty states of the fetch the page owns; a refresh
+ * that fails after a successful read keeps the rows it loaded and says the refresh failed.
  *
  * @param props.accounts - Provider-account rows, undefined while loading.
  * @param props.error - Fetch error, if the request failed.
- * @returns The provider-accounts section body.
+ * @returns The provider-accounts block body.
  */
 export function CounterpartyProviderAccounts({
-  accounts: providerAccounts,
-  error: providerAccountsError,
+  accounts,
+  error,
 }: {
   accounts: CounterpartyProviderAccount[] | undefined;
   error: unknown;
 }) {
   const t = useTranslations();
+  const errorMessage =
+    error instanceof Error ? error.message : t("DashboardPayments.counterparty.somethingWentWrong");
 
-  if (providerAccountsError) {
+  // With nothing loaded to show, the failure is the block's whole content.
+  if (error && (accounts === undefined || accounts.length === 0)) {
     return (
-      <div className="rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-        {providerAccountsError instanceof Error ? providerAccountsError.message : null}
-      </div>
+      <p className="text-body">
+        <StatusText tone="critical">
+          {t("DashboardPayments.counterparty.detail.providerAccountsFailed", {
+            error: errorMessage,
+          })}
+        </StatusText>
+      </p>
     );
   }
-  if (providerAccounts === undefined) {
+  if (accounts === undefined) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-4 py-5 text-sm text-tertiary">
-        <LoaderCircleIcon className="size-4 animate-spin" />
+      <p className="text-body text-tertiary" aria-busy="true">
         {t("DashboardPayments.counterparty.loadingProviderAccounts")}
-      </div>
+      </p>
     );
   }
-  if (providerAccounts.length === 0) {
+  if (accounts.length === 0) {
     return (
       <ListEmptyState
-        className="min-h-0 rounded-lg border border-dashed border-border-strong py-10"
-        icon={<WalletIcon className="size-5" />}
-        message={t("DashboardPayments.counterparty.noProviderAccounts")}
+        message={t("DashboardPayments.counterparty.detail.noProviderAccounts")}
+        description={t("DashboardPayments.counterparty.detail.noProviderAccountsDescription")}
       />
     );
   }
+  const rows = providerAccountRows(accounts);
   return (
-    <div className="space-y-3">
-      {groupProviderAccounts(providerAccounts).map((group) => (
-        <ProviderCustomerCard key={group.provider} group={group} />
-      ))}
+    <div className="flex flex-col gap-4">
+      {error ? (
+        <p className="text-body">
+          <StatusText tone="critical">
+            {t("DashboardPayments.counterparty.detail.providerAccountsRefreshFailed", {
+              error: errorMessage,
+            })}
+          </StatusText>
+        </p>
+      ) : null}
+      <div className="overflow-x-auto refresh:-mx-3">
+        <Table className="min-w-[720px] table-fixed rounded-none border-0">
+          <TableHeader>
+            <TableRow>
+              {PROVIDER_ACCOUNT_COLUMN_KEYS.map((key) => (
+                <TableHead key={key}>{t(key)}</TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow
+                key={row.key}
+                data-provider-account-kind={
+                  row.kind === "customer" ? "customer_link" : row.account.kind
+                }
+              >
+                <TableCell className="truncate text-body text-primary">
+                  {getRampProviderLabel(row.provider)}
+                </TableCell>
+                {row.kind === "customer" ? (
+                  <CustomerLinkCells link={row.link} />
+                ) : (
+                  <ProviderAccountCells account={row.account} />
+                )}
+                <TableCell className="text-body whitespace-nowrap">
+                  <ProviderAccountStatus
+                    status={providerAccountStatus(row.kind === "customer" ? row.link : row.account)}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

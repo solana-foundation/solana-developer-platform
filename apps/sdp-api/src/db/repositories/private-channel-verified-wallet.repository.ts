@@ -30,7 +30,7 @@ export interface PrivateChannelWalletRevocationRow {
 }
 
 /** Project tenancy scope for verified-wallet lookups. */
-export interface VerifiedWalletScope {
+interface VerifiedWalletScope {
   organizationId: string;
   projectId: string;
 }

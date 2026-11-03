@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY, SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "@/app";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -7,16 +7,16 @@ vi.mock(import("@sdp/types/release-channels"), async (importOriginal) => {
   const original = await importOriginal();
   return {
     ...original,
-    isModuleInReleaseChannel: (releaseChannel, module, rampProviderStages) =>
+    isModuleInReleaseChannel: (releaseChannel, module, rampProviderMaturity) =>
       module !== "custody" &&
-      original.isModuleInReleaseChannel(releaseChannel, module, rampProviderStages),
+      original.isModuleInReleaseChannel(releaseChannel, module, rampProviderMaturity),
   };
 });
 
 const CUSTODY_PROBE_PATHS = ["/v1/wallets", "/internal/dashboard/custody/connections"] as const;
 
 const app = createApp({
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 
 let clientAddress = 0;

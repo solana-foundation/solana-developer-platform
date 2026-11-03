@@ -21,6 +21,7 @@ import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import {
   activateTestCustodyConnection,
   insertTestCustodyConnection,
@@ -859,6 +860,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
   it("withdraws in PRODUCTION even while vault deposits are environment-closed there", async () => {
     // The deposit route fail-closes production; an exit must work wherever a
     // position exists, or the fail-close itself would trap funds.
+    const scopes = recordCallScopes(withdrawFromVault);
     const prodKeyHash = await hashString(PROD_API_KEY.raw, env.API_KEY_PEPPER);
     await seedApiKeyRow(env, prodKeyHash, {
       ...TEST_SEEDED_API_KEY,
@@ -907,7 +909,7 @@ describe("POST /v1/earn/vault-withdrawals — exit safety (ADR 0002)", () => {
 
     expect(res.status).toBe(200);
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-    expect(withdrawFromVault.mock.calls[0][1]).toMatchObject({ environment: "production" });
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("answers 501 when the provider cannot build an exit — capability, never permission", async () => {

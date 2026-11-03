@@ -1,4 +1,5 @@
 import { provisionUtilaWallet as provisionUtilaWalletInCustody } from "@sdp/custody/provisioning";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   findPrivyWalletByExternalId,
@@ -577,6 +578,12 @@ describe("utila wallet provisioning", () => {
     vi.restoreAllMocks();
   });
 
+  function provisionInSandbox(options: Parameters<typeof provisionUtilaWallet>[1]) {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      provisionUtilaWallet(createUtilaEnv(), options)
+    );
+  }
+
   it("normalizes resource-style vault IDs before creating wallets", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -607,9 +614,7 @@ describe("utila wallet provisioning", () => {
         throw new Error(`Unexpected fetch call: ${init?.method ?? "GET"} ${url}`);
       });
 
-    const result = await provisionUtilaWallet(createUtilaEnv(), {
-      displayName: "Root Wallet",
-    });
+    const result = await provisionInSandbox({ displayName: "Root Wallet" });
 
     expect(result.walletId).toBe("wallet_abc");
     expect(result.address).toBe(CREATED_ADDRESS);
@@ -641,7 +646,7 @@ describe("utila wallet provisioning", () => {
       }
     );
 
-    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+    await expect(provisionInSandbox({})).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       message: "Utila CreateWallet failed (403): code=PERMISSION_DENIED",
     });
@@ -663,7 +668,7 @@ describe("utila wallet provisioning", () => {
       }
     );
 
-    await expect(provisionUtilaWallet(createUtilaEnv(), {})).rejects.toMatchObject({
+    await expect(provisionInSandbox({})).rejects.toMatchObject({
       code: "NETWORK_ERROR",
       message: "Utila CreateWallet failed (502): code=unavailable",
     });
@@ -926,7 +931,6 @@ function createParaEnv(overrides: Partial<Env> = {}): Env {
 function createUtilaEnv(overrides: Partial<Env> = {}): Env {
   return {
     ENVIRONMENT: "development",
-    SOLANA_NETWORK: "devnet",
     UTILA_SERVICE_ACCOUNT_EMAIL: "service-account@example.com",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: utilaPrivateKeyPem,
     UTILA_VAULT_ID: "vaults/vault_123",

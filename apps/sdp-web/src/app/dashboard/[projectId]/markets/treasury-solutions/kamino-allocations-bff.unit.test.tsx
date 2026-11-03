@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/dashboard/markets/earn/kamino-allocations/route";
+import * as sdpApi from "@/lib/sdp-api";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 
 /**
@@ -19,6 +20,7 @@ import { useKaminoVaultAllocations } from "./kamino-allocations";
 // Hoisted because the SDP client mock below needs the same vaults.
 const VAULTS = vi.hoisted(() => ({
   happy: "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
+  batchHappy: "B5pjfZAiKjyUEuqB2694NHrsjcaM67uuJaWqjzTVtzR6",
   upstreamDown: "BoZDRc1RDY9FzUZZ19WT4GbtTnnbXQ8AGSU5ByEw3ut5",
 }));
 
@@ -30,26 +32,32 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
-// The route resolves its vault allowlist from the strategy catalogue through
-// the SDP API client; the seam stands in for that client with a catalogue
-// that fronts this file's vaults. It never touches global fetch, so the
-// `seenUrls` assertions below still see exactly the browser→BFF and BFF→
-// Kamino hops.
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({
-    request: () => {
+vi.mock("next/headers", () => import("@/test/next-headers"));
+
+/**
+ * The route resolves its vault allowlist from the strategy catalogue through
+ * the SDP API client; the seam stands in for that client with a catalogue
+ * that fronts this file's vaults. It never touches global fetch, so the
+ * `seenUrls` assertions below still see exactly the browser→BFF and BFF→
+ * Kamino hops.
+ */
+function stubCatalogueClient() {
+  const catalogue = vi.fn();
+  catalogue.mockResolvedValue({
+    strategies: Object.values(VAULTS).map((providerReference) => ({
+      provider: "kamino",
+      providerReference,
+      hostCluster: "mainnet-beta",
+    })),
+    total: Object.keys(VAULTS).length,
+  });
+  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue({
+    request: vi.fn(() => {
       throw new Error("Unexpected SDP API request");
-    },
-    fetch: async () => ({
-      strategies: Object.values(VAULTS).map((providerReference) => ({
-        provider: "kamino",
-        providerReference,
-        hostCluster: "mainnet-beta",
-      })),
-      total: Object.keys(VAULTS).length,
     }),
-  }),
-}));
+    fetch: catalogue,
+  });
+}
 
 const BFF_PATH = "/api/dashboard/markets/earn/kamino-allocations";
 const UPSTREAM_BASE = "https://api.kamino.finance/kvaults/vaults";
@@ -105,11 +113,11 @@ async function wiredFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   throw new Error(`unexpected fetch: ${url}`);
 }
 
-function renderIsolatedHook(vault: string) {
+function renderIsolatedHook(vaults: readonly string[]) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <SWRConfig value={{ provider: () => new Map() }}>{children}</SWRConfig>
   );
-  return renderHook(() => useKaminoVaultAllocations(vault, "mainnet-beta"), { wrapper });
+  return renderHook(() => useKaminoVaultAllocations(vaults), { wrapper });
 }
 
 describe("Kamino allocations: route → dashboardFetch → hook", () => {
@@ -117,23 +125,25 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     seenUrls.length = 0;
     upstreamResponse = () => Response.json(upstreamPayload());
     mocks.auth.mockResolvedValue({ userId: "user_1", orgId: "org_1" });
+    stubCatalogueClient();
     vi.stubGlobal("fetch", vi.fn(wiredFetch));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
   it("renders the route's body in the hook without any client-side reshaping", async () => {
-    const { result } = renderIsolatedHook(VAULTS.happy);
+    const { result } = renderIsolatedHook([VAULTS.happy]);
 
-    await waitFor(() => expect(result.current.allocations).toBeDefined());
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
 
     expect(result.current.error).toBeUndefined();
     expect(result.current.isLoading).toBe(false);
     // Exactly the figures the cell renders, already stripped to the contract.
-    expect(result.current.allocations).toEqual({
+    expect(result.current.allocationsByVault?.[VAULTS.happy]).toEqual({
       asOf: "2026-09-14T22:12:44.868Z",
       allocations: [
         {
@@ -147,18 +157,41 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     // One browser→BFF hop and one BFF→Kamino hop, nothing else on the wire.
     // The hook states its cluster explicitly for the BFF's mainnet-only gate.
     expect(seenUrls).toEqual([
-      `${BFF_PATH}?vault=${VAULTS.happy}&cluster=mainnet-beta`,
+      `${BFF_PATH}?vaults=${VAULTS.happy}&cluster=mainnet-beta`,
       `${UPSTREAM_BASE}/${VAULTS.happy}/allocations`,
     ]);
   });
 
-  it("surfaces an upstream failure to the hook as an error with no data", async () => {
+  it("reads every vault in one browser hop and leaves an upstream failure out", async () => {
     upstreamResponse = () => new Response("rate limited", { status: 429 });
+    let upstreamCalls = 0;
+    const happyUpstream = `${UPSTREAM_BASE}/${VAULTS.batchHappy}/allocations`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(UPSTREAM_BASE)) upstreamCalls += 1;
+        if (url === happyUpstream) {
+          seenUrls.push(url);
+          return Response.json(upstreamPayload());
+        }
+        return wiredFetch(input, init);
+      })
+    );
 
-    const { result } = renderIsolatedHook(VAULTS.upstreamDown);
+    const { result } = renderIsolatedHook([VAULTS.batchHappy, VAULTS.upstreamDown]);
 
-    await waitFor(() => expect(result.current.error).toBeDefined());
-    expect(result.current.allocations).toBeUndefined();
-    expect(result.current.error?.message).toBe("Vault allocations could not be read");
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
+    // A failed vault is absent rather than failing the batch, so its cell
+    // takes the placeholder while every other cell renders.
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.allocationsByVault?.[VAULTS.batchHappy]).toBeDefined();
+    expect(result.current.allocationsByVault?.[VAULTS.upstreamDown]).toBeUndefined();
+    expect(seenUrls.filter((url) => url.startsWith(BFF_PATH))).toEqual([
+      `${BFF_PATH}?vaults=${VAULTS.batchHappy},${VAULTS.upstreamDown}&cluster=mainnet-beta`,
+    ]);
+    // Kamino load is unchanged by the batch: one upstream read per vault.
+    expect(upstreamCalls).toBe(2);
   });
 });

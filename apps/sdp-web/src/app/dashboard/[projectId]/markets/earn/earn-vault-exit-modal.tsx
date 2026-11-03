@@ -3,11 +3,13 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
 import { Modal } from "@sdp/ui/modal";
 import { ArrowRightIcon, Clock3Icon, Loader2Icon, type LucideIcon, ZapIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatDurationSeconds, positionDisplayName } from "./earn-format";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { fetchEarnVaultWithdrawalOptions } from "./earn-program-data";
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 import {
@@ -99,25 +101,23 @@ function RouteOption({
   onClick: () => void;
   title: string;
 }) {
+  // A tinted, borderless tile as the design's action tiles are, the route's promise under its
+  // name; hover deepens the tint.
   return (
     <button
-      className="group w-full rounded-2xl border border-border-default bg-surface-raised px-5 py-4 text-left transition-colors hover:border-border-strong hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="group flex w-full items-center gap-4 rounded-control bg-fill-subtle px-4 py-4 text-left transition-colors hover:bg-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
       onClick={onClick}
       type="button"
     >
-      <span className="flex items-center gap-4">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary transition-colors group-hover:bg-fill-strong">
-          <Icon aria-hidden="true" className="size-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-primary">{title}</span>
-          <span className="mt-0.5 block text-sm leading-5 text-secondary">{description}</span>
-        </span>
-        <ArrowRightIcon
-          aria-hidden="true"
-          className="size-4 shrink-0 text-tertiary transition-transform group-hover:translate-x-0.5"
-        />
+      <Icon aria-hidden="true" className="size-5 shrink-0 text-secondary" strokeWidth={1.5} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-nav font-medium text-primary">{title}</span>
+        <span className="block text-meta text-secondary">{description}</span>
       </span>
+      <ArrowRightIcon
+        aria-hidden="true"
+        className="size-4 shrink-0 text-tertiary transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none"
+      />
     </button>
   );
 }
@@ -135,10 +135,8 @@ function ExitRouteOptions({
   const locale = useLocale();
   return (
     <>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {t("DashboardEarn.exitRoute.description")}
-      </p>
-      <div className="mt-5 grid gap-3">
+      <p className="mt-2 text-body text-secondary">{t("DashboardEarn.exitRoute.description")}</p>
+      <div className="mt-5 grid gap-2">
         {ready?.instant ? (
           <RouteOption
             description={t("DashboardEarn.exitRoute.instantDescription")}
@@ -192,31 +190,31 @@ function ExitRouteChooser({
   let body: ReactNode;
   if (!options) {
     body = (
-      <div className="mt-5 flex items-center gap-2 text-sm text-secondary" role="status">
+      <div className="mt-5 flex items-center gap-2 text-body text-secondary" role="status">
         <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
         {t("DashboardEarn.exitRoute.loading")}
       </div>
     );
   } else if (options.kind === "unavailable") {
     body = (
-      <div className="mt-5 rounded-xl border border-warning-border bg-warning-bg p-4">
-        <p className="text-sm text-warning">{t("DashboardEarn.exitRoute.unavailable")}</p>
+      <Callout className="mt-5" variant="warning">
+        <p>{t("DashboardEarn.exitRoute.unavailable")}</p>
         <Button className="mt-3" onClick={retry} size="sm" variant="outline">
           {t("DashboardEarn.exitRoute.retry")}
         </Button>
-      </div>
+      </Callout>
     );
   } else if (!ready?.instant && !asyncRoute) {
-    body = <p className="mt-5 text-sm text-warning">{t("DashboardEarn.exitRoute.none")}</p>;
+    body = <p className="mt-5 text-body text-warning">{t("DashboardEarn.exitRoute.none")}</p>;
   } else {
     body = <ExitRouteOptions asyncRoute={asyncRoute} onChoose={onChoose} ready={ready} />;
   }
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} onClose={onClose} size="md">
+    <Modal isOpen ariaLabel={modalLabel} onClose={onClose} {...EARN_TRANSACTION_MODAL_FRAME}>
       <div className="p-6">
         <h2
-          className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
+          className="pr-8 text-subheading font-medium text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >

@@ -3,29 +3,22 @@ import type {
   CounterpartyAccount,
   ListCounterpartyAccountsResponse,
 } from "@sdp/types/counterparties";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import {
-  formatDisplayAmount,
-  shortenAddress,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import {
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { recurringPaymentReadFailureOutcome } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-state";
 import { RecurringPaymentDetailWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace";
 import {
   fetchRecurringPaymentById,
   fetchRecurringPaymentCollectionAttempts,
 } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import type { SdpApiClient } from "@/lib/sdp-api";
-import { RecurringPaymentDetailRoute as RedesignRecurringPaymentDetailRoute } from "./page.redesign";
+import { PAYMENT_RECURRING_HREF } from "@/lib/payments-routes";
+import { requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +77,7 @@ async function fetchAllCounterpartyWalletAccounts(
   return accounts;
 }
 
-async function RecurringPaymentDetailRoute({
+export default async function RecurringPaymentDetailRoute({
   params,
 }: {
   params: Promise<{ recurringPaymentId: string }>;
@@ -111,7 +104,7 @@ async function RecurringPaymentDetailRoute({
           fetchPaymentsWallets(apiClient.request, { includeBalances: true })
         ),
         trace.step("fetch_issued_token_symbols", () =>
-          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+          fetchIssuedTokenSymbolsWhenIssuanceEnabled(apiClient.request)
         ),
       ]);
       const issuedTokensByMint = Object.fromEntries(
@@ -124,9 +117,25 @@ async function RecurringPaymentDetailRoute({
       });
 
       if (!recurringPaymentResult.ok) {
-        throw new Error(recurringPaymentResult.error);
+        const outcome = recurringPaymentReadFailureOutcome(
+          recurringPaymentId,
+          recurringPaymentResult.status
+        );
+        switch (outcome) {
+          case "list":
+            return redirect(await requestProjectHref(PAYMENT_RECURRING_HREF));
+          case "not_found":
+            return notFound();
+          case "failed":
+            throw new Error(recurringPaymentResult.error);
+          default: {
+            const unhandled: never = outcome;
+            throw new Error(`Unhandled recurring payment read outcome: ${unhandled}`);
+          }
+        }
       }
-      const recurringPaymentResultData = recurringPaymentResult.data;
+      const { recurringPayment: recurringPaymentResultData, tokenApproval } =
+        recurringPaymentResult.data;
       const sourceCustodyWalletId = recurringPaymentResultData.sourceCustodyWalletId;
       if (sourceCustodyWalletId === null) {
         throw new Error("Recurring payment source wallet is unresolved");
@@ -136,7 +145,6 @@ async function RecurringPaymentDetailRoute({
       const wallets = walletsResult.data ?? [];
       const wallet =
         wallets.find((entry) => entry.id === recurringPayment.sourceCustodyWalletId) ?? null;
-      const subscriptionId = recurringPayment.subscriptionId;
       const [counterparty, counterpartyAccounts, collectionAttemptsResult] = await Promise.all([
         trace.step("fetch_recurring_payment_counterparty", () =>
           fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
@@ -144,26 +152,17 @@ async function RecurringPaymentDetailRoute({
         trace.step("fetch_recurring_payment_counterparty_accounts", () =>
           fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
         ),
-        subscriptionId
-          ? trace.step("fetch_recurring_payment_collection_attempts", () =>
-              fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
-            )
-          : Promise.resolve({
-              ok: true as const,
-              data: { collectionAttempts: [], total: 0 },
-            }),
+        trace.step("fetch_recurring_payment_collection_attempts", () =>
+          fetchRecurringPaymentCollectionAttempts(apiClient.request, recurringPayment.id, t)
+        ),
       ]);
       const counterpartyLabel =
         counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");
-      const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
-      const tokenLabel =
-        knownToken?.symbol ??
-        wallet?.balances?.find((entry) => entry.mint === recurringPayment.token)?.token ??
-        shortenAddress(recurringPayment.token);
 
       return (
         <RecurringPaymentDetailWorkspace
           recurringPayment={recurringPayment}
+          tokenApproval={tokenApproval}
           wallet={wallet}
           wallets={wallets}
           issuedTokensByMint={issuedTokensByMint}
@@ -171,7 +170,6 @@ async function RecurringPaymentDetailRoute({
             (account) => account.accountKind === "crypto_wallet" && account.status === "active"
           )}
           counterpartyLabel={counterpartyLabel}
-          amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
           collectionAttempts={
             collectionAttemptsResult.ok ? collectionAttemptsResult.data.collectionAttempts : []
           }
@@ -186,9 +184,3 @@ async function RecurringPaymentDetailRoute({
     }
   );
 }
-
-export default withLegacyDesign(
-  RedesignRecurringPaymentDetailRoute,
-  RecurringPaymentDetailRoute,
-  "activity"
-);

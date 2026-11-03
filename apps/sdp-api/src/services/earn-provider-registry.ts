@@ -14,7 +14,6 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo/client";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
@@ -25,26 +24,28 @@ import {
   assertWisdomTreeNotPortfolioProvider,
   WisdomTreeVaultDirectClient,
 } from "@sdp/wisdomtree/client";
-import { assertClusterEndpoint } from "@/services/earn/execution-registry";
+import {
+  assertClusterEndpoint,
+  earnPoolNotConfigured,
+  earnProviderEndpointUrls,
+} from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
 /**
- * Resolve the request's cluster-specific RPC and prove its genesis before the
- * singleton provider performs any chain work. The runtime context is
- * request-scoped, so one API process can safely serve both SDP environments.
+ * The preferred endpoint of the request's cluster pool, proven before the
+ * singleton provider performs any chain work. The cluster comes from the
+ * request-scoped runtime, so one API process serves both SDP environments.
  */
 async function resolveProvenRpcUrl(
-  ctx: EarnRuntimeContext,
+  _ctx: EarnRuntimeContext,
   cluster: SolanaCluster
 ): Promise<string> {
-  // The API constructs this runtime from `Env`; the shared provider contract
-  // deliberately narrows it to a dependency-free string record.
-  const env = ctx.env as unknown as Env;
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
+  const [rpcUrl] = earnProviderEndpointUrls(cluster);
+  if (rpcUrl === undefined) throw earnPoolNotConfigured(cluster);
+  await assertClusterEndpoint(cluster, rpcUrl);
   return rpcUrl;
 }
 

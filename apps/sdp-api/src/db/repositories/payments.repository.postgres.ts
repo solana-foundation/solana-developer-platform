@@ -191,7 +191,7 @@ function buildTransferListWhere(params: ListTransfersInput): {
   return { whereClause: clauses.join(" AND "), values };
 }
 
-export type PaymentTransferProjectionRow = Record<string, unknown> & {
+type PaymentTransferProjectionRow = Record<string, unknown> & {
   kind: PaymentTransactionKind;
 };
 
@@ -199,7 +199,7 @@ export type PaymentTransferProjectionRow = Record<string, unknown> & {
 const storedTransferProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS).nullable();
 
 /** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
-export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
+function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -302,6 +302,10 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   }
   if (input.requireUnstarted) {
     clauses.push("submission_started_at IS NULL");
+  }
+  if (input.expectedProviderReference !== undefined) {
+    clauses.push("provider_reference IS NOT DISTINCT FROM ?");
+    values.push(input.expectedProviderReference);
   }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {
@@ -1252,11 +1256,66 @@ export function createPostgresPaymentsRepository(
       };
     },
 
+    async claimFireblocksTransferSubmission(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "provider_data->'fireblocksTransfer' IS NOT NULL",
+          // biome-ignore lint/security/noSecrets: SQL JSON field name, not a credential.
+          "provider_data->>'fireblocksSubmissionStartedAt' IS NULL",
+        ],
+        extraValues: [input.transferId],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb, updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(
+          JSON.stringify({ fireblocksSubmissionStartedAt: input.now }),
+          input.now,
+          ...scope.values
+        )
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async claimFireblocksTransferPoll(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "provider_data->'fireblocksTransfer' IS NOT NULL",
+          // biome-ignore lint/security/noSecrets: SQL JSON field names, not credentials.
+          "(provider_data->>'fireblocksLastPolledAt' IS NULL OR provider_data->>'fireblocksLastPolledAt' < ?)",
+        ],
+        extraValues: [input.transferId, input.polledBefore],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb, updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(JSON.stringify({ fireblocksLastPolledAt: input.now }), input.now, ...scope.values)
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
     async listTransfersByStatus({
       environment,
       statuses,
+      fireblocks,
       types,
-      hasSignature,
+      unsigned,
       createdBefore,
       updatedBefore,
       limit,
@@ -1274,13 +1333,19 @@ export function createPostgresPaymentsRepository(
       const clauses = ["p.environment = ?", `pt.status IN (${buildInClause(statuses.length)})`];
       const values: unknown[] = [environment, ...statuses];
 
+      if (fireblocks !== undefined) {
+        clauses.push(
+          fireblocks
+            ? "pt.provider_data->'fireblocksTransfer' IS NOT NULL"
+            : "pt.provider_data->'fireblocksTransfer' IS NULL"
+        );
+      }
+
       if (types?.length) {
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
         values.push(...types);
       }
-      if (hasSignature === true) {
-        clauses.push("pt.signature IS NOT NULL");
-      } else if (hasSignature === false) {
+      if (unsigned) {
         clauses.push("pt.signature IS NULL");
       }
       if (createdBefore) {
@@ -1306,6 +1371,41 @@ export function createPostgresPaymentsRepository(
         .all<PaymentTransferProjectionRow>();
 
       return rows.results.map(mapTransferRow);
+    },
+
+    async listProcessingSignedSubmissions({ environment, limit }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.listProcessingSignedSubmissions is system-only"
+        );
+      }
+      const rows = await db
+        .prepare(
+          `SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind
+           FROM payment_transfers pt
+           JOIN projects p ON p.id = pt.project_id
+           WHERE p.environment = ?
+             AND pt.status = ?
+             AND pt.type = ANY(?)
+             AND pt.provider_data->'fireblocksTransfer' IS NULL
+             AND pt.signature IS NOT NULL
+             AND pt.signed_transaction IS NOT NULL
+             AND pt.last_valid_block_height IS NOT NULL
+           ORDER BY pt.updated_at ASC, pt.id ASC
+           LIMIT ?`
+        )
+        .bind(environment, "processing", [...WALLET_TRANSFER_TYPES], limit)
+        .all<PaymentTransferProjectionRow>();
+
+      return rows.results.map((row) => {
+        const transfer = mapTransferRow(row);
+        return {
+          ...transfer,
+          signature: z.string().parse(transfer.signature),
+          signed_transaction: z.string().parse(transfer.signed_transaction),
+          last_valid_block_height: z.string().parse(transfer.last_valid_block_height),
+        };
+      });
     },
 
     async listConfirmedTransfersToPoll({ environment, confirmedAfter, limit }) {

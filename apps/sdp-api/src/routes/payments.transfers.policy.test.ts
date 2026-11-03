@@ -70,6 +70,7 @@ async function postBatch(path: string, idempotencyKey: string): Promise<Response
         "Idempotency-Key": idempotencyKey,
       },
       body: JSON.stringify({
+        externalId: "policy-run",
         sourceCustodyWalletId: SPECIALIZED_WALLET_ID,
         token: "SOL",
         recipients: [{ counterpartyAccountId: "cpacct_policy_unseeded", amount: "0.1" }],

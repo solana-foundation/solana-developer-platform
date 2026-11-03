@@ -90,7 +90,6 @@ export interface ClerkAuthContext {
   clerkOrgId: string;
   email: string | null;
   orgSlug: string | null;
-  orgRole: string | null;
 }
 
 /**
@@ -206,6 +205,5 @@ export function getClerkAuth(c: Context<{ Bindings: Env }>): ClerkAuthContext {
     clerkOrgId: auth.clerkOrgId,
     email: auth.email ?? null,
     orgSlug: auth.orgSlug ?? null,
-    orgRole: auth.orgRole ?? null,
   };
 }

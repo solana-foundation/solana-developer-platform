@@ -312,8 +312,8 @@ async function seedOrganizationAdminMembership(): Promise<void> {
     .run();
   await db
     .prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-       VALUES (?, ?, ?, 'admin')
+      `INSERT INTO project_members (id, project_id, user_id)
+       VALUES (?, ?, ?)
        ON CONFLICT (project_id, user_id) DO NOTHING`
     )
     .bind(`pm_integration_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id)
@@ -442,7 +442,6 @@ async function ensurePrivyCustodyWallet(): Promise<IntegrationCustodyWallet> {
   }
 
   for (const wallet of walletRows) {
-    // eslint-disable-next-line no-await-in-loop
     if (await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key)) {
       return fundIntegrationCustodyWallet(wallet);
     }
@@ -566,7 +565,7 @@ async function fundAddressViaKoraFeePayer(
     userId: "sdp:v1:system:integration-funding",
   });
   const feePayer = await feePayment.getFeePayer();
-  const rpc = createRpc(env);
+  const rpc = createRpc(rpcUrl);
   const maxTransferLamports =
     (await feePayment
       .getSponsorshipConfiguration?.()
@@ -674,12 +673,10 @@ async function waitForAccountExistence(
 ): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     const exists = await solanaAccountExists(rpcUrl, address);
     if (exists) {
       return;
     }
-    // eslint-disable-next-line no-await-in-loop
     await sleep(1_000);
   }
 
@@ -689,12 +686,10 @@ async function waitForAccountExistence(
 async function waitForLamports(address: string, minimumLamports: number, timeoutMs: number) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     const lamports = await getAddressLamports(address);
     if (lamports >= minimumLamports) {
       return;
     }
-    // eslint-disable-next-line no-await-in-loop
     await sleep(1_000);
   }
 

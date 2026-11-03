@@ -1,11 +1,12 @@
 "use client";
 
+import { isByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { PrivyCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
+import { ByokCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
@@ -34,6 +35,7 @@ export function AddConnectionModal({
   const router = useRouter();
   const href = useProjectHref();
   const formId = useId();
+  const [ready, setReady] = useState(provider !== "fireblocks");
   const [submitting, setSubmitting] = useState(false);
   // Once the form has swapped its fields for a recovery panel there is no
   // `<form id={formId}>` left for this footer to submit, and the panel carries
@@ -60,6 +62,8 @@ export function AddConnectionModal({
     );
   };
 
+  if (!isByokCustodyProvider(provider)) return null;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -76,9 +80,11 @@ export function AddConnectionModal({
           <p className="text-sm text-tertiary">{t("DashboardCustody.addConnectionDescription")}</p>
         </div>
 
-        <PrivyCredentialForm
+        <ByokCredentialForm
+          provider={provider}
           formId={formId}
           onSuccess={handleSuccess}
+          onReadyChange={setReady}
           onPendingChange={setSubmitting}
           onRecoveryChange={setInRecovery}
           onRecoveryLockChange={setRecoveryLocked}
@@ -93,7 +99,7 @@ export function AddConnectionModal({
             <Button
               type="submit"
               form={formId}
-              disabled={submitting}
+              disabled={submitting || !ready}
               iconLeft={
                 submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
               }

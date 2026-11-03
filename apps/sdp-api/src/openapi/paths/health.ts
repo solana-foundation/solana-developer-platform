@@ -33,7 +33,18 @@ export function registerHealthPaths(registry: OpenAPIRegistry) {
       },
       503: {
         description: "Service is not ready",
-        content: jsonContent(healthReadyResponseSchema),
+        // Its own example: the schema's field examples describe a ready instance.
+        content: jsonContent(
+          healthReadyResponseSchema.openapi({
+            example: {
+              status: "not_ready",
+              timestamp: "2025-01-01T00:00:00.000Z",
+              revision: "sdp-prod-api-public-00042-abc",
+              commit: "0123456789abcdef0123456789abcdef01234567",
+              checks: { database: "ok", redis: "error", egress: "ok" },
+            },
+          })
+        ),
       },
     },
   });

@@ -15,6 +15,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",
     sdpEnvironment: "sandbox",
+    dashboardAccess: { capabilities: { canManageCustody: true } },
   }),
 }));
 vi.mock("qrcode", () => ({

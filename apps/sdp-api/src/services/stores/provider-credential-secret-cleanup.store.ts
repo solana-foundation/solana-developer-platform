@@ -13,6 +13,7 @@ export interface RetainedProviderCredentialSecretRow {
 
 export interface CredentialSecretContainerRow {
   id: string;
+  provider: "privy" | "fireblocks";
   organization_id: string;
   secret_ref: string;
 }
@@ -68,8 +69,8 @@ export class ProviderCredentialSecretCleanupStore {
 
   async listDueContainers(now: Date, limit: number): Promise<CredentialSecretContainerRow[]> {
     return this.db.queryMany(
-      `SELECT id, organization_id, secret_ref FROM provider_credentials
-       WHERE provider = 'privy' AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
+      `SELECT id, provider, organization_id, secret_ref FROM provider_credentials
+       WHERE provider IN ('privy', 'fireblocks') AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
          AND secret_next_scan_at <= ?::timestamptz
        ORDER BY secret_next_scan_at, id LIMIT ?`,
       [now.toISOString(), limit]
@@ -82,7 +83,7 @@ export class ProviderCredentialSecretCleanupStore {
       (await this.db.execute(
         `UPDATE provider_credentials SET secret_next_scan_at = ?::timestamptz
        WHERE id = ? AND organization_id = ? AND secret_ref = ?
-         AND provider = 'privy' AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
+         AND provider IN ('privy', 'fireblocks') AND source = 'stored' AND storage_backend = 'gcp_secret_manager'
          AND secret_next_scan_at <= ?::timestamptz`,
         [next, owner.id, owner.organization_id, owner.secret_ref, now.toISOString()]
       )) === 1
@@ -96,7 +97,7 @@ export class ProviderCredentialSecretCleanupStore {
          deactivated_at = sdp_iso_now(), last_failed_at = sdp_iso_now(),
          last_failure_code = 'secret_creation_abandoned',
          secret_retention_expires_at = sdp_iso_now(), updated_at = sdp_iso_now()
-       WHERE pc.organization_id = ? AND pc.secret_ref = ? AND pc.provider = 'privy'
+       WHERE pc.organization_id = ? AND pc.secret_ref = ? AND pc.provider IN ('privy', 'fireblocks')
          AND pc.source = 'stored' AND pc.storage_backend = 'gcp_secret_manager'
          AND pc.status = 'creating'
          AND pc.created_at::timestamptz <= clock_timestamp() - interval '2 minutes'
@@ -121,7 +122,7 @@ export class ProviderCredentialSecretCleanupStore {
   ): Promise<RetainedProviderCredentialSecretRow[]> {
     return this.db.queryMany(
       `SELECT ${COLUMNS} FROM provider_credentials pc
-       WHERE pc.organization_id = ? AND pc.secret_ref = ? AND pc.provider = 'privy'
+       WHERE pc.organization_id = ? AND pc.secret_ref = ? AND pc.provider IN ('privy', 'fireblocks')
          AND pc.source = 'stored' AND pc.storage_backend = 'gcp_secret_manager'
          AND pc.secret_version_ref IS NOT NULL AND pc.secret_retention_expires_at IS NOT NULL
          AND ${GCP_TERMINAL} AND ${GCP_UNREFERENCED}
@@ -136,7 +137,7 @@ export class ProviderCredentialSecretCleanupStore {
   }): Promise<RetainedProviderCredentialSecretRow | null> {
     return this.db.queryOne(
       `UPDATE provider_credentials pc SET updated_at = sdp_iso_now()
-       WHERE pc.id = ? AND pc.provider = 'privy' AND pc.source = 'stored'
+       WHERE pc.id = ? AND pc.provider IN ('privy', 'fireblocks') AND pc.source = 'stored'
          AND pc.storage_backend = 'gcp_secret_manager' AND pc.secret_version_ref = ?
          AND ${GCP_TERMINAL} AND ${GCP_UNREFERENCED}
          AND NOT EXISTS (SELECT 1 FROM provider_credentials other
@@ -158,7 +159,7 @@ export class ProviderCredentialSecretCleanupStore {
       (await this.db.execute(
         `UPDATE provider_credentials pc SET secret_retention_expires_at = NULL,
          secret_cleanup_next_attempt_at = NULL, updated_at = sdp_iso_now()
-       WHERE pc.id = ? AND pc.provider = 'privy' AND pc.source = 'stored'
+       WHERE pc.id = ? AND pc.provider IN ('privy', 'fireblocks') AND pc.source = 'stored'
          AND pc.storage_backend = 'gcp_secret_manager' AND pc.secret_version_ref = ?
          AND pc.secret_retention_expires_at = ? AND ${GCP_TERMINAL} AND ${GCP_UNREFERENCED}`,
         [params.id, params.expectedSecretVersionRef, params.expectedRetentionExpiresAt]
@@ -181,7 +182,7 @@ export class ProviderCredentialSecretCleanupStore {
          secret_cleanup_outcome = CASE WHEN secret_version_ref IS NULL THEN NULL ELSE secret_cleanup_outcome END,
          secret_cleanup_absent_since = CASE WHEN secret_version_ref IS NULL THEN NULL ELSE secret_cleanup_absent_since END,
          secret_version_ref = COALESCE(secret_version_ref, ?), updated_at = sdp_iso_now()
-       WHERE id = ? AND secret_ref = ? AND provider = 'privy' AND source = 'stored'
+       WHERE id = ? AND secret_ref = ? AND provider IN ('privy', 'fireblocks') AND source = 'stored'
          AND storage_backend = 'gcp_secret_manager' AND status = 'deactivated'
          AND last_failure_code = 'secret_creation_abandoned'
          AND (secret_version_ref IS NULL OR secret_version_ref = ?)`,

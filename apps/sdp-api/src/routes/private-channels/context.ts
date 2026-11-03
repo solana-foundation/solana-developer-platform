@@ -9,7 +9,6 @@ import {
   createPrivateChannelUserRepository,
   createPrivateChannelVerifiedWalletRepository,
   createPrivateChannelWithdrawalRepository,
-  createProjectUserRepository,
 } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { createPrivateChannelEventService } from "@/services/private-channels/event.service";
@@ -57,10 +56,6 @@ export function getPrivateChannelEventService(c: AppContext) {
 
 export function getPrivateChannelUserRepository(c: AppContext) {
   return createPrivateChannelUserRepository(c.env);
-}
-
-export function getProjectUserRepository(c: AppContext) {
-  return createProjectUserRepository(c.env);
 }
 
 /** Load this request's project RPC client without exposing its endpoint. */

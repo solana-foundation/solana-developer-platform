@@ -186,8 +186,23 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
       expectedStatus: "confirmed",
     });
 
-    const nonTerminal = await repo.listNonTerminal(10);
+    const nonTerminal = await repo.listNonTerminal({ environment: "sandbox", limit: 10 });
     expect(nonTerminal.map((r) => r.id)).toEqual([a.id]);
+  });
+
+  it("listNonTerminal sweeps only projects in the given environment", async () => {
+    await seedInstance("inst_pcw_production", TEST_PRODUCTION_PROJECT_ID);
+    const sandbox = await seed();
+    const production = await seed({
+      projectId: TEST_PRODUCTION_PROJECT_ID,
+      instanceId: "inst_pcw_production",
+    });
+
+    const sandboxRows = await repo.listNonTerminal({ environment: "sandbox", limit: 10 });
+    const productionRows = await repo.listNonTerminal({ environment: "production", limit: 10 });
+
+    expect(sandboxRows.map((row) => row.id)).toEqual([sandbox.id]);
+    expect(productionRows.map((row) => row.id)).toEqual([production.id]);
   });
 
   it("patchContext merges into the JSONB atomically", async () => {

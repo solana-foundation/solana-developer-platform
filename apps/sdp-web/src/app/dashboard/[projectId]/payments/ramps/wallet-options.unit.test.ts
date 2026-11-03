@@ -1,6 +1,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { SOL_MINT, SOLANA_CLUSTERS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { walletComboboxOptions } from "./wallet-options";
+import { onchainPaymentAssetOptions, walletComboboxOptions } from "./wallet-options";
 
 describe("walletComboboxOptions", () => {
   it("uses exact wallet ids and keeps duplicate Provider ids selectable", () => {
@@ -78,5 +79,35 @@ describe("walletComboboxOptions", () => {
     ]);
     // Without the flag the same wallet stays selectable: drafts and receiving need it.
     expect(walletComboboxOptions(wallets, "Restricted")[1]).not.toHaveProperty("disabled");
+  });
+});
+
+describe("onchainPaymentAssetOptions", () => {
+  it.each(SOLANA_CLUSTERS)("limits Fireblocks BYOK to canonical SOL and USDC on %s", (cluster) => {
+    const usdc = WELL_KNOWN_TOKENS.USDC.mints[cluster].address;
+    const wrongClusterUsdc =
+      WELL_KNOWN_TOKENS.USDC.mints[cluster === "devnet" ? "mainnet-beta" : "devnet"].address;
+    const wallet: PaymentsDashboardWallet = {
+      id: "cwlt_fireblocks",
+      walletId: "fb_0",
+      publicKey: "address",
+      label: "Treasury",
+      provider: "fireblocks",
+      custodyConnectionId: "cconn_fireblocks",
+      isRuntimeExecutionAllowed: true,
+      balances: [SOL_MINT, usdc, wrongClusterUsdc, "unsupported-mint"].map((mint) => ({
+        mint,
+        token: mint === SOL_MINT ? "SOL" : "USDC",
+        amount: "1000000000",
+        uiAmount: "1",
+        decimals: 9,
+      })),
+    };
+    const options = (value: PaymentsDashboardWallet) =>
+      onchainPaymentAssetOptions(value, {}, (key) => key, cluster).map((option) => option.value);
+    expect(options(wallet)).toEqual([SOL_MINT, usdc]);
+    // Preserve other custody paths, including managed Fireblocks and Privy BYOK.
+    expect(options({ ...wallet, custodyConnectionId: undefined })).toHaveLength(4);
+    expect(options({ ...wallet, provider: "privy" })).toHaveLength(4);
   });
 });

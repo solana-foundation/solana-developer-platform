@@ -45,7 +45,7 @@ const FAILED: ProjectRing = {
 function renderCard(rings: ProjectRing[], onChanged: () => void = vi.fn()) {
   const view = render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <RingCard rings={rings} onChanged={onChanged} />
+      <RingCard rings={rings} canWrite onChanged={onChanged} />
     </I18nProvider>
   );
   return { view, onChanged };

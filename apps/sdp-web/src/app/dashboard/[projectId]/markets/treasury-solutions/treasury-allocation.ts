@@ -112,7 +112,7 @@ export function isOpenVaultPosition(position: TreasuryAllocationPosition): boole
  * was opened outside SDP and has no recorded row). Rendering nothing there
  * would present a deployed wallet as idle, which is the same lie as `0`.
  */
-type WalletDeploymentDisplay =
+export type WalletDeploymentDisplay =
   | { kind: "none" }
   | { kind: "unavailable" }
   | { kind: "value"; value: string };

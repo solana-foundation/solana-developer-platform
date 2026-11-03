@@ -1,5 +1,3 @@
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
-
 /** Kind of intent an observation attributes a settlement to. */
 export type PrivateChannelSettlementIntentKind = "deposit" | "withdrawal";
 
@@ -41,8 +39,4 @@ export interface PrivateChannelSettlementObservationRepository {
     intentKind: PrivateChannelSettlementIntentKind,
     intentId: string
   ): Promise<PrivateChannelSettlementObservationRow | null>;
-}
-
-export interface PrivateChannelSettlementObservationRepositoryContext {
-  db: RepositoryDbClient;
 }

@@ -7,15 +7,15 @@ browser reads SDP's own route.
 
 ## Flow
 
-| Step | Where | Does |
-| -- | -- | -- |
-| Hook | `apps/sdp-web/src/app/dashboard/[projectId]/overview-network.data.ts` | `useOverviewNetwork`: SWR, refetch every 5 min, last snapshot kept in local storage for an instant paint |
-| Proxy | `apps/sdp-web/src/app/api/dashboard/network/route.ts` | `proxyToSdpApi` to the route below |
-| Route | `apps/sdp-api/src/routes/internal-network/` | `GET /internal/dashboard/network`, Clerk sessions only, outside OpenAPI |
-| Service | `apps/sdp-api/src/services/network/network.service.ts` | Joins the readings cache and the health cache into one snapshot |
-| Recipes | `apps/sdp-api/src/services/network/network-snapshot.ts` | `NETWORK_READINGS`: each reading's inputs and same-day math |
-| Client | `apps/sdp-api/src/lib/data-api/` | Reads `/v1/metrics?provider=preferred`, validates it, indexes it by metric and closed UTC day |
-| Contract | `packages/sdp-types/src/network-metrics.ts` | The snapshot both apps parse |
+| Step     | Where                                                                 | Does                                                                                                     |
+| -------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Hook     | `apps/sdp-web/src/app/dashboard/[projectId]/overview-network.data.ts` | `useOverviewNetwork`: SWR, refetch every 5 min, last snapshot kept in local storage for an instant paint |
+| Proxy    | `apps/sdp-web/src/app/api/dashboard/network/route.ts`                 | `proxyToSdpApi` to the route below                                                                       |
+| Route    | `apps/sdp-api/src/routes/internal-network/`                           | `GET /internal/dashboard/network`, Clerk sessions only, outside OpenAPI                                  |
+| Service  | `apps/sdp-api/src/services/network/network.service.ts`                | Joins the readings cache and the health cache into one snapshot                                          |
+| Recipes  | `apps/sdp-api/src/services/network/network-snapshot.ts`               | `NETWORK_READINGS`: each reading's inputs and same-day math                                              |
+| Client   | `apps/sdp-api/src/lib/data-api/`                                      | Reads `/v1/metrics?provider=preferred`, validates it, indexes it by metric and closed UTC day            |
+| Contract | `packages/sdp-types/src/network-metrics.ts`                           | The snapshot both apps parse                                                                             |
 
 ## Reading data.solana.com
 
@@ -56,11 +56,10 @@ for that day.
 `lib/refreshing-cache.ts` keeps each value in memory and shares a copy through
 the KV `cache` store (Redis):
 
-| Value | Fresh for | Served while refreshing | Retry after a failure |
-| -- | -- | -- | -- |
-| Readings (`cache:network:readings:v2`) | 3 hours | up to 48 hours old | 5 minutes |
-| Health (`cache:network:health:v2`) | 2 minutes | up to 3 minutes old | 1 minute |
-
+| Value                                  | Fresh for | Served while refreshing | Retry after a failure |
+| -------------------------------------- | --------- | ----------------------- | --------------------- |
+| Readings (`cache:network:readings:v2`) | 3 hours   | up to 48 hours old      | 5 minutes             |
+| Health (`cache:network:health:v2`)     | 2 minutes | up to 3 minutes old     | 1 minute              |
 - A stale copy answers at once while one refresh runs behind it; a request only
   waits when no copy can be served. That refresh goes to the request's
   background runner (`executionCtx.waitUntil`), so a shutdown drains it instead

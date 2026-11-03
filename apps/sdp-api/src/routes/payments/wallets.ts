@@ -1,8 +1,10 @@
 import { badRequest } from "@sdp/payments/errors";
+import type { MovementOf } from "@sdp/types/movements";
 import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { conflict, walletNotFound } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -25,6 +27,34 @@ export function findRetainedPaymentWalletByWalletId(
   walletId: string
 ): Promise<CustodyWallet | null> {
   return findProjectPaymentWallet(c, "wallet_id", walletId);
+}
+
+/**
+ * Whether an address is one of the organization's custody wallets, in any project and any status:
+ * a key SDP holds for it. One database read.
+ *
+ * @param c - The request, for its organization.
+ * @param address - The Solana address.
+ * @returns Whether the organization holds a custody wallet at that address.
+ */
+export async function isOrganizationCustodyWalletAddress(
+  c: AppContext,
+  address: string
+): Promise<boolean> {
+  const { organizationId } = getAuth(c);
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT 1 AS held
+       FROM custody_wallets w
+       LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+       WHERE w.public_key = ?
+         AND (cfg.organization_id = ? OR conn.organization_id = ?)
+       LIMIT 1`
+    )
+    .bind(address, organizationId, organizationId)
+    .first<{ held: number }>();
+  return row !== null;
 }
 
 async function findProjectPaymentWallet(
@@ -166,6 +196,21 @@ export async function admitPaymentWalletRuntimeExecution(
     requireProjectId(c),
     wallet.id
   );
+}
+
+/** Refuse a stopped payment before its row, then check live wallet state. */
+export async function admitPaymentStart(
+  c: AppContext,
+  wallet: CustodyWallet,
+  movement: MovementOf<"payments">
+): Promise<void> {
+  await assertMoneyStartAdmitted(
+    c.env,
+    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+    { surface: "http", movement, subjectId: wallet.id },
+    { custodyWalletId: wallet.id }
+  );
+  await admitPaymentWalletRuntimeExecution(c, wallet);
 }
 
 export function resolveWalletAddress(

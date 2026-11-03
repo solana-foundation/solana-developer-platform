@@ -67,7 +67,7 @@ import {
   fetchRecurringPayments,
   getRecurringPayment,
   listRecurringPayments,
-} from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data.redesign";
+} from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data";
 import PaymentRequestDetailRoute from "@/app/dashboard/[projectId]/payments/requests/[requestId]/page";
 import PaymentRequestsPage from "@/app/dashboard/[projectId]/payments/requests/page";
 import { fetchPaymentRequests } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
@@ -75,8 +75,8 @@ import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/
 import {
   fetchTransactionsPageFromDashboard,
   transactionsApiQuery,
-} from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data.redesign";
-import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
+} from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data";
+import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { paymentsDemoBody } from "./demo-fixtures";
 
@@ -170,42 +170,27 @@ vi.mock("@/i18n/server", () => ({
 }));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 // The screens themselves are client components; the tests read the props the pages hand them.
+vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-workspace", () => ({
+  CounterpartyWorkspace: () => null,
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace", () => ({
+  CounterpartyDetailWorkspace: () => null,
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/requests/payment-requests-workspace", () => ({
+  PaymentRequestsWorkspace: () => null,
+}));
+vi.mock("@/app/dashboard/[projectId]/payments/recurring/recurring-payments-workspace", () => ({
+  RecurringPaymentsWorkspace: () => null,
+}));
 vi.mock(
-  "@/app/dashboard/[projectId]/payments/counterparty/counterparty-workspace.redesign",
-  () => ({
-    CounterpartyWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace.redesign",
-  () => ({
-    CounterpartyDetailWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/dashboard/[projectId]/payments/requests/payment-requests-workspace.redesign",
-  () => ({
-    PaymentRequestsWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/dashboard/[projectId]/payments/recurring/recurring-payments-workspace.redesign",
-  () => ({
-    RecurringPaymentsWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace.redesign",
+  "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace",
   () => ({
     RecurringPaymentDetailWorkspace: () => null,
   })
 );
-vi.mock(
-  "@/app/dashboard/[projectId]/payments/transactions/transactions-workspace.redesign",
-  () => ({
-    TransactionsWorkspace: () => null,
-  })
-);
+vi.mock("@/app/dashboard/[projectId]/payments/transactions/transactions-workspace", () => ({
+  TransactionsWorkspace: () => null,
+}));
 
 const NOW = harness.state.now;
 const t = ((key: string) => key) as Parameters<typeof fetchRecurringPayments>[1];
@@ -314,7 +299,7 @@ describe("paymentsDemoBody pass-through", () => {
     "/v1/payments/transfers/xfr_real",
     "/v1/payments/transfer-batches/batch_real",
     "/v1/payments/recurring-payments/prp_real",
-    "/v1/payments/subscriptions/sub_real/collection-attempts?page=1&pageSize=25",
+    "/v1/payments/recurring-payments/prp_real/collection-attempts?page=1&pageSize=25",
     "/v1/wallets/cwlt_real",
     "/v1/issuance/tokens/tok_1",
     "/health",
@@ -387,13 +372,11 @@ describe("demo world", () => {
       ).accounts;
       expect(accounts.map((account) => account.id)).toContain(schedule.counterpartyAccountId);
       expect(accounts[0]?.details.address).toBe(schedule.destinationAddress);
-      if (schedule.subscriptionId) {
-        const attempts = demoData<{ collectionAttempts: PaymentSubscriptionCollectionAttempt[] }>(
-          `/v1/payments/subscriptions/${schedule.subscriptionId}/collection-attempts?page=1&pageSize=25`
-        ).collectionAttempts;
-        for (const attempt of attempts) {
-          if (attempt.transferId) expect(transferIds.has(attempt.transferId)).toBe(true);
-        }
+      const attempts = demoData<{ collectionAttempts: PaymentSubscriptionCollectionAttempt[] }>(
+        `/v1/payments/recurring-payments/${schedule.id}/collection-attempts?page=1&pageSize=25`
+      ).collectionAttempts;
+      for (const attempt of attempts) {
+        if (attempt.transferId) expect(transferIds.has(attempt.transferId)).toBe(true);
       }
     }
 
@@ -756,10 +739,9 @@ describe("Schedules", () => {
   );
 
   it("shows a failed collection with a readable reason, then its retry", async () => {
-    const weekly = demoSchedules().find((schedule) => schedule.periodHours === 168);
     const result = await fetchRecurringPaymentCollectionAttempts(
       harness.request,
-      weekly?.subscriptionId ?? "",
+      "demo_rp_kai_weekly",
       t
     );
     expect(result.ok).toBe(true);

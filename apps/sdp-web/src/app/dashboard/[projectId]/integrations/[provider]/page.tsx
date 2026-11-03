@@ -41,6 +41,7 @@ import {
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
 import {
   createRequestScopedSdpApiClients,
+  requestMemberRole,
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
@@ -173,14 +174,14 @@ function resolveConnectionsProvider(
  * sent on behalf of someone who is about to be redirected away.
  */
 async function resolveRequestContext() {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
   if (!orgId) {
     redirect("/dashboard");
   }
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
 
   const { organizationClient, projectClient } = await createRequestScopedSdpApiClients({});
   const onboarding =

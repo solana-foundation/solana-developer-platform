@@ -1,10 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import { fetchIssuedTokensByMint } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchTransactionDetail } from "@/app/dashboard/[projectId]/payments/transactions/transaction-detail.data";
 import { TransactionDetailWorkspace } from "@/app/dashboard/[projectId]/payments/transactions/transaction-detail-workspace";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
@@ -12,7 +11,11 @@ import { requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
-async function TransactionDetailRoute({ params }: { params: Promise<{ transactionId: string }> }) {
+export default async function TransactionDetailRoute({
+  params,
+}: {
+  params: Promise<{ transactionId: string }>;
+}) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -30,7 +33,9 @@ async function TransactionDetailRoute({ params }: { params: Promise<{ transactio
         trace.step("fetch_transaction_detail", () =>
           fetchTransactionDetail(apiClient, transactionId)
         ),
-        trace.step("fetch_issued_tokens", () => fetchIssuedTokensByMint(apiClient.request)),
+        trace.step("fetch_issued_tokens", () =>
+          fetchIssuedTokensByMintWhenIssuanceEnabled(apiClient.request)
+        ),
       ]);
       // The ledger row carries the contact's id; its name comes from the contact itself, so an
       // older or archived contact still names the page. A missing contact keeps the id.
@@ -64,23 +69,3 @@ async function TransactionDetailRoute({ params }: { params: Promise<{ transactio
     }
   );
 }
-
-/**
- * The previous design has no transaction page, and its list opens a transaction only from a row
- * click. It lands on that list searched for the id, which the ledger matches as a prefix, so the
- * transaction is the row to open.
- */
-async function LegacyTransactionDetailRoute({
-  params,
-}: {
-  params: Promise<{ transactionId: string }>;
-}): Promise<never> {
-  const { transactionId } = await params;
-  redirect(
-    await requestProjectHref(
-      `${PAYMENT_TRANSACTIONS_HREF}?${new URLSearchParams({ search: transactionId })}`
-    )
-  );
-}
-
-export default withLegacyDesign(TransactionDetailRoute, LegacyTransactionDetailRoute, "activity");

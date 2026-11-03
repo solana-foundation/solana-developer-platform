@@ -14,10 +14,6 @@ export const organizationOnboardingSetupSchema = z.object({
   canManage: z.boolean(),
 });
 
-export const onboardingCompleteRequestSchema = z.object({
-  custodyProvider: z.string().min(1),
-});
-
 export const onboardingStatusResponseSchema = z
   .object({
     linked: z.boolean().openapi({ description: "Whether the Clerk org is linked." }),
@@ -27,7 +23,3 @@ export const onboardingStatusResponseSchema = z
     setup: organizationOnboardingSetupSchema.nullable(),
   })
   .openapi({ description: "Onboarding status response." });
-
-export const onboardingCompleteResponseSchema = z
-  .object({ setup: organizationOnboardingSetupSchema })
-  .openapi({ description: "Completed organization onboarding state." });

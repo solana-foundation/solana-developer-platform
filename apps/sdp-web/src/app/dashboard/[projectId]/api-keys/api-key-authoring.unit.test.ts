@@ -1,7 +1,7 @@
 import { type Action, API_KEY_GRANTABLE_ACTIONS, grantsCoverAction } from "@sdp/types/actions";
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   type SdpModule,
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
@@ -49,9 +49,9 @@ describe("API-key authoring: wallet access", () => {
 });
 
 const inStable = (module: SdpModule) =>
-  isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_STAGES);
+  isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_MATURITY);
 const inExperimental = (module: SdpModule) =>
-  isModuleInReleaseChannel("experimental", module, SDP_RAMP_PROVIDER_STAGES);
+  isModuleInReleaseChannel("experimental", module, SDP_RAMP_PROVIDER_MATURITY);
 
 describe("API-key authoring: grants offered by the release channel", () => {
   it("offers only stable modules and core on a stable deployment", () => {

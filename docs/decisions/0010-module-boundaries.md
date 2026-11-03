@@ -9,12 +9,12 @@ audit run outside the tree.
 `apps/sdp-api` has 60 `index.ts` files that mostly re-export. Their callers follow no single
 convention:
 
-| Barrel | Callers via barrel | Callers importing the file directly |
-|---|---|---|
-| `db/repositories/index.ts` (85 re-export lines) | 85 | 70 |
-| `middleware/index.ts` | 0 | 136 |
-| `services/domain/index.ts` | 0 | 26 |
-| `services/solana/index.ts` | 19 | 4 |
+| Barrel                                          | Callers via barrel | Callers importing the file directly |
+| ----------------------------------------------- | ------------------ | ----------------------------------- |
+| `db/repositories/index.ts` (85 re-export lines) | 85                 | 70                                  |
+| `middleware/index.ts`                           | 0                  | 136                                 |
+| `services/domain/index.ts`                      | 0                  | 26                                  |
+| `services/solana/index.ts`                      | 19                 | 4                                   |
 
 A split convention grows without bound: an agent adding a repository sees half the callers import
 the barrel and adds a re-export line; nobody removes one, because removal means proving no caller
@@ -75,12 +75,12 @@ Four layers decide what a module may import. A boundary goes in the lowest layer
 it. A higher layer only narrows what a lower one allows (which files inside the owning package
 may use it); restating a lower layer's boundary adds config and no protection.
 
-| Layer | Question | Mechanism |
-|---|---|---|
-| Dependencies | Which workspaces may use a package at all | The importing workspace's `package.json` declares it. pnpm links only declared dependencies, so an undeclared package fails in `tsc` and at runtime. The repo root's dependencies resolve from every workspace, so the root declares only tooling. |
-| Package surface | What a workspace package offers | Its `package.json` `exports` list. An unlisted file does not resolve through the package name. A tsconfig `paths` entry into another workspace's source bypasses the list; `sdp-api-integration`, which tests the API from outside, is the one workspace with such entries. |
-| Callers | Which files may import an exported subpath | `style/noRestrictedImports` today; one Biome GritQL plugin per boundary as each module is narrowed (below). |
-| Capabilities | Which files may turn key material into signing authority | `pnpm check:value-movement` allowlists (`0007-money-admission.md`). Adding a file is a security-reviewed change. |
+| Layer           | Question                                                 | Mechanism                                                                                                                                                                                                                                                                   |
+| --------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dependencies    | Which workspaces may use a package at all                | The importing workspace's `package.json` declares it. pnpm links only declared dependencies, so an undeclared package fails in `tsc` and at runtime. The repo root's dependencies resolve from every workspace, so the root declares only tooling.                          |
+| Package surface | What a workspace package offers                          | Its `package.json` `exports` list. An unlisted file does not resolve through the package name. A tsconfig `paths` entry into another workspace's source bypasses the list; `sdp-api-integration`, which tests the API from outside, is the one workspace with such entries. |
+| Callers         | Which files may import an exported subpath               | `style/noRestrictedImports` today; one Biome GritQL plugin per boundary as each module is narrowed (below).                                                                                                                                                                 |
+| Capabilities    | Which files may turn key material into signing authority | `pnpm check:value-movement` allowlists (`0007-money-admission.md`). Adding a file is a security-reviewed change.                                                                                                                                                            |
 
 A third-party SDK that one package wraps is declared only by that package, never by the root, and
 the declaration is the boundary: no lint rule restates it.

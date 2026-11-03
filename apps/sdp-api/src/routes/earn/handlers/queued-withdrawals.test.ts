@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   earnExternalWalletQueuedWithdrawalPreviewSchema,
@@ -34,6 +36,13 @@ const position = {
   shareMint: "AVfVedaQueueShare111111111111111111111111111",
   ownerAddress: "7YfVedaQueueOwner111111111111111111111111111",
 };
+
+/** The options read as a request for `environment` runs it: inside that cluster scope. */
+function readOptionsIn(environment: SdpEnvironment) {
+  return runInClusterScope({ projectId: null, environment }, () =>
+    readOptions({ env } as never, position)
+  );
+}
 
 function withdrawalClient(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -126,7 +135,7 @@ describe("queued withdrawal handler contracts", () => {
 
   it("keeps instant-only providers available and leaves queue-only fields null", async () => {
     capabilities.instant = withdrawalClient();
-    await expect(readOptions({ env } as never, "sandbox", position)).resolves.toEqual({
+    await expect(readOptionsIn("sandbox")).resolves.toEqual({
       instant: true,
       providerOrder: false,
       queued: false,
@@ -139,7 +148,7 @@ describe("queued withdrawal handler contracts", () => {
 
   it("advertises a provider-managed redemption order without calling it instant", async () => {
     capabilities.instant = withdrawalClient({ vaultWithdrawalSettlement: "provider_order" });
-    await expect(readOptions({ env } as never, "production", position)).resolves.toEqual({
+    await expect(readOptionsIn("production")).resolves.toEqual({
       instant: false,
       providerOrder: true,
       queued: false,
@@ -163,7 +172,7 @@ describe("queued withdrawal handler contracts", () => {
       }),
     };
 
-    await expect(readOptions({ env } as never, "production", position)).resolves.toMatchObject({
+    await expect(readOptionsIn("production")).resolves.toMatchObject({
       instant: false,
       providerOrder: false,
       queued: false,
@@ -186,7 +195,7 @@ describe("queued withdrawal handler contracts", () => {
         queueAsset: null,
       }),
     };
-    await expect(readOptions({ env } as never, "sandbox", position)).resolves.toMatchObject({
+    await expect(readOptionsIn("sandbox")).resolves.toMatchObject({
       instant: false,
       providerOrder: false,
       queued: false,

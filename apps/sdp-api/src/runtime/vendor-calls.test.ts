@@ -8,8 +8,12 @@ beforeEach(() => {
   logEvent.mockClear();
 });
 
-function failureEvents() {
+function vendorEvents() {
   return logEvent.mock.calls.filter(([, payload]) => payload.event === "sdp_api_vendor_call");
+}
+
+function failureEvents() {
+  return vendorEvents().filter(([, payload]) => payload.outcome === "failed");
 }
 
 describe("logVendorCallFailure", () => {
@@ -44,6 +48,7 @@ describe("logVendorCallFailure", () => {
       error_code: "BAD_REQUEST",
     });
     expect(Object.keys(payload).sort()).toEqual([
+      "boundary",
       "duration_ms",
       "error_code",
       "error_name",
@@ -58,16 +63,29 @@ describe("logVendorCallFailure", () => {
 });
 
 describe("instrumentVendorPort", () => {
-  it("returns sync results unchanged and emits nothing", () => {
+  it("returns sync results unchanged and emits success telemetry", () => {
     const port = instrumentVendorPort("kora", { double: (n: number) => n * 2 });
     expect(port.double(21)).toBe(42);
     expect(failureEvents()).toHaveLength(0);
+    expect(vendorEvents()[0]?.[1]).toMatchObject({
+      vendor: "kora",
+      operation: "double",
+      outcome: "succeeded",
+      boundary: "adapter_operation",
+    });
   });
 
-  it("resolves async results unchanged and emits nothing", async () => {
+  it("resolves async results unchanged and emits success telemetry", async () => {
     const port = instrumentVendorPort("kora", { fetch: async () => "ok" });
     await expect(port.fetch()).resolves.toBe("ok");
     expect(failureEvents()).toHaveLength(0);
+    expect(vendorEvents()).toHaveLength(1);
+    expect(vendorEvents()[0]?.[1]).toMatchObject({
+      vendor: "kora",
+      operation: "fetch",
+      outcome: "succeeded",
+      boundary: "adapter_operation",
+    });
   });
 
   it("rethrows sync errors unchanged and emits one failed event", () => {
@@ -118,5 +136,34 @@ describe("instrumentVendorPort", () => {
     }
     const port = instrumentVendorPort("kora", new Adapter());
     expect(port.add(2)).toBe(42);
+  });
+
+  it("does not block an adapter when telemetry source lookup fails", () => {
+    const port = instrumentVendorPort("kora", { getFeePayer: () => "address" }, () => {
+      throw new Error("telemetry unavailable");
+    });
+
+    expect(port.getFeePayer()).toBe("address");
+    expect(vendorEvents()[0]?.[1]).toMatchObject({
+      boundary: "adapter_operation",
+      outcome: "succeeded",
+    });
+  });
+});
+
+describe("withVendorCall", () => {
+  it("emits a timed success without logging the vendor response", async () => {
+    const result = await withVendorCall("tokens-xyz", "market-snapshots", async () => ({
+      secret: "x",
+    }));
+    expect(result).toEqual({ secret: "x" });
+    expect(vendorEvents()).toHaveLength(1);
+    expect(vendorEvents()[0]?.[1]).toMatchObject({
+      vendor: "tokens-xyz",
+      operation: "market-snapshots",
+      outcome: "succeeded",
+      boundary: "call_site",
+    });
+    expect(JSON.stringify(vendorEvents()[0]?.[1])).not.toContain("secret");
   });
 });

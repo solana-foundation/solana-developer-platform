@@ -1,5 +1,5 @@
 import type { EgressReadiness } from "@sdp/types/health";
-import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
 /**
  * SDP API — Hono application factory.
  *
@@ -14,18 +14,22 @@ import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import { scrubTelemetry } from "@sdp/redaction/scrub";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { RpcUnavailableError, SdpRpcError } from "@sdp/rpc/errors";
+import { isRpcUpstreamUnavailable } from "@sdp/rpc/transient";
+import type { RpcUnavailableReason } from "@sdp/types/rpc";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
-import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
+import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
 import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
+import { gatewayIdentityMiddleware } from "@/middleware/gateway-identity";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -46,6 +50,7 @@ import { earnRoutes as earn } from "@/routes/earn";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
 import { internalCustody } from "@/routes/internal-custody";
+import { internalFireblocks } from "@/routes/internal-fireblocks";
 import { internalHeliusRings } from "@/routes/internal-helius-rings";
 import { internalNetwork } from "@/routes/internal-network";
 import { issuance } from "@/routes/issuance";
@@ -74,10 +79,10 @@ export interface AppDeps {
   plugins?: SdpPlugin[];
   /**
    * Ramp provider stages to run the release channel against. Production passes
-   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * `SDP_RAMP_PROVIDER_MATURITY`; tests may put one provider in a release channel and
    * leave another out, which today's all-`experimental` stages cannot show.
    */
-  rampProviderStages: SdpRampProviderStages;
+  rampProviderMaturity: SdpRampProviderMaturity;
   /**
    * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
    * out of rotation until it can reach the internet. Absent where nothing gates
@@ -109,6 +114,11 @@ const KV_FREE_PATHS = [
 // smaller; the webhooks router already enforces this same ceiling on its
 // subset, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
+
+// Bound for any /pay request body. The only body /pay reads is the Solana Pay
+// transaction request (`transactionRequestBodySchema`: one account address),
+// tens of bytes; the unauthenticated surface gets no more room than that needs.
+const MAX_PAY_BODY_BYTES = 4 * 1024;
 
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
@@ -235,6 +245,117 @@ function getFireblocksBlockedError(err: Error): {
   };
 }
 
+/** How long a client is told to wait after Solana RPC was unavailable upstream. */
+const RPC_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
+
+/**
+ * Why `err` means Solana RPC is unavailable, or `null` when it doesn't: the pool's own
+ * `RpcUnavailableError`, or a transient failure from RPC itself (provider 429/5xx, a JSON-RPC
+ * timeout, SDP's attempt deadline) that reached the boundary uncaught.
+ */
+function rpcUnavailableFor(
+  err: Error
+): { reason: RpcUnavailableReason; cluster: SolanaCluster | undefined } | null {
+  if (err instanceof RpcUnavailableError) return { reason: err.reason, cluster: err.cluster };
+  return isRpcUpstreamUnavailable(err)
+    ? { reason: "upstream_unavailable", cluster: undefined }
+    : null;
+}
+
+/**
+ * One `503 RPC_UNAVAILABLE` for every way RPC can be unavailable, with `details: { reason,
+ * cluster }` so a client can tell "retry later" from "this won't work". Only
+ * `upstream_unavailable` is transient, so only it carries `Retry-After`. The body never repeats
+ * the thrown message, which can name env keys and genesis hashes; operators read those in the log.
+ */
+function rpcUnavailableResponse(
+  c: Context<{ Bindings: Env }>,
+  { reason, cluster: thrownCluster }: NonNullable<ReturnType<typeof rpcUnavailableFor>>
+): Response {
+  const environment = c.get("projectEnvironment");
+  const cluster =
+    environment === undefined ? thrownCluster : CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  if (reason === "upstream_unavailable") {
+    c.header("Retry-After", String(RPC_UNAVAILABLE_RETRY_AFTER_SECONDS));
+  }
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: "RPC_UNAVAILABLE",
+        message:
+          reason === "upstream_unavailable"
+            ? "Solana RPC is temporarily unavailable. Retry after the Retry-After delay."
+            : "Solana RPC is not available for this environment.",
+        details: { reason, cluster },
+      },
+      meta: { requestId: c.get("requestId") },
+    },
+    503
+  );
+}
+
+/**
+ * The response for an error thrown by an SDP SDK (`@sdp/rpc`, `@sdp/payments`, `@sdp/earn`), or
+ * `null` when `err` is none of theirs. RPC unavailability, including a transient kit error that
+ * reached the boundary uncaught, is one `503 RPC_UNAVAILABLE`; any other SDK error answers its own
+ * code and status.
+ *
+ * @param c - The request context.
+ * @param err - The thrown error.
+ * @param path - The matched route, for the log.
+ * @param logVendorError - Logs the `sdp_api_vendor_error` event for `err`.
+ */
+function sdkErrorResponse(
+  c: Context<{ Bindings: Env }>,
+  err: Error,
+  path: string,
+  logVendorError: (vendor: string, code: string, status: number) => void
+): Response | null {
+  const rpcUnavailable = rpcUnavailableFor(err);
+  if (rpcUnavailable !== null) {
+    logVendorError("rpc", "RPC_UNAVAILABLE", 503);
+    return rpcUnavailableResponse(c, rpcUnavailable);
+  }
+  if (
+    !(err instanceof SdpRpcError || err instanceof SdpPaymentsError || err instanceof SdpEarnError)
+  ) {
+    return null;
+  }
+  const requestId = c.get("requestId");
+  if (err instanceof SdpRpcError) {
+    logVendorError("rpc", err.code, err.statusCode);
+  }
+  // The provider's own wording never reaches the body below; operators read
+  // it here. Its own event, so it stays out of the vendor-error alert, which
+  // leaves ramps to sdp_api_ramp_provider_error.
+  if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
+    logEvent(err.statusCode >= 500 ? "error" : "warn", {
+      event: "sdp_api_payments_provider_error",
+      code: err.code,
+      status: err.statusCode,
+      method: c.req.method,
+      path,
+      request_id: requestId,
+      ...describeError(err),
+      error_diagnostics: paymentsErrorDiagnostics(err),
+    });
+  }
+  const details = err.details ? redactCredentialSecrets(err.details) : undefined;
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: err.code,
+        message: redactCredentialString(err.message),
+        ...(details && { details }),
+      },
+      meta: { requestId },
+    },
+    mapErrorStatusCode(err.statusCode)
+  );
+}
+
 /** How long a client is told to wait after the database could not take its request. */
 const DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
 
@@ -271,13 +392,17 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.use("*", async (c, next) => {
-    c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("rampProviderMaturity", deps.rampProviderMaturity);
     c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
+
+  // The gateway's signed caller identity, before anything reads the caller or
+  // its address (rate limits, auth, IP allowlists).
+  app.use("*", gatewayIdentityMiddleware());
 
   // Database identity boundary: public surfaces run as named system
   // components, everything else is identity-less until an auth middleware
@@ -300,6 +425,15 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       },
     })
   );
+  app.use(
+    "/pay/*",
+    bodyLimit({
+      maxSize: MAX_PAY_BODY_BYTES,
+      onError: () => {
+        throw payloadTooLarge();
+      },
+    })
+  );
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
@@ -317,14 +451,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     if (c.env.ENVIRONMENT === "development") {
       return prettyJSON()(c, next);
-    }
-    return next();
-  });
-
-  // Logger in development
-  app.use("*", async (c, next) => {
-    if (c.env.ENVIRONMENT === "development") {
-      return logger((message) => getLogger().info(message))(c, next);
     }
     return next();
   });
@@ -392,6 +518,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/custody", internalCustody);
   app.use("/internal/dashboard/wallets/*", requireModule("custody"));
   app.route("/internal/dashboard/wallets", internalWallets);
+  app.use("/internal/dashboard/fireblocks/*", requireModule("custody"));
+  app.route("/internal/dashboard/fireblocks", internalFireblocks);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 
@@ -409,6 +537,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const requestId = c.get("requestId");
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
+    const path = routePath(c, -1) || "unmatched";
 
     const logVendorError = (vendor: string, code: string, status: number) =>
       logEvent("error", {
@@ -417,7 +546,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         code,
         status,
         method: c.req.method,
-        path: c.req.path,
+        path,
         request_id: requestId,
         ...describeError(err),
       });
@@ -431,43 +560,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       return appErrorResponse(c, normalizedError);
     }
 
-    if (
-      err instanceof SdpRpcError ||
-      err instanceof SdpPaymentsError ||
-      err instanceof SdpEarnError
-    ) {
-      if (err instanceof SdpRpcError) {
-        logVendorError("rpc", err.code, err.statusCode);
-      }
-      // The provider's own wording never reaches the body below; operators read
-      // it here. Its own event, so it stays out of the vendor-error alert, which
-      // leaves ramps to sdp_api_ramp_provider_error.
-      if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
-        logEvent(err.statusCode >= 500 ? "error" : "warn", {
-          event: "sdp_api_payments_provider_error",
-          code: err.code,
-          status: err.statusCode,
-          method: c.req.method,
-          path: c.req.path,
-          request_id: requestId,
-          ...describeError(err),
-          error_diagnostics: paymentsErrorDiagnostics(err),
-        });
-      }
-      const details = err.details ? redactCredentialSecrets(err.details) : undefined;
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: err.code,
-            message: redactCredentialString(err.message),
-            ...(details && { details }),
-          },
-          meta: { requestId },
-        },
-        mapErrorStatusCode(err.statusCode)
-      );
-    }
+    const sdkResponse = sdkErrorResponse(c, err, path, logVendorError);
+    if (sdkResponse !== null) return sdkResponse;
 
     if (err instanceof SigningError) {
       const mapped = mapSigningError(err);
@@ -541,7 +635,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     logEvent("error", {
       event: "sdp_api_internal_error",
       method: c.req.method,
-      path: c.req.path,
+      path,
       request_id: requestId,
       ...describeError(err),
     });

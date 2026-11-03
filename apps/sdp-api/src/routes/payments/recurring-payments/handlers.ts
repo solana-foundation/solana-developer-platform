@@ -17,10 +17,12 @@ import {
   AppError,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
+  notFound,
   walletNotFound,
 } from "@/lib/errors";
-import { assertCallerWalletInScope, assertMoneyStartAdmitted } from "@/lib/money-admission";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import {
@@ -37,8 +39,13 @@ import {
   getPaymentSubscriptionsRepository,
   getPaymentsRepository,
 } from "@/routes/payments/context";
-import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import {
+  mapCollectionAttemptRow,
+  mapTransferRow,
+  respondWithCollectionAttemptsPage,
+} from "@/routes/payments/mappers";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
+import { describeTokenApprovalAfterCancel } from "@/services/payments/recurring-payments/authority-revocation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
   createRecurringPayment as createRecurringPaymentRecord,
@@ -91,6 +98,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     subscriptionAuthorityAddress: row.subscription_authority_address,
     authorizationSignature: row.authorization_signature,
     status: row.status,
+    pausedReason: row.paused_reason,
     metadataUri: row.metadata_uri,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -135,7 +143,7 @@ export async function findRecurringPaymentCreateReplay(
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
 function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWallet {
   if (authorized.sourceWallet === null) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+    throw conflict("Recurring payment source wallet is unresolved");
   }
   return authorized.sourceWallet;
 }
@@ -150,11 +158,11 @@ function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWall
  * or none runs the handler. The same key on another schedule is refused (422).
  * No RPC, no signing: it reads rows only.
  */
-function answerFromAttempt(
+async function answerFromAttempt(
   c: AppContext,
   recurringPayment: PaymentRecurringPaymentRow,
   attempt: { recurring_payment_id: string; idempotency_fingerprint?: string | null } | null
-): RecordAnswer | null {
+): Promise<RecordAnswer | null> {
   if (attempt === null) return null;
   // Activation, lifecycle and collection attempts record no fingerprint: the
   // schedule they name is the request (the path's id, an empty body).
@@ -164,13 +172,29 @@ function answerFromAttempt(
     markIdempotencyRecordMismatch(c);
     throw new AppError("IDEMPOTENCY_KEY_REUSED");
   }
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(recurringPayment),
-  };
+  const response = await recurringPaymentResponse(c, recurringPayment);
   return {
     fingerprint: attempt.idempotency_fingerprint ?? null,
     respond: () => success(c, response),
   };
+}
+
+/**
+ * A single recurring payment's response: a canceled one also says what became of the token
+ * approval it relied on (HOO-2339), from two database reads.
+ */
+async function recurringPaymentResponse(
+  c: AppContext,
+  recurringPayment: PaymentRecurringPaymentRow
+): Promise<PaymentRecurringPaymentResponse> {
+  const response: PaymentRecurringPaymentResponse = {
+    recurringPayment: mapRecurringPayment(recurringPayment),
+  };
+  const tokenApproval = await describeTokenApprovalAfterCancel(c.env, recurringPayment);
+  if (tokenApproval !== undefined) {
+    response.tokenApproval = tokenApproval;
+  }
+  return response;
 }
 
 function tenant(c: AppContext): { organizationId: string; projectId: string } {
@@ -422,8 +446,8 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
-          admitCaller: () => assertCallerWalletInScope(auth, sourceWallet.id),
           idempotencyKey: requiredIdempotency(c).key,
+          releaseAuthority: "inline",
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
@@ -444,11 +468,8 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
             ),
           idempotencyKey: requiredIdempotency(c).key,
         });
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(updated),
-  };
 
-  return success(c, response);
+  return success(c, await recurringPaymentResponse(c, updated));
 }
 
 export const cancelRecurringPayment = async (c: AppContext) =>
@@ -538,11 +559,44 @@ export const getRecurringPayment = async (c: AppContext) => {
   });
 
   if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
+    throw notFound("Recurring payment");
   }
 
-  const response: PaymentRecurringPaymentResponse = {
-    recurringPayment: mapRecurringPayment(recurringPayment),
-  };
-  return success(c, response);
+  return success(c, await recurringPaymentResponse(c, recurringPayment));
+};
+
+/**
+ * Lists every collection attempt a recurring payment has made, across the subscriptions its edits
+ * replaced as well as its current one, scoped to the request's project.
+ *
+ * @param c - Request context carrying the `id` path parameter and the paging query.
+ * @returns The page of collection attempts, in the subscription collection-attempt list contract.
+ */
+export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById(
+      {
+        recurringPaymentId: params.data.id,
+        organizationId: auth.organizationId,
+        projectId,
+      }
+    );
+    if (!recurringPayment) {
+      throw notFound("Recurring payment");
+    }
+    return getPaymentSubscriptionsRepository(c).listRecurringPaymentCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      recurringPaymentId: recurringPayment.id,
+      ...page,
+    });
+  });
 };

@@ -1,51 +1,68 @@
-import type { ListApiKeysResponse } from "@sdp/types/api-keys";
-import type { CustodyWalletsResponse } from "@sdp/types/custody";
+import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { cache } from "react";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import type { QuickStartStep } from "./dashboard-quick-start";
+import { z } from "zod";
+import type { QuickStartStatus } from "./dashboard-quick-start";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
-import { createOrgSdpApiClient, listSdpProjects } from "./sdp-api";
+import { createOrgSdpApiClient, listSdpProjects, requestOnboardingStatus } from "./sdp-api";
 
-export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null> => {
+// Only the fields the guide reads: the rest of each response is not its business.
+const onboardingStatusSchema = z.object({
+  linked: z.boolean(),
+  setup: z
+    .object({
+      canManage: z.boolean(),
+      custodyProviders: z.array(z.enum(CUSTODY_PROVIDERS)),
+    })
+    .nullish(),
+});
+const apiKeysSchema = z.object({
+  apiKeys: z.array(z.object({ lastUsedAt: z.string().nullable() })),
+});
+
+function latestTimestamp(values: readonly (string | null)[]): string | null {
+  let latest: string | null = null;
+  for (const value of values) {
+    if (value && (latest === null || Date.parse(value) > Date.parse(latest))) latest = value;
+  }
+  return latest;
+}
+
+/**
+ * The setup signals the quick start is built from, or null when the viewer cannot manage setup
+ * or the status is unknown. Unknown is not new: a status failure must not flash a guide.
+ */
+export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | null> => {
   try {
+    // Shared with the page's own gates: one onboarding read per request.
+    const status = onboardingStatusSchema.parse(await requestOnboardingStatus());
+    if (!status.linked || !status.setup?.canManage) return null;
     const client = await createOrgSdpApiClient();
     const signal = AbortSignal.timeout(10_000);
-    const status = await client.fetch<OnboardingStatusResponse>("/v1/onboarding/status", {
-      signal,
-    });
-    if (!status.linked || !status.setup?.canManage) return null;
-    if (status.setup.status === "complete" || status.setup.custodyProviders.length > 0)
-      return "done";
 
-    // The default sandbox is not the only place an organization can have a wallet.
+    // A first call can come from a key in any project, not only the default sandbox.
     const projects = await listSdpProjects();
     if (projects.length === 0) return null;
-    const wallets = await Promise.allSettled(
-      projects.map((project) =>
-        client.fetch<CustodyWalletsResponse>("/v1/wallets?includeBalances=false&view=summary", {
-          headers: { [PROJECT_HEADER_NAME]: project.id },
-          signal,
-        })
-      )
-    );
-    if (wallets.some((result) => result.status === "fulfilled" && result.value.wallets.length > 0))
-      return "done";
-    if (wallets.some((result) => result.status === "rejected")) return null;
     const keys = await Promise.allSettled(
       projects.map((project) =>
-        client.fetch<ListApiKeysResponse>("/v1/api-keys", {
-          headers: { [PROJECT_HEADER_NAME]: project.id },
-          signal,
-        })
+        client
+          .fetch<unknown>("/v1/api-keys", {
+            headers: { [PROJECT_HEADER_NAME]: project.id },
+            signal,
+          })
+          .then((body) => apiKeysSchema.parse(body))
       )
     );
-    // Key creation is already complete, even without a wallet binding or browser history.
-    if (keys.some((result) => result.status === "fulfilled" && result.value.apiKeys.length > 0))
-      return "wallet";
-    if (keys.some((result) => result.status === "rejected")) return null;
-    return "api-key";
+    const apiKeys = keys.flatMap((result) =>
+      result.status === "fulfilled" ? result.value.apiKeys : []
+    );
+    if (apiKeys.length === 0 && keys.some((result) => result.status === "rejected")) return null;
+
+    return {
+      custodyProvider: status.setup.custodyProviders[0] ?? null,
+      apiKeyCount: apiKeys.length,
+      lastCallAt: latestTimestamp(apiKeys.map((key) => key.lastUsedAt)),
+    };
   } catch {
-    // Unknown is not new: don't flash an onboarding modal on a status failure.
     return null;
   }
 });

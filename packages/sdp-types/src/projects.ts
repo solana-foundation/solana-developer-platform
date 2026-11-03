@@ -4,8 +4,6 @@
  * Projects group API keys by team or environment within an organization.
  */
 
-import type { ProjectRole } from "./roles";
-
 export type ProjectEnvironment = "sandbox" | "production";
 
 export const PROJECT_STATUSES = ["active", "archived"] as const;
@@ -44,7 +42,6 @@ export interface ProjectMember {
   id: string; // pm_xxxxxxxxxxxx
   projectId: string;
   userId: string;
-  role: ProjectRole;
   createdAt: string;
 }
 
@@ -61,25 +58,6 @@ export interface ProjectResponse {
 
 export interface ListProjectsResponse {
   projects: Project[];
-}
-
-export interface AddProjectMemberRequest {
-  userId: string;
-  role?: ProjectRole;
-}
-
-export interface UpdateProjectMemberRequest {
-  role: ProjectRole;
-}
-
-export interface ProjectMemberResponse {
-  member: ProjectMember & {
-    user: {
-      id: string;
-      email: string;
-      name: string | null;
-    };
-  };
 }
 
 export interface ListProjectMembersResponse {

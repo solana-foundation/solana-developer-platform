@@ -7,6 +7,7 @@ import {
   actionsInModule,
   actionVerbOf,
 } from "@sdp/types/actions";
+import type { RateLimitTier } from "@sdp/types/api-keys";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import {
   SDP_MODULES,
@@ -17,6 +18,11 @@ import {
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { z } from "zod";
+import {
+  ANONYMOUS_MAX_REQUESTS,
+  RATE_LIMIT_TIERS,
+  RATE_LIMIT_WINDOW_MS,
+} from "@/middleware/rate-limit";
 import { routeActionKey } from "@/routes/route-actions";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { registerAdminPaths } from "./paths/admin";
@@ -44,7 +50,7 @@ import {
 import routeActionsJson from "./route-actions.generated.json";
 
 const EARN_TAG_DESCRIPTION =
-  "Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.";
+  "Strategy reads, previews, withdrawal-route discovery, unsigned builds, submission, queued actions, and tenant tracking.";
 
 const OPENAPI_TAG = {
   HEALTH: { name: "Health", description: "Service health and readiness endpoints." },
@@ -75,7 +81,8 @@ const OPENAPI_TAG = {
   COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
   COUNTERPARTIES: {
     name: "Counterparties",
-    description: "Counterparty (customer/beneficiary) identity records.",
+    description:
+      "A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.",
   },
   ASSET_PROFILES: {
     name: "Asset Profiles",
@@ -199,7 +206,7 @@ function registerApiKeyAuth(registry: OpenAPIRegistry) {
     scheme: "bearer",
     bearerFormat: "API Key",
     description:
-      "Use Authorization: Bearer sk_test_... or sk_live_... with a base64url-encoded suffix.",
+      "Use Authorization: Bearer sf_<key id>_<secret><checksum>. Keys issued before this format (sk_test_..., sk_live_...) are still accepted.",
   });
 }
 
@@ -374,8 +381,9 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
  * What a release channel's public surfaces may name, for consumers that cannot
  * load this package (the docs site's MDX pipeline): the modules and ramp
  * providers the public document publishes, Earn's hold included, the actions
- * an API key may be granted in it (per module, in registry order), and the
- * full vocabularies to validate tags against.
+ * an API key may be granted in it (per module, in registry order), the
+ * full vocabularies to validate tags against, and the rate limits every
+ * channel enforces (`middleware/rate-limit.ts`), so the docs never restate them.
  */
 export type PublicSurfaceManifest = {
   releaseChannel: SdpReleaseChannel;
@@ -384,6 +392,11 @@ export type PublicSurfaceManifest = {
   grantableActions: { module: ActionModule; verbs: ActionVerb[] }[];
   allModules: SdpModule[];
   allRampProviders: RampProviderId[];
+  rateLimits: {
+    windowSeconds: number;
+    apiKeyTiers: Record<RateLimitTier, number>;
+    unauthenticatedPerIp: number;
+  };
 };
 
 export function createPublicSurfaceManifest(
@@ -403,5 +416,10 @@ export function createPublicSurfaceManifest(
     })).filter(({ verbs }) => verbs.length > 0),
     allModules: [...SDP_MODULES],
     allRampProviders: [...RAMP_PROVIDERS],
+    rateLimits: {
+      windowSeconds: RATE_LIMIT_WINDOW_MS / 1000,
+      apiKeyTiers: { ...RATE_LIMIT_TIERS },
+      unauthenticatedPerIp: ANONYMOUS_MAX_REQUESTS,
+    },
   };
 }
