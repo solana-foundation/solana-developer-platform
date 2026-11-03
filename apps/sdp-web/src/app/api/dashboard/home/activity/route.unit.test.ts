@@ -201,6 +201,28 @@ describe("GET /api/dashboard/home/activity", () => {
     });
   });
 
+  it("calls the volume a floor when the read's full window never leaves today", async () => {
+    // The read asks for 20; all 20 from today may have cut off earlier transfers from today.
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: Array.from({ length: 20 }, (_, index) => transfer(`transfer_${index}`, TODAY, "1")),
+      walletsNotLoaded: 0,
+    });
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledWith(expect.anything(), 20, {
+      walletDeadlineMs: 2_500,
+    });
+    expect(body.data.todaysVolume).toEqual({
+      transferCount: 20,
+      amountByMint: { [USDC_MINT]: "20" },
+      complete: true,
+      coversDay: false,
+    });
+  });
+
   // The list can say it is partial; a total cannot, since a sum over some wallets is smaller.
   it.each([
     [
