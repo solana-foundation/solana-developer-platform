@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
@@ -48,7 +48,14 @@ const copy = {
 
 function renderConsole() {
   return render(
-    <InterfacesConsole copy={copy} modesLabel="Ways in" responseLabel="Response" links={null} />
+    <InterfacesConsole
+      copy={copy}
+      modesLabel="Ways in"
+      responseLabel="Response"
+      comingSoonModes={[]}
+      comingSoonLabel="Coming soon"
+      links={null}
+    />
   );
 }
 
@@ -71,6 +78,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("InterfacesSection", () => {
@@ -117,16 +125,41 @@ describe("InterfacesSection", () => {
     // The tabs turn on their own, so the card is not a live region.
     expect(markup).not.toContain("aria-live");
   });
+
+  it("marks the Prepare tab coming soon on the stable channel, which holds subscriptions back", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
+    const view = document.createElement("div");
+    view.innerHTML = renderToStaticMarkup(await InterfacesSection({ links }));
+    const section = within(view);
+
+    expect(section.getByRole("tab", { name: /Coming soon/ })).toBe(
+      section.getByRole("tab", { name: /^Prepare mode/ })
+    );
+  });
 });
 
 describe("interface snippets", () => {
-  // The homepage is served on every deployment, so each call must be in prod's public document.
-  it.each(INTERFACE_SNIPPETS)("$method $path is a public API route on stable", (snippet) => {
-    expect(findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")).toMatchObject({
-      method: snippet.method,
-      pathTemplate: snippet.path,
-    });
-  });
+  it.each(INTERFACE_SNIPPETS.filter((snippet) => snippet.gate === undefined))(
+    "$method $path is a public API route on stable",
+    (snippet) => {
+      expect(
+        findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")
+      ).toMatchObject({ method: snippet.method, pathTemplate: snippet.path });
+    }
+  );
+
+  it.each(INTERFACE_SNIPPETS.filter((snippet) => snippet.gate !== undefined))(
+    "$method $path is held back on stable and public on beta",
+    (snippet) => {
+      expect(
+        findPublishedPlaygroundOperation(snippet.method, snippet.path, "stable")
+      ).toBeUndefined();
+      expect(findPublishedPlaygroundOperation(snippet.method, snippet.path, "beta")).toMatchObject({
+        method: snippet.method,
+        pathTemplate: snippet.path,
+      });
+    }
+  );
 
   it.each(INTERFACE_SNIPPETS)("$mode calls its own path on the public host", (snippet) => {
     const concrete = snippet.path

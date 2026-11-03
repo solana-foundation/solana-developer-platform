@@ -15,6 +15,8 @@ import { walletBalances } from "./wallet-balances";
 export const payments = new Hono<{ Bindings: Env }>();
 
 payments.use("/ramps/*", requireModule("ramps"));
+payments.use("/subscription-plans/*", requireModule("subscriptions"));
+payments.use("/subscriptions/*", requireModule("subscriptions"));
 payments.use("*", unifiedAuthMiddleware());
 payments.use("*", projectContextMiddleware());
 

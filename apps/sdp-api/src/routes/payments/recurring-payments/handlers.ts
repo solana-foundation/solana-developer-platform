@@ -17,7 +17,9 @@ import {
   AppError,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
+  notFound,
   walletNotFound,
 } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
@@ -37,7 +39,11 @@ import {
   getPaymentSubscriptionsRepository,
   getPaymentsRepository,
 } from "@/routes/payments/context";
-import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import {
+  mapCollectionAttemptRow,
+  mapTransferRow,
+  respondWithCollectionAttemptsPage,
+} from "@/routes/payments/mappers";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { describeTokenApprovalAfterCancel } from "@/services/payments/recurring-payments/authority-revocation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
@@ -137,7 +143,7 @@ export async function findRecurringPaymentCreateReplay(
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
 function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWallet {
   if (authorized.sourceWallet === null) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+    throw conflict("Recurring payment source wallet is unresolved");
   }
   return authorized.sourceWallet;
 }
@@ -553,8 +559,44 @@ export const getRecurringPayment = async (c: AppContext) => {
   });
 
   if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
+    throw notFound("Recurring payment");
   }
 
   return success(c, await recurringPaymentResponse(c, recurringPayment));
+};
+
+/**
+ * Lists every collection attempt a recurring payment has made, across the subscriptions its edits
+ * replaced as well as its current one, scoped to the request's project.
+ *
+ * @param c - Request context carrying the `id` path parameter and the paging query.
+ * @returns The page of collection attempts, in the subscription collection-attempt list contract.
+ */
+export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById(
+      {
+        recurringPaymentId: params.data.id,
+        organizationId: auth.organizationId,
+        projectId,
+      }
+    );
+    if (!recurringPayment) {
+      throw notFound("Recurring payment");
+    }
+    return getPaymentSubscriptionsRepository(c).listRecurringPaymentCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      recurringPaymentId: recurringPayment.id,
+      ...page,
+    });
+  });
 };

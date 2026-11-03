@@ -1,5 +1,6 @@
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import type { GatedSurface } from "@/components/homepage/release-gate";
 
 /**
  * The three calls the Interfaces section shows, one per way of working. They are real requests
@@ -18,6 +19,8 @@ export type InterfaceSnippet = {
   method: "GET" | "POST";
   /** The path as the API reference writes it, shown in the card's head. */
   path: string;
+  /** The surface whose module serves `path`, when a release channel can hold it back. */
+  gate?: GatedSurface;
   /** The request as typed in a wide terminal. */
   request: readonly CodeLine[];
   /** The same request set for a phone: one flag a line, the body broken out. */
@@ -79,6 +82,7 @@ export const INTERFACE_SNIPPETS: readonly InterfaceSnippet[] = [
     mode: "prepare",
     method: "POST",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
+    gate: "subscriptions",
     request: [
       [PROMPT, " curl -X POST \\"],
       [`    ${API}/v1/payments/subscriptions/psub_71c/prepare-collection \\`],

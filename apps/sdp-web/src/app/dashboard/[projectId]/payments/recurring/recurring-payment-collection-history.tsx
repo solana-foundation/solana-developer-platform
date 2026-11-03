@@ -49,13 +49,13 @@ const RUN_STATUS_KEYS = {
 export function RecurringPaymentRunHistory({
   attempts,
   error,
-  tokenLabel,
+  tokenLabelForMint,
   pendingActivation,
 }: {
   attempts: PaymentSubscriptionCollectionAttempt[];
   error?: string;
-  /** The schedule's token; every run pays in it. */
-  tokenLabel: string;
+  /** Each run is labeled with its own token: runs from before an edit paid in the old one. */
+  tokenLabelForMint: (mint: string) => string;
   /** A schedule not yet activated has made no runs, and says when its first will be. */
   pendingActivation: boolean;
 }) {
@@ -131,7 +131,7 @@ export function RecurringPaymentRunHistory({
                 <span className="font-medium text-primary">
                   {formatDecimalAmount(attempt.amount, locale)}
                 </span>
-                <span className="text-secondary"> {tokenLabel}</span>
+                <span className="text-secondary"> {tokenLabelForMint(attempt.token)}</span>
               </TableCell>
               <TableCell className={cn(PAYMENTS_TABLE_CELL, "whitespace-normal")}>
                 <StatusText tone={RUN_STATUS_TONES[attempt.status]} className="block">
