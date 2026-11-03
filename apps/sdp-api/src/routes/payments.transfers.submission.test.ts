@@ -69,7 +69,7 @@ describe("Payments routes — signed submission", () => {
       )
       .bind(auditIntentId)
       .first<{ count: number }>();
-    return row?.count ?? 0;
+    return required(row).count;
   }
 
   describe("signed submission boundary", () => {
