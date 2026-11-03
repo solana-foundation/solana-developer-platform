@@ -1,15 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { DashboardFlags } from "@/flags/dashboard";
+import { EnglishI18n } from "@/test/i18n";
 import { getDashboardPageConfig } from "./dashboard-header";
 import { DashboardLoadingScreen } from "./dashboard-loading-screen";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
-  useLocale: () => "en",
-}));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: vi.fn(),
@@ -31,7 +27,11 @@ const FLAGS: DashboardFlags = {
 };
 
 function renderLoadingScreen(pathname: string): string {
-  return renderToStaticMarkup(<DashboardLoadingScreen pathname={pathname} flags={FLAGS} />);
+  return renderToStaticMarkup(
+    <EnglishI18n>
+      <DashboardLoadingScreen pathname={pathname} flags={FLAGS} />
+    </EnglishI18n>
+  );
 }
 
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
@@ -107,10 +107,12 @@ describe("DashboardLoadingScreen", () => {
 
   it("keeps deep links route-specific and preserves a collapsed sidebar", () => {
     const markup = renderToStaticMarkup(
-      <DashboardLoadingScreen
-        pathname="/dashboard/wallets?view=list#activity"
-        isSidebarOpen={false}
-      />
+      <EnglishI18n>
+        <DashboardLoadingScreen
+          pathname="/dashboard/wallets?view=list#activity"
+          isSidebarOpen={false}
+        />
+      </EnglishI18n>
     );
     expect(markup).toContain('data-wallet-loading-layout="wallets-overview"');
     expect(markup).not.toContain('data-loading-layout="home"');
