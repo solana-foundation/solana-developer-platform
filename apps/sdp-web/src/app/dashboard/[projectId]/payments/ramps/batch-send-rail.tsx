@@ -18,8 +18,6 @@ interface BatchSendRailProps {
 
 function batchPrimaryLabel(wizard: BatchSendWizard, t: ReturnType<typeof useTranslations>): string {
   switch (true) {
-    case wizard.submitting:
-      return t("DashboardPayments.submitting");
     case wizard.isLastStep && Boolean(wizard.batchResult):
       return t("DashboardPayments.counterparty.done");
     case wizard.isLastStep:
@@ -59,6 +57,7 @@ export function BatchSendRail({
       steps={steps}
       stepIndex={finished ? wizard.stepIndex + 1 : wizard.stepIndex}
       primaryDisabled={wizard.submitting || wizard.retrying || !wizard.canProceed}
+      primaryLoading={wizard.submitting}
       primaryLabel={batchPrimaryLabel(wizard, t)}
       secondaryDisabled={wizard.submitting}
       hideSecondary={finished}
@@ -76,12 +75,10 @@ export function BatchSendRail({
           <Button
             type="button"
             variant="outline"
-            disabled={wizard.retrying}
+            loading={wizard.retrying}
             onClick={() => void wizard.retryFailedRecipients()}
           >
-            {wizard.retrying
-              ? t("DashboardPayments.batchSend.retryingFailedRecipients")
-              : t("DashboardPayments.batchSend.retryFailedRecipients")}
+            {t("DashboardPayments.batchSend.retryFailedRecipients")}
           </Button>
         ) : null
       }

@@ -58,8 +58,8 @@ export function OrganizationIpAllowlistForm({
           {t("Shared.organizationAccess.allowedIpsHelper")}
         </p>
       </div>
-      <Button type="button" onClick={save} disabled={isPending}>
-        {isPending ? t("Shared.organizationAccess.saving") : t("Shared.organizationAccess.save")}
+      <Button type="button" onClick={save} loading={isPending}>
+        {t("Shared.organizationAccess.save")}
       </Button>
     </div>
   );

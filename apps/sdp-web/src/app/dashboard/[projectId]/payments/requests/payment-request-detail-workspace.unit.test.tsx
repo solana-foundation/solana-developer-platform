@@ -226,7 +226,9 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
     expect(cancel).toHaveBeenCalledWith("preq_1");
     expect(dialog.getByRole("button", { name: "Close modal" })).toHaveProperty("disabled", true);
     expect(dialog.getByRole("button", { name: "Keep it" })).toHaveProperty("disabled", true);
-    expect(dialog.getByRole("button", { name: "Canceling" })).toHaveProperty("disabled", true);
+    expect(dialog.getByRole("button", { name: /^Cancel request/ }).getAttribute("aria-busy")).toBe(
+      "true"
+    );
     expect(dashboardRouter.refresh).not.toHaveBeenCalled();
 
     pending.resolve({ ok: true });

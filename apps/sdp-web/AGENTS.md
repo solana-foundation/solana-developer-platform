@@ -52,6 +52,16 @@ Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes f
 - The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
 - Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
 
+A button whose action is running takes `loading` and keeps its words: the
+design-system button spins in place at its own width, so there is no "…ing"
+label and no busy variant. A test finds it by its words plus the spinner's
+("Save Loading"), so match the start of the name and assert `aria-busy`. A
+test that ends with a transition still pending holds every later one in its
+file (React 19 entangles async transitions), so one stale assertion can fail
+the whole file. A flow's new step fades in through `useStepFade` (`src/lib`),
+which `WizardFrame` applies for every flow it frames; both it and `Modal`'s
+entrance come from `@sdp/ui/motion` and stay off under reduced motion.
+
 # Stage smoke
 
 Pull-request CI never runs the `gcp-read-only` Playwright project (`playwright/tests/gcp-read-only-*.e2e.spec.ts`). It runs after each merge against the deployed stage dashboard, with whatever design flags Vercel serves there, and a red run holds the production API and web release until a later merge goes green. A change that renames something these specs select (a link's name, a heading) updates them in the same pull request; where the two designs differ, match both.

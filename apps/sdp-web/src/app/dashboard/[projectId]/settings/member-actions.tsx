@@ -97,12 +97,9 @@ export function MemberActions({
   );
   const isApiKeysLoading = isConfirmOpen && !apiKeys && !apiKeysError;
   const isApiKeysFailed = !apiKeys && Boolean(apiKeysError);
-  let removeLabel = t("Shared.members.removeMember");
-  if (isPending) {
-    removeLabel = t("Shared.members.removing");
-  } else if (isApiKeysFailed) {
-    removeLabel = t("Shared.members.removeAnyway");
-  }
+  const removeLabel = isApiKeysFailed
+    ? t("Shared.members.removeAnyway")
+    : t("Shared.members.removeMember");
 
   const confirmRemove = () => {
     const input = JSON.stringify(["remove", memberId]);
@@ -183,7 +180,8 @@ export function MemberActions({
             <Button
               variant="destructive"
               onClick={confirmRemove}
-              disabled={isPending || isApiKeysLoading}
+              disabled={isApiKeysLoading}
+              loading={isPending}
             >
               {removeLabel}
             </Button>

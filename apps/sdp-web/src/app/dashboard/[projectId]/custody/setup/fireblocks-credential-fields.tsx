@@ -1,8 +1,7 @@
 "use client";
 
-import { assertNever } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
-import { DownloadIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -27,24 +26,6 @@ interface RegistrationProps {
   primaryVaultId?: string;
   onReadyChange?: (ready: boolean) => void;
   onPendingChange?: (pending: boolean) => void;
-}
-function csrButtonLabel(
-  ready: boolean,
-  generating: boolean,
-  t: ReturnType<typeof useTranslations>
-) {
-  let action: "generate" | "download" | "generating" = ready ? "download" : "generate";
-  if (generating) action = "generating";
-  switch (action) {
-    case "generate":
-      return t("DashboardCustody.fireblocksCsrGenerate");
-    case "download":
-      return t("DashboardCustody.fireblocksCsrDownload");
-    case "generating":
-      return t("DashboardCustody.fireblocksCsrGenerating");
-    default:
-      return assertNever(action);
-  }
 }
 function useRegistration({ onReadyChange, onPendingChange }: RegistrationProps) {
   const t = useTranslations();
@@ -175,17 +156,14 @@ export function FireblocksCredentialFields(props: RegistrationProps) {
         <Button
           type="button"
           variant="secondary"
-          disabled={disabled || loading || generating || vaultsPending}
+          disabled={disabled || loading || vaultsPending}
+          loading={generating}
           onClick={() => (ready && csr ? downloadCsr(csr) : void generate())}
-          iconLeft={
-            generating ? (
-              <Loader2Icon className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <DownloadIcon className="size-4" aria-hidden />
-            )
-          }
+          iconLeft={<DownloadIcon className="size-4" aria-hidden />}
         >
-          {csrButtonLabel(ready, generating, t)}
+          {ready
+            ? t("DashboardCustody.fireblocksCsrDownload")
+            : t("DashboardCustody.fireblocksCsrGenerate")}
         </Button>
         <p className="text-sm leading-5 text-tertiary">
           {t("DashboardCustody.fireblocksKeyStorage")}

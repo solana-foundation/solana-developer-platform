@@ -158,12 +158,13 @@ function NoWalletState() {
 
 /** The footer: cancel back to the list, and create once the request has what it needs. */
 function CreateFooter({
-  canCreate,
-  submitting,
+  complete,
+  busy,
   onCreate,
 }: {
-  canCreate: boolean;
-  submitting: boolean;
+  /** The request has everything the API needs. */
+  complete: boolean;
+  busy: boolean;
   onCreate: () => void;
 }) {
   const t = useTranslations();
@@ -182,14 +183,13 @@ function CreateFooter({
       </Button>
       <Button
         type="button"
-        variant={canCreate ? "default" : "outline"}
-        disabled={!canCreate}
-        className={cn(!canCreate && "opacity-100 text-tertiary refresh:bg-fill")}
+        variant={complete ? "default" : "outline"}
+        disabled={!complete}
+        loading={busy}
+        className={cn(!complete && "opacity-100 text-tertiary refresh:bg-fill")}
         onClick={onCreate}
       >
-        {submitting
-          ? t("DashboardPayments.requests.creating")
-          : t("DashboardPayments.requests.createAndCopyLink")}
+        {t("DashboardPayments.requests.createAndCopyLink")}
       </Button>
     </div>
   );
@@ -301,7 +301,8 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
   const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
   const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
 
-  const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
+  const complete = isValidAmount(amount) && token !== null && wallet !== null;
+  const canCreate = complete && !busy;
 
   async function create() {
     if (!canCreate || token === null || wallet === null) {
@@ -369,9 +370,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
       currentStep={0}
       progressLabel=""
       hideProgress
-      footer={
-        <CreateFooter canCreate={canCreate} submitting={busy} onCreate={() => void create()} />
-      }
+      footer={<CreateFooter complete={complete} busy={busy} onCreate={() => void create()} />}
     >
       {/* The design sets a single-page form 3px nearer the title than the frame's stepped
           flows sit. */}

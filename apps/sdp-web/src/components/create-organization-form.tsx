@@ -63,10 +63,13 @@ export function CreateOrganizationForm() {
           onChange={(event) => setName(event.target.value)}
         />
       </div>
-      <Button type="submit" className="w-full" disabled={isPending || trimmedName.length === 0}>
-        {isPending
-          ? t("Shared.SharedComponents.creatingOrganization")
-          : t("Shared.SharedComponents.createOrganizationSubmit")}
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={trimmedName.length === 0}
+        loading={isPending}
+      >
+        {t("Shared.SharedComponents.createOrganizationSubmit")}
       </Button>
     </form>
   );

@@ -5,7 +5,6 @@ import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon } from "lucide-react";
 import { useState } from "react";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
@@ -133,13 +132,7 @@ function AddWalletForm({
         <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
           {t("DashboardCustody.cancel")}
         </Button>
-        <Button
-          type="submit"
-          disabled={pending}
-          iconLeft={
-            pending ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
-          }
-        >
+        <Button type="submit" loading={pending}>
           {t("DashboardCustody.addWalletConfirm")}
         </Button>
       </div>

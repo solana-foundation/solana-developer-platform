@@ -300,10 +300,10 @@ function TokensBlock({
             type="button"
             variant="outline"
             size="sm"
-            disabled={isBusy}
+            loading={isBusy}
             onClick={requestDevnetSol}
           >
-            {isBusy ? t("DashboardCustody.requesting") : t("DashboardCustody.requestDevnetSol")}
+            {t("DashboardCustody.requestDevnetSol")}
           </Button>
         ) : undefined
       }
