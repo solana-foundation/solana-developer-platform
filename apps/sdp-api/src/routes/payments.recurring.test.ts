@@ -9690,7 +9690,10 @@ describe("Payments routes — recurring", () => {
           )
           .bind(activated.id)
           .first<{
-            status: PaymentRecurringPaymentAttemptStatus; plan_update_signature: string | null; error: string | null }>()
+            status: PaymentRecurringPaymentAttemptStatus;
+            plan_update_signature: string | null;
+            error: string | null;
+          }>()
       );
       // The send was saved before the takeover; nothing after it was written.
       expect(attempt.status).toBe("processing");
