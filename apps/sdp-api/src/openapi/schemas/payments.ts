@@ -955,7 +955,7 @@ const paymentRecurringPaymentSchema = z
       .enum(RECURRING_PAYMENT_PAUSE_REASONS)
       .nullable()
       .openapi({
-        description: `Why SDP paused the recurring payment, set exactly while \`status\` is \`paused\`: \`custody_policy_refused\` when the custody provider's policy refused to sign a collection, \`failed_attempts\` when one due period failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Resume clears it.`,
+        description: `Why SDP paused the recurring payment, set exactly while \`status\` is \`paused\`: \`custody_policy_refused\` when the custody provider's policy refused to sign a collection, \`failed_attempts\` when one due period failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, or \`destination_unavailable\` when its counterparty or account is archived or unavailable in the project. Resume requires an active recipient and clears the reason.`,
         example: null,
       }),
     metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),

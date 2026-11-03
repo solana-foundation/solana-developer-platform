@@ -437,6 +437,10 @@ async function upsertReleasePullRequest(version, body) {
         maintainer_can_modify: true,
       });
 
+  // The release PR can wait on approval for weeks; the stale-PR workflow skips `keep-open`.
+  await githubRequest("POST", `/repos/${repo}/issues/${pullRequest.number}/labels`, {
+    labels: ["keep-open"],
+  });
   await enableAutoMerge(pullRequest.node_id, version);
   return pullRequest.number;
 }

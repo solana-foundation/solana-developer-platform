@@ -1,5 +1,5 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db/client";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -72,6 +72,131 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
     }
     return row;
   }
+
+  describe("archive parent", () => {
+    it("rolls the parent archive back when archiving an account fails", async () => {
+      const parent = await seedCounterparty("archive_rollback");
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: parent.id,
+        accountKind: "crypto_wallet",
+      });
+      assert(account);
+      const db = getDb(env);
+      await expect(
+        db.transaction(async (tx) => {
+          // The failing transaction also removes this test-only trigger.
+          await tx.execute(`CREATE FUNCTION refuse_account_archive() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'account archive refused'; END $$`);
+          await tx.execute(`CREATE TRIGGER refuse_account_archive
+          AFTER UPDATE ON counterparty_accounts FOR EACH ROW
+          WHEN (NEW.status = 'archived') EXECUTE FUNCTION refuse_account_archive()`);
+          await createPostgresCounterpartiesRepository(
+            asTransactionalClient(tx)
+          ).archiveCounterparty({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            counterpartyId: parent.id,
+          });
+        })
+      ).rejects.toThrow("account archive refused");
+      expect(
+        await createPostgresCounterpartiesRepository(db).getCounterpartyById({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+          status: "any",
+        })
+      ).toEqual(parent);
+      expect(
+        await repo.getCounterpartyAccountById({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+          counterpartyAccountId: account.id,
+          status: "any",
+        })
+      ).toEqual(account);
+    });
+
+    it("archives every active child, preserves archived children, and leaves other parents alone", async () => {
+      const parent = await seedCounterparty("archive_parent");
+      const other = await seedCounterparty("other_parent");
+      const accounts = await Promise.all(
+        [parent, parent, other].map((counterparty) =>
+          repo.createCounterpartyAccount({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            counterpartyId: counterparty.id,
+            accountKind: "crypto_wallet",
+          })
+        )
+      );
+      const alreadyArchived = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: parent.id,
+        accountKind: "crypto_wallet",
+      });
+      assert(alreadyArchived);
+      const old = await repo.archiveCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: parent.id,
+        counterpartyAccountId: alreadyArchived.id,
+      });
+      const counterparties = createPostgresCounterpartiesRepository(getDb(env));
+      // A different project must not archive the parent or any of its children.
+      expect(
+        await counterparties.archiveCounterparty({
+          organizationId: TEST_ORG.id,
+          projectId: `${TEST_PROJECT_ID}_production`,
+          counterpartyId: parent.id,
+        })
+      ).toBeNull();
+      expect(
+        (
+          await repo.listCounterpartyAccountsByCounterparty({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            counterpartyId: parent.id,
+            includeArchived: false,
+            limit: 100,
+            offset: 0,
+          })
+        ).rows
+      ).toHaveLength(2);
+      expect(
+        await counterparties.archiveCounterparty({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+        })
+      ).toMatchObject({ status: "archived" });
+      for (const [index, account] of accounts.entries()) {
+        assert(account);
+        expect(
+          await repo.getCounterpartyAccountById({
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            counterpartyId: index === 2 ? other.id : parent.id,
+            counterpartyAccountId: account.id,
+            status: "any",
+          })
+        ).toMatchObject({ status: index === 2 ? "active" : "archived" });
+      }
+      expect(
+        await repo.getCounterpartyAccountById({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: parent.id,
+          counterpartyAccountId: alreadyArchived.id,
+          status: "any",
+        })
+      ).toEqual(old);
+    });
+  });
 
   describe("createCounterpartyAccount", () => {
     it("inserts and returns the row with generated id", async () => {
