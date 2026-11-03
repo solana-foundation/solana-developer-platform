@@ -63,7 +63,7 @@ const COOKIE_ASSIGNMENT_PATTERN =
 // one identifier (`x-api-key`, `walletMnemonic`) or two words (`api key`,
 // `seed phrase`); `isCredentialKey` decides. Starts only at the start of an
 // identifier run, so each run is tried once and the scan stays linear.
-const ASSIGNMENT_START = /(?<![\w-])(?:([A-Za-z0-9]+[^\S\n\r]+[\w-]+)|([\w][\w-]*))(\s*[:=]\s*)/g;
+const ASSIGNMENT_START = /(?<![\w-])(?:[A-Za-z0-9]+[^\S\n\r]+[\w-]+|[\w][\w-]*)(\s*[:=]\s*)/g;
 // The value of an ordinary credential assignment: one run, up to a comma,
 // whitespace or a closing brace.
 const ASSIGNMENT_VALUE = /[^,\s}]+/y;
@@ -72,8 +72,10 @@ const ASSIGNMENT_VALUE = /[^,\s}]+/y;
 // continues across horizontal whitespace, one word at a time, until a comma,
 // brace, newline, a `name=` that opens the next pair, or a complete two-word
 // credential name (`api key=`), which its own rule then redacts.
-const FREE_TEXT_WORD = /[^\S\n\r]+([^,\s}=]+)/y;
-const TWO_WORD_ASSIGNMENT = /([A-Za-z0-9]+[^\S\n\r]+[A-Za-z0-9]+)[^\S\n\r]*[:=]/y;
+const HORIZONTAL_SPACE = /[^\S\n\r]+/y;
+const FREE_TEXT_WORD = /[^,\s}=]+/y;
+const NAME_WORD = /[A-Za-z0-9]+/y;
+const NAME_SEPARATOR = /[^\S\n\r]*[:=]/y;
 // Words that open a two-word credential name (`access token`, `wallet
 // passphrase`). They decide only where a free-text value ends, never whether a
 // key is a credential: that is `isCredentialKey`'s.
@@ -94,7 +96,7 @@ const CREDENTIAL_NAME_QUALIFIERS = new Set([
 // URL userinfo (`scheme://user:pass@host`) is a credential whatever the
 // scheme. The whole userinfo goes: the user half is an API key as often as a
 // name. Starts only where a scheme run starts, so the scan stays linear.
-const URL_USERINFO_PATTERN = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/?#"'<>\\]+@/g;
+const URL_USERINFO_PATTERN = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/?#"<>\\]+@/g;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =
@@ -147,8 +149,9 @@ function redactJsonDocument(value: string, nesting: number): string | undefined 
   if (value.length > MAX_JSON_LENGTH || !JSON_DOCUMENT_START.test(value)) {
     return undefined;
   }
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
+    // SAFETY: JSON.parse only ever produces JSON values.
     parsed = JSON.parse(value);
   } catch {
     return undefined;
@@ -157,8 +160,13 @@ function redactJsonDocument(value: string, nesting: number): string | undefined 
   return redacted === parsed ? value : JSON.stringify(redacted);
 }
 
-/** Returns `value` itself when nothing inside it changed. */
-function redactJsonValue(value: unknown, nesting: number, depth: number): unknown {
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+/**
+ * Returns `value` itself when nothing inside it changed. A property name is
+ * text too (`{"token=...":1}`), so it is redacted like any other string.
+ */
+function redactJsonValue(value: JsonValue, nesting: number, depth: number): JsonValue {
   if (typeof value === "string") {
     return redactString(value, nesting + 1);
   }
@@ -180,13 +188,15 @@ function redactJsonValue(value: unknown, nesting: number, depth: number): unknow
   }
 
   let changed = false;
-  const result: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
+  const entries = Object.entries(value).map(([key, item]): [string, JsonValue] => {
+    const nextKey = redactString(key, nesting + 1);
     const next = isCredentialKey(key) ? REDACTED : redactJsonValue(item, nesting, depth + 1);
-    changed ||= next !== item;
-    result[key] = next;
-  }
-  return changed ? result : value;
+    changed ||= nextKey !== key || next !== item;
+    return [nextKey, next];
+  });
+  // `Object.fromEntries` defines own properties, so a `__proto__` field
+  // survives instead of hitting the inherited setter.
+  return changed ? Object.fromEntries(entries) : value;
 }
 
 /**
@@ -275,9 +285,22 @@ function fieldValueEnd(
   if (first === "[" || first === "{") {
     // Bracket counting, not a parse: a value that never balances is masked to
     // the end of the text rather than cut where the secret might continue.
+    // A quoted string inside it is skipped whole, so a bracket inside a
+    // string (`{"value":"pa}ss"}`) does not end the value early.
     let open = 0;
+    let run = 0;
     for (let index = from; index < text.length; index += 1) {
       const char = text[index];
+      if (char === "\\") {
+        run += 1;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        index = quotedValueEnd(text, index + 1, run, char).end - 1;
+        run = 0;
+        continue;
+      }
+      run = 0;
       if (char === "[" || char === "{") {
         open += 1;
       } else if ((char === "]" || char === "}") && --open === 0) {
@@ -288,7 +311,7 @@ function fieldValueEnd(
   }
 
   let end = from;
-  while (end < text.length && !/[,\s}\]"'\\]/.test(text[end] ?? "")) {
+  while (end < text.length && !/[,\s}\]"'\\]/.test(text[end])) {
     end += 1;
   }
   return { open: "", contentEnd: end, end };
@@ -335,8 +358,8 @@ function redactAssignments(text: string): string {
   let redacted = "";
   let copiedUpTo = 0;
   for (let match = start.exec(text); match !== null; match = start.exec(text)) {
-    const [, twoWords, oneWord, separator] = match;
-    const name = twoWords ?? oneWord ?? "";
+    const [assignment, separator] = match;
+    const name = assignment.slice(0, assignment.length - separator.length);
     const key = isCredentialKey(name) ? name : lastWord(name);
     if (key === undefined || !isCredentialKey(key)) {
       continue;
@@ -361,9 +384,10 @@ function redactAssignments(text: string): string {
   return redacted + text.slice(copiedUpTo);
 }
 
+/** The last of several space-separated words, or undefined for one word. */
 function lastWord(name: string): string | undefined {
-  const words = name.split(/[^\S\n\r]+/);
-  return words.length > 1 ? words[words.length - 1] : undefined;
+  const lastSpace = name.search(/[^\S\n\r][^\s]*$/);
+  return lastSpace === -1 ? undefined : name.slice(lastSpace + 1);
 }
 
 function stickyEnd(pattern: RegExp, text: string, from: number): number {
@@ -377,16 +401,17 @@ function freeTextValueEnd(text: string, from: number): number {
     return from;
   }
   for (;;) {
-    FREE_TEXT_WORD.lastIndex = end;
-    const word = FREE_TEXT_WORD.exec(text);
-    if (word === null) {
+    const wordStart = stickyEnd(HORIZONTAL_SPACE, text, end);
+    const wordEnd = stickyEnd(FREE_TEXT_WORD, text, wordStart);
+    if (
+      wordStart === end ||
+      wordEnd === wordStart ||
+      text[wordEnd] === "=" ||
+      opensCredentialName(text, wordStart)
+    ) {
       return end;
     }
-    const wordStart = FREE_TEXT_WORD.lastIndex - (word[1] ?? "").length;
-    if (text[FREE_TEXT_WORD.lastIndex] === "=" || opensCredentialName(text, wordStart)) {
-      return end;
-    }
-    end = FREE_TEXT_WORD.lastIndex;
+    end = wordEnd;
   }
 }
 
@@ -398,12 +423,22 @@ function freeTextValueEnd(text: string, from: number): number {
  * `seed=... yellow token=` must not leave `yellow` readable.
  */
 function opensCredentialName(text: string, from: number): boolean {
-  TWO_WORD_ASSIGNMENT.lastIndex = from;
-  const match = TWO_WORD_ASSIGNMENT.exec(text);
-  if (match === null || !isCredentialKey(match[1] ?? "")) {
+  const firstEnd = stickyEnd(NAME_WORD, text, from);
+  const secondStart = stickyEnd(HORIZONTAL_SPACE, text, firstEnd);
+  const secondEnd = stickyEnd(NAME_WORD, text, secondStart);
+  if (
+    firstEnd === from ||
+    secondStart === firstEnd ||
+    secondEnd === secondStart ||
+    stickyEnd(NAME_SEPARATOR, text, secondEnd) === secondEnd
+  ) {
     return false;
   }
-  const [first = "", second = ""] = (match[1] ?? "").split(/[^\S\n\r]+/);
+  const first = text.slice(from, firstEnd);
+  const second = text.slice(secondStart, secondEnd);
+  if (!isCredentialKey(text.slice(from, secondEnd))) {
+    return false;
+  }
   return !isCredentialKey(second) || CREDENTIAL_NAME_QUALIFIERS.has(first.toLowerCase());
 }
 

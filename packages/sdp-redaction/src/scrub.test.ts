@@ -723,10 +723,49 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
       },
     });
 
-    const scrubbed = scrubError(error) as Error & { context: { status: number; response: string } };
+    // `context` is an own enumerable property of the scrubbed error, so it
+    // serializes; `message` and `stack` do not.
+    const serialized = JSON.stringify(scrubError(error));
 
-    assert.ok(!scrubbed.context.response.includes("fake-key-material"), scrubbed.context.response);
-    assert.equal(scrubbed.context.status, 400);
+    assert.ok(!serialized.includes("fake-key-material"), serialized);
+    assert.ok(serialized.includes('"status":400'), serialized);
+  });
+
+  it("does not end a bracketed value at a bracket inside one of its strings", () => {
+    for (const body of [
+      'upstream said {"credentials":{"value":"pa}ss"}}, retrying',
+      'upstream said {\\"credentials\\":{\\"value\\":\\"pa}ss\\"}}, retrying',
+    ]) {
+      const redacted = redactCredentialString(body);
+
+      assert.ok(!redacted.includes("ss"), redacted);
+    }
+    assert.equal(
+      redactCredentialString('upstream said {"credentials":{"value":"pa]ss"}} ok'),
+      'upstream said {"credentials":[REDACTED]} ok'
+    );
+  });
+
+  it("strips userinfo that contains an apostrophe", () => {
+    assert.equal(
+      redactCredentialString("GET https://svc:fake'password@rpc.example.test/v1 failed"),
+      "GET https://[REDACTED]@rpc.example.test/v1 failed"
+    );
+  });
+
+  it("redacts a credential written into a JSON property name", () => {
+    const redacted = redactCredentialString(
+      '{"token=fake-token-value":"denied","walletId":"wal_1"}'
+    );
+
+    assert.ok(!redacted.includes("fake-token-value"), redacted);
+    assert.ok(redacted.includes('"walletId":"wal_1"'), redacted);
+  });
+
+  it("keeps an own __proto__ field when a sibling is redacted", () => {
+    const redacted = redactCredentialString('{"__proto__":{"note":"kept"},"password":"fake"}');
+
+    assert.equal(redacted, '{"__proto__":{"note":"kept"},"password":"[REDACTED]"}');
   });
 
   it("keeps ordinary fields and already-encoded text that hides nothing", () => {
