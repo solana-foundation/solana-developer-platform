@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
@@ -53,7 +54,8 @@ const paymentRequest: PaymentRequest = {
 function renderDetail(demo: boolean, publicToken: string | null, request: PaymentRequest) {
   function wrapper({ children }: { children: ReactNode }) {
     return (
-      <SWRConfig value={{ provider: () => new Map() }}>
+      // The dashboard's own SWR defaults, which keep a key's last read once it goes null.
+      <SWRConfig value={{ ...DASHBOARD_SWR_CONFIG, provider: () => new Map() }}>
         <I18nProvider locale="en" messages={getMessages("en")}>
           <PaymentsDemoProvider value={demo}>{children}</PaymentsDemoProvider>
         </I18nProvider>
@@ -108,6 +110,27 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("shows a refresh's expired request over the open read before it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const read = vi
+      .spyOn(requestsData, "fetchPaymentRequestFromBrowser")
+      .mockResolvedValue(paymentRequest);
+    const { rerender } = renderDetail(false, "tok_1", paymentRequest);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(read).toHaveBeenCalledOnce();
+
+    // The refresh draws the request the clock expired; nothing wrote it, so `updatedAt` ties.
+    rerender(
+      <PaymentRequestDetailWorkspace
+        request={{ ...paymentRequest, status: "expired" }}
+        publicToken="tok_1"
+        walletName={null}
+      />
+    );
+
+    await waitFor(() => expect(screen.getAllByText("Expired").length).toBeGreaterThan(0));
   });
 
   it("reads a request that is no longer open no more", async () => {

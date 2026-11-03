@@ -296,6 +296,8 @@ function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
       revalidateOnMount: false,
       revalidateOnFocus: true,
       dedupingInterval: 2_000,
+      // Once the server's request closes, the key goes null and its last read must go with it.
+      keepPreviousData: false,
     }
   );
   // A tie goes to the read: the API derives `expired` from the clock, before anything writes it.
