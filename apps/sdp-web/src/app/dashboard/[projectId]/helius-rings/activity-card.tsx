@@ -109,18 +109,9 @@ function runAction(
 }
 
 const ACTION_LABELS = {
-  recheck: {
-    idle: "DashboardHeliusRings.recovery.recheck",
-    busy: "DashboardHeliusRings.recovery.rechecking",
-  },
-  void: {
-    idle: "DashboardHeliusRings.recovery.void",
-    busy: "DashboardHeliusRings.recovery.voiding",
-  },
-  retry: {
-    idle: "DashboardHeliusRings.recovery.retry",
-    busy: "DashboardHeliusRings.recovery.retrying",
-  },
+  recheck: "DashboardHeliusRings.recovery.recheck",
+  void: "DashboardHeliusRings.recovery.void",
+  retry: "DashboardHeliusRings.recovery.retry",
 } as const;
 
 /**
@@ -302,6 +293,7 @@ export function ActivityCard({
                               // One request per row at a time: the actions read
                               // and write the same operation.
                               disabled={rowBusy}
+                              loading={rowBusy && busy?.kind === action.kind}
                               // The row opens the detail drawer, which is not
                               // what someone aiming at the button asked for.
                               onClick={(event) => {
@@ -309,11 +301,7 @@ export function ActivityCard({
                                 void handleAction(operation.id, action, operation.state);
                               }}
                             >
-                              {t(
-                                ACTION_LABELS[action.kind][
-                                  rowBusy && busy?.kind === action.kind ? "busy" : "idle"
-                                ]
-                              )}
+                              {t(ACTION_LABELS[action.kind])}
                             </Button>
                           ))}
                         </span>

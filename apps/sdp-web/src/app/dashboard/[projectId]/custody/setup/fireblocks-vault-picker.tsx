@@ -152,12 +152,11 @@ export function FireblocksVaultPicker(props: VaultPickerProps) {
       <Button
         type="button"
         variant="secondary"
-        disabled={disabled || pending || !apiKey.trim()}
+        disabled={disabled || !apiKey.trim()}
+        loading={pending}
         onClick={() => load()}
       >
-        {pending
-          ? t("DashboardCustody.fireblocksVaultsLoading")
-          : t("DashboardCustody.fireblocksVaultsLoad")}
+        {t("DashboardCustody.fireblocksVaultsLoad")}
       </Button>
       {error ? (
         <p role="alert" className="text-sm text-error">

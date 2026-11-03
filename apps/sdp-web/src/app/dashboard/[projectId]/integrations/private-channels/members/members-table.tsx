@@ -12,7 +12,7 @@ import {
 import { Modal } from "@sdp/ui/modal";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { EllipsisIcon, Loader2Icon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
+import { EllipsisIcon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -319,16 +319,8 @@ function DisablePrincipalDialog({
           <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
             {t("DashboardPrivateChannels.common.cancel")}
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={confirm}
-            disabled={pending}
-            iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
-          >
-            {pending
-              ? t("DashboardPrivateChannels.members.disabling")
-              : t("DashboardPrivateChannels.members.disable")}
+          <Button type="button" variant="destructive" onClick={confirm} loading={pending}>
+            {t("DashboardPrivateChannels.members.disable")}
           </Button>
         </div>
       </div>

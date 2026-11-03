@@ -82,7 +82,6 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "The selected custody wallet signs the vault deposit transaction.",
   "DashboardEarn.deposit.vaultConfirmNoteSponsored": "SDP covers the network fee.",
   "DashboardEarn.deposit.vaultSubmit": "Confirm deposit",
-  "DashboardEarn.deposit.vaultSubmitting": "Submitting…",
   "DashboardEarn.deposit.vaultSubmitError": "The deposit could not be submitted.",
   "DashboardEarn.deposit.vaultDoneTitle": "Deposit submitted",
   "DashboardEarn.deposit.vaultDoneBody": "Signed and sent to Solana.",

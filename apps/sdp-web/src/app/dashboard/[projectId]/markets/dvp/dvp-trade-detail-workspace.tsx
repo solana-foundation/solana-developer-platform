@@ -19,7 +19,6 @@ import {
   CopyIcon,
   ExternalLinkIcon,
   InfoIcon,
-  Loader2Icon,
   type LucideIcon,
   SnowflakeIcon,
   TriangleAlertIcon,
@@ -1009,8 +1008,8 @@ export function DvpTradeDetailWorkspace({
        reserved for destroying something (HOO-1230). */
     return (
       <Button
-        disabled={funding || wallet?.isRuntimeExecutionAllowed !== true}
-        iconLeft={funding ? <Loader2Icon aria-hidden className="animate-spin" /> : undefined}
+        disabled={wallet?.isRuntimeExecutionAllowed !== true}
+        loading={funding}
         onClick={() => {
           if (wallet?.isRuntimeExecutionAllowed === true) {
             void act("fund", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
@@ -1018,7 +1017,7 @@ export function DvpTradeDetailWorkspace({
         }}
         type="button"
       >
-        {t(funding ? "DashboardMarkets.dvp.actionFunding" : "DashboardMarkets.dvp.actionFund")}
+        {t("DashboardMarkets.dvp.actionFund")}
       </Button>
     );
   };
@@ -1030,6 +1029,9 @@ export function DvpTradeDetailWorkspace({
     return canWrite && canReclaimLeg(trade.legs[side], trade.status) ? (
       <button
         className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
+        // A text link, not the design-system button, so it has no spinner: it
+        // keeps its word and dims while its reclaim is out.
+        aria-busy={pending.has(`reclaim:${side}`)}
         // Any action in flight, not only this leg's: a reclaim racing a settle
         // or cancel can only make one of them fail.
         disabled={pending.size > 0 || wallet?.isRuntimeExecutionAllowed !== true}
@@ -1040,11 +1042,7 @@ export function DvpTradeDetailWorkspace({
         }}
         type="button"
       >
-        {t(
-          pending.has(`reclaim:${side}`)
-            ? "DashboardMarkets.dvp.actionReclaiming"
-            : "DashboardMarkets.dvp.actionReclaim"
-        )}
+        {t("DashboardMarkets.dvp.actionReclaim")}
       </button>
     ) : undefined;
   };

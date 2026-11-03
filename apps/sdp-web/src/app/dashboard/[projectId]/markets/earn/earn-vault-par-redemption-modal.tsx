@@ -443,17 +443,8 @@ function ParRedemptionResult({
       {cancelError ? <EarnErrorNote message={cancelError} /> : null}
       <div className="mt-5 flex justify-end gap-2">
         {cancelable ? (
-          <Button
-            disabled={cancelling}
-            iconLeft={
-              cancelling ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
-            }
-            onClick={() => void cancel()}
-            variant="outline"
-          >
-            {cancelling
-              ? t("DashboardEarn.parRedemption.cancelling")
-              : t("DashboardEarn.parRedemption.cancelAction")}
+          <Button loading={cancelling} onClick={() => void cancel()} variant="outline">
+            {t("DashboardEarn.parRedemption.cancelAction")}
           </Button>
         ) : null}
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -634,13 +625,11 @@ function ParRedemptionReview({
         </Button>
         <Button
           className="flex-[2]"
-          disabled={submitting || loading || !preview || preview.blockingIssues.length > 0}
-          iconLeft={submitting ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          disabled={loading || !preview || preview.blockingIssues.length > 0}
+          loading={submitting}
           onClick={onSubmit}
         >
-          {submitting
-            ? t("DashboardEarn.parRedemption.submitting")
-            : t("DashboardEarn.parRedemption.submit")}
+          {t("DashboardEarn.parRedemption.submit")}
         </Button>
       </div>
     </>

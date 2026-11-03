@@ -202,6 +202,33 @@ describe("OfframpRail final step before the quote lands", () => {
   });
 });
 
+describe("OfframpRail primary while the provider account is set up", () => {
+  it("keeps Continue's words and spins in place", () => {
+    renderRail(
+      offrampWizard({
+        stepIndex: 0,
+        steps: [
+          { id: "REQUIREMENTS", label: "Details", title: "What MoonPay needs" },
+          { id: "COMPLETE", label: "Complete", title: "Complete your payout" },
+        ],
+        currentStepId: "REQUIREMENTS",
+        isLastStep: false,
+        onTransactionStage: false,
+        quote: null,
+        quoteTransferId: null,
+        transferStatus: undefined,
+        depositTarget: null,
+        hostedQuoteLoading: true,
+      })
+    );
+
+    expect(screen.getByRole("button", { name: /^Continue/ }).getAttribute("aria-busy")).toBe(
+      "true"
+    );
+    expect(screen.queryByText("Processing")).toBeNull();
+  });
+});
+
 describe("OfframpRail cancel on refresh surfaces", () => {
   function renderRefreshRail(wizard: OfframpWizard) {
     mocks.wizard = wizard;

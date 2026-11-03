@@ -6,7 +6,7 @@ import { Callout } from "@sdp/ui/callout";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 import { FireblocksCredentialFields } from "@/app/dashboard/[projectId]/custody/setup/fireblocks-credential-fields";
 import { useTranslations } from "@/i18n/provider";
@@ -161,13 +161,8 @@ export function RotateCredentialsModal({
               inFlight ||
               (!attempt && (!canRotate || (provider === "fireblocks" && !fireblocksReady)))
             }
-            iconLeft={
-              pending ? (
-                <Loader2Icon aria-hidden className="size-4 animate-spin" />
-              ) : (
-                <RefreshCwIcon aria-hidden className="size-4" />
-              )
-            }
+            loading={pending}
+            iconLeft={<RefreshCwIcon aria-hidden className="size-4" />}
           >
             {attempt
               ? t("Shared.SharedComponents.retry")

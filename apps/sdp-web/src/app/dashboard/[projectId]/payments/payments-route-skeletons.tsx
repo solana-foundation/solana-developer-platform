@@ -3,6 +3,7 @@ import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import type { ReactNode } from "react";
+import { RECENT_DEPOSIT_COLUMN_WIDTHS } from "@/app/dashboard/[projectId]/payments/ramps/components/recent-deposit-columns";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 
 const TABLE_ROW_IDS = [
@@ -238,26 +239,71 @@ export function PaymentsPayPageSkeleton() {
   );
 }
 
+// Each bar sits on its cell's text line, so a row is as tall as a settled one, and gives way to
+// its column, so the table is no wider.
+const RECENT_DEPOSIT_CELL_SKELETONS = [
+  "inline-block h-4 w-full max-w-20 align-middle",
+  "inline-block h-4 w-full max-w-24 align-middle",
+  "inline-block h-4 w-full max-w-28 align-middle",
+  "inline-block h-4 w-full max-w-20 align-middle",
+] as const;
+
+/** A wallet's recent deposits while they load: the settled table's columns, header and rows. */
+export function RecentDepositsTableSkeleton() {
+  return (
+    <Table className="table-fixed rounded-none border-0 refresh:-mx-3" data-loading-recent-deposits>
+      <colgroup>
+        {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (
+          <col key={width} className={width} />
+        ))}
+      </colgroup>
+      <TableHeader>
+        <TableRow>
+          {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (
+            <TableHead key={width}>
+              <SkeletonBlock className="inline-block h-3 w-full max-w-14 align-middle" />
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {TABLE_ROW_IDS.map((rowId) => (
+          <TableRow key={rowId}>
+            {RECENT_DEPOSIT_CELL_SKELETONS.map((cell, index) => (
+              <TableCell key={RECENT_DEPOSIT_COLUMN_WIDTHS[index]}>
+                <SkeletonBlock className={cell} />
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 /**
- * The address tab while its wallets load, cut to the settled panel: the address card (the code
- * on top on a phone, on the right from sm) and its three 40px fact rows. The route skeleton and
- * the panel's own loading pass both draw it, so Deposit settles without a jump.
+ * Deposit's address tab while its wallets load, block for block: the address card (the code on
+ * top on a phone, on the right from sm), the facts, the watching line and the recent deposits,
+ * each at the settled panel's height. The route skeleton and the panel's own loading pass both
+ * draw it, so Deposit settles without a jump.
  */
 export function DepositAddressSkeleton() {
   return (
     <div data-loading-deposit-address aria-busy="true">
       <div className="flex flex-col gap-4 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
         <SkeletonBlock className="size-44 shrink-0 self-center rounded-control sm:order-last sm:size-32 sm:self-auto" />
-        <div className="flex min-w-0 flex-1 flex-col gap-4 sm:justify-between">
+        <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-4">
           <div className="flex min-w-0 flex-col gap-1.5">
-            <SkeletonBlock className="h-6 w-40 max-w-full" />
-            <div className="flex flex-col gap-1">
-              <SkeletonBlock className="h-6 w-full" />
-              <SkeletonBlock className="h-4 w-2/3 sm:hidden" />
+            <SkeletonBlock className="h-6 w-28" />
+            {/* The address: two 24px lines on a phone, one from sm. */}
+            <div className="flex h-12 flex-col justify-center gap-2 sm:h-6">
+              <SkeletonBlock className="h-4 w-full sm:w-[26.375rem] sm:max-w-full" />
+              <SkeletonBlock className="h-4 w-1/2 sm:hidden" />
             </div>
           </div>
-          <SkeletonBlock className="h-11 w-full rounded-control sm:hidden" />
-          <SkeletonBlock className="h-4 w-64 max-w-full" />
+          {/* The phone's copy button draws at the design system's 40px whatever its class asks. */}
+          <SkeletonBlock className="mt-4 h-10 w-full rounded-control sm:hidden" />
+          <SkeletonBlock className="mt-4 h-4 w-80 max-w-full sm:mt-0" />
         </div>
       </div>
       <div className="mt-6 divide-y divide-border-subtle">
@@ -268,6 +314,16 @@ export function DepositAddressSkeleton() {
           </div>
         ))}
       </div>
+      <div className="mt-5 flex min-h-[var(--button-height-md)] items-center">
+        <SkeletonBlock className="h-4 w-56 max-w-full" />
+      </div>
+      <section className="mt-16 flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <SkeletonBlock className="h-6 w-56" />
+          <SkeletonBlock className="h-[1.875rem] w-40 rounded-control" />
+        </div>
+        <RecentDepositsTableSkeleton />
+      </section>
     </div>
   );
 }

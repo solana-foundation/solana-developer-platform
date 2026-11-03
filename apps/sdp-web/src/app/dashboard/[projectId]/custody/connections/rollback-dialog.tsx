@@ -3,7 +3,7 @@
 import type { CustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon, Undo2Icon } from "lucide-react";
+import { Undo2Icon } from "lucide-react";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { rollbackCredentialAction } from "./connection-actions";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
@@ -108,14 +108,8 @@ export function RollbackDialog({
           <Button
             type="button"
             onClick={handleConfirm}
-            disabled={pending}
-            iconLeft={
-              pending ? (
-                <Loader2Icon aria-hidden className="size-4 animate-spin" />
-              ) : (
-                <Undo2Icon aria-hidden className="size-4" />
-              )
-            }
+            loading={pending}
+            iconLeft={<Undo2Icon aria-hidden className="size-4" />}
           >
             {t("DashboardCustody.rollbackConfirm", {
               count: lifecycle.impact.connections.length,

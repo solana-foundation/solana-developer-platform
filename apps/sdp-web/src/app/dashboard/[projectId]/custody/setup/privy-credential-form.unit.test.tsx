@@ -190,10 +190,10 @@ describe("ByokCredentialForm", () => {
       await user.click(await screen.findByRole("checkbox", { name: /Treasury/ }));
       await user.click(screen.getByRole("button", { name: "Connect and verify" }));
       await waitFor(() => expect(submitPrivyCredentialAction).toHaveBeenCalledTimes(attempt + 1));
-      expect(screen.getByRole("button", { name: "Verifying credentials…" })).toHaveProperty(
-        "disabled",
-        true
-      );
+      // The submit keeps its words and spins while the check runs.
+      expect(
+        screen.getByRole("button", { name: /^Connect and verify/ }).getAttribute("aria-busy")
+      ).toBe("true");
       const payload = vi.mocked(submitPrivyCredentialAction).mock.calls[attempt][0];
       expect(payload.get("signingKeyId")).toBe(csrs[attempt].id);
       if (attempt > 0) {

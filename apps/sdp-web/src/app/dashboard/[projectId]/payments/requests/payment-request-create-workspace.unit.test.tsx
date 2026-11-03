@@ -111,8 +111,8 @@ describe("New request page", () => {
       "/dashboard/prj_test_sandbox/payments/requests/preq_1"
     );
     // On its way to the request, the form stays busy so a second press makes no second link.
-    const creating = screen.getByRole("button", { name: "Creating…" });
-    expect(creating.hasAttribute("disabled")).toBe(true);
+    const creating = screen.getByRole("button", { name: /^Create and copy link/ });
+    expect(creating.getAttribute("aria-busy")).toBe("true");
   });
 
   // The expiry comes from the clock. Read again on the retry, it would be a new

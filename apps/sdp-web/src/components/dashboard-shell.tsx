@@ -502,6 +502,8 @@ export function DashboardShell({
       ? pageTitleOverride
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
+  // A page can insist on its title where the route hides it: a missing page has to say so.
+  const titleAlwaysVisible = activeTitleOverride?.alwaysVisible === true;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
@@ -804,14 +806,16 @@ export function DashboardShell({
                       : "px-3 py-5 md:p-6"
                 )}
               >
+                {/* One frame per route. Next already remounts the page on a route change, so the
+                header and content wrappers were the only nodes kept across it; the header's height
+                and column differ from route to route, and a kept frame moved under the new page
+                (a layout shift to the browser). Keyed, the browser sees a page replaced. */}
                 <div
+                  key={pathname}
+                  data-dashboard-page-frame=""
                   className={[
                     "min-w-0 w-full",
-                    shouldLockViewportScroll
-                      ? "flex min-h-0 flex-1 flex-col"
-                      : pageConfig.hideTitleOnMobile
-                        ? "space-y-4 sm:space-y-6"
-                        : "space-y-6",
+                    shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
@@ -823,7 +827,7 @@ export function DashboardShell({
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop
+                        pageConfig.flushTopOnDesktop && !titleAlwaysVisible
                           ? "pt-6 md:pt-0"
                           : stacksBackAboveTitle
                             ? "pt-6 md:pt-10"
@@ -849,11 +853,9 @@ export function DashboardShell({
                         <DashboardTopBar
                           setMobileSidebarOpen={setMobileSidebarOpen}
                           titleVisibility={
-                            pageConfig.hideTitle
+                            pageConfig.hideTitle && !titleAlwaysVisible
                               ? "screen-reader-only"
-                              : pageConfig.hideTitleOnMobile
-                                ? "desktop-only"
-                                : "visible"
+                              : "visible"
                           }
                           title={pageTitle}
                           titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}
@@ -861,7 +863,9 @@ export function DashboardShell({
                           hasHeaderTabs={hasHeaderTabs}
                           action={headerAction}
                           above={stacksBackAboveTitle ? backAction : undefined}
-                          mark={activeTitleOverride?.mark}
+                          mark={
+                            activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark
+                          }
                           layout={isRefresh ? "refresh" : "base"}
                           utilities={
                             demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined

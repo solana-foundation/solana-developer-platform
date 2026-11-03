@@ -225,14 +225,8 @@ function DeleteApiKeyFormActions({
       <Button type="button" variant="secondary" onClick={onCancel} disabled={isSubmitting}>
         {t("DashboardCustody.cancel")}
       </Button>
-      <Button
-        type="submit"
-        variant="destructive"
-        disabled={!canSubmit || isSubmitting}
-        aria-busy={isSubmitting}
-        className="min-w-[104px]"
-      >
-        {isSubmitting ? t("DashboardCustody.deleting") : t("DashboardCustody.deleteKey")}
+      <Button type="submit" variant="destructive" disabled={!canSubmit} loading={isSubmitting}>
+        {t("DashboardCustody.deleteKey")}
       </Button>
     </div>
   );

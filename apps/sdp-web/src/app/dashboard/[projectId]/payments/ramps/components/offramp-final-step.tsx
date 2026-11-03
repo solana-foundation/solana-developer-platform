@@ -146,7 +146,6 @@ export function OfframpFooterActionButton({
                 amount: action.depositTarget.amount,
                 token,
               }),
-              busyLabel: t("DashboardPayments.ramps.sending"),
               doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
             }}
           />

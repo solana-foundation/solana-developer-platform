@@ -225,6 +225,32 @@ function EventFamilySelect({
   );
 }
 
+/** Pages in older events: it spins while that page loads, and waits while a filter applies. */
+function LoadMoreButton({
+  disabled,
+  loading,
+  onClick,
+}: {
+  disabled: boolean;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex justify-center">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={onClick}
+        disabled={disabled}
+        loading={loading}
+      >
+        {t("DashboardPrivateChannels.events.loadMore")}
+      </Button>
+    </div>
+  );
+}
+
 export function EventsList({
   projectId,
   initialEvents,
@@ -500,12 +526,7 @@ export function EventsList({
       )}
 
       {feed.events.length > 0 && feed.hasMore ? (
-        <div className="flex justify-center">
-          <Button type="button" variant="secondary" onClick={loadMore} disabled={isBusy}>
-            {isLoadingMore ? <Loader2Icon className="animate-spin" /> : null}
-            {t("DashboardPrivateChannels.events.loadMore")}
-          </Button>
-        </div>
+        <LoadMoreButton disabled={isBusy} loading={isLoadingMore} onClick={loadMore} />
       ) : null}
 
       {selectedEvent && selectedSummary ? (

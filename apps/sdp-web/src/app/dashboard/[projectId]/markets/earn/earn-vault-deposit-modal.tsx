@@ -1060,15 +1060,13 @@ function DepositReviewStep(props: DepositReviewStepProps) {
         <Button className="flex-1" disabled={submitting} onClick={onBack} variant="outline">
           {t("DashboardEarn.deposit.back")}
         </Button>
-        <Button className="flex-[2]" disabled={submitting || submitBlocked} onClick={onSubmit}>
-          {submitting ? (
-            <span className="inline-flex items-center gap-2">
-              <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
-              {t("DashboardEarn.deposit.vaultSubmitting")}
-            </span>
-          ) : (
-            t("DashboardEarn.deposit.vaultSubmit")
-          )}
+        <Button
+          className="flex-[2]"
+          disabled={submitBlocked}
+          loading={submitting}
+          onClick={onSubmit}
+        >
+          {t("DashboardEarn.deposit.vaultSubmit")}
         </Button>
       </div>
     </>

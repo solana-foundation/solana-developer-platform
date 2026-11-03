@@ -716,10 +716,9 @@ function SetupFooter({
             form={DETAILS_FORM_ID}
             variant={canCreate ? "default" : "outline"}
             disabled={!canCreate}
+            loading={isPending}
           >
-            {isPending
-              ? t("DashboardCustody.createWalletPending")
-              : t("DashboardCustody.createWallet")}
+            {t("DashboardCustody.createWallet")}
           </Button>
         ) : null}
       </div>
@@ -970,7 +969,7 @@ export function WalletSetupFlow({
   // Every setup request, Managed or BYOK, holds the mode picker and Back: a BYOK request
   // settling after its form unmounted could lock recovery with no form left to recover from.
   const setupRequestInFlight = isPending || byokRequestPending;
-  const canCreate = canProvisionWallet && walletLabel.trim().length > 0 && !isPending;
+  const canCreate = canProvisionWallet && walletLabel.trim().length > 0;
 
   const leaveFlow = () => router.push(href("/dashboard/wallets"));
 
