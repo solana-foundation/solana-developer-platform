@@ -1,6 +1,16 @@
+import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import { z } from "zod";
-import { badRequest, providerUnavailable } from "#/errors";
-import type { EarnRuntimeContext } from "#/types";
+import { badRequest, providerUnavailable, type SdpEarnError } from "#/errors";
+import type {
+  EarnOnboardingApplicationResult,
+  EarnOnboardingCorrectionAnswer,
+  EarnOnboardingCustomerDetail,
+  EarnOnboardingDocumentReference,
+  EarnOnboardingForm,
+  EarnOnboardingModerator,
+  EarnOnboardingRegistrationScope,
+  EarnRuntimeContext,
+} from "#/types";
 import { requestWisdomTreeOnboarding } from "./connect";
 import {
   type WisdomTreeBusinessPatch,
@@ -8,6 +18,7 @@ import {
   type WisdomTreeCorrection,
   type WisdomTreePersonSubmission,
   wisdomTreeBusinessDetailSchema,
+  wisdomTreeBusinessFieldsSchema,
   wisdomTreeBusinessPatchSchema,
   wisdomTreeBusinessResultSchema,
   wisdomTreeBusinessSubmissionSchema,
@@ -17,6 +28,7 @@ import {
   wisdomTreeModeratorSchema,
   wisdomTreeOnboardingFormSchema,
   wisdomTreeOnboardingRecordsSchema,
+  wisdomTreeOnboardingRecoverySchema,
   wisdomTreePersonDetailSchema,
   wisdomTreePersonResultSchema,
   wisdomTreePersonSubmissionSchema,
@@ -38,6 +50,30 @@ function input<S extends z.ZodType>(schema: S, value: z.input<S>): z.output<S> {
   const result = schema.safeParse(value);
   if (!result.success) throw badRequest("Invalid WisdomTree onboarding input");
   return result.data;
+}
+
+/**
+ * The exact bytes a wallet must sign to prove control of itself for this
+ * registration. The message binds every scope dimension (organization,
+ * project, environment, counterparty) plus the address, so one signature can
+ * never be replayed for another customer, project or wallet, and no challenge
+ * round trip is needed. Clients sign the UTF-8 text with the wallet's Ed25519
+ * key and send the base58 signature.
+ */
+export function wisdomTreeWalletRegistrationMessage(
+  scope: EarnOnboardingRegistrationScope,
+  owner: string
+): Uint8Array {
+  return new TextEncoder().encode(
+    [
+      "WisdomTree wallet registration",
+      `organization: ${scope.organizationId}`,
+      `project: ${scope.projectId}`,
+      `environment: ${scope.environment}`,
+      `counterparty: ${scope.counterpartyId}`,
+      `owner: ${owner}`,
+    ].join("\n")
+  );
 }
 
 /**
@@ -180,4 +216,129 @@ export class WisdomTreeOnboardingClient {
       throw providerUnavailable("WisdomTree customer is not assigned to the configured moderator");
     }
   }
+
+  // ── EarnOnboardingProvider surface ────────────────────────────────────────
+  // The shared API orchestration calls only these: the provider's wire
+  // vocabulary (submissions, corrections, document slots, GUID names) stops
+  // here. Each neutral method dispatches through `this.<wire method>`, so a
+  // test spy on the wire method still observes every orchestration call.
+
+  async getOnboardingModerator(ctx: EarnRuntimeContext): Promise<EarnOnboardingModerator> {
+    const moderator = await this.getModerator(ctx);
+    return { guid: moderator.guid, clientOrganizations: moderator.client_organizations };
+  }
+
+  async getOnboardingForm(
+    ctx: EarnRuntimeContext,
+    entityType: CounterpartyEntityType
+  ): Promise<EarnOnboardingForm> {
+    const form =
+      entityType === "business" ? await this.getBusinessForm(ctx) : await this.getPersonForm(ctx);
+    return { canCreate: form.can_create, form };
+  }
+
+  onboardingApplicationFields(entityType: CounterpartyEntityType): ReadonlySet<string> {
+    // Business submissions are open-ended except for these fields, so a
+    // document slot colliding with one must be refused before anything is
+    // claimed. Individual onboarding takes no documents at all.
+    return entityType === "business"
+      ? new Set(Object.keys(wisdomTreeBusinessFieldsSchema.shape))
+      : new Set();
+  }
+
+  async saveOnboardingApplication(
+    ctx: EarnRuntimeContext,
+    submission: {
+      entityType: CounterpartyEntityType;
+      application: Record<string, unknown>;
+      documents?: Record<string, EarnOnboardingDocumentReference>;
+      linkedOrganizationGuid?: string | null;
+    }
+  ): Promise<EarnOnboardingApplicationResult> {
+    if (submission.entityType === "business") {
+      const application: Record<string, unknown> = { ...submission.application };
+      for (const [slot, document] of Object.entries(submission.documents ?? {})) {
+        application[slot] = {
+          blob_path: document.blobPath,
+          original_filename: document.originalFilename,
+        };
+      }
+      if (
+        submission.linkedOrganizationGuid !== null &&
+        submission.linkedOrganizationGuid !== undefined
+      ) {
+        application.org_guid = submission.linkedOrganizationGuid;
+      }
+      const result = await this.saveBusiness(
+        ctx,
+        wisdomTreeBusinessSubmissionSchema.parse(application)
+      );
+      return { organizationGuid: result.organization_guid };
+    }
+    const result = await this.submitPerson(
+      ctx,
+      wisdomTreePersonSubmissionSchema.parse(submission.application)
+    );
+    return { personGuid: result.person_guid };
+  }
+
+  async getOnboardingCustomerDetail(
+    ctx: EarnRuntimeContext,
+    input: { entityType: CounterpartyEntityType; reference: string }
+  ): Promise<EarnOnboardingCustomerDetail> {
+    if (input.entityType === "business") {
+      const detail = await this.getBusiness(ctx, input.reference);
+      return {
+        reference: detail.org_guid,
+        providerStatus: detail.onboarding_status,
+        corrections: detail.resubmission_reasons,
+        correctionDueAt: detail.correction_due_at,
+      };
+    }
+    const detail = await this.getPerson(ctx, input.reference);
+    return { reference: detail.person_guid, providerStatus: detail.onboarding_status };
+  }
+
+  async uploadOnboardingDocument(
+    ctx: EarnRuntimeContext,
+    document: { documentType: string; file: File }
+  ): Promise<EarnOnboardingDocumentReference> {
+    const uploaded = await this.uploadDocument(ctx, document);
+    return { blobPath: uploaded.blob_path, originalFilename: uploaded.original_filename };
+  }
+
+  async answerOnboardingCorrection(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; reasonId: number; answer: EarnOnboardingCorrectionAnswer }
+  ): Promise<void> {
+    await this.answerCorrection(
+      ctx,
+      input.reference,
+      input.reasonId,
+      wisdomTreeCorrectionSchema.parse(input.answer)
+    );
+  }
+
+  async registerOnboardingWallet(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; owner: string }
+  ): Promise<void> {
+    await this.registerSolanaWallet(ctx, input.reference, input.owner);
+  }
+
+  walletRegistrationMessage(scope: EarnOnboardingRegistrationScope, owner: string): Uint8Array {
+    return wisdomTreeWalletRegistrationMessage(scope, owner);
+  }
+
+  onboardingRecoveryReferences(error: SdpEarnError): EarnOnboardingApplicationResult {
+    const recovery = wisdomTreeOnboardingRecoverySchema.safeParse(error.details);
+    if (!recovery.success) return {};
+    return {
+      organizationGuid: recovery.data.organization_guid,
+      personGuid: recovery.data.person_guid,
+    };
+  }
 }
+
+/** The one onboarding adapter instance, composed into WisdomTree's registry client. */
+export const wisdomTreeOnboardingClient = new WisdomTreeOnboardingClient();

@@ -7,11 +7,12 @@ import {
 } from "./earn-onboarding.repository";
 
 const scopeWhere =
-  "organization_id = ? AND project_id = ? AND environment = ? AND counterparty_id = ?";
+  "organization_id = ? AND project_id = ? AND environment = ? AND provider = ? AND counterparty_id = ?";
 const scopeValues = (scope: EarnOnboardingScope) => [
   scope.organizationId,
   scope.projectId,
   scope.environment,
+  scope.provider,
   scope.counterpartyId,
 ];
 
@@ -29,8 +30,8 @@ export function createPostgresEarnOnboardingRepository(
     async claim(scope, input) {
       const row = await db
         .prepare(`INSERT INTO earn_onboarding_customers
-        (id, organization_id, project_id, environment, counterparty_id, moderator_guid, entity_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING *`)
+        (id, organization_id, project_id, environment, provider, counterparty_id, moderator_guid, entity_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING *`)
         .bind(
           `earn_customer_${crypto.randomUUID()}`,
           ...scopeValues(scope),
@@ -53,8 +54,8 @@ export function createPostgresEarnOnboardingRepository(
     async claimWallet(scope, owner) {
       const row = await db
         .prepare(`INSERT INTO earn_onboarding_wallets
-        (id, organization_id, project_id, environment, counterparty_id, owner_address)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING owner_address`)
+        (id, organization_id, project_id, environment, provider, counterparty_id, owner_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING owner_address`)
         .bind(`earn_wallet_${crypto.randomUUID()}`, ...scopeValues(scope), owner)
         .first();
       return row !== null;
@@ -80,12 +81,12 @@ export function createPostgresEarnOnboardingRepository(
     async findByWallet(scope, owner) {
       const row = await db
         .prepare(`SELECT c.* FROM earn_onboarding_customers c
-        JOIN earn_onboarding_wallets w USING (organization_id, project_id, environment, counterparty_id)
+        JOIN earn_onboarding_wallets w USING (organization_id, project_id, environment, provider, counterparty_id)
         JOIN counterparties p ON p.id = c.counterparty_id AND p.organization_id = c.organization_id AND p.project_id = c.project_id
-        WHERE c.organization_id = ? AND c.project_id = ? AND c.environment = ?
+        WHERE c.organization_id = ? AND c.project_id = ? AND c.environment = ? AND c.provider = ?
           AND w.owner_address = ? AND w.status = 'linked' AND c.status = 'linked'
           AND p.status = 'active' AND p.entity_type = c.entity_type AND c.organization_guid IS NOT NULL`)
-        .bind(scope.organizationId, scope.projectId, scope.environment, owner)
+        .bind(scope.organizationId, scope.projectId, scope.environment, scope.provider, owner)
         .first<Record<string, unknown>>();
       return row === null ? null : earnOnboardingCustomerSchema.parse(row);
     },
@@ -93,8 +94,8 @@ export function createPostgresEarnOnboardingRepository(
       const id = `earn_document_${crypto.randomUUID()}`;
       await db
         .prepare(`INSERT INTO earn_onboarding_documents
-        (id, organization_id, project_id, environment, counterparty_id, encrypted_reference)
-        VALUES (?, ?, ?, ?, ?, ?)`)
+        (id, organization_id, project_id, environment, provider, counterparty_id, encrypted_reference)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .bind(id, ...scopeValues(scope), encryptedReference)
         .run();
       return id;

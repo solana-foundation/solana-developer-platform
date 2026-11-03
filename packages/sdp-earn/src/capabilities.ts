@@ -1,6 +1,7 @@
 import type {
   EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
+  EarnOnboardingProvider,
   EarnPortfolioWalletProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
@@ -275,4 +276,33 @@ const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly
 export function supportsLiveMetrics(client: EarnVaultProvider): client is EarnLiveMetricsProvider {
   const candidate = client as Partial<Record<(typeof LIVE_METRICS_METHODS)[number], unknown>>;
   return LIVE_METRICS_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const ONBOARDING_METHODS = [
+  "getOnboardingModerator",
+  "getOnboardingForm",
+  "onboardingApplicationFields",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "saveOnboardingApplication",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "getOnboardingCustomerDetail",
+  // biome-ignore lint/security/noSecrets: capability method name, not a secret.
+  "uploadOnboardingDocument",
+  "answerOnboardingCorrection",
+  "registerOnboardingWallet",
+  "walletRegistrationMessage",
+  "onboardingRecoveryReferences",
+] as const satisfies readonly Exclude<keyof EarnOnboardingProvider, keyof EarnVaultProvider>[];
+
+/**
+ * Capability discovery for the optional KYC/KYB onboarding contract — same
+ * all-or-nothing method-presence rule as the guards above. Onboarding without
+ * its whole surface is worse than none: a customer claimed but never
+ * submittable, or a wallet provable but not registrable, is a half-built
+ * identity SDP cannot reconcile. Kept separate from every money capability by
+ * design: onboarding feeds the eligibility gate, it never implies one.
+ */
+export function supportsOnboarding(client: EarnVaultProvider): client is EarnOnboardingProvider {
+  const candidate = client as Partial<Record<(typeof ONBOARDING_METHODS)[number], unknown>>;
+  return ONBOARDING_METHODS.every((method) => typeof candidate[method] === "function");
 }

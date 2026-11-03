@@ -1,14 +1,5 @@
 import { SdpEarnError } from "@sdp/earn/errors";
-import type { WisdomTreeOnboardingClient } from "@sdp/earn/providers/wisdomtree/onboarding";
-import {
-  type WisdomTreeBusinessSubmission,
-  type WisdomTreeCorrection,
-  wisdomTreeBusinessFieldsSchema,
-  wisdomTreeBusinessSubmissionSchema,
-  wisdomTreeOnboardingRecoverySchema,
-  wisdomTreeUploadedDocumentSchema,
-} from "@sdp/earn/providers/wisdomtree/onboarding-schemas";
-import type { EarnRuntimeContext } from "@sdp/earn/types";
+import type { EarnOnboardingProvider, EarnRuntimeContext } from "@sdp/earn/types";
 import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import {
   address,
@@ -17,6 +8,7 @@ import {
   isSignatureBytes,
   verifySignature,
 } from "@solana/kit";
+import { z } from "zod";
 import type {
   EarnOnboardingCustomer,
   EarnOnboardingRepository,
@@ -27,25 +19,17 @@ import type { OnboardingApplication } from "@/routes/earn-onboarding/schemas";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import type { CustodyConfigStore } from "@/services/stores/custody-config.store";
 
-type Provider = Pick<
-  WisdomTreeOnboardingClient,
-  | "getModerator"
-  | "getBusinessForm"
-  | "getPersonForm"
-  | "saveBusiness"
-  | "submitPerson"
-  | "getBusiness"
-  | "getPerson"
-  | "uploadDocument"
-  | "answerCorrection"
-  | "registerSolanaWallet"
->;
-
 /** The project's custody wallets, whose keys SDP holds and signs with. */
 type CustodyWallets = Pick<
   CustodyConfigStore,
   "findActiveWalletByPublicKey" | "findActiveConnectionWalletByPublicKey"
 >;
+
+/** The document reference the API stores, encrypted: the provider's own upload answer. */
+const storedDocumentReferenceSchema = z.object({
+  blobPath: z.string().min(1),
+  originalFilename: z.string().min(1).optional(),
+});
 
 /**
  * WisdomTree processed and refused the registration (any 4xx), or the write
@@ -63,35 +47,9 @@ function isConfirmedWalletRejection(error: SdpEarnError): boolean {
   );
 }
 
-/**
- * The exact bytes a wallet must sign to prove control of itself for this
- * registration. The message binds every scope dimension (organization,
- * project, environment, counterparty) plus the address, so one signature can
- * never be replayed for another customer, project or wallet, and no challenge
- * round trip is needed. Clients sign the UTF-8 text with the wallet's Ed25519
- * key and send the base58 signature.
- */
-export function wisdomTreeWalletRegistrationMessage(
-  scope: Pick<
-    EarnOnboardingScope,
-    "environment" | "organizationId" | "projectId" | "counterpartyId"
-  >,
-  owner: string
-): Uint8Array {
-  return new TextEncoder().encode(
-    [
-      "WisdomTree wallet registration",
-      `organization: ${scope.organizationId}`,
-      `project: ${scope.projectId}`,
-      `environment: ${scope.environment}`,
-      `counterparty: ${scope.counterpartyId}`,
-      `owner: ${owner}`,
-    ].join("\n")
-  );
-}
-
 /** Whether `signature` is the wallet's own valid Ed25519 signature over the scope-bound registration message. */
 async function provesWalletOwnership(
+  provider: EarnOnboardingProvider,
   scope: EarnOnboardingScope,
   owner: string,
   signature: string
@@ -104,18 +62,27 @@ async function provesWalletOwnership(
     return await verifySignature(
       publicKey,
       signatureBytes,
-      wisdomTreeWalletRegistrationMessage(scope, owner)
+      provider.walletRegistrationMessage(scope, owner)
     );
   } catch {
     return false;
   }
 }
 
-/** No PII is persisted. Only immutable identity links and encrypted upload references. */
-export class WisdomTreeOnboardingService {
+/**
+ * The SHARED onboarding orchestration behind every provider's KYC/KYB routes
+ * (dispatched by capability — `supportsOnboarding` — never a provider-id
+ * check). SDP owns what must never drift between providers: durable claims,
+ * identity links, moderator-consistency checks, encrypted document
+ * references, wallet claim/verify/register, and recovery of uncertain
+ * submissions. The provider's own forms, application and correction
+ * vocabulary and registration proof message live behind `EarnOnboardingProvider`.
+ * No PII is persisted. Only immutable identity links and encrypted upload references.
+ */
+export class EarnOnboardingService {
   constructor(
     private readonly repository: EarnOnboardingRepository,
-    private readonly provider: Provider,
+    private readonly provider: EarnOnboardingProvider,
     private readonly cipher: CustodyCipher,
     private readonly runtime: EarnRuntimeContext,
     private readonly custodyWallets: CustodyWallets
@@ -155,23 +122,21 @@ export class WisdomTreeOnboardingService {
         "Provide the wallet's base58 signature over the registration message, or register an SDP custody wallet of this project"
       );
     }
-    if (!(await provesWalletOwnership(scope, owner, signature)))
+    if (!(await provesWalletOwnership(this.provider, scope, owner, signature)))
       throw badRequest("The wallet signature does not prove control of the address");
   }
 
   async form(entityType: CounterpartyEntityType) {
-    await this.provider.getModerator(this.runtime);
-    return entityType === "business"
-      ? this.provider.getBusinessForm(this.runtime)
-      : this.provider.getPersonForm(this.runtime);
+    await this.provider.getOnboardingModerator(this.runtime);
+    return (await this.provider.getOnboardingForm(this.runtime, entityType)).form;
   }
 
   private async customer(scope: EarnOnboardingScope) {
     const row = await this.repository.get(scope);
     if (row === null) throw notFound("Earn onboarding customer");
-    const moderator = await this.provider.getModerator(this.runtime);
+    const moderator = await this.provider.getOnboardingModerator(this.runtime);
     if (moderator.guid !== row.moderator_guid)
-      throw conflict("WisdomTree moderator credentials changed; reconcile the customer mapping");
+      throw conflict("Onboarding provider credentials changed; reconcile the customer mapping");
     if (row.status === "archived") throw conflict("Earn onboarding customer is archived");
     return { row, moderator };
   }
@@ -179,12 +144,12 @@ export class WisdomTreeOnboardingService {
   private async link(
     scope: EarnOnboardingScope,
     row: EarnOnboardingCustomer,
-    reference: { organization_guid?: string; person_guid?: string }
+    reference: { organizationGuid?: string; personGuid?: string }
   ) {
     const linked = await this.repository.link(scope, {
       moderatorGuid: row.moderator_guid,
-      organizationGuid: reference.organization_guid ?? null,
-      personGuid: reference.person_guid ?? null,
+      organizationGuid: reference.organizationGuid ?? null,
+      personGuid: reference.personGuid ?? null,
     });
     if (linked === null)
       throw internalError("Onboarding identity could not be recorded; reconcile before retrying");
@@ -199,7 +164,7 @@ export class WisdomTreeOnboardingService {
     const expected = entityType === "business" ? "organization" : "retail";
     if (request.application.entity_type !== expected)
       throw badRequest("Application type does not match the counterparty");
-    const moderator = await this.provider.getModerator(this.runtime);
+    const moderator = await this.provider.getOnboardingModerator(this.runtime);
     const existing = await this.repository.get(scope);
     if (existing !== null) {
       if (
@@ -214,33 +179,25 @@ export class WisdomTreeOnboardingService {
       if (request.application.entity_type === "retail") return this.status(scope);
     }
     const documents = await this.documents(scope, entityType, request.documents);
-    const form =
-      entityType === "business"
-        ? await this.provider.getBusinessForm(this.runtime)
-        : await this.provider.getPersonForm(this.runtime);
-    if (!form.can_create && existing === null)
-      throw new AppError("FORBIDDEN", "WisdomTree does not permit onboarding for this account");
+    const form = await this.provider.getOnboardingForm(this.runtime, entityType);
+    if (!form.canCreate && existing === null)
+      throw new AppError("FORBIDDEN", "The provider does not permit onboarding for this account");
     const claimed =
       existing === null
-        ? await this.repository.claim(scope, { entityType, moderatorGuid: moderator.guid })
+        ? await this.repository.claim(scope, { moderatorGuid: moderator.guid, entityType })
         : existing;
     if (claimed === null)
       throw conflict("Another request already claimed this onboarding customer");
     try {
-      if (request.application.entity_type === "organization") {
-        const application: WisdomTreeBusinessSubmission = { ...request.application, ...documents };
-        if (claimed.organization_guid !== null) application.org_guid = claimed.organization_guid;
-        const result = await this.provider.saveBusiness(
-          this.runtime,
-          wisdomTreeBusinessSubmissionSchema.parse(application)
-        );
-        if (existing === null) await this.link(scope, claimed, result);
-        else if (result.organization_guid !== existing.organization_guid)
-          throw internalError("WisdomTree changed an existing customer identity");
-      } else {
-        const result = await this.provider.submitPerson(this.runtime, request.application);
-        await this.link(scope, claimed, result);
-      }
+      const result = await this.provider.saveOnboardingApplication(this.runtime, {
+        entityType,
+        application: request.application,
+        documents,
+        linkedOrganizationGuid: claimed.organization_guid,
+      });
+      if (existing === null) await this.link(scope, claimed, result);
+      else if (result.organizationGuid !== existing.organization_guid)
+        throw internalError("The provider changed an existing customer identity");
     } catch (error) {
       if (existing === null) await this.recoverCreate(scope, claimed, error);
       throw error;
@@ -254,13 +211,13 @@ export class WisdomTreeOnboardingService {
     entityType: CounterpartyEntityType,
     references: OnboardingApplication["documents"]
   ) {
-    const documents: Record<string, { blob_path: string; original_filename?: string }> = {};
+    const documents: Record<string, { blobPath: string; originalFilename?: string }> = {};
     if (references === undefined) return documents;
     if (entityType !== "business")
       throw badRequest("Individual onboarding does not accept business documents");
+    const fields = this.provider.onboardingApplicationFields(entityType);
     for (const [key, id] of Object.entries(references)) {
-      if (key in wisdomTreeBusinessFieldsSchema.shape)
-        throw badRequest("Document slot overlaps an application field");
+      if (fields.has(key)) throw badRequest("Document slot overlaps an application field");
       documents[key] = await this.document(scope, id);
     }
     return documents;
@@ -272,14 +229,12 @@ export class WisdomTreeOnboardingService {
     cause: unknown
   ) {
     if (!(cause instanceof SdpEarnError)) return;
-    const recovery = wisdomTreeOnboardingRecoverySchema.safeParse(cause.details);
-    if (!recovery.success) return;
-    const reference = recovery.data;
-    if (claimed.entity_type === "business" && reference.organization_guid !== undefined) {
-      await this.link(scope, claimed, { organization_guid: reference.organization_guid });
+    const reference = this.provider.onboardingRecoveryReferences(cause);
+    if (claimed.entity_type === "business" && reference.organizationGuid !== undefined) {
+      await this.link(scope, claimed, { organizationGuid: reference.organizationGuid });
     }
-    if (claimed.entity_type === "individual" && reference.person_guid !== undefined) {
-      await this.link(scope, claimed, { person_guid: reference.person_guid });
+    if (claimed.entity_type === "individual" && reference.personGuid !== undefined) {
+      await this.link(scope, claimed, { personGuid: reference.personGuid });
     }
   }
 
@@ -293,31 +248,20 @@ export class WisdomTreeOnboardingService {
       };
     const guid = row.entity_type === "business" ? row.organization_guid : row.person_guid;
     if (guid === null) throw internalError("Linked onboarding customer has no provider identity");
-    const detail =
-      row.entity_type === "business"
-        ? await this.provider.getBusiness(this.runtime, guid)
-        : await this.provider.getPerson(this.runtime, guid);
-    if (row.entity_type === "business" && detail.org_guid !== guid)
-      throw internalError("WisdomTree returned another customer");
-    if (row.entity_type === "individual" && detail.person_guid !== guid)
-      throw internalError("WisdomTree returned another customer");
+    const detail = await this.provider.getOnboardingCustomerDetail(this.runtime, {
+      entityType: row.entity_type,
+      reference: guid,
+    });
+    if (detail.reference !== guid) throw internalError("The provider returned another customer");
     // Detailed API statuses are open strings. A new status is never approval.
     return {
       counterpartyId: scope.counterpartyId,
       state: row.status,
-      providerStatus: detail.onboarding_status,
+      providerStatus: detail.providerStatus,
       organizationGuid: row.organization_guid,
       personGuid: row.person_guid,
-      // Retail individuals belong to the moderator, not a new child org. Never
-      // promote their organization_guid into a customer-child mapping.
-      corrections:
-        row.entity_type === "business" && "resubmission_reasons" in detail
-          ? detail.resubmission_reasons
-          : undefined,
-      correctionDueAt:
-        row.entity_type === "business" && "correction_due_at" in detail
-          ? detail.correction_due_at
-          : undefined,
+      corrections: detail.corrections,
+      correctionDueAt: detail.correctionDueAt,
     };
   }
 
@@ -326,25 +270,32 @@ export class WisdomTreeOnboardingService {
     if (row.status !== "linked" || row.organization_guid === null)
       throw conflict("A linked business customer is required");
     // Control of the address must be proven before anything is claimed or
-    // written. The claim is globally unique per environment and moderator
-    // registrations are accepted immediately, so an unproven caller could
-    // block the address's real owner forever.
+    // written. The claim is unique per environment and provider, and the
+    // provider's registrations are accepted immediately, so an unproven
+    // caller could block the address's real owner forever.
     await this.assertControlProven(scope, owner, signature);
-    if (!moderator.client_organizations.some((child) => child.guid === row.organization_guid)) {
-      throw conflict("WisdomTree customer is not assigned to the configured moderator");
+    if (!moderator.clientOrganizations.some((child) => child.guid === row.organization_guid)) {
+      throw conflict("Onboarding customer is not assigned to the configured provider identity");
     }
-    const detail = await this.provider.getBusiness(this.runtime, row.organization_guid);
-    if (detail.org_guid !== row.organization_guid || detail.onboarding_status !== "active")
-      throw conflict("WisdomTree customer verification is not active");
+    const detail = await this.provider.getOnboardingCustomerDetail(this.runtime, {
+      entityType: row.entity_type,
+      reference: row.organization_guid,
+    });
+    if (detail.reference !== row.organization_guid || detail.providerStatus !== "active")
+      throw conflict("Onboarding customer verification is not active");
     if (!(await this.repository.claimWallet(scope, owner)))
       throw conflict("Wallet onboarding already claimed; reconcile before retrying");
     try {
-      await this.provider.registerSolanaWallet(this.runtime, row.organization_guid, owner);
+      await this.provider.registerOnboardingWallet(this.runtime, {
+        reference: row.organization_guid,
+        owner,
+      });
     } catch (error) {
-      // The address is globally unique per environment across every customer.
-      // A confirmed rejection releases the unverified claim so it cannot block
-      // the real owner; an uncertain outcome (timeout, 5xx, malformed reply)
-      // keeps the claim — the provider may have accepted the wallet.
+      // The address is unique per environment and provider across every
+      // customer. A confirmed rejection releases the unverified claim so it
+      // cannot block the real owner; an uncertain outcome (timeout, 5xx,
+      // malformed reply) keeps the claim — the provider may have accepted
+      // the wallet.
       if (error instanceof SdpEarnError && isConfirmedWalletRejection(error))
         await this.repository.releaseWallet(scope, owner);
       throw error;
@@ -355,14 +306,14 @@ export class WisdomTreeOnboardingService {
   }
 
   async upload(scope: EarnOnboardingScope, document: { documentType: string; file: File }) {
-    const moderator = await this.provider.getModerator(this.runtime);
+    const moderator = await this.provider.getOnboardingModerator(this.runtime);
     const existing = await this.repository.get(scope);
     if (
       existing !== null &&
       (existing.moderator_guid !== moderator.guid || existing.status === "archived")
     )
       throw conflict("Onboarding customer cannot accept documents");
-    const reference = await this.provider.uploadDocument(this.runtime, document);
+    const reference = await this.provider.uploadOnboardingDocument(this.runtime, document);
     const encrypted = await this.cipher.encrypt(this.documentAad(scope), JSON.stringify(reference));
     return { documentId: await this.repository.saveDocument(scope, encrypted) };
   }
@@ -381,7 +332,7 @@ export class WisdomTreeOnboardingService {
     const encrypted = await this.repository.getDocument(scope, id);
     if (encrypted === null) throw notFound("Onboarding document");
     const raw = await this.cipher.decrypt(this.documentAad(scope), encrypted);
-    const parsed = wisdomTreeUploadedDocumentSchema.safeParse(JSON.parse(raw));
+    const parsed = storedDocumentReferenceSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) throw internalError("Onboarding document reference is invalid");
     return parsed.data;
   }
@@ -389,16 +340,30 @@ export class WisdomTreeOnboardingService {
   async correct(
     scope: EarnOnboardingScope,
     reasonId: number,
-    answer: Omit<WisdomTreeCorrection, "document"> & { documentId?: string }
+    answer: {
+      values?: Record<string, unknown>;
+      explanation?: string;
+      attested?: boolean;
+      documentId?: string;
+    }
   ) {
     const { row } = await this.customer(scope);
     if (row.status !== "linked" || row.organization_guid === null)
       throw conflict("A linked business application is required");
     const { documentId, ...body } = answer;
-    const correction: WisdomTreeCorrection = body;
+    const answerForProvider: {
+      values?: Record<string, unknown>;
+      explanation?: string;
+      attested?: boolean;
+      document?: string;
+    } = body;
     if (documentId !== undefined)
-      correction.document = (await this.document(scope, documentId)).blob_path;
-    await this.provider.answerCorrection(this.runtime, row.organization_guid, reasonId, correction);
+      answerForProvider.document = (await this.document(scope, documentId)).blobPath;
+    await this.provider.answerOnboardingCorrection(this.runtime, {
+      reference: row.organization_guid,
+      reasonId,
+      answer: answerForProvider,
+    });
     return { counterpartyId: scope.counterpartyId, reasonId, answered: true };
   }
 }

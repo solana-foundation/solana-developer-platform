@@ -1,4 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { CounterpartyEntityType } from "@sdp/types/counterparties";
 import type {
   EarnApyType,
   EarnDepositTokenSymbol,
@@ -18,6 +19,7 @@ import type {
 } from "@sdp/types/earn";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import type { SdpEarnError } from "./errors";
 
 /**
  * Runtime context for catalogue/quote/execute calls. Providers read their own
@@ -1192,4 +1194,151 @@ export interface EarnWithdrawalApprovalProvider extends EarnVaultProvider {
     ctx: EarnRuntimeContext,
     input: EarnWithdrawalApprovalVoteInput
   ): Promise<EarnWithdrawalApprovalVoteResult>;
+}
+
+/**
+ * The provider-side operator identity an onboarding deployment's credentials
+ * belong to (WisdomTree's Moderator), with the customer organizations assigned
+ * to it. The API pins every customer mapping to this identity, so rotated
+ * credentials answering a different operator surface as a conflict instead of
+ * silently rebinding customers to a new provider tree.
+ */
+export interface EarnOnboardingModerator {
+  guid: string;
+  clientOrganizations: readonly { guid: string }[];
+}
+
+/** The provider's live KYC/KYB form for one applicant entity type. */
+export interface EarnOnboardingForm {
+  /** Whether the provider accepts a first submission right now. */
+  canCreate: boolean;
+  /**
+   * The provider's own open form — template, sections, choices, CDD
+   * conditions, agreements. The adapter owns this shape; orchestration and
+   * routes pass it through untouched and never cache it (it can echo
+   * configuration, not applicants).
+   */
+  form: Record<string, unknown>;
+}
+
+/** One uploaded document, as the provider stored it. */
+export interface EarnOnboardingDocumentReference {
+  blobPath: string;
+  originalFilename?: string;
+}
+
+/**
+ * One applicant's submission in the provider's own vocabulary. The API route
+ * validates the body against the adapter's schemas; the adapter merges the
+ * uploaded document references into its wire shape and validates the whole
+ * submission at its boundary — the orchestration never learns the fields.
+ */
+export interface EarnOnboardingApplicationSubmission {
+  entityType: CounterpartyEntityType;
+  application: Record<string, unknown>;
+  /** Uploaded documents keyed by the provider's own application slot. */
+  documents?: Record<string, EarnOnboardingDocumentReference>;
+  /** The stored organization reference when this customer is already linked. */
+  linkedOrganizationGuid?: string | null;
+}
+
+/** Provider references a submission created; empty for a rejected or draft-only write. */
+export interface EarnOnboardingApplicationResult {
+  organizationGuid?: string;
+  personGuid?: string;
+}
+
+/** One linked customer's live provider record, read by reference. */
+export interface EarnOnboardingCustomerDetail {
+  /** The reference this detail describes; a mismatch is orchestration drift. */
+  reference: string;
+  /** Open-string provider review status; a new status is never approval. */
+  providerStatus: string;
+  corrections?: readonly Record<string, unknown>[];
+  correctionDueAt?: string | null;
+}
+
+/** One correction answer, in the provider's own vocabulary. */
+export interface EarnOnboardingCorrectionAnswer {
+  values?: Record<string, unknown>;
+  explanation?: string;
+  attested?: boolean;
+  /** The provider blob path of a previously uploaded document. */
+  document?: string;
+}
+
+/** The scope dimensions a wallet-registration proof must bind. */
+export interface EarnOnboardingRegistrationScope {
+  organizationId: string;
+  projectId: string;
+  environment: SdpEnvironment;
+  counterpartyId: string;
+}
+
+/**
+ * Optional capability: KYC/KYB customer onboarding for regulated instruments.
+ *
+ * Exists so a regulated provider's customers can reach its rails at all
+ * (WisdomTree fund tokens refuse unverified wallets — see
+ * `EarnDepositEligibilityProvider`, the gate this feeds). The API owns the
+ * SHARED orchestration — durable claims, identity links, encrypted document
+ * references, wallet claim/verify/register and recovery — while the adapter
+ * owns every provider shape: forms, application and correction vocabulary,
+ * wire submissions, the wallet-registration proof message and the recovery
+ * identifiers its errors carry. Adding a provider is implementing the
+ * capability and mounting the shared route stack for it — no second service.
+ *
+ * Discovered via `supportsOnboarding` (capabilities.ts), never provider-id
+ * checks. Onboarding state is scoped by `provider` in the API's onboarding
+ * tables, so two providers onboard the same counterparty and register the
+ * same wallet independently; each provider's cross-customer uniqueness rules
+ * stay inside its own scope.
+ */
+export interface EarnOnboardingProvider extends EarnVaultProvider {
+  /** Verify the live operator identity and its assigned customer organizations. */
+  getOnboardingModerator(ctx: EarnRuntimeContext): Promise<EarnOnboardingModerator>;
+  /** The provider's current live form. Forms are always live; never auto-accept agreements. */
+  getOnboardingForm(
+    ctx: EarnRuntimeContext,
+    entityType: CounterpartyEntityType
+  ): Promise<EarnOnboardingForm>;
+  /**
+   * The application field names the provider's own vocabulary defines for one
+   * entity type, so the orchestration can refuse a document slot that would
+   * shadow one BEFORE anything is claimed.
+   */
+  onboardingApplicationFields(entityType: CounterpartyEntityType): ReadonlySet<string>;
+  saveOnboardingApplication(
+    ctx: EarnRuntimeContext,
+    submission: EarnOnboardingApplicationSubmission
+  ): Promise<EarnOnboardingApplicationResult>;
+  getOnboardingCustomerDetail(
+    ctx: EarnRuntimeContext,
+    input: { entityType: CounterpartyEntityType; reference: string }
+  ): Promise<EarnOnboardingCustomerDetail>;
+  uploadOnboardingDocument(
+    ctx: EarnRuntimeContext,
+    document: { documentType: string; file: File }
+  ): Promise<EarnOnboardingDocumentReference>;
+  answerOnboardingCorrection(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; reasonId: number; answer: EarnOnboardingCorrectionAnswer }
+  ): Promise<void>;
+  registerOnboardingWallet(
+    ctx: EarnRuntimeContext,
+    input: { reference: string; owner: string }
+  ): Promise<void>;
+  /**
+   * The exact bytes a customer wallet must sign to prove control of itself
+   * for THIS provider's registration: provider-branded, scope-bound, and
+   * replay-safe across customers, projects and wallets without a challenge
+   * round trip.
+   */
+  walletRegistrationMessage(scope: EarnOnboardingRegistrationScope, owner: string): Uint8Array;
+  /**
+   * The durable identity references a failed submission MAY already have
+   * created, recovered from the provider error's typed details. A timeout or
+   * malformed reply after a partial write is recoverable only through these.
+   */
+  onboardingRecoveryReferences(error: SdpEarnError): EarnOnboardingApplicationResult;
 }

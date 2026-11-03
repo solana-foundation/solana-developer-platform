@@ -1,6 +1,9 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
-import { WisdomTreeOnboardingClient } from "@sdp/earn/providers/wisdomtree/onboarding";
+import {
+  wisdomTreeOnboardingClient,
+  wisdomTreeWalletRegistrationMessage,
+} from "@sdp/earn/providers/wisdomtree/onboarding";
 import type { CustodyConnectionBindingLifecycle } from "@sdp/types/custody";
 import { generateKeyPairSigner, getBase58Decoder, signBytes } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,10 +20,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
-import {
-  WisdomTreeOnboardingService,
-  wisdomTreeWalletRegistrationMessage,
-} from "./wisdomtree-onboarding.service";
+import { EarnOnboardingService } from "./earn-onboarding.service";
 
 const moderatorGuid = "a3c9d5b7-8a4d-4e35-9c1e-417cba654e2c";
 const childGuid = "8b6f0d3e-2c71-4f5a-a1d9-3e4c7b2f9a10";
@@ -29,19 +29,22 @@ const scope: EarnOnboardingScope = {
   organizationId: TEST_ORG.id,
   projectId: "prj_onboarding",
   environment: "sandbox",
+  provider: "wisdomtree",
   counterpartyId: "cp_onboarding",
 };
 const sibling: EarnOnboardingScope = { ...scope, counterpartyId: "cp_other" };
 const db = getDb(env);
 const repo = createPostgresEarnOnboardingRepository(db);
-const provider = new WisdomTreeOnboardingClient();
+// Spies target the shared wire adapter; the service receives the registry
+// client that forwards to it, exactly as the production handlers resolve it.
+const provider = wisdomTreeOnboardingClient;
 const runtime = { environment: "sandbox" as const, env: {} };
 const cipher = createEarnOnboardingCipher({
   EARN_ONBOARDING_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 });
-const service = new WisdomTreeOnboardingService(
+const service = new EarnOnboardingService(
   repo,
-  provider,
+  new WisdomTreeEarnClient(),
   cipher,
   runtime,
   new CustodyConfigStore(db, env)
