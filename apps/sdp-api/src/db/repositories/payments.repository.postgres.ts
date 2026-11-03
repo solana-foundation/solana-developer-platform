@@ -240,6 +240,7 @@ function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
     confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
     finalization_last_polled_at:
       (row.finalization_last_polled_at as string | null | undefined) ?? null,
+    audit_intent_id: (row.audit_intent_id as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -645,6 +646,29 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async recordTransferAuditIntent(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          SIGNED_SUBMISSION_STATUS_CLAUSE,
+          "signed_transaction IS NULL",
+          "submission_started_at IS NULL",
+        ],
+        extraValues: [input.transferId, ...SIGNED_SUBMISSION_STATUS_VALUES],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers SET audit_intent_id = ? WHERE ${scope.where} RETURNING id`
+        )
+        .bind(input.auditIntentId, ...scope.values)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
     async updateOnchainTransferForRamp(input) {
       return applyRampTransition(
         {
@@ -723,7 +747,12 @@ export function createPostgresPaymentsRepository(
           ],
           clauseValues: [],
           // The released claim's key is no longer this row's: a retry under it runs again.
-          assignments: ["idempotency_key = NULL", "idempotency_fingerprint = NULL"],
+          // Its audit intent is closed; the next claim records its own.
+          assignments: [
+            "idempotency_key = NULL",
+            "idempotency_fingerprint = NULL",
+            "audit_intent_id = NULL",
+          ],
           assignmentValues: [],
         }
       );

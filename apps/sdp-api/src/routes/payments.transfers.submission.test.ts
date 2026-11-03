@@ -1,5 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
   generateKeyPairSigner,
@@ -17,6 +18,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -46,7 +48,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
-  installClusterRpcStub();
+  const rpc = installClusterRpcStub();
   describe("signed submission boundary", () => {
     async function latestTransferRow() {
       const row = (await listTransferRows())[0];
@@ -313,6 +315,78 @@ describe("Payments routes — signed submission", () => {
         "sdp_api_payment_submission_unresolved"
       );
       warn.mockRestore();
+    });
+
+    it("closes the open audit intent when the tracker settles an ambiguous broadcast", async () => {
+      await mockSignedSubmissionAdapter();
+      sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+      vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+
+      const res = await transferRequest("0.001");
+      expect(res.status).toBe(200);
+      const { transfer } = (await readTransferResponse(res)).data;
+      expect(transfer.status).toBe("processing");
+
+      const audit = new AuditService(getDb(env));
+      const outcomeKey = {
+        organizationId: TEST_ORG.id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+      } as const;
+      const intents = await getDb(env)
+        .prepare(
+          `SELECT resource_id FROM audit_logs
+           WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+             AND metadata::jsonb ->> 'auditPhase' = 'intent'
+             AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+        )
+        .bind(transfer.id)
+        .all<{ resource_id: string }>();
+      expect(intents.results).toHaveLength(1);
+      const intentId = intents.results[0]?.resource_id;
+      expect((await readTransferRow(transfer.id)).audit_intent_id).toBe(intentId);
+      expect(await audit.findCriticalOutcome(outcomeKey)).toBeNull();
+
+      rpc.answer("getSignatureStatuses", {
+        context: { slot: 600 },
+        value: [{ slot: 500, confirmations: null, confirmationStatus: "finalized", err: null }],
+      });
+      await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        trackPendingTransfers(env)
+      );
+
+      expect(await readTransferRow(transfer.id)).toMatchObject({ status: "finalized", slot: 500 });
+      expect(await audit.findCriticalOutcome(outcomeKey)).toMatchObject({
+        status: "success",
+        metadata: {
+          auditPhase: "outcome",
+          auditIntentId: intentId,
+          status: "finalized",
+          signature: transfer.signature,
+          slot: "500",
+        },
+      });
+      const open = await getDb(env)
+        .prepare(
+          `SELECT count(*)::integer AS count FROM audit_logs intent
+           WHERE intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+             AND NOT EXISTS (
+               SELECT 1 FROM audit_logs outcome
+               WHERE outcome.metadata::jsonb ->> 'auditPhase' = 'outcome'
+                 AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+             )`
+        )
+        .first<{ count: number }>();
+      expect(open?.count).toBe(0);
+      const outcomes = await getDb(env)
+        .prepare(
+          `SELECT count(*)::integer AS count FROM audit_logs
+           WHERE metadata::jsonb ->> 'auditIntentId' = ?`
+        )
+        .bind(intentId)
+        .first<{ count: number }>();
+      expect(outcomes?.count).toBe(1);
     });
 
     it("fails a transfer whose first broadcast preflight refuses, keeping its signature", async () => {

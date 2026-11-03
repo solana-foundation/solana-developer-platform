@@ -55,6 +55,8 @@ export interface PaymentTransferRow {
   idempotency_fingerprint: string | null;
   confirmed_at: string | null;
   finalization_last_polled_at: string | null;
+  /** The audit intent the sending request opened; a job that settles the row closes it. */
+  audit_intent_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -284,6 +286,16 @@ export interface PaymentsRepository {
     lastValidBlockHeight: string;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Records the audit intent a request opened for an unsent transfer, so the job
+   * that settles the row can close it. Matches only a row with no signed bytes.
+   */
+  recordTransferAuditIntent(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    auditIntentId: string;
+  }): Promise<boolean>;
   markTransferSubmissionStarted(input: {
     transferId: string;
     organizationId: string;

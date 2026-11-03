@@ -106,7 +106,7 @@ import {
 } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, type AuditLogEntry, AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -1012,6 +1012,41 @@ async function executeFireblocksTransfer(
   return success(c, { transfer: mapTransferRow(updated) });
 }
 
+/**
+ * Opens a transfer's critical audit intent and records its id on the row, so the
+ * job that later settles an ambiguous submission closes this intent in the same
+ * transaction as the settle. A row the id cannot be recorded on is never sent:
+ * the intent is closed as failed and the error refuses the send.
+ */
+async function beginTransferAudit(
+  c: AppContext,
+  auditService: AuditService,
+  transfer: TransferRow,
+  entry: AuditLogEntry
+): Promise<AuditIntent> {
+  const intent = await auditService.beginCritical(c, entry);
+  let failure: unknown = internalError("Payment transfer was not ready to record its audit intent");
+  try {
+    if (
+      await getPaymentsRepository(c).recordTransferAuditIntent({
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        projectId: transfer.project_id,
+        auditIntentId: intent.id,
+      })
+    ) {
+      return intent;
+    }
+  } catch (error) {
+    failure = error;
+  }
+  await auditService.completeCritical(c, intent, {
+    status: "failure",
+    metadata: { error: "Audit intent was not recorded on the transfer" },
+  });
+  throw failure;
+}
+
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer, counterpartyAccount } =
@@ -1093,7 +1128,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>;
   try {
-    auditIntent = await auditService.beginCritical(c, {
+    auditIntent = await beginTransferAudit(c, auditService, transfer, {
       action: "transfer",
       resourceType: "payment_transfer",
       resourceId: transfer.id,
