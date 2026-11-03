@@ -258,10 +258,15 @@ export class WisdomTreeOnboardingClient {
     if (submission.entityType === "business") {
       const application: Record<string, unknown> = { ...submission.application };
       for (const [slot, document] of Object.entries(submission.documents ?? {})) {
-        application[slot] = {
-          blob_path: document.blobPath,
-          original_filename: document.originalFilename,
-        };
+        // An upload may come back without a filename. Keep the key absent
+        // rather than undefined: the business catchall validates slots as
+        // JSON, and an explicit undefined value would fail the parse after
+        // the customer was claimed, forcing operator recovery.
+        const upload: Record<string, unknown> = { blob_path: document.blobPath };
+        if (document.originalFilename !== undefined) {
+          upload.original_filename = document.originalFilename;
+        }
+        application[slot] = upload;
       }
       if (
         submission.linkedOrganizationGuid !== null &&
