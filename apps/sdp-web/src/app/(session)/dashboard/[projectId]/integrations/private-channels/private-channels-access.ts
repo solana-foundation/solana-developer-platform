@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { privateChannels } from "@/flags";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 
 /**
  * Flag + auth gate shared by every Private Channels page.
@@ -16,10 +15,7 @@ export async function requirePrivateChannelsAccess(): Promise<void> {
     notFound();
   }
 
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

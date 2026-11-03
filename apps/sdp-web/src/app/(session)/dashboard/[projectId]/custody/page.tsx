@@ -10,7 +10,6 @@ import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projec
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { WalletsOverviewSkeleton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
@@ -75,10 +74,7 @@ async function getCustodyWallets(
 }
 
 export default async function CustodyPage() {
-  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const [t, { orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!orgId) {
     redirect("/dashboard");
   }

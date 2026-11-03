@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ui } from "@clerk/ui";
 import type { ReactNode } from "react";
 import { getTranslations } from "@/i18n/server";
+import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 
 const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
   "https://ecosystem.solana.com",
@@ -36,12 +37,12 @@ export default async function SessionLayout({ children }: { children: ReactNode 
           forgotPasswordAlternativeMethods: { title: t("Shared.authShell.forgotPasswordTitle") },
         },
       }}
-      signInUrl="/sign-in"
+      signInUrl={AUTH_ENTRY_PATH}
       signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
       allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
-      afterSignOutUrl="/sign-in"
+      afterSignOutUrl={AUTH_ENTRY_PATH}
     >
       {children}
     </ClerkProvider>

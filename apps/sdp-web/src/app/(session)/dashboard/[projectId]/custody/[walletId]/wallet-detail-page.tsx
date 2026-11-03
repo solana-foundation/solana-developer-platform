@@ -9,7 +9,6 @@ import {
 import { formatWalletPurposeLabel } from "@/app/(session)/dashboard/[projectId]/custody/wallet-format-utils";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestMemberRole, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
@@ -139,15 +138,12 @@ function toWalletPageView(
  * page); balances and the issued-token names are handed to the view as promises, so each part streams in on its own instead of holding the page.
  */
 export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
-  const [t, { userId, orgId }, { walletId }, issuanceEnabled] = await Promise.all([
+  const [t, { orgId }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     params,
     issuance(),
   ]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
   if (!orgId) {
     redirect("/dashboard");
   }

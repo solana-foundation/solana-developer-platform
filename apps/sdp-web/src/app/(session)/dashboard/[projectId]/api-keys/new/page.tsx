@@ -4,17 +4,13 @@ import { grantableActionsInChannel } from "@/app/(session)/dashboard/[projectId]
 import { fetchApiKeyAuthoringWallets } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewApiKeyPage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

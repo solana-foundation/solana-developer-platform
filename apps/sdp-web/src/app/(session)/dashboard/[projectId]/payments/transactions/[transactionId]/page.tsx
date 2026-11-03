@@ -4,7 +4,6 @@ import { fetchCounterparty } from "@/app/(session)/dashboard/[projectId]/payment
 import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchTransactionDetail } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-detail.data";
 import { TransactionDetailWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-detail-workspace";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
@@ -16,10 +15,7 @@ export default async function TransactionDetailRoute({
 }: {
   params: Promise<{ transactionId: string }>;
 }) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

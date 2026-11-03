@@ -5,6 +5,7 @@ import { AuthTermsNotice } from "@/components/auth-terms-notice";
 import { waitlistHref } from "@/components/homepage/homepage-links";
 import { homepageOpenSignup } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
 
 export default async function SignInPage() {
   const [t, openSignup] = await Promise.all([getTranslations(), homepageOpenSignup()]);
@@ -14,7 +15,7 @@ export default async function SignInPage() {
 
   return (
     <AuthPageShell action={action}>
-      <SignIn routing="path" path="/sign-in" appearance={authAppearance} />
+      <SignIn routing="path" path={AUTH_ENTRY_PATH} appearance={authAppearance} />
       <AuthTermsNotice />
     </AuthPageShell>
   );

@@ -7,17 +7,13 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring.data";
 import { ApiKeyAuthoringWorkspace } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
 export default async function EditApiKeyPage({ params }: { params: Promise<{ keyId: string }> }) {
-  const [{ userId, orgId }, { keyId }] = await Promise.all([auth(), params]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const [{ orgId }, { keyId }] = await Promise.all([auth(), params]);
   if (!orgId) {
     redirect("/dashboard");
   }

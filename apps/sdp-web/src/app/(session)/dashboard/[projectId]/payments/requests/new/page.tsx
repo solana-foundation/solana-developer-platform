@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { PaymentRequestCreateWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-request-create-workspace";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { redirectUnlessCanWrite } from "@/lib/require-write-access";
@@ -10,10 +9,7 @@ import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 export const dynamic = "force-dynamic";
 
 export default async function PaymentRequestCreatePage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

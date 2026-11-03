@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import { heliusRings } from "@/flags";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createRequestScopedSdpApiClients } from "@/lib/sdp-api";
 import { HeliusRingsWorkspace } from "./helius-rings-workspace";
 
@@ -23,10 +22,7 @@ export default async function HeliusRingsPage() {
   if (!(await heliusRings())) {
     notFound();
   }
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }
