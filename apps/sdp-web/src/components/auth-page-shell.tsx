@@ -15,9 +15,7 @@ export function SdpProductLockup({ productName }: { productName: string }) {
           className="size-4.5 bg-primary mask-[url(/homepage/logos/sdp-mark.svg)] mask-contain mask-center mask-no-repeat"
         />
       </span>
-      <span className="w-min text-nav font-medium leading-none text-primary">
-        {productName}
-      </span>
+      <span className="w-min text-nav font-medium leading-none text-primary">{productName}</span>
     </div>
   );
 }
