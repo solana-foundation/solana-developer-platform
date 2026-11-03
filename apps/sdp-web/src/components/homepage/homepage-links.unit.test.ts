@@ -1,6 +1,6 @@
 import { DEFAULT_SDP_AI_LLMS_URL } from "@sdp/types/site";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { SIGN_IN_PATH } from "@/lib/clerk-config";
 import {
   DASHBOARD_PATH,
   externalLinkProps,
@@ -23,7 +23,7 @@ describe("resolveHomepageLinks", () => {
     const links = resolveHomepageLinks({ openSignup: true, ...labels });
 
     expect(links.signup).toEqual({ href: "/sign-up", label: "Create account", external: false });
-    expect(links.signIn).toBe(AUTH_ENTRY_PATH);
+    expect(links.signIn).toBe(SIGN_IN_PATH);
   });
 
   it("sends visitors to the off-site waitlist while open signup is off", () => {
