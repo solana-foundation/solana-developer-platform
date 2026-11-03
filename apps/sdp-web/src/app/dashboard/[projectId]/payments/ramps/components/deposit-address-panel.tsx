@@ -34,11 +34,16 @@ import {
   PAYMENT_STATUS_TONE,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { DepositAddressSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
+import {
+  DepositAddressSkeleton,
+  RECENT_DEPOSIT_COLUMN_WIDTHS,
+  RecentDepositsTableSkeleton,
+} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
 const RECENT_DEPOSIT_COUNT = 5;
@@ -303,6 +308,7 @@ function RecentDeposits({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const href = useProjectHref();
   let body: ReactNode;
   if (depositsError) {
     body = (
@@ -311,7 +317,7 @@ function RecentDeposits({
       </p>
     );
   } else if (deposits === undefined) {
-    body = <div className="h-32 animate-pulse rounded-control bg-fill-subtle" />;
+    body = <RecentDepositsTableSkeleton />;
   } else if (deposits.length === 0) {
     body = (
       <p className="py-6 text-body text-tertiary">
@@ -321,13 +327,11 @@ function RecentDeposits({
   } else {
     body = (
       <Table className="table-fixed rounded-none border-0 refresh:-mx-3">
-        {/* Where the design's columns start in its 660px column: Amount at 136px, Contact at
-            319, Created at 577 (its own table runs wider than the card and is clipped). */}
+        {/* The design's own table runs wider than the card and is clipped. */}
         <colgroup>
-          <col className="w-[19.5%]" />
-          <col className="w-[26.5%]" />
-          <col className="w-[37.75%]" />
-          <col className="w-[16.25%]" />
+          {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (
+            <col key={width} className={width} />
+          ))}
         </colgroup>
         <TableHeader>
           <TableRow>
@@ -382,7 +386,9 @@ function RecentDeposits({
         {/* The design's block action is its 30px control. */}
         <Button asChild variant="outline" size="sm" className="[--button-height-md:1.875rem]">
           <Link
-            href={`/dashboard/payments/transactions?module=payments&custodyWalletId=${encodeURIComponent(wallet.id)}`}
+            href={href(
+              `/dashboard/payments/transactions?module=payments&custodyWalletId=${encodeURIComponent(wallet.id)}`
+            )}
           >
             {t("DashboardPayments.depositAddress.openInTransactions")}
           </Link>
@@ -410,6 +416,7 @@ export function DepositAddressPanel({
   // Wallet setup is for custody managers; anyone else gets the empty state alone.
   const canManageCustody = useDashboardWorkspace().dashboardAccess.capabilities.canManageCustody;
   const locale = useLocale();
+  const href = useProjectHref();
   const cluster = useSolanaCluster();
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -448,7 +455,7 @@ export function DepositAddressPanel({
         action={
           canManageCustody ? (
             <Button asChild>
-              <Link href="/dashboard/wallets/setup">
+              <Link href={href("/dashboard/wallets/setup")}>
                 <PlusIcon className="size-4" aria-hidden="true" />
                 {t("DashboardPayments.depositAddress.createWallet")}
               </Link>

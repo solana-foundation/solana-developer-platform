@@ -47,7 +47,9 @@ Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes f
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.
 - Browser calls to `/api/*` go through `dashboardRequest` / `dashboardFetch` (`@/lib/dashboard-fetch`).
-- Links use `useProjectHref()` (client) or `requestProjectHref()` (server); route comparisons use `useDashboardPathname()`.
+- Links use `useProjectHref()` (client) or `requestProjectHref()` (server); route comparisons use `useDashboardPathname()`. `src/lib/dashboard-project-links.unit.test.ts` fails a literal `/dashboard/…` link or redirect target; bare `/dashboard` (choose a Project) is the one unscoped target.
+- A missing page or an unmatched address inside a Project renders `[projectId]/not-found.tsx` in the shell; the `[...unmatched]` catch-all exists so unmatched URLs reach it instead of the root 404.
+- The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
 - Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
 
 # Stage smoke

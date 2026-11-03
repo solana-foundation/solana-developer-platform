@@ -2,6 +2,7 @@
 
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -63,6 +64,11 @@ type DashboardPageConfig = {
     href: string;
     label: string;
   };
+  /**
+   * Holds the place of the mark a page sets beside its title (a wallet's provider mark) until the
+   * page names itself, so the header is its final height from the first frame.
+   */
+  titleMark?: ReactNode;
 };
 
 export type DashboardHeaderActionConfig = {
@@ -329,7 +335,8 @@ export function StackedDashboardTopBar({
           ) : null}
           {mark ? (
             <div className="flex min-w-0 items-center gap-4">
-              <span className="shrink-0">{mark}</span>
+              {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
+              <span className="flex shrink-0">{mark}</span>
               <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
                 {title}
               </h1>
@@ -846,9 +853,10 @@ function getWalletRoutePageConfig(
   if (!isWalletDetail) return null;
 
   // The wallet names itself (and sets its provider mark and star) through DashboardPageTitle;
-  // "Wallet" holds the place until it does.
+  // "Wallet" and a mark-sized block hold the place until it does.
   return {
     title: t("Shared.dashboardShell.wallet"),
+    titleMark: <SkeletonBlock className="size-12 rounded-full" />,
     contentWidthClass: REFRESH_PAGE_WIDTH,
     backAction: {
       href: "/dashboard/wallets",

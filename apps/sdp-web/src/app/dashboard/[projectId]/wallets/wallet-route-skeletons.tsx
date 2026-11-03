@@ -1,5 +1,6 @@
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
+import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -77,6 +78,11 @@ function WalletCardSkeleton() {
 export function WalletsOverviewSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
+      {/* The list sets its toolbar in the header's tab row, the row's only content on a phone,
+          where the tabs are hidden; held here, the row is its height before the list lands. */}
+      <DashboardHeaderTabsTrailing>
+        <SkeletonBlock className="h-7 w-24" />
+      </DashboardHeaderTabsTrailing>
       <LoadingRegion layout="wallets-overview">
         <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid-skeleton>
           {FOUR_ITEMS.map((item) => (

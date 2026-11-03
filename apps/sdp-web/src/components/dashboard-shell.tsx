@@ -804,7 +804,13 @@ export function DashboardShell({
                       : "px-3 py-5 md:p-6"
                 )}
               >
+                {/* One frame per route. Next already remounts the page on a route change, so the
+                header and content wrappers were the only nodes kept across it; the header's height
+                and column differ from route to route, and a kept frame moved under the new page
+                (a layout shift to the browser). Keyed, the browser sees a page replaced. */}
                 <div
+                  key={pathname}
+                  data-dashboard-page-frame=""
                   className={[
                     "min-w-0 w-full",
                     shouldLockViewportScroll
@@ -861,7 +867,9 @@ export function DashboardShell({
                           hasHeaderTabs={hasHeaderTabs}
                           action={headerAction}
                           above={stacksBackAboveTitle ? backAction : undefined}
-                          mark={activeTitleOverride?.mark}
+                          mark={
+                            activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark
+                          }
                           layout={isRefresh ? "refresh" : "base"}
                           utilities={
                             demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined
