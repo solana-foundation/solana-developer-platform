@@ -1,3 +1,9 @@
+import {
+  readStamp,
+  withMinimumRpcSlot,
+  withReadFloor,
+  withRpcReadContext,
+} from "@sdp/rpc/read-context";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { PLUME_PROGRAMS, PLUME_VAULTS } from "@sdp/types/plume-programs";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
@@ -89,7 +95,7 @@ function fixture() {
     // SAFETY: this test transport supplies exactly the JSON-RPC envelope for this one Kit method.
     return { jsonrpc: "2.0", id: p.id, result } as T;
   };
-  const rpc: SolanaRpc = createSolanaRpcFromTransport(transport);
+  const rpc: SolanaRpc = createSolanaRpcFromTransport(withRpcReadContext(transport));
   return {
     rpc,
     keyCounts,
@@ -118,6 +124,22 @@ describe("Plume RPC budget", () => {
       readPlumeVault(f.rpc, vault, owner, usdc),
     ]);
     expect(f.keyCounts).toHaveLength(1);
+  });
+  it("never joins a shared read under a minimum-slot scope", async () => {
+    const f = fixture();
+    const live = readPlumeVault(f.rpc, vault, owner, usdc);
+    const scoped = withMinimumRpcSlot(1, () => readPlumeVault(f.rpc, vault, owner, usdc));
+    await Promise.all([live, scoped]);
+    // The scoped read sends its own request, so the context-aware transport
+    // validates its own scope; a joined response observes no RPC context.
+    expect(f.keyCounts).toEqual([5, 3]);
+  });
+  it("never joins a request sent before the caller's read floor", async () => {
+    const f = fixture();
+    const live = readPlumeVault(f.rpc, vault, owner, usdc);
+    const floored = withReadFloor(readStamp(), () => readPlumeVault(f.rpc, vault, owner, usdc));
+    await Promise.all([live, floored]);
+    expect(f.keyCounts).toEqual([5, 3]);
   });
   it("never caches a failed identity proof", async () => {
     const f = fixture();

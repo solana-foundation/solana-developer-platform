@@ -1,3 +1,4 @@
+import { currentMinimumRpcSlot, readFloor, readStamp } from "@sdp/rpc/read-context";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
 import { PLUME_PROGRAMS, type PlumeVaultDeployment } from "@sdp/types/plume-programs";
@@ -86,11 +87,29 @@ async function readPlumeVaultOnce(
   return { shareAta, shares: token.amount, shareAccountExists: true };
 }
 
-const inFlightReads = new WeakMap<
-  SolanaRpc,
-  Map<string, Promise<Awaited<ReturnType<typeof readPlumeVaultOnce>>>>
->();
-/** Share only concurrent identical reads; each subsequent operation reads live holdings. */
+const inFlightReads = new WeakMap<SolanaRpc, Map<string, SharedPlumeRead>>();
+
+interface SharedPlumeRead {
+  /** `readStamp()` taken before the request was sent. */
+  stamp: number;
+  /** The sender's minimum-slot scope, if any: a scoped read never shares. */
+  minimumSlot?: number;
+  response: Promise<Awaited<ReturnType<typeof readPlumeVaultOnce>>>;
+}
+
+/**
+ * Whether the current caller may join an in-flight shared read. A caller with
+ * a minimum-slot scope always sends its own request, so the context-aware
+ * transport validates its own scope, and no caller joins one sent before its
+ * read floor. Only unscoped live reads share.
+ */
+function canJoinPlumeRead(entry: SharedPlumeRead): boolean {
+  if (currentMinimumRpcSlot() !== undefined || entry.minimumSlot !== undefined) return false;
+  const floor = readFloor();
+  return floor === undefined || entry.stamp > floor;
+}
+
+/** Share only unscoped concurrent identical reads; each subsequent operation reads live holdings. */
 export function readPlumeVault(
   rpc: SolanaRpc,
   vault: PlumeVaultDeployment,
@@ -104,8 +123,14 @@ export function readPlumeVault(
   }
   const key = `${vault.shareMint}:${owner}:${usdc}`;
   const existing = reads.get(key);
-  if (existing) return existing;
-  const pending = readPlumeVaultOnce(rpc, vault, owner, usdc).finally(() => reads.delete(key));
-  reads.set(key, pending);
-  return pending;
+  if (existing && canJoinPlumeRead(existing)) return existing.response;
+  const entry: SharedPlumeRead = {
+    stamp: readStamp(),
+    minimumSlot: currentMinimumRpcSlot(),
+    response: readPlumeVaultOnce(rpc, vault, owner, usdc).finally(() => {
+      if (reads.get(key) === entry) reads.delete(key);
+    }),
+  };
+  reads.set(key, entry);
+  return entry.response;
 }

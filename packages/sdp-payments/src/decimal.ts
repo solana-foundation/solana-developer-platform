@@ -88,7 +88,11 @@ export function addDecimalAmounts(left: string, right: string): string {
 export function multiplyDecimalAmounts(left: string, right: string): string {
   return decimalFixedPointToString(
     multiplyDecimalFixedPoint(
-      parseAmount(left, decimalScale(left)),
+      // The product lands at the left operand's scale and the library refuses
+      // an inexact rescale, so the left operand carries the two inputs'
+      // combined precision: every product of a d1- and a d2-scale decimal is
+      // exact at d1+d2 fractional digits.
+      parseAmount(left, decimalScale(left) + decimalScale(right)),
       parseAmount(right, decimalScale(right))
     )
   );
