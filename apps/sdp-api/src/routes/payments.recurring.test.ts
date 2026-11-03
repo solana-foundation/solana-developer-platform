@@ -11,6 +11,8 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
+  type PaymentSubscriptionCollectionAttemptStatus,
+  type PaymentTransferStatus,
   RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
@@ -4805,12 +4807,12 @@ describe("Payments routes — recurring", () => {
     const transfer = await getDb(env)
       .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
       .bind(transferId)
-      .first<{ status: string; signature: string | null }>();
+      .first<{ status: PaymentTransferStatus; signature: string | null }>();
     expect(transfer).toEqual({ status: "processing", signature: savedSignature });
     const attempt = await getDb(env)
       .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
       .bind(attemptId)
-      .first<{ status: string }>();
+      .first<{ status: PaymentSubscriptionCollectionAttemptStatus }>();
     expect(attempt?.status).toBe("processing");
     // Recovery sends nothing of its own.
     expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBeforeCollect);
@@ -9522,7 +9524,7 @@ describe("Payments routes — recurring", () => {
         )
         .bind(recurringPaymentId)
         .first<{
-          status: string;
+          status: PaymentRecurringPaymentStatus;
           lease_id: string | null;
           plan_creation_signature: string | null;
           authorization_signature: string | null;
@@ -9687,7 +9689,8 @@ describe("Payments routes — recurring", () => {
               WHERE recurring_payment_id = ?`
           )
           .bind(activated.id)
-          .first<{ status: string; plan_update_signature: string | null; error: string | null }>()
+          .first<{
+            status: PaymentRecurringPaymentAttemptStatus; plan_update_signature: string | null; error: string | null }>()
       );
       // The send was saved before the takeover; nothing after it was written.
       expect(attempt.status).toBe("processing");
