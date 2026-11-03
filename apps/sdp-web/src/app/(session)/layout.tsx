@@ -2,12 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ui } from "@clerk/ui";
 import type { ReactNode } from "react";
 import { getTranslations } from "@/i18n/server";
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
-
-const ALLOWED_SATELLITE_REDIRECT_ORIGINS = [
-  "https://ecosystem.solana.com",
-  "https://bookface-git-main-solana-foundation.vercel.app",
-];
+import { ALLOWED_SATELLITE_REDIRECT_ORIGINS, SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 
 // `dynamic` hands the request's auth to the client as initial state, so `useAuth()` is loaded on
 // the server render and the first client render instead of after clerk-js boots. Clerk reads the
@@ -37,12 +32,12 @@ export default async function SessionLayout({ children }: { children: ReactNode 
           forgotPasswordAlternativeMethods: { title: t("Shared.authShell.forgotPasswordTitle") },
         },
       }}
-      signInUrl={AUTH_ENTRY_PATH}
-      signUpUrl="/sign-up"
+      signInUrl={SIGN_IN_PATH}
+      signUpUrl={SIGN_UP_PATH}
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
       allowedRedirectOrigins={ALLOWED_SATELLITE_REDIRECT_ORIGINS}
-      afterSignOutUrl={AUTH_ENTRY_PATH}
+      afterSignOutUrl={SIGN_IN_PATH}
     >
       {children}
     </ClerkProvider>

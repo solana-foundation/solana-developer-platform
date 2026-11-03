@@ -3,16 +3,16 @@ import { authAppearance } from "@/components/auth-appearance";
 import { AuthPageShell } from "@/components/auth-page-shell";
 import { AuthTermsNotice } from "@/components/auth-terms-notice";
 import { getTranslations } from "@/i18n/server";
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 
 export default async function SignUpPage() {
   const t = await getTranslations();
 
   return (
     <AuthPageShell
-      action={{ href: AUTH_ENTRY_PATH, label: t("Homepage.cta.signIn"), external: false }}
+      action={{ href: SIGN_IN_PATH, label: t("Homepage.cta.signIn"), external: false }}
     >
-      <SignUp routing="path" path="/sign-up" appearance={authAppearance} />
+      <SignUp routing="path" path={SIGN_UP_PATH} appearance={authAppearance} />
       <AuthTermsNotice />
     </AuthPageShell>
   );
