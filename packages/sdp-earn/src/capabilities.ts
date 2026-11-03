@@ -303,6 +303,9 @@ const ONBOARDING_METHODS = [
  * design: onboarding feeds the eligibility gate, it never implies one.
  */
 export function supportsOnboarding(client: EarnVaultProvider): client is EarnOnboardingProvider {
+  // SAFETY: the cast only builds a presence probe for the optional capability
+  // methods; every ONBOARDING_METHODS key is typeof-checked below, and the
+  // client is narrowed only when all of them are functions.
   const candidate = client as Partial<Record<(typeof ONBOARDING_METHODS)[number], unknown>>;
   return ONBOARDING_METHODS.every((method) => typeof candidate[method] === "function");
 }
