@@ -296,8 +296,10 @@ const earnExternalWalletWithdrawalFields = {
     .openapi({
       description:
         "The redemption route to build: `standard` queues a provider-managed order for a later " +
-        "payout, `instant` redeems atomically. Defaults to `standard`; a provider without the " +
-        "requested route refuses the build.",
+        "payout, `instant` is the provider's faster route but still waits for cross-chain " +
+        "delivery — chain confirmation alone is not payout, so treat the exit as complete only " +
+        "at the movement's verified `delivered` outcome. Defaults to `standard`; a provider " +
+        "without the requested route refuses the build.",
     }),
   shares: earnDecimalAmountSchema.openapi({
     description: "Shares to redeem, decimal string in share units.",
