@@ -127,7 +127,6 @@ export function DashboardWorkspaceProvider({
       provider: () => new Map(),
       isPaused: () => isProjectSwitchingRef.current,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 

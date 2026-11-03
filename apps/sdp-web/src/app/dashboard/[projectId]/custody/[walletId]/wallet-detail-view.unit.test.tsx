@@ -57,6 +57,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     selectedProjectId: "project",
     dashboardCacheScope: { userId: "user", orgId: "org" },
     dashboardAccess: { capabilities: { canUseWalletSignerCheck: true } },
+    flags: { dvp: false, issuance: false, markets: false, ramps: false },
   }),
 }));
 vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({

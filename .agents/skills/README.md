@@ -20,15 +20,15 @@ The canonical home is `.agents/skills/`. These workflows are explicit-only: disc
 
 Explicitly invoke **`integrate-ramp-provider`** first. Pass the provider docs URL and state the supported directions, quote delivery mode, sandbox environment, rail-discovery source, counterparty/KYC flow, and settlement mechanism. Then invoke only the capability skills the provider needs:
 
-| Skill | Covers |
-|---|---|
-| `register-provider` | Step 1 — wire the provider id, package client, API schemas/dispatch, availability, setup registry, secrets, and dashboard catalog |
-| `rail-discovery` | Declare supported fiat/crypto corridors and regenerate the support matrix |
-| `integrate-estimate` | Rate preview (`estimateOnramp` / `estimateOfframp`) |
-| `counterparty-requirements` | Required readiness contract (`ready`, `unsupported`, KYC, or payout requirements) |
-| `integrate-onramp` | Fiat→crypto quote |
-| `integrate-offramp` | Crypto→fiat quote |
-| `integrate-webhook` | Signature verification + settlement events |
+| Skill                       | Covers                                                                                                                            |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `register-provider`         | Step 1 — wire the provider id, package client, API schemas/dispatch, availability, setup registry, secrets, and dashboard catalog |
+| `rail-discovery`            | Declare supported fiat/crypto corridors and regenerate the support matrix                                                         |
+| `integrate-estimate`        | Rate preview (`estimateOnramp` / `estimateOfframp`)                                                                               |
+| `counterparty-requirements` | Required readiness contract (`ready`, `unsupported`, KYC, or payout requirements)                                                 |
+| `integrate-onramp`          | Fiat→crypto quote                                                                                                                 |
+| `integrate-offramp`         | Crypto→fiat quote                                                                                                                 |
+| `integrate-webhook`         | Signature verification + settlement events                                                                                        |
 
 Capability work is parallel after registration. For an unsupported direction, declare empty support and implement the required interface methods as typed rejections; only `createOnrampQuote` is optional in the current `RampProvider` contract.
 

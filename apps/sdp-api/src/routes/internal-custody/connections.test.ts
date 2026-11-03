@@ -40,7 +40,6 @@ function buildApp(options: { injectJwt: boolean }) {
   const payload: ClerkJwtPayload = {
     sub: USER.clerkId,
     org_id: ORG.clerkId,
-    org_role: "org:admin",
     email: USER.email,
   };
   const token = `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;

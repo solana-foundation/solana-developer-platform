@@ -548,14 +548,14 @@ read that exists only to seed watches.
 `earnVaultDepositAvailability` answers with a REASON, not a boolean, and every
 surface renders that reason:
 
-| Result | Means |
-|---|---|
-| `available` | this org can open this position, here, now |
-| `cluster_unavailable` | the instrument lives on another cluster (`fundable: false`) — checked FIRST, and the badge names the row's `hostCluster` ("Mainnet only") instead of collapsing into a bare "Unavailable" (PRO-1742) |
-| `strategy_unavailable` | inactive / not a `vault_direct` provider / provider not surfaced |
-| `environment_unavailable` | that provider has no deposit deployment in the environment (`isVaultDirectDepositEnabled`) |
-| `access_unavailable` | provider access could not be resolved — **fails closed** |
-| `provider_unavailable` | resolved, but this org's provider entry is not enabled |
+| Result                    | Means                                                                                                                                                                                                |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `available`               | this org can open this position, here, now                                                                                                                                                           |
+| `cluster_unavailable`     | the instrument lives on another cluster (`fundable: false`) — checked FIRST, and the badge names the row's `hostCluster` ("Mainnet only") instead of collapsing into a bare "Unavailable" (PRO-1742) |
+| `strategy_unavailable`    | inactive / not a `vault_direct` provider / provider not surfaced                                                                                                                                     |
+| `environment_unavailable` | that provider has no deposit deployment in the environment (`isVaultDirectDepositEnabled`)                                                                                                           |
+| `access_unavailable`      | provider access could not be resolved — **fails closed**                                                                                                                                             |
+| `provider_unavailable`    | resolved, but this org's provider entry is not enabled                                                                                                                                               |
 
 Two rules hold it together:
 
@@ -640,7 +640,7 @@ The surfacing constants live in **`earn-surfacing.ts`, which carries NO
 Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
-importing a *value* from a client module receives a **client-reference proxy,
+importing a _value_ from a client module receives a **client-reference proxy,
 not the value** — an object, so always truthy. The program-creation guard (since
 retired with the custodial provider) was therefore dead code and the deposit
 route happily rendered the full wizard with no provider that could create
@@ -727,7 +727,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
   `DetailRow`, an amount takes `fit="figure"` (whole on one line, its label
   wraps) and a name `fit="wrap"`.
 - Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
-  the asymmetry: the money-in writes answer 403 even for *missing credentials*,
+  the asymmetry: the money-in writes answer 403 even for _missing credentials_,
   so read `error.code`, not just the status, before labelling a failure.
 - Tests: vitest, `environment: "node"` by default — a test that touches
   `document` needs a `// @vitest-environment jsdom` docblock. Mock the data-hook

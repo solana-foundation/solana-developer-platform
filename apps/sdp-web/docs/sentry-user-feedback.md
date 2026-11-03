@@ -35,9 +35,9 @@ target environment. A configured DSN alone does not prove that routing works.
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
+| Symptom                       | Check                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
 | Feedback dialog does not open | Confirm the DSN is set, Sentry is enabled, and `Sentry.getFeedback()` returns an integration. |
-| No Sentry issue appears | Check the browser request and Sentry project ingestion for the target environment. |
-| No Linear issue appears | Check the Sentry feedback alert and Linear integration, then submit a test report. |
-| Replay is absent | Production session replay is sampled at 10%; an error can trigger replay at 100%. |
+| No Sentry issue appears       | Check the browser request and Sentry project ingestion for the target environment.            |
+| No Linear issue appears       | Check the Sentry feedback alert and Linear integration, then submit a test report.            |
+| Replay is absent              | Production session replay is sampled at 10%; an error can trigger replay at 100%.             |

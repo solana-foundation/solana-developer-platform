@@ -46,7 +46,6 @@ function buildApp(options: { injectJwt?: boolean } = {}) {
   const payload: ClerkJwtPayload = {
     sub: TEST_USER.clerkId,
     org_id: TEST_ORG.clerkId,
-    org_role: "org:admin",
     email: TEST_USER.email,
   };
   const token = createJwt(payload);

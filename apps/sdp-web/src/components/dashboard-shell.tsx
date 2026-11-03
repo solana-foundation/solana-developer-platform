@@ -469,7 +469,7 @@ export function DashboardShell({
   const sidebarExpandedWidth = 280;
   const sidebarScope: ThemeScope = "refresh";
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(pathname, t, paymentsEnabled);
+  const pageConfig = getDashboardPageConfig(pathname, t, paymentsEnabled, rampsEnabled);
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
     label: favorite.name,

@@ -28,6 +28,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useZodForm, type ZodFormApi } from "@/lib/use-zod-form";
 import { defaultBasics } from "./counterparty-create-defaults";
+import { useAddressScreeningEnabled } from "./use-address-screening";
 
 /**
  * An address waiting on the person's call: one the screening flagged or could not screen
@@ -85,6 +86,7 @@ export function CounterpartyCreateProvider({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [flaggedAddress, setFlaggedAddress] = useState<FlaggedAddress | null>(null);
+  const screeningEnabled = useAddressScreeningEnabled();
 
   // Where the contact goes once it exists: the caller's hand-off (a dialog inside a flow), or
   // the directory.
@@ -187,7 +189,7 @@ export function CounterpartyCreateProvider({
         complete(created);
         return;
       }
-      const warning = await screen(address);
+      const warning = screeningEnabled ? await screen(address) : null;
       if (warning !== null) {
         setFlaggedAddress({ counterparty: created, address, message: warning, reason: "flagged" });
         return;
@@ -200,7 +202,7 @@ export function CounterpartyCreateProvider({
     } finally {
       setSubmitting(false);
     }
-  }, [basics, notice, t, complete, screen, attachAddress]);
+  }, [basics, notice, t, complete, screen, screeningEnabled, attachAddress]);
 
   const attachFlaggedAddress = useCallback(async () => {
     if (!flaggedAddress) return;

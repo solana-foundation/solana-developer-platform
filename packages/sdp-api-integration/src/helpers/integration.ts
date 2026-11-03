@@ -442,7 +442,6 @@ async function ensurePrivyCustodyWallet(): Promise<IntegrationCustodyWallet> {
   }
 
   for (const wallet of walletRows) {
-    // eslint-disable-next-line no-await-in-loop
     if (await solanaAccountExists(env.SOLANA_RPC_URL as string, wallet.public_key)) {
       return fundIntegrationCustodyWallet(wallet);
     }
@@ -674,12 +673,10 @@ async function waitForAccountExistence(
 ): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     const exists = await solanaAccountExists(rpcUrl, address);
     if (exists) {
       return;
     }
-    // eslint-disable-next-line no-await-in-loop
     await sleep(1_000);
   }
 
@@ -689,12 +686,10 @@ async function waitForAccountExistence(
 async function waitForLamports(address: string, minimumLamports: number, timeoutMs: number) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     const lamports = await getAddressLamports(address);
     if (lamports >= minimumLamports) {
       return;
     }
-    // eslint-disable-next-line no-await-in-loop
     await sleep(1_000);
   }
 

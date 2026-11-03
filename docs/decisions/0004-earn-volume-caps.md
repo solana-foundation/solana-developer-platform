@@ -54,11 +54,11 @@ Two constraints shape the design:
 Three layers, each bounding one thing. All three refuse or interpose on
 **deposits only**.
 
-| Layer | Owner | Bounds | On breach |
-| -- | -- | -- | -- |
-| 1. Vault exposure | SDP, platform-wide | Ledgered SDP holdings in one vault, as a share of the vault's TVL plus an absolute ceiling | Soft: alert at 80%. Hard: deposit refused with a typed 409, surfaced first as a preview `blockingIssues` entry. |
-| 2. Org velocity defaults | SDP sets tier defaults; org may request a raise | Per-org rolling 24h deposit volume; per-transaction large-deposit line | Existing approval flow: 202 `SIGNING_PENDING`, approver clears in the dashboard. Never denied. |
-| 3. Org-configured policy | The org | Whatever the org expresses via wallet policy or control profile | Existing deny / review / approval semantics. |
+| Layer                    | Owner                                           | Bounds                                                                                     | On breach                                                                                                       |
+| ------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| 1. Vault exposure        | SDP, platform-wide                              | Ledgered SDP holdings in one vault, as a share of the vault's TVL plus an absolute ceiling | Soft: alert at 80%. Hard: deposit refused with a typed 409, surfaced first as a preview `blockingIssues` entry. |
+| 2. Org velocity defaults | SDP sets tier defaults; org may request a raise | Per-org rolling 24h deposit volume; per-transaction large-deposit line                     | Existing approval flow: 202 `SIGNING_PENDING`, approver clears in the dashboard. Never denied.                  |
+| 3. Org-configured policy | The org                                         | Whatever the org expresses via wallet policy or control profile                            | Existing deny / review / approval semantics.                                                                    |
 
 ### Layer 1: vault exposure
 
@@ -176,13 +176,13 @@ declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
 
 ## Defaults (placeholders until shadow data exists)
 
-| Cap | Placeholder | Notes |
-| -- | -- | -- |
-| Vault exposure, hard | 10% of vault TVL, ceiling 5M USD-equivalent | Soft alert at 80% of the hard cap. |
-| Org daily deposit volume | by tier, to be set | Approval, not deny. |
-| Org large single deposit | by tier, to be set | Approval, not deny. |
-| Program withdrawal to a new destination | above the large-deposit line | Approval; org can disable. |
-| Partner key daily volume | declared onboarding volume × 3 | Soft at ×2. |
+| Cap                                     | Placeholder                                 | Notes                              |
+| --------------------------------------- | ------------------------------------------- | ---------------------------------- |
+| Vault exposure, hard                    | 10% of vault TVL, ceiling 5M USD-equivalent | Soft alert at 80% of the hard cap. |
+| Org daily deposit volume                | by tier, to be set                          | Approval, not deny.                |
+| Org large single deposit                | by tier, to be set                          | Approval, not deny.                |
+| Program withdrawal to a new destination | above the large-deposit line                | Approval; org can disable.         |
+| Partner key daily volume                | declared onboarding volume × 3              | Soft at ×2.                        |
 
 ## Consequences
 

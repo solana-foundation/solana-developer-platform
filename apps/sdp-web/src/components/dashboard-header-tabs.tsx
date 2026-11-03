@@ -46,6 +46,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
   // The strip scrolls when its tabs do not fit (a tablet beside the open sidebar), so the
   // selected tab is brought into view: a link to the last tab must not open on a strip that
   // hides which tab it is on.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeTab is the trigger; the effect reads the selected tab from the DOM.
   useEffect(() => {
     stripRef.current
       ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')

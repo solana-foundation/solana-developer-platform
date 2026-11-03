@@ -56,6 +56,104 @@ Source: https://platform.solana.com/docs
 
 ---
 
+### Go to mainnet
+Source: https://platform.solana.com/docs/guides/go-to-mainnet
+
+> Request mainnet access, connect your own custody account, and go live.
+
+You start with a Sandbox project on devnet. The SDP team must approve your
+organization before enabling Production on mainnet.
+
+## 1. Request mainnet access
+
+Sign in to the [dashboard](https://platform.solana.com/dashboard) as an
+**organization admin**. Open the account menu at the bottom of the sidebar, then
+**Settings**. Under **Mainnet access**, click **Request mainnet access**. If the
+section is missing, ask an admin to submit.
+
+[![The Mainnet access section in organization settings, with Request mainnet access](/images/go-to-mainnet/01-request-access.png)](/docs/images/go-to-mainnet/01-request-access.png)
+
+Select your organization's registered **Country or region** and click
+**Continue**. Contact the SDP team to change it after submission.
+
+[![Request mainnet access with Singapore selected as the organization's jurisdiction](/images/go-to-mainnet/02-jurisdiction.png)](/docs/images/go-to-mainnet/02-jurisdiction.png)
+
+Read the **Terms and Conditions** to the end, accept them on your organization's
+behalf, and click **Send request**. **Request sent** confirms submission;
+Settings shows **In review** until approval.
+
+[![Request sent confirmation, with SDP review still pending](/images/go-to-mainnet/request-sent.png)](/docs/images/go-to-mainnet/request-sent.png)
+
+If you see **Request not sent**, click **Send request again**; your details are
+saved. If requests aren't open, contact the SDP team.
+
+## 2. Switch to Production
+
+After approval, refresh **Settings**. When **Mainnet access** shows **Approved**,
+use the sidebar's top workspace switcher to select your production project
+(default: **Default Production Project**).
+
+<a href="/docs/images/go-to-mainnet/03-production-project.png">
+  <img
+    src="/docs/images/go-to-mainnet/03-production-project.png"
+    alt="The workspace switcher showing Default Production Project"
+    width="330"
+    height="342"
+    style={{ maxWidth: "100%", height: "auto" }}
+  />
+</a>
+
+Production uses `mainnet-beta`. Wallets, provider connections, and API keys are
+separate from Sandbox and must be set up again.
+
+## 3. Connect your custody provider account
+
+Production requires **Bring your own credentials**. In Production, open
+**Wallets**, click **Create wallet**, select **Privy**, then **Continue**.
+
+Enter a **Credential label**, your **Privy app ID** and **Privy app secret** from
+the [Privy dashboard](https://dashboard.privy.io), and an **Initial wallet label**.
+Click **Connect and verify** to verify the connection and create your first
+Privy wallet.
+
+[![Privy credential form with an example app ID and a masked app secret](/images/go-to-mainnet/04-connect-privy.png)](/docs/images/go-to-mainnet/04-connect-privy.png)
+
+For more wallets, select this connection. See
+[Create a wallet](/docs/guides/setup-wallets).
+
+## 4. Create a production API key
+
+In Production, open **API keys** and click **New API key**. Name it, grant the
+required actions, choose which wallets it can sign with, and review the summary.
+Click **Create key**.
+
+[![API key review showing Production, selected permissions, and the Treasury wallet](/images/go-to-mainnet/05-production-api-key.png)](/docs/images/go-to-mainnet/05-production-api-key.png)
+
+Copy the key to your secret manager; it's shown once. Replace your backend's
+sandbox key. The API URL stays `https://api.solana.com`; the key's project
+determines the network. See
+[API key grants and wallet access](/docs/developing-with-sdp/manage-api-keys).
+
+## 5. Fund your wallet with mainnet USDC
+
+Send a small amount of **USDC on Solana mainnet** to your wallet's address.
+Devnet tokens have no value on mainnet. Circle's
+[mainnet USDC mint](https://developers.circle.com/stablecoins/usdc-contract-addresses)
+is `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+
+Use `"token": "USDC"` in transfer requests so SDP selects the mint for your network.
+Replace any hardcoded devnet mint addresses.
+
+SDP sponsors network fees and recipient token-account rent for transfers it
+signs from your Privy wallet. Fund it with USDC; no SOL is needed for those fees.
+Sponsorship limits apply. If sponsorship is unavailable, SDP refuses the transfer
+instead of charging your wallet.
+
+Send a [small first payment](/docs/payments/send-basic-payment) and
+[verify its status](/docs/payments/accept-verification) before increasing volume.
+
+---
+
 ## Learn
 
 ### Tutorials
@@ -94,6 +192,9 @@ Authenticated environments are a property of the **project**, not of individual 
 A key's format does not name its environment: the project it belongs to does.
 
 Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
+
+[Go to mainnet](/docs/guides/go-to-mainnet) covers requesting access and setting
+up your production wallets and API key.
 
 ## Response conventions
 
@@ -348,6 +449,232 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 - Fiat on-ramps and off-ramps
 - Compliance screening
 - Asset profiles and public token metadata
+
+---
+
+## Getting Started
+
+### Set up your workspace
+Source: https://platform.solana.com/docs/guides/setup-organization
+
+> Create an organization and a sandbox project.
+
+Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
+
+### 1. Sign up
+
+Go to [platform.solana.com](https://platform.solana.com) and click **Dashboard**. On the sign-in screen, click **Sign up** to create a new account.
+
+![SDP sign-in screen with Sign up link](/images/getting-started/sign-in.png)
+
+Enter your email address and a password to create your account.
+
+![Create your account screen](/images/getting-started/create-account.png)
+
+### 2. Create or select an organization
+
+After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
+
+![Setup your organization screen](/images/getting-started/setup-organization.png)
+
+If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
+
+<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
+
+### 3. Organize with projects
+
+A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
+
+### 4. Next steps
+
+- [Set up wallets](/docs/guides/setup-wallets) for signing transactions
+- [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access
+- [Send your first payment](/docs/payments/send-basic-payment)
+- [Go to mainnet](/docs/guides/go-to-mainnet) when your sandbox integration is ready
+
+---
+
+### Create a wallet
+Source: https://platform.solana.com/docs/guides/setup-wallets
+
+> Initialize a custody provider and create wallets for signing transactions.
+
+A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for transfers and other onchain operations.
+
+## Supported providers
+
+| Provider | Description |
+| --- | --- |
+| **Privy** | Embedded wallet infrastructure platform |
+| **Fireblocks** | Digital asset infrastructure company |
+| **Coinbase CDP** | Embedded wallets for developers |
+| **Para** | Wallet and authentication suite |
+| **Turnkey** | Non-custodial wallet infrastructure platform |
+| **DFNS** | Digital asset wallet infrastructure |
+| **Anchorage** | Regulated institutional crypto custody |
+
+<Tabs items={["Dashboard", "API"]}>
+<Tab value="Dashboard">
+
+### 1. Open wallet setup
+
+Open **Wallets** in the sidebar and click **Create wallet**. Complete
+[organization setup](/docs/guides/setup-organization) first if needed.
+
+### 2. Choose a custody provider
+
+Under **Which provider holds the keys?**, select a provider and click
+**Continue**. The list shows the providers your project can use.
+
+### 3. Set up the provider
+
+If the provider offers both modes, choose **Managed** to use SDP's provider
+account or **Bring your own credentials** to connect your own. Production
+requires your own credentials; see [Go to mainnet](/docs/guides/go-to-mainnet).
+
+For Privy, enter a **Credential label**, **Privy app ID**, **Privy app secret**,
+and optional **Initial wallet label**. Click **Connect and verify** to connect
+the account and create its first wallet.
+
+![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
+
+For Managed custody, enter a **Wallet label** and click **Create wallet**.
+The first wallet is a transfer wallet.
+
+### 4. Create additional wallets
+
+Click **Create wallet** again, select the provider, and enter a **Wallet label**
+and **Purpose**. If the provider has active connections, choose the **Account**
+the wallet will belong to. Nothing is preselected. Click **Create wallet**.
+
+### 5. View your wallet
+
+After provisioning, the wallet appears on **Wallets** with its address and
+balance. Open it to see its details.
+
+</Tab>
+<Tab value="API">
+
+#### 1. Initialize the provider from the dashboard
+
+Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
+
+Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
+
+```bash title="Terminal"
+export IDEMPOTENCY_KEY=$(uuidgen)
+
+curl -X POST https://api.solana.com/v1/wallets \
+  -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionId": "cconn_123",
+    "label": "Treasury wallet"
+  }'
+```
+
+#### 2. Create additional wallets
+
+Every wallet names the provider account it lives under: `provider` for the provider's Managed account, or `connectionId` for a connection your project added. Send exactly one of them. There is no default account to fall back to.
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash
+curl -X POST 'https://api.solana.com/v1/wallets' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  }'
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript
+const res = await fetch("https://api.solana.com/v1/wallets", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  })
+});
+```
+</Tab>
+<Tab value="Java">
+```java title="CreateWallet.java"
+String idempotencyKey = java.util.UUID.randomUUID().toString();
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets"))
+    .header("Authorization", "Bearer sf_...")
+    .header("Idempotency-Key", idempotencyKey)
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("""
+        {
+          "provider": "privy",
+          "label": "Treasury wallet",
+          "purpose": "transfer"
+        }"""))
+    .build();
+```
+</Tab>
+</Tabs>
+
+The `purpose` field is optional metadata in the API. The dashboard exposes it
+when creating additional wallets; the provider's first wallet is a transfer
+wallet.
+Reuse the same `Idempotency-Key` when retrying a wallet creation.
+
+#### 3. List wallets
+
+<Tabs items={["curl", "TypeScript", "Java"]}>
+<Tab value="curl">
+```bash title="Terminal"
+curl "https://api.solana.com/v1/wallets?view=summary" \
+  -H "Authorization: Bearer sf_..."
+```
+</Tab>
+<Tab value="TypeScript">
+```typescript title="list-wallets.ts"
+const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
+  headers: { "Authorization": "Bearer sf_..." },
+});
+const { data } = await response.json();
+// data.wallets includes id, walletId, publicKey, provider, label, purpose, and status
+```
+</Tab>
+<Tab value="Java">
+```java title="ListWallets.java"
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
+    .header("Authorization", "Bearer sf_...")
+    .GET()
+    .build();
+```
+</Tab>
+</Tabs>
+
+Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Other modules name it the same way (their pages say which field). An API key limited to selected wallets lists the same `id` in `walletIds`.
+
+```typescript title="transfer-request.ts"
+const body = {
+  sourceCustodyWalletId: "cwlt_123", // `id` from GET /v1/wallets
+  destination: "7xKXz...9fGh",
+  token: "9aBCd...4eEf",
+  amount: "100.00",
+};
+```
+
+</Tab>
+</Tabs>
 
 ---
 
@@ -1628,7 +1955,11 @@ The rest of this section assumes transfers are submitted by SDP from a custody w
 
 ## Fees and sponsorship
 
-Solana fees are paid in SOL by the transaction's fee payer. On wallet transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
+SDP pays the network fees and recipient token-account rent on the transfers it
+signs from Privy wallets, so those wallets need the tokens they send, with no SOL
+for fees. Sponsorship limits apply; an unavailable sponsor refuses the transfer
+rather than charging the source wallet. Fireblocks submits its own transfers,
+whose fees SDP does not sponsor.
 
 ## The transfer data model
 
@@ -1640,6 +1971,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
+| `counterpartyId` | Set when the transfer is tied to a counterparty, for example a transfer batch recipient or a transfer sent with `counterpartyAccountId`. |
 | `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
 | `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
@@ -1853,6 +2185,12 @@ curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
 </Step>
 
 </HowItWorks>
+
+## Pay a counterparty
+
+When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
+
+The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
 
 ## SOL and the rent-exempt minimum
 
@@ -2114,6 +2452,8 @@ For destinations that are not registered counterparty accounts, a run can send o
 5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
+
+To tie a single transfer to a registered counterparty account, pass `counterpartyAccountId` with it. See [Pay a counterparty](/docs/payments/send-basic-payment#pay-a-counterparty).
 
 ### Dedup and retries for single transfers
 
@@ -20171,6 +20511,10 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
   Destination wallet address.
 
+- **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
+
+  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.
+
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
   Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.
@@ -21924,7 +22268,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -21952,7 +22296,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -21979,7 +22323,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate"
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22199,7 +22543,7 @@ Create a custody-executed outbound transfer batch.
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -22572,7 +22916,7 @@ curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22601,7 +22945,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22628,7 +22972,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
       {
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "amount": "25.00"
       }
     ],
@@ -22669,7 +23013,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -23146,7 +23490,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -23557,7 +23901,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_ex
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -23781,7 +24125,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         Counterparty identifier for the recipient.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier for the recipient.
 
@@ -24178,7 +24522,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
         "transferId": "xfr_example",
         "externalId": "payroll_row_001",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destination": "So11111111111111111111111111111111111111112",
         "amount": "100.00",
         "status": "pending",
@@ -24326,7 +24670,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
   Counterparty receiving the recurring payment.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty crypto_wallet account. It must contain Solana wallet details.
 
@@ -24390,7 +24734,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -24572,7 +24916,7 @@ curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24592,7 +24936,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments",
   body: JSON.stringify({
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24610,7 +24954,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -24632,7 +24976,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -24759,7 +25103,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -24938,7 +25282,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments",
         "sourceProviderWalletId": "privy_wallet_123",
         "sourceAddress": "So11111111111111111111111111111111111111112",
         "counterpartyId": "cpty_example",
-        "counterpartyAccountId": "cpa_example",
+        "counterpartyAccountId": "cpacct_example",
         "destinationAddress": "So11111111111111111111111111111111111111112",
         "destinationTokenAccount": "So11111111111111111111111111111111111111112",
         "token": "example",
@@ -25033,7 +25377,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
   Optional replacement counterparty. When provided, counterpartyAccountId is also required.
 
-- **`counterpartyAccountId`** · `string` · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
 
   Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.
 
@@ -25101,7 +25445,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -25283,7 +25627,7 @@ curl -X PATCH 'https://api.solana.com/v1/payments/recurring-payments/prp_example
   -d '{
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25304,7 +25648,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
   body: JSON.stringify({
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25323,7 +25667,7 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
   json={
     "sourceCustodyWalletId": "cwlt_example",
     "counterpartyId": "cpty_example",
-    "counterpartyAccountId": "cpa_example",
+    "counterpartyAccountId": "cpacct_example",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
@@ -25346,7 +25690,7 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -25467,7 +25811,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -25663,7 +26007,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -25790,7 +26134,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -26000,7 +26344,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -26127,7 +26471,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -26337,7 +26681,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -26464,7 +26808,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -27028,7 +27372,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -27239,7 +27583,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Counterparty ID.
 
-      - **`counterpartyAccountId`** · `string` · required · example `cpa_example`
+      - **`counterpartyAccountId`** · `string` · required · example `cpacct_example`
 
         Counterparty account ID.
 
@@ -27449,7 +27793,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
-      "counterpartyAccountId": "cpa_example",
+      "counterpartyAccountId": "cpacct_example",
       "destinationAddress": "So11111111111111111111111111111111111111112",
       "destinationTokenAccount": "So11111111111111111111111111111111111111112",
       "token": "example",
@@ -34631,7 +34975,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
       Counterparty accounts.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -34775,7 +35119,7 @@ r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts
   "data": {
     "accounts": [
       {
-        "id": "cpa_example",
+        "id": "cpacct_example",
         "organizationId": "org_example",
         "projectId": "prj_example",
         "counterpartyId": "cpty_example",
@@ -34886,7 +35230,7 @@ Create counterparty account request body.
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -35056,7 +35400,7 @@ r = requests.post("https://api.solana.com/v1/counterparties/cpty_example/account
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35390,7 +35734,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35412,7 +35756,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -35513,12 +35857,12 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-curl 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "GET",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`
@@ -35529,7 +35873,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests
 
-r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
@@ -35539,7 +35883,7 @@ r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35598,7 +35942,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35646,7 +35990,7 @@ Update counterparty account request body. At least one field must be provided.
 
       Counterparty payment account record.
 
-      - **`id`** · `string` · required · example `cpa_example`
+      - **`id`** · `string` · required · example `cpacct_example`
 
         Counterparty account identifier.
 
@@ -35759,7 +36103,7 @@ Update counterparty account request body. At least one field must be provided.
 ## Example request
 
 ```bash tab="cURL"
-curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -35774,7 +36118,7 @@ curl -X PATCH 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cp
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -35795,7 +36139,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
     "label": "Primary USDC wallet",
@@ -35813,7 +36157,7 @@ r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accoun
 {
   "data": {
     "account": {
-      "id": "cpa_example",
+      "id": "cpacct_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "counterpartyId": "cpty_example",
@@ -35872,7 +36216,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Counterparty identifier.
 
-- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpa_example`
+- **`counterpartyAccountId`** · `string` · required · min length 1 · example `cpacct_example`
 
   Counterparty account identifier.
 
@@ -35943,13 +36287,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 ## Example request
 
 ```bash tab="cURL"
-curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example' \
+curl -X DELETE 'https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
   -H "Idempotency-Key: $(uuidgen)"
 ```
 
 ```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example", {
+const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example", {
   method: "DELETE",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
@@ -35961,7 +36305,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```python tab="Python"
 import os, requests, uuid
 
-r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
+r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpacct_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
 ```
 
@@ -38636,226 +38980,6 @@ r = requests.delete("https://api.solana.com/v1/issuance/asset-profiles/asset_pro
 ```
 
 Error responses use the [standard error shape](/docs/reference/conventions/errors).
-
----
-
-## Getting Started
-
-### Set up your workspace
-Source: https://platform.solana.com/docs/guides/setup-organization
-
-> Create an organization and a sandbox project.
-
-Every SDP user works through an **organization** — a team workspace containing one or more **projects**, each a provisioned environment with its own API keys, wallets, and members. This guide creates your organization and covers how projects scope your resources.
-
-### 1. Sign up
-
-Go to [platform.solana.com](https://platform.solana.com) and click **Dashboard**. On the sign-in screen, click **Sign up** to create a new account.
-
-![SDP sign-in screen with Sign up link](/images/getting-started/sign-in.png)
-
-Enter your email address and a password to create your account.
-
-![Create your account screen](/images/getting-started/create-account.png)
-
-### 2. Create or select an organization
-
-After signing in you'll be prompted to set up your organization. Upload a logo and enter your organization name, then click **Continue**.
-
-![Setup your organization screen](/images/getting-started/setup-organization.png)
-
-If you already have an organization, the **Organization Switcher** in the top-left of the sidebar lets you switch between them or create a new one.
-
-<img src="/docs/images/getting-started/org-switcher.png" alt="Organization Switcher dropdown" width="436" style={{ display: "block", maxWidth: "100%" }} />
-
-### 3. Organize with projects
-
-A **project** is a provisioned environment within your organization — sandbox or production-style — with its own API keys, wallets, tokens, and members, so teams don't share the same wallet and token surface. See the [Projects API reference](/docs/reference/api/projects) for managing them programmatically.
-
-### 4. Next steps
-
-- [Set up wallets](/docs/guides/setup-wallets) for signing transactions
-- [Create API keys](/docs/developing-with-sdp/manage-api-keys) for programmatic access
-- [Send your first payment](/docs/payments/send-basic-payment)
-
----
-
-### Create a wallet
-Source: https://platform.solana.com/docs/guides/setup-wallets
-
-> Initialize a custody provider and create wallets for signing transactions.
-
-A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for transfers and other onchain operations.
-
-## Supported providers
-
-| Provider | Description |
-| --- | --- |
-| **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
-| **Coinbase CDP** | Embedded wallets for developers |
-| **Para** | Wallet and authentication suite |
-| **Turnkey** | Non-custodial wallet infrastructure platform |
-| **DFNS** | Digital asset wallet infrastructure |
-| **Anchorage** | Regulated institutional crypto custody |
-
-<Tabs items={["Dashboard", "API"]}>
-<Tab value="Dashboard">
-
-### 1. Navigate to Wallets
-
-Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
-
-### 2. Choose a custody provider
-
-The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
-
-![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
-
-### 3. Create the wallet
-
-Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
-
-If you have connected your own account with that provider, choose the account the wallet is created in: the provider's Managed account (when the project has one) or one of your active connections. The choice appears as soon as one active connection exists, and nothing is preselected: SDP has no default custody, so every wallet names where it lives.
-
-<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
-
-### 4. View your wallet
-
-After provisioning, the wallet card appears on the Wallets page with its address, wallet ID, and balance.
-
-![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
-
-To create additional wallets, click **Create Wallet** in the top right and repeat the process.
-
-### 5. Provider capabilities
-
-Each provider supports a different set of operations shown as capability chips:
-
-- **Transfers** — can sign payment transactions
-- **Compliance** — can sign freeze/unfreeze instructions
-
-</Tab>
-<Tab value="API">
-
-#### 1. Initialize the provider from the dashboard
-
-Initializing a custody provider is provider setup (`wallets.configure`), and no API key can hold a `configure` action. An organization admin initializes it once per project, signed in to the dashboard (see the **Dashboard** tab); the dashboard calls `POST /v1/wallets/initialize` with that session. The same call made with an API key returns `403` with `details.action` set to `wallets.configure`.
-
-Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
-
-```bash title="Terminal"
-export IDEMPOTENCY_KEY=$(uuidgen)
-
-curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..." \
-  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connectionId": "cconn_123",
-    "label": "Treasury wallet"
-  }'
-```
-
-#### 2. Create additional wallets
-
-Every wallet names the provider account it lives under: `provider` for the provider's Managed account, or `connectionId` for a connection your project added. Send exactly one of them. There is no default account to fall back to.
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash
-curl -X POST 'https://api.solana.com/v1/wallets' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "provider": "privy",
-    "label": "Treasury wallet",
-    "purpose": "transfer"
-  }'
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript
-const res = await fetch("https://api.solana.com/v1/wallets", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "provider": "privy",
-    "label": "Treasury wallet",
-    "purpose": "transfer"
-  })
-});
-```
-</Tab>
-<Tab value="Java">
-```java title="CreateWallet.java"
-String idempotencyKey = java.util.UUID.randomUUID().toString();
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets"))
-    .header("Authorization", "Bearer sf_...")
-    .header("Idempotency-Key", idempotencyKey)
-    .header("Content-Type", "application/json")
-    .POST(HttpRequest.BodyPublishers.ofString("""
-        {
-          "provider": "privy",
-          "label": "Treasury wallet",
-          "purpose": "transfer"
-        }"""))
-    .build();
-```
-</Tab>
-</Tabs>
-
-The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
-Reuse the same `Idempotency-Key` when retrying a wallet creation.
-
-#### 3. List wallets
-
-<Tabs items={["curl", "TypeScript", "Java"]}>
-<Tab value="curl">
-```bash title="Terminal"
-curl "https://api.solana.com/v1/wallets?view=summary" \
-  -H "Authorization: Bearer sf_..."
-```
-</Tab>
-<Tab value="TypeScript">
-```typescript title="list-wallets.ts"
-const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
-  headers: { "Authorization": "Bearer sf_..." },
-});
-const { data } = await response.json();
-// data.wallets includes id, walletId, publicKey, provider, label, purpose, and status
-```
-</Tab>
-<Tab value="Java">
-```java title="ListWallets.java"
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
-    .header("Authorization", "Bearer sf_...")
-    .GET()
-    .build();
-```
-</Tab>
-</Tabs>
-
-Every operation that signs names its wallet; there is no default wallet. Transfers take the wallet's `id` (`cwlt_…`) as `sourceCustodyWalletId`. Other modules name it the same way (their pages say which field). An API key limited to selected wallets lists the same `id` in `walletIds`.
-
-```typescript title="transfer-request.ts"
-const body = {
-  sourceCustodyWalletId: "cwlt_123", // `id` from GET /v1/wallets
-  destination: "7xKXz...9fGh",
-  token: "9aBCd...4eEf",
-  amount: "100.00",
-};
-```
-
-</Tab>
-</Tabs>
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

@@ -39,6 +39,7 @@ import {
 import { ByokCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
 import { useWalletInventoryRefresh } from "@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { isWalletPurposeOffered } from "@/app/dashboard/[projectId]/custody/wallet-purposes";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -68,7 +69,10 @@ const CUSTODY_MODE_LABEL_KEYS = {
   byok: "DashboardCustody.walletSetupModeByok",
 } as const satisfies Record<CustodyMode, MessageKey>;
 
-/** The purposes the create endpoint accepts, in the order the picker lists them. */
+/**
+ * The purposes the create endpoint accepts, in the order the picker lists them. The picker
+ * offers only those whose module runs here (`isWalletPurposeOffered`).
+ */
 const WALLET_PURPOSES = [
   { value: "transfer", labelKey: "DashboardCustody.transfers" },
   { value: "mint_authority", labelKey: "DashboardCustody.mintAuthority" },
@@ -472,8 +476,11 @@ function DetailsStep({
   t: ReturnType<typeof useTranslations>;
   walletLabel: string;
 }) {
-  const { projects, selectedProjectId } = useDashboardWorkspace();
+  const { flags, projects, selectedProjectId } = useDashboardWorkspace();
   const cluster = useSolanaCluster();
+  const purposes = WALLET_PURPOSES.filter((purpose) =>
+    isWalletPurposeOffered(purpose.value, flags)
+  );
   const projectName =
     projects.find((project) => project.id === selectedProjectId)?.name ??
     t("DashboardCustody.projectValue");
@@ -520,7 +527,7 @@ function DetailsStep({
             disabled={!isConnected}
             size="xl"
           >
-            {WALLET_PURPOSES.map((purpose) => (
+            {purposes.map((purpose) => (
               <SelectItem key={purpose.value} value={purpose.value}>
                 {t(purpose.labelKey)}
               </SelectItem>

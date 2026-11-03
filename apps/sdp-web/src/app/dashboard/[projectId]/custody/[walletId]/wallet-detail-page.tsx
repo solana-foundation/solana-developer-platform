@@ -160,7 +160,10 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
     resolvedWalletId,
     t("DashboardCustody.trackedBalancesUnavailable")
   );
-  const issuedTokensPromise = getIssuedTokens(apiClient.request);
+  // Issuance off means the API refuses `/v1/issuance/tokens`; nothing on the page needs them then.
+  const issuedTokensPromise = issuanceEnabled
+    ? getIssuedTokens(apiClient.request)
+    : Promise.resolve<IssuedTokensByMint>({});
   const wallet = await walletPromise;
 
   const canManageCustody = resolveDashboardAccess(await requestMemberRole()).capabilities

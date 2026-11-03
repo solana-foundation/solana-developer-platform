@@ -47,7 +47,6 @@ Clerk's default session token does not include `org_id`. Without the custom clai
    ```json
    {
      "org_id": "{{org.id}}",
-     "org_role": "{{org.role}}",
      "org_slug": "{{org.slug}}",
      "email": "{{user.primary_email_address}}"
    }
@@ -59,13 +58,14 @@ The `email` claim also feeds the dashboard's feature-flag targeting (`apps/sdp-w
 
 What each claim does:
 
-| Claim      | Required?   | Used by                                                                                                                       |
-| ---------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `sub`      | yes         | User identity; checked in `clerk-token.ts` and threaded through every request as the actor                                    |
-| `org_id`   | yes         | Organization scope; the request is rejected if missing                                                                        |
-| `org_role` | recommended | Maps `"org:admin"` to admin, anything else to member (`clerk-role.ts`); without it everyone is a member                       |
-| `org_slug` | optional    | Surfaced in some logs and audit events                                                                                        |
-| `email`    | optional    | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+| Claim      | Required? | Used by                                                                                                                       |
+| ---------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `sub`      | yes       | User identity; checked in `clerk-token.ts` and threaded through every request as the actor                                    |
+| `org_id`   | yes       | Organization scope; the request is rejected if missing                                                                        |
+| `org_slug` | optional  | Surfaced in some logs and audit events                                                                                        |
+| `email`    | optional  | Used for actor display; the API also falls back to `email_addresses[0].email_address` if you prefer Clerk's default shorthand |
+
+The Clerk organization role is never read: everyone is `org:member` in Clerk, and SDP holds each person's role ([ADR 0012](../../../../docs/decisions/0012-sdp-owns-organization-membership.md)).
 
 When testing, sign in to Clerk's hosted UI with an **active organization selected**. Tokens minted without an active org omit `org_id` and the API rejects them.
 

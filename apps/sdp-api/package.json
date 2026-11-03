@@ -23,6 +23,7 @@
     "db:postgres:bootstrap": "DATABASE_URL=${DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp} node scripts/migrate-postgres.mjs",
     "sponsorship:budget": "tsx scripts/sponsorship-budget.ts",
     "movement:control": "tsx scripts/project-movement-control.ts",
+    "mainnet-access": "tsx scripts/mainnet-access.ts",
     "keygen:local": "tsx scripts/generate-local-keypair.ts",
     "typecheck": "tsc --noEmit",
     "verify:v1:surfpool": "node --import tsx scripts/verify-v1-surfpool.ts",
@@ -49,7 +50,7 @@
     "route-actions:check": "tsx scripts/generate-route-actions.ts --check"
   },
   "dependencies": {
-    "@clerk/backend": "3.26.1",
+    "@clerk/backend": "3.26.2",
     "@hono/node-server": "2.1.5",
     "@sdp/api-catalog": "workspace:*",
     "@sdp/custody": "workspace:*",
@@ -87,7 +88,7 @@
     "@solana/subscriptions": "0.5.0",
     "@solana/sysvars": "catalog:",
     "@solana/token-acl-sdk": "catalog:",
-    "hono": "4.13.13",
+    "hono": "4.13.14",
     "ioredis": "6.0.0",
     "jose": "6.2.13",
     "nanoid": "6.0.2",

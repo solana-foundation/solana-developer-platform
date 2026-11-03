@@ -123,6 +123,13 @@ describe("onchain wizard gating", () => {
     expect(run()).toBe(expected);
   });
 
+  it("ties a ready submission to the contact account it pays", () => {
+    expect(resolveReadySubmission(completeFields, "destination-address", SOL_MINT)).toMatchObject({
+      destination: "destination-address",
+      counterpartyAccountId: "account-1",
+    });
+  });
+
   it.each([
     { name: "below balance", amount: "0.9", availableAmount: "1", expected: false },
     { name: "equal balance", amount: "1.0", availableAmount: "1", expected: false },

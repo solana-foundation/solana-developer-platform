@@ -52,7 +52,6 @@ function buildApp() {
   const payload: ClerkJwtPayload = {
     sub: "clerk_provider_credential_lifecycle",
     org_id: "clerk_org_provider_credential_lifecycle",
-    org_role: "org:admin",
     email: "provider-credential-lifecycle@example.com",
   };
   const token = `${encodeJwtPart({ alg: "RS256", typ: "JWT" })}.${encodeJwtPart(payload)}.signature`;

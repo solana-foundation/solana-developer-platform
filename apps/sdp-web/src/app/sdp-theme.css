@@ -260,12 +260,13 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   }
 }
 
-/* The 2026 palette, faces and body type on every dashboard route, not only inside the refresh
-   scope. The dashboard shell marks its <main> with data-sdp-dashboard-shell; :has lifts that to
-   the root, so menus, dialogs and toasts portaled to <body> follow, and pages outside the
-   dashboard keep the base palette. Component shapes and page layout stay with the
+/* The 2026 palette, faces and body type on every dashboard route and the sign-in and sign-up
+   pages, not only inside the refresh scope. The dashboard shell marks its <main> with
+   data-sdp-dashboard-shell and the auth pages with data-sdp-auth-shell; :has lifts that to the
+   root, so menus, dialogs and toasts portaled to <body> follow, and other pages keep the base
+   palette. Component shapes and page layout stay with the
    refresh scope. Same re-points as the refresh scope in @sdp/design-tokens' tokens.css. */
-:root:has(main[data-sdp-dashboard-shell]) {
+:root:has(main:is([data-sdp-dashboard-shell], [data-sdp-auth-shell])) {
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);
@@ -352,7 +353,7 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
 }
 
-:root.dark:has(main[data-sdp-dashboard-shell]) {
+:root.dark:has(main:is([data-sdp-dashboard-shell], [data-sdp-auth-shell])) {
   --clerk-color-primary: #fbfaf9;
   --clerk-color-primary-foreground: #08080a;
   --clerk-color-foreground: #fbfaf9;

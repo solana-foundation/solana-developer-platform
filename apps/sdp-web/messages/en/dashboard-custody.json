@@ -2,7 +2,11 @@
   "DashboardCustody": {
     "walletStateActive": "Active",
     "walletStateActiveBody": "Payments, ramps and issuance can sign with this wallet.",
+    "walletStateActiveBodyRamps": "Payments and ramps can sign with this wallet.",
+    "walletStateActiveBodyIssuance": "Payments and issuance can sign with this wallet.",
+    "walletStateActiveBodyPayments": "Payments can sign with this wallet.",
     "walletPurposeInfo": "What this wallet is for. Payments, transfer batches and recurring payments only send from a transfer wallet; Issuance signs with a mint or freeze authority.",
+    "walletPurposeInfoPayments": "What this wallet is for. Payments, transfer batches and recurring payments only send from a transfer wallet.",
     "walletIdInfo": "SDP's own identifier for this wallet, which is what the API takes. The address is what the chain knows.",
     "walletTokens": "Tokens",
     "walletToken": "Token",
@@ -65,6 +69,7 @@
     "walletDisablePolicyTitle": "Disable this policy",
     "walletDisablePolicy": "Disable policy…",
     "walletLabelSettingsHint": "Shown wherever this wallet appears: here, in Payments, in Issuance, and in API responses. The address and the wallet ID do not change with it.",
+    "walletLabelSettingsHintPayments": "Shown wherever this wallet appears: here, in Payments, and in API responses. The address and the wallet ID do not change with it.",
     "walletSaveChanges": "Save changes",
     "walletDiscard": "Discard",
     "walletNotSavedYet": "Not saved yet.",
@@ -680,7 +685,8 @@
       },
       "counterparties": {
         "label": "Counterparties",
-        "description": "Counterparties and their accounts. Execute changes payout destinations and submits provider requirements."
+        "description": "Counterparties and their accounts. Execute changes payout destinations and submits provider requirements.",
+        "descriptionWithoutRamps": "Counterparties and their accounts. Execute changes payout destinations."
       },
       "transactions": {
         "label": "Transactions",

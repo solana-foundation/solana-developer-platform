@@ -68,20 +68,19 @@ production's release channel.
 
 Rewrite the composition, keep data hooks and trackers single-copy.
 
-| Legacy pattern | Refresh replacement |
-|---|---|
-| Bordered `Card` per section, cards inside cards | `RecordStack`, `RecordBlock`, `RecordRow`, `RecordLine`, `StateBand` (`web/components/refresh-record.tsx`) |
-| Row of stat cards with big numbers (`text-[32px]`) | One hero figure in `text-amount` plus a stat or summary line (Payments' available balance, Earn's `EarnSummary` in `dash/markets/earn/earn-page-blocks.tsx`) |
-| Grid of link cards, eyebrow labels, audience blurbs | `ActionTile` via `web/components/ui/action-tile.tsx` (link only), one short line each |
+| Legacy pattern                                                                                | Refresh replacement                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bordered `Card` per section, cards inside cards                                               | `RecordStack`, `RecordBlock`, `RecordRow`, `RecordLine`, `StateBand` (`web/components/refresh-record.tsx`)                                                                           |
+| Row of stat cards with big numbers (`text-[32px]`)                                            | One hero figure in `text-amount` plus a stat or summary line (Payments' available balance, Earn's `EarnSummary` in `dash/markets/earn/earn-page-blocks.tsx`)                         |
+| Grid of link cards, eyebrow labels, audience blurbs                                           | `ActionTile` via `web/components/ui/action-tile.tsx` (link only), one short line each                                                                                                |
 | Wide bordered tables with `minWidth: 52-72rem`, 7-8 columns, or `@solana/design-system/table` | Borderless `@sdp/ui/table` no wider than the page column, fewer columns, widths per breakpoint pinned by a layout test (`web/test/table-columns.ts`, `treasury-layout.unit.test.ts`) |
-| Raw status strings or provider ids in badges | `@sdp/ui/status-text`; badges are status-only; provider names via `formatCustodyProviderName` and `WalletProviderMark` (`dash/custody/`) |
-| Hand-built warning banners | `@sdp/ui/callout` |
-| `ListEmptyState` inside a Card, marketing empty states | `@sdp/ui/list-empty-state` alone; the action sits in the empty state or the header, not both |
-| Design-system `SegmentedControl` for view switches | `@sdp/ui/segmented-control`; page tabs stay underlined |
-| Hover lift, shadows, glow, italics, uppercase tracking | Removed: quiet and institutional, no hero art |
-| Arbitrary type and widths (`text-[11px]`, `max-w-[63rem]`) | Scale tokens (`text-body`, `text-meta`, `text-subheading`); layout widths only in rem when no token exists |
-| Ad hoc `<dl>` summaries | `@sdp/ui/detail-list` (`DetailList`, `DetailRow`) |
-
+| Raw status strings or provider ids in badges                                                  | `@sdp/ui/status-text`; badges are status-only; provider names via `formatCustodyProviderName` and `WalletProviderMark` (`dash/custody/`)                                             |
+| Hand-built warning banners                                                                    | `@sdp/ui/callout`                                                                                                                                                                    |
+| `ListEmptyState` inside a Card, marketing empty states                                        | `@sdp/ui/list-empty-state` alone; the action sits in the empty state or the header, not both                                                                                         |
+| Design-system `SegmentedControl` for view switches                                            | `@sdp/ui/segmented-control`; page tabs stay underlined                                                                                                                               |
+| Hover lift, shadows, glow, italics, uppercase tracking                                        | Removed: quiet and institutional, no hero art                                                                                                                                        |
+| Arbitrary type and widths (`text-[11px]`, `max-w-[63rem]`)                                    | Scale tokens (`text-body`, `text-meta`, `text-subheading`); layout widths only in rem when no token exists                                                                           |
+| Ad hoc `<dl>` summaries                                                                       | `@sdp/ui/detail-list` (`DetailList`, `DetailRow`)                                                                                                                                    |
 - **Rules that still hold:** mono only on code; table bodies one style, no
   bold, sentence case; numbers tabular; actions inside their block; a row's
   read-only and role gates move with its actions.

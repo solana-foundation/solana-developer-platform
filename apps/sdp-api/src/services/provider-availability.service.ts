@@ -1594,7 +1594,12 @@ export async function syncProviderAccessFromClerk(
     organizationId: string;
     clerkOrganization: ClerkOrganizationWithMetadata;
   }
-): Promise<{ tier: OrganizationTier; settings: OrganizationSettings | null }> {
+): Promise<{
+  tier: OrganizationTier;
+  settings: OrganizationSettings | null;
+  /** Whether this sync turned mainnet on or off; the caller audits the change. */
+  productionEntitlementChanged: boolean;
+}> {
   const clerkMetadata = parseClerkOrganizationTierMetadata(params.clerkOrganization);
 
   // Settings are one JSON column patched by read-merge-write; the row lock keeps
@@ -1639,7 +1644,9 @@ export async function syncProviderAccessFromClerk(
   });
 
   const wasProductionEnabled = existingSettings?.enableProductionProject === true;
-  if (wasProductionEnabled !== clerkMetadata.enableProductionProject) {
+  const productionEntitlementChanged =
+    wasProductionEnabled !== clerkMetadata.enableProductionProject;
+  if (productionEntitlementChanged) {
     logEvent("info", {
       event: "sdp_api_organization_production_enablement_changed",
       organization_id: params.organizationId,
@@ -1650,5 +1657,6 @@ export async function syncProviderAccessFromClerk(
   return {
     tier: clerkMetadata.tier,
     settings: persistedSettings,
+    productionEntitlementChanged,
   };
 }

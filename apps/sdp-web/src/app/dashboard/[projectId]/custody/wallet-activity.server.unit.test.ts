@@ -1,5 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
-import { loadWalletActivity } from "./wallet-activity.data";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const flags = vi.hoisted(() => ({ issuance: vi.fn() }));
+
+// The deployment's Issuance flag, the one ambient input the loader reads.
+vi.mock("@/flags", () => ({ issuance: flags.issuance }));
+
+import { loadWalletActivity } from "./wallet-activity.server";
+
+beforeEach(() => {
+  flags.issuance.mockResolvedValue(true);
+});
 
 describe("loadWalletActivity", () => {
   it("uses the exact wallet identity for Payments and Issuance", async () => {
@@ -20,6 +30,44 @@ describe("loadWalletActivity", () => {
       "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
       "/v1/issuance/transactions?custodyWalletId=cwlt_1&page=1&pageSize=20",
     ]);
+  });
+
+  it("never reads Issuance when it is off, and raises no issuance notice", async () => {
+    flags.issuance.mockResolvedValue(false);
+    const request = vi.fn(
+      async (_path: string) => new Response(JSON.stringify({ data: [] }), { status: 200 })
+    );
+
+    const result = await loadWalletActivity(
+      request,
+      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
+    );
+
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/payments/transfers?page=1&pageSize=20&custodyWalletId=cwlt_1&includeObserved=true",
+    ]);
+    expect(result.data?.activityNotice).toBeNull();
+    expect(result.data?.activityError).toBeNull();
+  });
+
+  // An Issuance read that never ran counted as a loaded source, so a failed payments read
+  // showed an empty history instead of its error.
+  it("reports a failed payments read as the error when Issuance is off", async () => {
+    flags.issuance.mockResolvedValue(false);
+    const request = vi.fn(
+      async (_path: string) =>
+        new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 })
+    );
+
+    const result = await loadWalletActivity(
+      request,
+      { custodyWalletId: "cwlt_1", providerWalletId: "privy_1" },
+      ((key: string) => key) as Parameters<typeof loadWalletActivity>[2]
+    );
+
+    expect(result.data?.activityError).toBe("DashboardCustody.walletActivityUnavailable");
+    expect(result.data?.activityNotice).toBeNull();
   });
 });
 

@@ -167,6 +167,11 @@ export const createTransferRequestSchema = createTransferSchemaBase
       description: "Destination wallet address.",
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
+    counterpartyAccountId: withOpenApi(createTransferSchemaBase.shape.counterpartyAccountId, {
+      description:
+        "The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.",
+      example: "cpacct_example",
+    }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
       description:
         "Token to transfer. Pass `SOL` for the native token, a well-known token symbol (e.g. `USDC`) resolved to the configured cluster's mint, or a base58 SPL mint address. Custom tokens must be specified by their on-chain mint.",
@@ -482,7 +487,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
         {
           externalId: "payroll_row_001",
           counterpartyId: "cpty_example",
-          counterpartyAccountId: "cpa_example",
+          counterpartyAccountId: "cpacct_example",
           amount: "25.00",
         },
       ],
@@ -562,7 +567,7 @@ const transferBatchRecipientSchema = z
     }),
     counterpartyAccountId: z.string().openapi({
       description: "Counterparty account identifier for the recipient.",
-      example: "cpa_example",
+      example: "cpacct_example",
     }),
     destination: solanaAddressSchema.openapi({
       description: "Resolved Solana destination address.",
@@ -790,7 +795,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       createRecurringPaymentSchemaBase.shape.counterpartyAccountId,
       {
         description: "Counterparty crypto_wallet account. It must contain Solana wallet details.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(createRecurringPaymentSchemaBase.shape.token, {
@@ -840,7 +845,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       {
         description:
           "Optional replacement counterparty account. Without counterpartyId, this changes the account for the current counterparty.",
-        example: "cpa_example",
+        example: "cpacct_example",
       }
     ),
     token: withOpenApi(updateRecurringPaymentSchemaBase.shape.token, {
@@ -908,7 +913,7 @@ const paymentRecurringPaymentSchema = z
       .openapi({ description: "Counterparty ID.", example: "cpty_example" }),
     counterpartyAccountId: z
       .string()
-      .openapi({ description: "Counterparty account ID.", example: "cpa_example" }),
+      .openapi({ description: "Counterparty account ID.", example: "cpacct_example" }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Counterparty wallet owner address.",
     }),

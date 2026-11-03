@@ -1,6 +1,10 @@
 import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
 import { describe, expect, it } from "vitest";
-import { enabledTransactionModules, type TransactionModuleFlags } from "./transaction-modules";
+import {
+  enabledPaymentTransactionKinds,
+  enabledTransactionModules,
+  type TransactionModuleFlags,
+} from "./transaction-modules";
 
 const ALL_ON: TransactionModuleFlags = {
   dvp: true,
@@ -37,6 +41,28 @@ describe("enabledTransactionModules", () => {
       "private_channels",
       "issuance",
       "rings",
+    ]);
+  });
+});
+
+describe("enabledPaymentTransactionKinds", () => {
+  // Stable's Type filter offered Onramp, Offramp and Confidential pay, none of which it records.
+  it("offers ramps only where the channel runs Ramps, and confidential pay nowhere", () => {
+    expect(enabledPaymentTransactionKinds({ ramps: false })).toEqual([
+      "pay",
+      "batch_pay",
+      "recurring_pay",
+      "deposit",
+      "request_deposit",
+    ]);
+    expect(enabledPaymentTransactionKinds({ ramps: true })).toEqual([
+      "pay",
+      "batch_pay",
+      "recurring_pay",
+      "deposit",
+      "request_deposit",
+      "onramp",
+      "offramp",
     ]);
   });
 });

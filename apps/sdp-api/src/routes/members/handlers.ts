@@ -584,7 +584,11 @@ async function endMembership(
             action: "delete",
             resourceType: "member",
             resourceId: ended.memberId,
-            metadata: { userId: ended.userId, left: params.change.kind === "leave" },
+            metadata: {
+              userId: ended.userId,
+              previousRole: ended.previousRole,
+              left: params.change.kind === "leave",
+            },
             organizationId: params.organizationId,
             userId: params.actorUserId,
           }

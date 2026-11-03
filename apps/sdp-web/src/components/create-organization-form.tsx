@@ -42,25 +42,27 @@ export function CreateOrganizationForm() {
 
   return (
     <form
-      className="mt-6 space-y-3"
+      className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
         submit();
       }}
     >
-      <label htmlFor="organization-name" className="block font-medium text-primary text-sm">
-        {t("Shared.SharedComponents.organizationNameLabel")}
-      </label>
-      <Input
-        id="organization-name"
-        name="name"
-        value={name}
-        maxLength={100}
-        autoComplete="organization"
-        placeholder={t("Shared.SharedComponents.organizationNamePlaceholder")}
-        disabled={isPending}
-        onChange={(event) => setName(event.target.value)}
-      />
+      <div className="flex flex-col gap-2">
+        <label htmlFor="organization-name" className="text-meta font-medium text-primary">
+          {t("Shared.SharedComponents.organizationNameLabel")}
+        </label>
+        <Input
+          id="organization-name"
+          name="name"
+          value={name}
+          maxLength={100}
+          autoComplete="organization"
+          placeholder={t("Shared.SharedComponents.organizationNamePlaceholder")}
+          disabled={isPending}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
       <Button type="submit" className="w-full" disabled={isPending || trimmedName.length === 0}>
         {isPending
           ? t("Shared.SharedComponents.creatingOrganization")

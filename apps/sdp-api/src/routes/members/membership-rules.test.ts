@@ -214,6 +214,15 @@ describe("organization membership rules", () => {
     expect((await requestAs(ADMIN_A, "DELETE", ADMIN_B.memberId, null)).status).toBe(204);
     expect(await membership(ADMIN_B)).toEqual({ role: "admin", status: "removed" });
     expect(await projectMemberships(ADMIN_B)).toEqual([]);
+    // Admin alerts email the removed admin from this record (HOO-2299).
+    const entry = await getDb(env).queryOne<{ metadata: string }>(
+      "SELECT metadata FROM audit_logs WHERE resource_type = 'member' AND resource_id = ?",
+      [ADMIN_B.memberId]
+    );
+    expect(JSON.parse(String(entry?.metadata))).toMatchObject({
+      userId: ADMIN_B.userId,
+      previousRole: "admin",
+    });
   });
 
   it("commits and audits a removal whose Clerk half fails, and a retry finishes only the Clerk half", async () => {

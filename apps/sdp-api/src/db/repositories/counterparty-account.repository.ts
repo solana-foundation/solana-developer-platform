@@ -6,7 +6,7 @@ import type {
 } from "@sdp/types/counterparties";
 
 export function generateCounterpartyAccountId(): string {
-  return `counterparty_account_${crypto.randomUUID()}`;
+  return `cpacct_${crypto.randomUUID()}`;
 }
 
 export interface CounterpartyAccountRow {

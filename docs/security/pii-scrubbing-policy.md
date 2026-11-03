@@ -13,16 +13,16 @@ second copy to drift.
 
 ## The two passes
 
-| Pass | Function | Applied to |
-| --- | --- | --- |
-| Credential only | `redactCredentialString`, `redactCredentialSecrets` | Client-facing error bodies |
-| Credentials + PII | `scrubTelemetry`, `scrubTelemetryString`, `scrubError` | Logs, Sentry, traces, metrics |
-| Credentials + PII, emails masked | `scrubAuditMetadata` | Audit ledger `metadata` |
+| Pass                             | Function                                               | Applied to                    |
+| -------------------------------- | ------------------------------------------------------ | ----------------------------- |
+| Credential only                  | `redactCredentialString`, `redactCredentialSecrets`    | Client-facing error bodies    |
+| Credentials + PII                | `scrubTelemetry`, `scrubTelemetryString`, `scrubError` | Logs, Sentry, traces, metrics |
+| Credentials + PII, emails masked | `scrubAuditMetadata`                                   | Audit ledger `metadata`       |
 
 A 4xx response goes back to the tenant that submitted the data in it. Stripping its own
 counterparty fields out of a validation error would remove the only thing that makes the
 error actionable, so the response path stays on the credential-only pass. PII scrubbing is
-for the sinks *we* read.
+for the sinks _we_ read.
 
 Audit metadata masks (`j***@example.com`) rather than drops: an invitation event whose
 subject is unnamed is not an audit trail. The full address stays in the invitations table
@@ -124,16 +124,16 @@ means checking its address shape against
 Every boundary below is enforced in code, not by asking call sites to remember. A new sink
 is not done until it appears here with a test.
 
-| Sink | Enforcement point |
-| --- | --- |
-| API logs (pino) | `hooks.logMethod` in `apps/sdp-api/src/runtime/logger.ts` — every argument, including the message |
-| API unexpected-error capture | `scrubError` in `captureUnexpectedError` (`apps/sdp-api/src/app.ts`) — the API has no Sentry since #1602 (error tracking is web-only); the capture lands in the pino stream, which the log hook scrubs again |
-| Audit ledger metadata | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed |
-| Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
-| Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
-| Ramp provider error messages | `providerErrorMessageSchema` (`packages/sdp-payments/src/ramps/fetch.ts`) scrubs the message into `SdpPaymentsError.diagnostics`, which error bodies never carry; `paymentsErrorDiagnostics` (`apps/sdp-api/src/runtime/money-path-events.ts`) scrubs diagnostics again before they are logged |
-| Earn provider error messages and bodies | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
-| Fireblocks request/response tracing | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino) |
+| Sink                                     | Enforcement point                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API logs (pino)                          | `hooks.logMethod` in `apps/sdp-api/src/runtime/logger.ts` — every argument, including the message                                                                                                                                                                                              |
+| API unexpected-error capture             | `scrubError` in `captureUnexpectedError` (`apps/sdp-api/src/app.ts`) — the API has no Sentry since #1602 (error tracking is web-only); the capture lands in the pino stream, which the log hook scrubs again                                                                                   |
+| Audit ledger metadata                    | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed                                                                                                                                                                                                                      |
+| Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites                                                                                                                                                                                                                               |
+| Dashboard Sentry user                    | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only                                                                                                                                                                                                                     |
+| Ramp provider error messages             | `providerErrorMessageSchema` (`packages/sdp-payments/src/ramps/fetch.ts`) scrubs the message into `SdpPaymentsError.diagnostics`, which error bodies never carry; `paymentsErrorDiagnostics` (`apps/sdp-api/src/runtime/money-path-events.ts`) scrubs diagnostics again before they are logged |
+| Earn provider error messages and bodies  | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only                                                         |
+| Fireblocks request/response tracing      | `scrubTelemetry` in `keychain-fireblocks.adapter.ts` (writes via `console`, bypassing pino)                                                                                                                                                                                                    |
 
 Scrubbing failure is a drop, not a pass-through: if the walker throws inside a Sentry hook
 the payload is discarded and `sdp_telemetry_scrub_failed` is written to stderr. An
@@ -153,12 +153,12 @@ webhook body passes through it before anything else reads the payload:
 
 ### Sampling
 
-| Setting | Value |
-| --- | --- |
-| `tracesSampleRate` (web) | 0.1 in production, 1 otherwise |
-| `replaysSessionSampleRate` | 0.1 |
-| `replaysOnErrorSampleRate` | 1.0 |
-| `enableLogs` (web) | true — structured logs go to Sentry and are covered by `beforeSendLog` |
+| Setting                    | Value                                                                  |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `tracesSampleRate` (web)   | 0.1 in production, 1 otherwise                                         |
+| `replaysSessionSampleRate` | 0.1                                                                    |
+| `replaysOnErrorSampleRate` | 1.0                                                                    |
+| `enableLogs` (web)         | true — structured logs go to Sentry and are covered by `beforeSendLog` |
 
 Sampling bounds the cost of scrubbing as well as the volume: span and transaction payloads
 are walked only for the traces that are actually sampled.
@@ -171,7 +171,7 @@ are walked only for the traces that are actually sampled.
 - **Cloud Logging** — the API's pino stream lands in Google Cloud Logging under the Cloud
   Run service. Retention is the bucket's configured period; access is IAM on the project.
 - **Audit ledger** — retention is indefinite by design and age never authorizes deletion;
-  see `docs/ops/audit-ledger.md`. This is why metadata scrubbing happens *before* the row is
+  see `docs/ops/audit-ledger.md`. This is why metadata scrubbing happens _before_ the row is
   hashed: what the chain commits to is exactly what a reviewer can read back, forever. The
   same permanence applies to the walker's depth bound — metadata nested past 16 levels is
   committed as `[Truncated]` and cannot be recovered later, which is deliberate: nothing

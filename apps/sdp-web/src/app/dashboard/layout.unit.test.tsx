@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthPageShell } from "@/components/auth-page-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
 import * as sdpApi from "@/lib/sdp-api";
 
@@ -24,8 +25,11 @@ describe("dashboard layout", () => {
     const layout = await DashboardLayout({ children: "dashboard page" });
 
     expect(layout).toMatchObject({
-      type: SelectExistingOrganizationPanel,
-      props: { noAccess: true },
+      type: AuthPageShell,
+      props: {
+        action: null,
+        children: { type: SelectExistingOrganizationPanel, props: { noAccess: true } },
+      },
     });
   });
 

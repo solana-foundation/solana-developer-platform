@@ -10,14 +10,14 @@ checklist-driven.
 Two provider SHAPES live here, and the difference decides which seams a new
 integration touches:
 
-| | **Custodial portfolio** (no shipped provider; Ground, the one integration, was removed) | **Vault-direct** (Kamino, Veda, Jupiter Lend, Ondo; WisdomTree registered pre-launch) |
-|---|---|---|
-| Money model | SDP provisions an omnibus wallet; the provider spreads funds across sources | Non-custodial; the owner signs a provider-built transaction and keeps the resulting vault shares or yield token |
-| Contract | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals) | Catalogue client in `@sdp/earn`; execution client implements `EarnVaultDirectProvider` in its own package |
-| `/v1/earn/programs` | the whole flow | **501** by capability detection |
-| Upstream readiness | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY` | Kamino, Veda, and Jupiter Lend are credential-free; Ondo needs the platform Jupiter key; WisdomTree needs Connect credentials |
-| Clusters | catalogued per environment's own cluster | provider deployment registries: Kamino on devnet/mainnet, Veda on devnet, Jupiter Lend and Ondo on mainnet; WisdomTree remains deposit-disabled |
-| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide |
+|                     | **Custodial portfolio** (no shipped provider; Ground, the one integration, was removed) | **Vault-direct** (Kamino, Veda, Jupiter Lend, Ondo; WisdomTree registered pre-launch)                                                           |
+| ------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Money model         | SDP provisions an omnibus wallet; the provider spreads funds across sources             | Non-custodial; the owner signs a provider-built transaction and keeps the resulting vault shares or yield token                                 |
+| Contract            | `EarnVaultProvider` + `EarnPortfolioWalletProvider` (+ approvals)                       | Catalogue client in `@sdp/earn`; execution client implements `EarnVaultDirectProvider` in its own package                                       |
+| `/v1/earn/programs` | the whole flow                                                                          | **501** by capability detection                                                                                                                 |
+| Upstream readiness  | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`                                     | Kamino, Veda, and Jupiter Lend are credential-free; Ondo needs the platform Jupiter key; WisdomTree needs Connect credentials                   |
+| Clusters            | catalogued per environment's own cluster                                                | provider deployment registries: Kamino on devnet/mainnet, Veda on devnet, Jupiter Lend and Ondo on mainnet; WisdomTree remains deposit-disabled |
+| Dashboard           | treasury program flow                                                                   | treasury vault flow plus an authenticated integration guide                                                                                     |
 
 A vault-direct provider is a complete integration without a portfolio wallet:
 `supportsPortfolioWallets` returning false is the answer, not a TODO. Its
@@ -54,7 +54,7 @@ Companion docs:
   `EARN_KNOWN_CURATOR_LABELS` in `@sdp/types`).
 - **A program is one portfolio wallet pinned to one vault; an org may hold
   many.** Selecting a strategy points that wallet's stablecoin lane at a
-  *single* vault — `pct: 100` for the selected strategy's lane
+  _single_ vault — `pct: 100` for the selected strategy's lane
   (`singleStrategyAllocation`, `earn-deposit-model.ts`), which is the only
   shape the V1 API accepts: PRO-1667 caps each token group at one allocation
   entry per program. An omitted token lane keeps its current allocation, so a
@@ -62,7 +62,7 @@ Companion docs:
   strategies arrives as several programs (PRO-1670): `POST /v1/earn/programs`
   creates one, `PUT /v1/earn/programs/:programId` re-targets that one in place,
   and nothing rebalances between them — moving money between programs is an
-  explicit withdraw-then-deposit. Uniqueness is at the *provider wallet*:
+  explicit withdraw-then-deposit. Uniqueness is at the _provider wallet_:
   `earn_provider_wallets` carries a GLOBAL `UNIQUE (provider,
   provider_wallet_ref)` (migration 0056), so one provider-side wallet is claimed
   by exactly one link row platform-wide — two orgs pointing at one wallet would
@@ -88,16 +88,16 @@ vault or yield-bearing token, and money moves only when a signed transaction
 lands on chain. SDP ships TWO signers over one runtime, and the signer decides
 which routes serve the flow:
 
-| | Treasury (SDP signs) | B2B2C external wallet (the customer signs) |
-| -- | -- | -- |
-| Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
-| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` builds; the caller then submits to `/external-wallet/deposits` |
-| Direct exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions`; the caller then submits to `/external-wallet/withdrawals` |
-| Queued exit | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options, preview, request/cancellation builds, submits, and history |
-| Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
-| Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
-| Authorization | wallet policy, then `createOrgSignerForCustodyWallet` | the owner's own ed25519 signature |
-| Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
+|                     | Treasury (SDP signs)                                                                         | B2B2C external wallet (the customer signs)                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Who holds the funds | an org custody wallet                                                                        | the end user's own wallet; SDP holds no key                                                                                                   |
+| Deposit             | `POST /v1/earn/vault-deposits`                                                               | `POST /v1/earn/external-wallet/deposit-transactions` builds; the caller then submits to `/external-wallet/deposits`                           |
+| Direct exit         | `POST /v1/earn/vault-withdrawals`                                                            | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions`; the caller then submits to `/external-wallet/withdrawals` |
+| Queued exit         | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options, preview, request/cancellation builds, submits, and history                                                                           |
+| Movement reads      | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements`                            | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772)                                                          |
+| Holdings + earnings | `GET /v1/earn/vault-positions`                                                               | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…`                                     |
+| Authorization       | wallet policy, then `createOrgSignerForCustodyWallet`                                        | the owner's own ed25519 signature                                                                                                             |
+| Ledger identity     | `earn_movements.custody_wallet_id`                                                           | `earn_movements.owner_address`                                                                                                                |
 
 Both are the SAME execution model (`vault_direct`). Treasury and
 external-wallet submits record a signed transaction durably before SDP

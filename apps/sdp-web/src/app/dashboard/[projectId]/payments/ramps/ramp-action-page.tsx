@@ -33,6 +33,7 @@ import { OfframpRail } from "./offramp-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
 import { OnrampRail } from "./onramp-rail";
 import { getPaymentMethodLabel, type PaymentMethod } from "./payment-method";
+import { useRampsOffered } from "./use-ramps-offered";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -111,7 +112,10 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     );
   };
 
-  const fiatEnabled = hasEnabledRampProvider(rampProviderAccess);
+  const rampsOffered = useRampsOffered();
+  const fiatEnabled = rampsOffered && hasEnabledRampProvider(rampProviderAccess);
+  // Without Ramps there is no provider tab, so a stale `?tab=provider` opens the address.
+  const depositTab = rampsOffered ? tab : null;
 
   const effectiveMethod: PaymentMethod =
     mode === "send"
@@ -160,7 +164,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   }
   return (
     <DepositFlow
-      tab={tab}
+      tab={depositTab}
       method={effectiveMethod}
       railProps={railProps}
       contact={contact}

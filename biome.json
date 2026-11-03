@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "assist": {
     "actions": {
       "source": {
@@ -23,6 +23,11 @@
   "css": {
     "parser": {
       "tailwindDirectives": true
+    }
+  },
+  "markdown": {
+    "formatter": {
+      "formatEmbeds": false
     }
   },
   "linter": {
@@ -91,6 +96,12 @@
     }
   },
   "overrides": [
+    {
+      "includes": ["**/SKILL.md"],
+      "formatter": {
+        "enabled": false
+      }
+    },
     {
       "includes": ["**/apps/sdp-api/**/*.ts", "**/apps/sdp-api/**/*.tsx"],
       "linter": {
@@ -474,6 +485,11 @@
       "!**/dist",
       "!**/*.d.ts",
       "!**/pnpm-lock.yaml",
+      "!**/*.svg",
+      "!CHANGELOG.md",
+      "!docs/architecture/module-map.md",
+      "!docs/earn/*-catalogue-inventory.md",
+      "!packages/sdp-issuance/src/capabilities/SUPPORT_MATRIX.md",
       "!**/.source",
       "!**/packages/sdp-spc-escrow/src/generated",
       "!**/packages/sdp-spc-withdraw/src/generated",

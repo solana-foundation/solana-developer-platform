@@ -6,14 +6,7 @@ import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
-
-const onboardingOrganizationSchema = z.object({
-  linked: z.boolean(),
-  organization: z
-    .object({ id: z.string().min(1) })
-    .nullable()
-    .optional(),
-});
+import { resolveOrganizationId } from "./organization-id";
 
 /** The organization read; an absent allowlist is an unrestricted one. */
 const organizationAllowlistSchema = z.object({
@@ -31,19 +24,6 @@ export type OrganizationIpAllowlist =
 export type SaveOrganizationIpAllowlistResult =
   | { ok: true; allowedIps: string[] }
   | { ok: false; error: string };
-
-/** The signed-in organization's SDP id, from the onboarding status. */
-async function resolveOrganizationId(
-  client: Awaited<ReturnType<typeof createOrgSdpApiClient>>
-): Promise<string> {
-  const onboarding = onboardingOrganizationSchema.parse(
-    await client.fetch<unknown>("/v1/onboarding/status")
-  );
-  if (!onboarding.linked || !onboarding.organization) {
-    throw new Error("Organization is not linked yet");
-  }
-  return onboarding.organization.id;
-}
 
 /** The organization-wide API-key IP allowlist; empty when unrestricted. */
 export async function loadOrganizationIpAllowlist(): Promise<OrganizationIpAllowlist> {
@@ -82,6 +62,58 @@ export async function saveOrganizationIpAllowlistAction(
     );
     revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
     return { ok: true, allowedIps: parseAllowlist(organization) };
+  } catch (error) {
+    return { ok: false, error: readableApiError(error) };
+  }
+}
+
+/** The organization read; an unset `alertEmails` means alert emails are on. */
+const organizationAlertEmailsSchema = z.object({
+  settings: z.object({ alertEmails: z.boolean().optional() }).nullable(),
+});
+
+function parseAlertEmails(body: unknown): boolean {
+  return organizationAlertEmailsSchema.parse(body).settings?.alertEmails !== false;
+}
+
+export type OrganizationAlertEmails = { ok: true; enabled: boolean } | { ok: false; error: string };
+
+/** Whether the organization's admins get alert emails (HOO-2299); on unless turned off. */
+export async function loadOrganizationAlertEmails(): Promise<OrganizationAlertEmails> {
+  try {
+    const client = await createOrgSdpApiClient();
+    const organizationId = await resolveOrganizationId(client);
+    const organization = await client.fetch<unknown>(
+      `/v1/organizations/${encodeURIComponent(organizationId)}`
+    );
+    return { ok: true, enabled: parseAlertEmails(organization) };
+  } catch (error) {
+    return { ok: false, error: readableApiError(error) };
+  }
+}
+
+/**
+ * Turns every alert email to the organization's admins on or off; the saved
+ * value is what the API returns. The switch's Idempotency-Key is forwarded,
+ * one per intended value, so a retried save is the same request.
+ */
+export async function saveOrganizationAlertEmailsAction(
+  enabled: boolean,
+  idempotencyKey: string
+): Promise<OrganizationAlertEmails> {
+  try {
+    const client = await createOrgSdpApiClient();
+    const organizationId = await resolveOrganizationId(client);
+    const organization = await client.fetch<unknown>(
+      `/v1/organizations/${encodeURIComponent(organizationId)}`,
+      {
+        method: "PATCH",
+        headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+        body: JSON.stringify({ settings: { alertEmails: enabled } }),
+      }
+    );
+    revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
+    return { ok: true, enabled: parseAlertEmails(organization) };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }

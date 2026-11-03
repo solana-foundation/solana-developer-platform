@@ -170,18 +170,18 @@ funded SDP fee sponsor and has the keychain adapter's synchronous approval windo
 
 All operations below make **zero Solana RPC calls** in the custody adapter:
 
-| Operation | Before | After |
-| --- | --- | --- |
-| CSR generation / download | Unsupported | Zero Fireblocks requests |
-| Named vault discovery | Manual vault-ID entry | One Fireblocks GET per page of up to 50 vaults |
-| Initial BYOK verification | One address GET for a manually entered vault | Two Fireblocks GETs per selected vault: current metadata and address; no duplicate primary-address read. Legacy single-ID submissions retain one address GET |
-| Credential check | Unsupported | One Fireblocks address GET |
-| Rotation or rollback verification | One primary-vault address GET | One Fireblocks address GET per distinct vault across the primary and attached wallets; reuse the primary result |
-| New vault provisioning | Three Fireblocks requests for managed wallets | Same three requests for managed and BYOK: vault POST, asset POST, address GET; reuse the returned address |
-| Native SOL payment | Address GET, RAW POST, approval polls, local blockhash/sponsorship/submission/confirmation RPC | One TRANSFER POST, zero Solana RPC at send; one GET per status poll, throttled to once per 15 seconds per transfer |
-| Native USDC payment | Same RAW path plus live mint/token-account reads | Same as SOL plus one static catalogue GET on a five-minute cache miss; concurrent reads shared, failures not cached |
-| First signature for a wallet | Managed: address GET, proposal POST, approval polls | Same path for managed and BYOK |
-| Subsequent signatures on a cached adapter | Managed: proposal POST and approval polls | Same path for managed and BYOK; no duplicate address GET |
+| Operation                                 | Before                                                                                         | After                                                                                                                                                        |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CSR generation / download                 | Unsupported                                                                                    | Zero Fireblocks requests                                                                                                                                     |
+| Named vault discovery                     | Manual vault-ID entry                                                                          | One Fireblocks GET per page of up to 50 vaults                                                                                                               |
+| Initial BYOK verification                 | One address GET for a manually entered vault                                                   | Two Fireblocks GETs per selected vault: current metadata and address; no duplicate primary-address read. Legacy single-ID submissions retain one address GET |
+| Credential check                          | Unsupported                                                                                    | One Fireblocks address GET                                                                                                                                   |
+| Rotation or rollback verification         | One primary-vault address GET                                                                  | One Fireblocks address GET per distinct vault across the primary and attached wallets; reuse the primary result                                              |
+| New vault provisioning                    | Three Fireblocks requests for managed wallets                                                  | Same three requests for managed and BYOK: vault POST, asset POST, address GET; reuse the returned address                                                    |
+| Native SOL payment                        | Address GET, RAW POST, approval polls, local blockhash/sponsorship/submission/confirmation RPC | One TRANSFER POST, zero Solana RPC at send; one GET per status poll, throttled to once per 15 seconds per transfer                                           |
+| Native USDC payment                       | Same RAW path plus live mint/token-account reads                                               | Same as SOL plus one static catalogue GET on a five-minute cache miss; concurrent reads shared, failures not cached                                          |
+| First signature for a wallet              | Managed: address GET, proposal POST, approval polls                                            | Same path for managed and BYOK                                                                                                                               |
+| Subsequent signatures on a cached adapter | Managed: proposal POST and approval polls                                                      | Same path for managed and BYOK; no duplicate address GET                                                                                                     |
 
 Credential-version changes select a fresh adapter. No provider-account address is inferred from
 deployment credentials or another connection's signer cache.

@@ -97,12 +97,17 @@ export function resolveReadySubmission(
   if (fields.walletId === "" || destinationAddress === null || selectedMint === null) {
     return null;
   }
-  const baseSubmission = {
+  const baseSubmission: CreateTransferInput = {
     sourceCustodyWalletId: fields.walletId,
     destination: destinationAddress,
     token: address(selectedMint),
     amount: fields.amount,
   };
+  // The destination is the address of the contact account in `accountId`, so the
+  // transfer names that account and is tied to the contact, as a batch recipient is.
+  if (fields.accountId !== "") {
+    baseSubmission.counterpartyAccountId = fields.accountId;
+  }
   const memo = fields.memo.trim();
   return memo === "" ? baseSubmission : { ...baseSubmission, memo };
 }

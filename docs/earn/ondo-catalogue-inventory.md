@@ -9,17 +9,17 @@ the owner's USDY balance, and the exit is the reverse swap. Surfaced 2026-09-14
 
 ## The row
 
-| Field | Value | Where it comes from |
-| --- | --- | --- |
-| `providerReference` / `shareMint` | `A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6` | The USDY mint, verified on-chain each pass (SPL token, 6 decimals) |
-| `hostCluster` | `mainnet-beta` | Measured by genesis hash before the mint is read |
-| `sourceKind` | `rwa` | Tokenized note backed by short-term Treasuries and bank deposits; traces to the issuer's published mint, the same allowlist bar Veda clears |
-| `depositMints` | mainnet USDC only | The pair Ondo's own market-making liquidity quotes; other stablecoins ride the swap-funded deposit leg into USDC first |
-| `liquidityTerm` | `instant` | Secondary-market exit, no lock |
-| `currentApy` | issuer-published APY as a fraction (e.g. `0.035999` for Sep 2026's 3.5999%, shown as 3.6%) | `ondo.finance/api/v1/assets`, the `usdy` entry's `apy`, read keylessly each hourly pass and truncated, never rounded up (PRO-1833) |
-| `riskMetadata.tvlUsd` | USDY supply on Solana in USD | Same listing, `tvlUsd.solana` |
-| `depositSlippage` / `withdrawalSlippage` | 50 bps default, quote required | Both legs are real swaps; the builder proves the encoded threshold covers the caller's floor |
-| `riskMetadata.curator` | `ondo` | Issuer attribution |
+| Field                                    | Value                                                                                      | Where it comes from                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `providerReference` / `shareMint`        | `A1KLoBrKBde8Ty9qtNQUtq3C2ortoC3u7twggz7sEto6`                                             | The USDY mint, verified on-chain each pass (SPL token, 6 decimals)                                                                          |
+| `hostCluster`                            | `mainnet-beta`                                                                             | Measured by genesis hash before the mint is read                                                                                            |
+| `sourceKind`                             | `rwa`                                                                                      | Tokenized note backed by short-term Treasuries and bank deposits; traces to the issuer's published mint, the same allowlist bar Veda clears |
+| `depositMints`                           | mainnet USDC only                                                                          | The pair Ondo's own market-making liquidity quotes; other stablecoins ride the swap-funded deposit leg into USDC first                      |
+| `liquidityTerm`                          | `instant`                                                                                  | Secondary-market exit, no lock                                                                                                              |
+| `currentApy`                             | issuer-published APY as a fraction (e.g. `0.035999` for Sep 2026's 3.5999%, shown as 3.6%) | `ondo.finance/api/v1/assets`, the `usdy` entry's `apy`, read keylessly each hourly pass and truncated, never rounded up (PRO-1833)          |
+| `riskMetadata.tvlUsd`                    | USDY supply on Solana in USD                                                               | Same listing, `tvlUsd.solana`                                                                                                               |
+| `depositSlippage` / `withdrawalSlippage` | 50 bps default, quote required                                                             | Both legs are real swaps; the builder proves the encoded threshold covers the caller's floor                                                |
+| `riskMetadata.curator`                   | `ondo`                                                                                     | Issuer attribution                                                                                                                          |
 
 ## Eligibility and issuer controls
 

@@ -2,6 +2,7 @@ import { isMovementId, MOVEMENTS, type MovementId } from "@sdp/types/movements";
 import { closeDatabasePools } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
+import { closeAllRedisClients } from "@/runtime/kv-redis";
 import {
   changeProjectMovementControl,
   getProjectMovementControl,
@@ -99,4 +100,4 @@ runWithSystemDatabaseIdentity("script:project-movement-control", main)
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   })
-  .finally(closeDatabasePools);
+  .finally(() => Promise.all([closeDatabasePools(), closeAllRedisClients()]));
