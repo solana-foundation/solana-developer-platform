@@ -1,3 +1,4 @@
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
@@ -10,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       !/^(0|[1-9]\d*)$/.test(minimumSlot) ||
       !Number.isSafeInteger(Number(minimumSlot)))
   ) {
-    return Response.json(
+    return dashboardJson(
       { error: { message: "Invalid wallet balance minimumSlot" } },
       { status: 400 }
     );

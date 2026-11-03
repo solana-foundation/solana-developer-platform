@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = { params: Promise<{ paymentRequestId: string }> };
@@ -10,10 +10,7 @@ const routeParamsSchema = z.object({ paymentRequestId: z.string().trim().min(1) 
 export async function GET(request: Request, context: RouteContext) {
   const params = routeParamsSchema.safeParse(await context.params);
   if (!params.success) {
-    return NextResponse.json(
-      { error: { message: "Payment request id is required" } },
-      { status: 400 }
-    );
+    return dashboardJson({ error: { message: "Payment request id is required" } }, { status: 400 });
   }
   return proxyToSdpApi({
     request,

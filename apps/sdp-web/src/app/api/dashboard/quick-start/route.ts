@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { loadQuickStartStatus } from "@/lib/quick-start-server";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 
@@ -10,14 +10,10 @@ import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.quick-start", request);
   const status = await trace.step("load_quick_start_status", () => loadQuickStartStatus());
-  const response = NextResponse.json(
+  const response = dashboardJson(
     { data: status },
     {
-      headers: {
-        "Cache-Control": "no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
-      },
+      trace,
     }
   );
   logRouteResult(trace, 200, { known: status !== null });
