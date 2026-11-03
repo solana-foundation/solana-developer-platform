@@ -14,7 +14,7 @@ import DashboardLayout from "./layout";
 describe("dashboard layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSdpAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    mocks.getSdpAuth.mockResolvedValue({ orgId: "org_test" });
   });
 
   it("offers the organization choices under a no-access notice when SDP refuses the session", async () => {

@@ -51,7 +51,7 @@ describe("dashboard home module flags", () => {
     fetchPaymentsAggregateMock.mockReset();
     fetchPaymentsIssuedTokenSymbolsMock.mockReset();
     fetchPaymentsWalletsMock.mockReset();
-    authMock.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    authMock.mockResolvedValue({ orgId: "org_test" });
     issuanceMock.mockResolvedValue(false);
   });
 

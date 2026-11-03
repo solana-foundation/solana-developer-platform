@@ -137,7 +137,7 @@ beforeEach(() => {
   mockRequest.mockReset();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
 
-  mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+  mockAuth.mockResolvedValue({ orgId: "org_test" });
   mockRequestMemberRole.mockReset();
   mockRequestMemberRole.mockResolvedValue("member");
   mockIssuanceFlag.mockResolvedValue(true);
