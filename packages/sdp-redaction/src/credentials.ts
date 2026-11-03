@@ -93,7 +93,7 @@ const CREDENTIAL_NAME_QUALIFIERS = new Set([
   "signing",
   "wallet",
 ]);
-// URL userinfo (`scheme://user:pass@host`) is a credential whatever the
+// URL userinfo (the `user:password` before `@` in a URL) is a credential whatever the
 // scheme. The whole userinfo goes: the user half is an API key as often as a
 // name. Starts only where a scheme run starts, so the scan stays linear.
 const URL_USERINFO_PATTERN = /(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/?#"<>\\]+@/g;
@@ -420,7 +420,7 @@ function freeTextValueEnd(text: string, from: number): number {
  * passphrase=`) starts at `from`. When the second word is a credential on its
  * own (`token=`), the first word is part of the name only if it qualifies one
  * (`access token`); otherwise it is the last word of the value before it, and
- * `seed=... yellow token=` must not leave `yellow` readable.
+ * `seed=... india token=` must not leave `india` readable.
  */
 function opensCredentialName(text: string, from: number): boolean {
   const firstEnd = stickyEnd(NAME_WORD, text, from);

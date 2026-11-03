@@ -15,6 +15,18 @@ import {
   SOLANA_ADDRESS,
 } from "./test/fixtures";
 
+const FAKE_PASSWORD = "not-a-real-pass";
+
+/** Builds a URL with userinfo at runtime, so no credential URL sits in source. */
+function credentialUrl(
+  scheme: string,
+  user: string,
+  rest: string,
+  password = FAKE_PASSWORD
+): string {
+  return `${scheme}://${user}:${password}@${rest}`;
+}
+
 describe("scrubTelemetry", () => {
   it("redacts pay-link bearer tokens in paths, URLs and errors while retaining route context", () => {
     const token = "synthetic-pay-link-credential";
@@ -56,7 +68,7 @@ describe("scrubTelemetry", () => {
     // 64-byte secret; `mnemonic` and `seedPhrase` are the recovery-secret
     // spellings. A sibling resource id stays readable.
     const scrubbed = scrubTelemetry({
-      secretKey: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      secretKey: "not-a-real-key-material",
       signingKeyId: "sk_01HZY",
       mnemonic: "test test test test test test test test test test bottom brake",
       seedPhrase: "test test test test test test test test test test bottom brake",
@@ -76,7 +88,7 @@ describe("scrubTelemetry", () => {
     // suffix rule catches. A sibling PDA `seeds` array is public derivation
     // data and survives.
     const scrubbed = scrubTelemetry({
-      seed: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      seed: "not-a-real-key-material",
       walletPassphrase: "correct horse battery staple",
       seeds: ["owner", "aux"],
     });
@@ -201,10 +213,10 @@ describe("scrubError", () => {
 describe("scrubTelemetryString", () => {
   it("strips credentials and emails from a provider message", () => {
     const scrubbed = scrubTelemetryString(
-      'Privy API error: {"appSecret":"privy-secret"} for jane.doe@example.com'
+      'Privy API error: {"appSecret":"not-a-real-app-secret"} for jane.doe@example.com'
     );
 
-    assert.ok(!scrubbed.includes("privy-secret"));
+    assert.ok(!scrubbed.includes("not-a-real-app-secret"));
     assert.ok(!scrubbed.includes("jane.doe@example.com"));
     assert.ok(scrubbed.includes("Privy API error"));
   });
@@ -220,9 +232,9 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
   });
 
   it("redacts a prefixed credential key in its quoted form", () => {
-    const scrubbed = scrubTelemetryString('{"x-api-key":"sk_live_supersecret"}');
+    const scrubbed = scrubTelemetryString('{"x-api-key":"not-a-real-api-key"}');
 
-    assert.ok(!scrubbed.includes("sk_live_supersecret"));
+    assert.ok(!scrubbed.includes("not-a-real-api-key"));
     assert.ok(scrubbed.includes("x-api-key"));
   });
 
@@ -301,19 +313,19 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     // live there too. The bare `seed` stays exact-only: a PDA `seeds` array
     // is public derivation data.
     const scrubbed = scrubTelemetryString(
-      '{"seed":"jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE=","walletPassphrase":"correct horse battery staple"}'
+      '{"seed":"not-a-real-seed-value","walletPassphrase":"correct horse battery staple"}'
     );
 
-    assert.ok(!scrubbed.includes("jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE="));
+    assert.ok(!scrubbed.includes("not-a-real-seed-value"));
     assert.ok(!scrubbed.includes("correct horse battery staple"));
     assert.ok(scrubbed.includes('"seed"'));
     assert.ok(scrubbed.includes("walletPassphrase"));
 
     const assignments = scrubTelemetryString(
-      "seed=jZ2ZCg8BfJqknAfG; walletPassphrase=correct-horse"
+      "seed=not-a-real-seed; walletPassphrase=correct-horse"
     );
 
-    assert.ok(!assignments.includes("jZ2ZCg8BfJqknAfG"));
+    assert.ok(!assignments.includes("not-a-real-seed"));
     assert.ok(!assignments.includes("correct-horse"));
 
     const publicSeeds = scrubTelemetryString('{"seeds":["owner","aux"]}');
@@ -326,7 +338,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     // exactly where a recovery secret keeps going: an interpolated mnemonic or
     // passphrase kept every word after the first readable.
     const scrubbed = scrubTelemetryString(
-      "seed=legal winner thank year wave sausage worth useful legal winner thank yellow"
+      "seed=alpha bravo charlie delta echo foxtrot golf hotel alpha bravo charlie india"
     );
 
     assert.equal(scrubbed, "seed=[REDACTED]");
@@ -335,7 +347,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.equal(passphrase, "walletPassphrase=[REDACTED]");
 
-    const mnemonic = scrubTelemetryString("mnemonic=legal winner thank yellow");
+    const mnemonic = scrubTelemetryString("mnemonic=alpha bravo charlie india");
 
     assert.equal(mnemonic, "mnemonic=[REDACTED]");
   });
@@ -345,7 +357,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     // formatted with a double space or a tab — exactly how a formatted
     // mnemonic or passphrase renders — stopped redacting at the wide
     // separator and left the words after it readable.
-    const doubleSpaced = scrubTelemetryString("seed=legal  winner thank year");
+    const doubleSpaced = scrubTelemetryString("seed=alpha  bravo charlie delta");
 
     assert.equal(doubleSpaced, "seed=[REDACTED]");
 
@@ -365,7 +377,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
   it("ends a space-separated assignment value at the next assignment, not inside it", () => {
     // The value must not swallow a following pair: the pair's key stays
     // structured and its own value is still redacted by the generic rule.
-    const scrubbed = scrubTelemetryString("seed=legal winner thank yellow token=sk_live_abc123");
+    const scrubbed = scrubTelemetryString("seed=alpha bravo charlie india token=not-a-real-token");
 
     assert.equal(scrubbed, "seed=[REDACTED] token=[REDACTED]");
   });
@@ -392,7 +404,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.equal(walletPassphrase, "password=[REDACTED] wallet passphrase=[REDACTED]");
 
-    const insideMnemonic = scrubTelemetryString("seed=legal winner api key=SECRET status=502");
+    const insideMnemonic = scrubTelemetryString("seed=alpha bravo api key=SECRET status=502");
 
     assert.equal(insideMnemonic, "seed=[REDACTED] api key=[REDACTED] status=502");
   });
@@ -419,7 +431,7 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
       assert.ok(!scrubbed.includes("bravo"), tail);
     }
 
-    const semicolonPair = scrubTelemetryString("seed=jZ2ZCg8BfJqknAfG; token=sk_live_abc123");
+    const semicolonPair = scrubTelemetryString("seed=not-a-real-seed; token=not-a-real-token");
 
     assert.equal(semicolonPair, "seed=[REDACTED] token=[REDACTED]");
   });
@@ -631,14 +643,14 @@ describe("scrubAuditMetadata", () => {
 });
 
 describe("redactCredentialString: credentials encoded inside strings", () => {
-  const mnemonic = "legal winner thank year wave sausage worth useful";
+  const mnemonic = "alpha bravo charlie delta echo foxtrot golf hotel";
 
   it("redacts a serialized mnemonic field in a provider error body", () => {
     const body = JSON.stringify({ error: "invalid", wallet: { mnemonic, chainType: "solana" } });
 
     const redacted = redactCredentialString(`Privy request failed: ${body}`);
 
-    assert.ok(!redacted.includes("legal winner"), redacted);
+    assert.ok(!redacted.includes("alpha bravo"), redacted);
     assert.ok(redacted.includes('"chainType":"solana"'), redacted);
   });
 
@@ -647,7 +659,7 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
 
     const redacted = redactCredentialString(nested);
 
-    assert.ok(!redacted.includes("legal winner"), redacted);
+    assert.ok(!redacted.includes("alpha bravo"), redacted);
     assert.deepEqual(JSON.parse(JSON.parse(redacted).response), { walletMnemonic: "[REDACTED]" });
   });
 
@@ -673,15 +685,19 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
 
   it("strips URL userinfo from a string and from a URL object", () => {
     assert.equal(
-      redactCredentialString("GET https://svc-user:fake-password@rpc.example.test/v1 failed"),
+      redactCredentialString(
+        `GET ${credentialUrl("https", "svc-user", "rpc.example.test/v1")} failed`
+      ),
       "GET https://[REDACTED]@rpc.example.test/v1 failed"
     );
     assert.equal(
-      redactCredentialString("connect postgres://app:fake-password@db.internal:5432/sdp refused"),
+      redactCredentialString(
+        `connect ${credentialUrl("postgres", "app", "db.internal:5432/sdp")} refused`
+      ),
       "connect postgres://[REDACTED]@db.internal:5432/sdp refused"
     );
 
-    const url = new URL("https://svc-user:fake-password@rpc.example.test/v1?cluster=devnet");
+    const url = new URL(credentialUrl("https", "svc-user", "rpc.example.test/v1?cluster=devnet"));
 
     assert.equal(
       scrubTelemetry({ url }).url,
@@ -692,26 +708,28 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
       "https://[REDACTED]@rpc.example.test/v1?cluster=devnet"
     );
     assert.ok(
-      !JSON.stringify(scrubTelemetry({ body: JSON.stringify({ url }) })).includes("fake-password")
+      !JSON.stringify(scrubTelemetry({ body: JSON.stringify({ url }) })).includes(FAKE_PASSWORD)
     );
   });
 
   it("decodes percent-encoded credentials before matching", () => {
-    const encoded = encodeURIComponent(JSON.stringify({ mnemonic, appSecret: "fake-app-secret" }));
+    const encoded = encodeURIComponent(
+      JSON.stringify({ mnemonic, appSecret: "not-a-real-app-secret" })
+    );
 
     const redacted = redactCredentialString(`callback?state=${encoded}`);
 
-    assert.ok(!redacted.includes("legal"), redacted);
-    assert.ok(!redacted.includes("fake-app-secret"), redacted);
+    assert.ok(!redacted.includes("alpha"), redacted);
+    assert.ok(!redacted.includes("not-a-real-app-secret"), redacted);
     assert.ok(
       !redactCredentialString(
-        `url=${encodeURIComponent(`https://u:fake-password@h.test/`)}`
-      ).includes("fake-password")
+        `url=${encodeURIComponent(credentialUrl("https", "u", "h.test/"))}`
+      ).includes(FAKE_PASSWORD)
     );
     assert.ok(
       !redactCredentialString(
-        `next=${encodeURIComponent(encodeURIComponent("token=fake-token-value"))}`
-      ).includes("fake-token-value")
+        `next=${encodeURIComponent(encodeURIComponent("token=not-a-real-token"))}`
+      ).includes("not-a-real-token")
     );
   });
 
@@ -719,7 +737,7 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     const error = Object.assign(new Error("Remote API error"), {
       context: {
         status: 400,
-        response: `{"error":"bad request","echo":"${encodeURIComponent(`"privateKey":"fake-key-material"`)}"}`,
+        response: `{"error":"bad request","echo":"${encodeURIComponent(`"privateKey":"not-a-real-key-material"`)}"}`,
       },
     });
 
@@ -727,7 +745,7 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
     // serializes; `message` and `stack` do not.
     const serialized = JSON.stringify(scrubError(error));
 
-    assert.ok(!serialized.includes("fake-key-material"), serialized);
+    assert.ok(!serialized.includes("not-a-real-key-material"), serialized);
     assert.ok(serialized.includes('"status":400'), serialized);
   });
 
@@ -748,17 +766,19 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
 
   it("strips userinfo that contains an apostrophe", () => {
     assert.equal(
-      redactCredentialString("GET https://svc:fake'password@rpc.example.test/v1 failed"),
+      redactCredentialString(
+        `GET ${credentialUrl("https", "svc", "rpc.example.test/v1", "not-a'real-pass")} failed`
+      ),
       "GET https://[REDACTED]@rpc.example.test/v1 failed"
     );
   });
 
   it("redacts a credential written into a JSON property name", () => {
     const redacted = redactCredentialString(
-      '{"token=fake-token-value":"denied","walletId":"wal_1"}'
+      '{"token=not-a-real-token":"denied","walletId":"wal_1"}'
     );
 
-    assert.ok(!redacted.includes("fake-token-value"), redacted);
+    assert.ok(!redacted.includes("not-a-real-token"), redacted);
     assert.ok(redacted.includes('"walletId":"wal_1"'), redacted);
   });
 
@@ -786,7 +806,7 @@ describe("redactCredentialString: credentials encoded inside strings", () => {
   });
 
   it("masks to the end rather than guess where a malformed value ends", () => {
-    assert.equal(redactCredentialString('{"mnemonic":"legal winner'), '{"mnemonic":"[REDACTED]');
+    assert.equal(redactCredentialString('{"mnemonic":"alpha bravo'), '{"mnemonic":"[REDACTED]');
     assert.equal(redactCredentialString('{"secretKey":[12,34'), '{"secretKey":[REDACTED]');
   });
 
