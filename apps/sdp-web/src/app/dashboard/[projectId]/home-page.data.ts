@@ -1,4 +1,9 @@
-import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferSummary } from "@sdp/types/payments";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import {
+  isSuccessfulPaymentTransferStatus,
+  PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferSummary,
+} from "@sdp/types/payments";
 import {
   TOKEN_TRANSACTION_STATUSES,
   type TokenTransaction,
@@ -10,7 +15,7 @@ import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { readTransactionParam, toTitleCase } from "./activity-format-utils";
-import { resolveTransferTokenLabel } from "./payments/payments-overview.utils";
+import { resolveTransferTokenLabel, resolveUsdUnitPrice } from "./payments/payments-overview.utils";
 import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -131,31 +136,79 @@ function resolveIssuanceExplorer(transaction: TokenTransaction): HomeActivityExp
   return null;
 }
 
-export function computeTodaysVolume(transfers: PaymentTransferSummary[]): number | null {
+export const todaysVolumeSchema = z.object({
+  /** Successful transfers created since 00:00 UTC. */
+  transferCount: z.number().int().nonnegative(),
+  /** What they moved, summed per mint: SOL and USDC amounts do not add. */
+  amountByMint: z.record(z.string(), z.number()),
+  /** False when a counted transfer had no token or no readable amount, so the sums miss it. */
+  complete: z.boolean(),
+});
+
+export type TodaysVolume = z.infer<typeof todaysVolumeSchema>;
+
+/**
+ * Today's successful transfers and what they moved, per mint. Only a successful transfer moved
+ * value: a pending one may still fail, and a failed, canceled or unpaid one moved nothing. Home
+ * prices the amounts with the balance read it already has (`priceTodaysVolume`).
+ */
+export function computeTodaysVolume(transfers: PaymentTransferSummary[]): TodaysVolume {
   const now = new Date();
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  let hasNumericAmount = false;
+  const amountByMint: Record<string, number> = {};
+  let transferCount = 0;
+  let complete = true;
 
-  const total = transfers.reduce((sum, transfer) => {
-    if (!transfer.createdAt) {
-      return sum;
+  for (const transfer of transfers) {
+    if (!transfer.createdAt || !isSuccessfulPaymentTransferStatus(transfer.status)) {
+      continue;
     }
 
     const createdAt = new Date(transfer.createdAt);
     if (Number.isNaN(createdAt.getTime()) || createdAt < startOfDay) {
-      return sum;
+      continue;
     }
 
+    transferCount += 1;
+    const mint = transfer.token?.trim();
     const amount = Number(transfer.amount);
-    if (!Number.isFinite(amount)) {
-      return sum;
+    if (!mint || !Number.isFinite(amount)) {
+      complete = false;
+      continue;
     }
 
-    hasNumericAmount = true;
-    return sum + amount;
-  }, 0);
+    amountByMint[mint] = (amountByMint[mint] ?? 0) + amount;
+  }
 
-  return hasNumericAmount ? total : null;
+  return { transferCount, amountByMint, complete };
+}
+
+/** Home's volume figure: dollars when every transfer today has a price, otherwise how many. */
+export type TodaysVolumeFigure = { kind: "usd"; usd: number } | { kind: "count"; count: number };
+
+/**
+ * Prices today's volume with the balances on screen, which carry the API's market price for
+ * each mint held. A transfer in a token with no price makes a dollar sum wrong, not smaller, so
+ * the day reads as a count instead.
+ */
+export function priceTodaysVolume(
+  volume: TodaysVolume,
+  balances: readonly CustodyWalletTokenBalance[]
+): TodaysVolumeFigure {
+  if (!volume.complete) {
+    return { kind: "count", count: volume.transferCount };
+  }
+
+  let usd = 0;
+  for (const [mint, amount] of Object.entries(volume.amountByMint)) {
+    const usdPrice = resolveUsdUnitPrice(mint, balances);
+    if (usdPrice === null) {
+      return { kind: "count", count: volume.transferCount };
+    }
+    usd += amount * usdPrice;
+  }
+
+  return { kind: "usd", usd };
 }
 
 export function buildHomeActivityRows(

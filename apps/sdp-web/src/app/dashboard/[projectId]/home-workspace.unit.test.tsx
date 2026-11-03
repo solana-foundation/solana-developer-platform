@@ -2,7 +2,7 @@
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import { wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import type { SWRResponse } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,10 +158,23 @@ beforeEach(() => {
   };
   mocks.swr = {
     "dashboard-home-activity": {
-      data: { activityRows: [], todaysVolume: 1234.5, todaysVolumeError: null },
+      data: {
+        activityRows: [],
+        todaysVolume: { transferCount: 3, amountByMint: { [USDC_MINT]: 1234.5 }, complete: true },
+        todaysVolumeError: null,
+      },
     },
   };
 });
+
+/** One SOL held where nothing prices it, as on devnet, where the API prices no mint. */
+const UNPRICED_SOL: CustodyWalletTokenBalance = {
+  token: "SOL",
+  mint: SOL_MINT,
+  amount: "1000000000",
+  uiAmount: "1",
+  decimals: 9,
+};
 
 /** The keys Home's activity read was asked for under, across every render. */
 function activityReadKeys(): Set<unknown> {
@@ -235,6 +248,33 @@ describe("Overview (HomeWorkspace)", () => {
   it("names holdings with no price feed rather than totalling them", () => {
     renderOverview({ totalBalance: null });
     expect(screen.getByText("Holdings with no price feed")).toBeTruthy();
+  });
+
+  it("lists a holding with no price beside the count, and says the total leaves it out", () => {
+    renderOverview({ balances: [at(BALANCES, 0), UNPRICED_SOL] });
+    const balance = within(requireSection("balance"));
+    expect(balance.getByRole("link", { name: "2 tokens held" })).toBeTruthy();
+    expect(balance.getByText("SOL")).toBeTruthy();
+    expect(
+      balance.getByRole("button", { name: "Excludes 1 token with no price feed." })
+    ).toBeTruthy();
+  });
+
+  it("counts today's payments when one moved a token with no price, never adding SOL to dollars", () => {
+    mocks.swr["dashboard-home-activity"] = {
+      data: {
+        activityRows: [],
+        todaysVolume: {
+          transferCount: 2,
+          amountByMint: { [SOL_MINT]: 0.5, [USDC_MINT]: 10 },
+          complete: true,
+        },
+        todaysVolumeError: null,
+      },
+    };
+    renderOverview({ balances: [at(BALANCES, 0), UNPRICED_SOL] });
+    const balance = within(requireSection("balance"));
+    expect(balance.getByRole("link", { name: "2 payments today" })).toBeTruthy();
   });
 
   it("turns the first run into the wallet prompt with no activity list", () => {

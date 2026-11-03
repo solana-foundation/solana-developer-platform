@@ -4,12 +4,16 @@ import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
 import {
+  countUnpricedHoldings,
   formatTokenAmount,
+  formatTotalBalance,
   isHttpUrl,
   normalizeAggregateBalances,
   resolveTokenByMint,
   resolveTotalBalance,
   resolveTransferTokenLabel,
+  resolveUsdBalanceValue,
+  resolveUsdUnitPrice,
   statusMessageKey,
   statusVariant,
 } from "./payments-overview.utils";
@@ -206,9 +210,97 @@ describe("normalizeAggregateBalances", () => {
     expect(resolveTotalBalance(rows)).toBe(375.25 + 100 + 37.5);
   });
 
-  it("still drops balances the API could not price", () => {
+  it("keeps a holding with no price feed, which the total leaves out", () => {
     const unpriced: CustodyWalletTokenBalance = { ...issuedBalance, usdValue: undefined };
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, unpriced]);
-    expect(rows.map((row) => row.token)).toEqual(["USDC", "SOL"]);
+    expect(rows.map((row) => row.token)).toEqual(["USDC", "bSGD", "SOL"]);
+    expect(resolveTotalBalance(rows)).toBe(375.25 + 100);
+    expect(countUnpricedHoldings(rows)).toBe(1);
+  });
+
+  it("drops a row that holds nothing", () => {
+    const spent: CustodyWalletTokenBalance = { ...usdcBalance, amount: "0", uiAmount: "0" };
+    const rows = normalizeAggregateBalances([solBalance, spent]);
+    expect(rows.map((row) => row.token)).toEqual(["SOL"]);
+  });
+});
+
+describe("resolveTotalBalance", () => {
+  // Off mainnet the API prices nothing, so SOL arrives without a USD value.
+  const unpricedSol: CustodyWalletTokenBalance = {
+    token: "SOL",
+    mint: SOL_MINT,
+    amount: "1000000000",
+    uiAmount: "1",
+    decimals: 9,
+  };
+  const spentUsdc: CustodyWalletTokenBalance = {
+    token: "USDC",
+    mint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+    amount: "0",
+    uiAmount: "0",
+    decimals: 6,
+  };
+
+  it("has no dollar total for 1 SOL beside a spent USDC account, where it read $0.00", () => {
+    expect(resolveTotalBalance([unpricedSol, spentUsdc])).toBeNull();
+    expect(countUnpricedHoldings([unpricedSol, spentUsdc])).toBe(1);
+  });
+
+  it("is an honest $0.00 when the rows hold nothing", () => {
+    const emptySol = { ...unpricedSol, amount: "0", uiAmount: "0" };
+    expect(resolveTotalBalance([emptySol, spentUsdc])).toBe(0);
+  });
+
+  it("has no total when nothing was read", () => {
+    expect(resolveTotalBalance([])).toBeNull();
+  });
+
+  it("sums the priced holdings and counts the others as unpriced", () => {
+    const usdc = { ...spentUsdc, amount: "100000000", uiAmount: "100" };
+    expect(resolveTotalBalance([unpricedSol, usdc])).toBe(100);
+    expect(countUnpricedHoldings([unpricedSol, usdc])).toBe(1);
+  });
+
+  it("never prices a token by its symbol", () => {
+    const spoofed: CustodyWalletTokenBalance = {
+      token: "USDC",
+      mint: UNCATALOGUED_MINT,
+      amount: "1000000000000",
+      uiAmount: "1000000",
+      decimals: 6,
+    };
+    expect(resolveUsdBalanceValue(spoofed)).toBeNull();
+    expect(resolveTotalBalance([spoofed])).toBeNull();
+  });
+});
+
+describe("resolveUsdUnitPrice", () => {
+  const sol: CustodyWalletTokenBalance = {
+    token: "SOL",
+    mint: SOL_MINT,
+    amount: "1000000000",
+    uiAmount: "1",
+    decimals: 9,
+  };
+
+  it("reads the market price a balance row carried", () => {
+    expect(resolveUsdUnitPrice(SOL_MINT, [{ ...sol, usdPrice: 150 }])).toBe(150);
+  });
+
+  it("values a well-known USD stablecoin at a dollar, held or not", () => {
+    expect(resolveUsdUnitPrice(WELL_KNOWN_TOKENS.USDC.mints.devnet.address, [])).toBe(1);
+  });
+
+  it("has no price for a mint without one", () => {
+    expect(resolveUsdUnitPrice(SOL_MINT, [sol])).toBeNull();
+    expect(resolveUsdUnitPrice(UNCATALOGUED_MINT, [])).toBeNull();
+  });
+});
+
+describe("formatTotalBalance", () => {
+  it("shows a dash where there is no dollar total, and $0.00 only for a measured zero", () => {
+    expect(formatTotalBalance(null, "en-US")).toBe("—");
+    expect(formatTotalBalance(0, "en-US")).toBe("$0.00");
   });
 });

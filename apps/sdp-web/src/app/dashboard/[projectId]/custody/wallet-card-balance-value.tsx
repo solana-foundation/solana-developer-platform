@@ -2,7 +2,7 @@
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
-  formatCurrencyAmount,
+  formatTotalBalance,
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
@@ -76,7 +76,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
 
   return (
     <span className={`font-medium ${hasError ? "text-muted" : "text-primary"}`}>
-      {formatCurrencyAmount(totalBalance)}
+      {formatTotalBalance(totalBalance)}
       {hasError ? <span className="sr-only"> {t("DashboardCustody.stale")}</span> : null}
     </span>
   );

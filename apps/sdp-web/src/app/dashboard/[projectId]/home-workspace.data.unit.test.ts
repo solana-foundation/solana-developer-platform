@@ -18,6 +18,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const ACTIVITY_PATH = "/api/dashboard/home/activity";
 const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const SNAPSHOT = {
   activityRows: [
     {
@@ -35,7 +36,7 @@ const SNAPSHOT = {
   ],
   activityError: null,
   activityNotice: null,
-  todaysVolume: 125,
+  todaysVolume: { transferCount: 1, amountByMint: { [USDC_MINT]: 125 }, complete: true },
   todaysVolumeError: null,
 };
 

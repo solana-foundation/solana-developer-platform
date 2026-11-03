@@ -1,13 +1,16 @@
-import type { PaymentTransferSummary } from "@sdp/types/payments";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types/payments";
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
-import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { describe, expect, it, vi } from "vitest";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import {
   buildHomeActivityRows,
+  computeTodaysVolume,
   fetchOrgIssuanceActivity,
   filterHomeActivityRowsByFlags,
+  priceTodaysVolume,
 } from "./home-page.data";
 
 const t = (key: MessageKey, _values?: TranslationValues) => key;
@@ -195,5 +198,104 @@ describe("token mint passthrough", () => {
     );
 
     expect(row.tokenMint).toBe(mint);
+  });
+});
+
+describe("today's volume", () => {
+  const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+  const TODAY = "2026-10-23T09:00:00.000Z";
+
+  function sent(
+    token: string | undefined,
+    amount: string,
+    status: PaymentTransferStatus = "finalized",
+    createdAt = TODAY
+  ): PaymentTransferSummary {
+    return {
+      id: `transfer_${token}_${amount}_${status}`,
+      custodyWalletId: "wallet_1",
+      providerWalletId: "provider_wallet_1",
+      status,
+      signature: "sig_1",
+      rampsMemo: {},
+      direction: "outbound",
+      token,
+      amount,
+      createdAt,
+    };
+  }
+
+  function held(mint: string, usdPrice?: number): CustodyWalletTokenBalance {
+    return { token: "T", mint, amount: "1", uiAmount: "1", decimals: 6, usdPrice };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps today's amounts per mint, since SOL and USDC do not add", () => {
+    const volume = computeTodaysVolume([
+      sent(SOL_MINT, "0.5", "completed"),
+      sent(USDC_MINT, "10"),
+      sent(USDC_MINT, "5", "confirmed"),
+      sent(USDC_MINT, "100", "finalized", "2026-10-22T09:00:00.000Z"),
+    ]);
+
+    expect(volume).toEqual({
+      transferCount: 3,
+      amountByMint: { [SOL_MINT]: 0.5, [USDC_MINT]: 15 },
+      complete: true,
+    });
+  });
+
+  it("counts only transfers that succeeded", () => {
+    const unsuccessful: PaymentTransferStatus[] = [
+      "pending",
+      "processing",
+      "failed",
+      "canceled",
+      "expired",
+      "awaiting_payment",
+      "settling",
+    ];
+    const volume = computeTodaysVolume(unsuccessful.map((status) => sent(USDC_MINT, "10", status)));
+
+    expect(volume).toEqual({ transferCount: 0, amountByMint: {}, complete: true });
+  });
+
+  it("marks the day incomplete when a counted transfer has no token to price", () => {
+    expect(computeTodaysVolume([sent(undefined, "10")])).toEqual({
+      transferCount: 1,
+      amountByMint: {},
+      complete: false,
+    });
+  });
+
+  it("prices each mint with the market price its balance row carried", () => {
+    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")]);
+
+    // SOL at the API's $150, USDC at a dollar as a well-known stablecoin.
+    expect(priceTodaysVolume(volume, [held(SOL_MINT, 150)])).toEqual({ kind: "usd", usd: 310 });
+  });
+
+  it("reads as a count when a token moved today has no price, rather than adding SOL to dollars", () => {
+    const volume = computeTodaysVolume([sent(SOL_MINT, "2"), sent(USDC_MINT, "10")]);
+
+    expect(priceTodaysVolume(volume, [held(SOL_MINT)])).toEqual({ kind: "count", count: 2 });
+  });
+
+  it("reads as a count when the day is incomplete", () => {
+    const volume = computeTodaysVolume([sent(undefined, "10"), sent(USDC_MINT, "10")]);
+
+    expect(priceTodaysVolume(volume, [])).toEqual({ kind: "count", count: 2 });
+  });
+
+  it("is a measured $0.00 on a day without payments", () => {
+    expect(priceTodaysVolume(computeTodaysVolume([]), [])).toEqual({ kind: "usd", usd: 0 });
   });
 });

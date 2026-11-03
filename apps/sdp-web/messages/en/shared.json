@@ -539,7 +539,11 @@
         "one": "token held",
         "other": "tokens held"
       },
-      "volume": "today’s volume"
+      "volume": "today’s volume",
+      "payments": {
+        "one": "payment today",
+        "other": "payments today"
+      }
     },
     "recentActivity": "Recent activity",
     "activityStatus": "{type} {status}",
@@ -582,6 +586,13 @@
       "firstRunBodyPayments": "Everything else here needs one: a payment has to leave from somewhere.",
       "quickActionWalletsBody": "Somewhere to hold funds.",
       "quickActionApiKeysBody": "So your systems can call."
+    }
+  },
+  "holdings": {
+    "noPriceFeed": "These tokens have no price feed, so there is no dollar total.",
+    "excludesUnpriced": {
+      "one": "Excludes 1 token with no price feed.",
+      "other": "Excludes {count} tokens with no price feed."
     }
   },
   "integrations": {

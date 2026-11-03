@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import { assertNever, type PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
@@ -34,6 +34,9 @@ import {
   filterHomeActivityRowsByFlags,
   type HomeActivityExplorerRef,
   type HomeActivityRow,
+  priceTodaysVolume,
+  type TodaysVolume,
+  type TodaysVolumeFigure,
 } from "./home-page.data";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
 import { useHomeActivitySnapshot } from "./home-workspace.data";
@@ -54,6 +57,7 @@ import {
 } from "./payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
 import { PAYMENT_STATUS_TONE } from "./payments/payments-presentation";
+import { UnpricedHoldingsHint } from "./payments/unpriced-holdings-hint";
 import { tokenActivityHref } from "./tokens/holdings-links";
 
 interface HomeWorkspaceProps {
@@ -166,6 +170,38 @@ function CensusLink({ href, figure, label }: { href: string; figure: string; lab
 }
 
 /**
+ * The census entry for today: its volume in dollars, or how many payments it saw when one moved
+ * a token with no price. Still loading or failed reads as a dash, never as a measured $0.00.
+ */
+function volumeCensusEntry(
+  volume: TodaysVolumeFigure | null,
+  locale: string,
+  t: ReturnType<typeof useTranslations>
+): { figure: string; label: string } {
+  if (volume === null) {
+    return { figure: "—", label: t("Shared.homeWorkspace.summary.volume") };
+  }
+  switch (volume.kind) {
+    case "usd":
+      return {
+        figure: formatCurrencyAmount(volume.usd, locale),
+        label: t("Shared.homeWorkspace.summary.volume"),
+      };
+    case "count":
+      return {
+        figure: volume.count.toLocaleString(locale),
+        label: t(
+          volume.count === 1
+            ? "Shared.homeWorkspace.summary.payments.one"
+            : "Shared.homeWorkspace.summary.payments.other"
+        ),
+      };
+    default:
+      return assertNever(volume);
+  }
+}
+
+/**
  * The populated left column, the same grammar as the Payments overview: the total at 40px, the
  * top holdings on 52px rows, and a census of wallets and tokens over today's volume.
  */
@@ -185,7 +221,7 @@ function BalanceSummary({
   balances: CustodyWalletTokenBalance[];
   walletCount: number;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  todaysVolume: number | null;
+  todaysVolume: TodaysVolume | null;
   todaysVolumeUnavailable: boolean;
 }) {
   const t = useTranslations();
@@ -222,8 +258,13 @@ function BalanceSummary({
       ),
     },
   ];
-  // Still loading or failed reads as a dash, never as a measured $0.00.
-  const volumeFigure = todaysVolumeUnavailable ? "—" : formatCurrencyAmount(todaysVolume, locale);
+  const volumeCensus = volumeCensusEntry(
+    todaysVolumeUnavailable || todaysVolume === null
+      ? null
+      : priceTodaysVolume(todaysVolume, balances),
+    locale,
+    t
+  );
 
   return (
     <section className="min-w-0" data-overview-section="balance">
@@ -238,8 +279,9 @@ function BalanceSummary({
           <p className="mt-2 text-body text-error">{totalBalanceError}</p>
         </>
       ) : hasPricedValue ? (
-        <p className="mt-1 text-amount font-medium text-primary tabular-nums">
+        <p className="mt-1 flex items-center gap-2 text-amount font-medium text-primary tabular-nums">
           {formatCurrencyAmount(totalBalance, locale)}
+          <UnpricedHoldingsHint balances={balances} />
         </p>
       ) : (
         // Holding only unpriced tokens (an organization's own issuance) has no dollar total;
@@ -323,8 +365,8 @@ function BalanceSummary({
           </span>
           <CensusLink
             href={href(DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions)}
-            figure={volumeFigure}
-            label={t("Shared.homeWorkspace.summary.volume")}
+            figure={volumeCensus.figure}
+            label={volumeCensus.label}
           />
         </p>
       </div>

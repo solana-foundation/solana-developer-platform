@@ -1,4 +1,5 @@
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import * as homePageData from "@/app/dashboard/[projectId]/home-page.data";
 
@@ -32,10 +33,19 @@ import { GET } from "./route";
 
 const TODAY = "2026-10-23T09:00:00.000Z";
 const YESTERDAY = "2026-10-22T09:00:00.000Z";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 /** A transfer with the fields the row builder and the volume read. */
-function transfer(id: string, createdAt: string, amount: string) {
-  return { id, createdAt, amount, status: "completed", direction: "outbound", destination: "D" };
+function transfer(id: string, createdAt: string, amount: string, status = "completed") {
+  return {
+    id,
+    createdAt,
+    amount,
+    status,
+    token: USDC_MINT,
+    direction: "outbound",
+    destination: "D",
+  };
 }
 
 const LISTED_MINT: TokenTransactionListItem = {
@@ -161,7 +171,28 @@ describe("GET /api/dashboard/home/activity", () => {
 
     expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledOnce();
     expect(body.data.activityRows).toHaveLength(2);
-    expect(body.data).toMatchObject({ todaysVolume: 125, todaysVolumeError: null });
+    expect(body.data).toMatchObject({
+      todaysVolume: { transferCount: 1, amountByMint: { [USDC_MINT]: 125 }, complete: true },
+      todaysVolumeError: null,
+    });
+  });
+
+  it("leaves a failed transfer out of today's volume: it moved nothing", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [transfer("transfer_1", TODAY, "125"), transfer("transfer_2", TODAY, "50", "failed")],
+      walletsNotLoaded: 0,
+    });
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityRows).toHaveLength(2);
+    expect(body.data.todaysVolume).toEqual({
+      transferCount: 1,
+      amountByMint: { [USDC_MINT]: 125 },
+      complete: true,
+    });
   });
 
   // The list can say it is partial; a total cannot, since a sum over some wallets is smaller.
