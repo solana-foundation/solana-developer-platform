@@ -92,6 +92,25 @@ async function countAuditRows(transferId: string): Promise<number> {
   return row.count;
 }
 
+/** Each audit intent opened for `transferId`, with how many outcomes close it. */
+async function intentOutcomeCounts(transferId: string): Promise<number[]> {
+  const rows = await getDb(env)
+    .prepare(
+      `SELECT (
+         SELECT count(*)::integer FROM audit_logs outcome
+         WHERE outcome.metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+       ) AS outcomes
+       FROM audit_logs intent
+       WHERE intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+         AND intent.metadata::jsonb -> 'target' ->> 'resourceId' = ?
+       ORDER BY intent.ledger_sequence`
+    )
+    .bind(transferId)
+    .all<{ outcomes: number }>();
+  return rows.results.map((row) => row.outcomes);
+}
+
 describe("Payments routes — funding an off-ramp token deposit", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
@@ -205,6 +224,8 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     const released = await readTransferRow(transferId);
     expect({ ...released, updated_at: quoted.updated_at }).toEqual(quoted);
     expect(released.status).toBe("awaiting_payment");
+    // The release closed the attempt's intent before the row could be claimed again.
+    expect(await intentOutcomeCounts(transferId)).toEqual([1]);
 
     // The release stored nothing under the key, so the same key funds the sale.
     const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
@@ -215,6 +236,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       status: "settling",
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    expect(await intentOutcomeCounts(transferId)).toEqual([1, 1]);
   });
 
   it("fails a sale MoonPay failed during the claim, so a retry under its key sends nothing", {

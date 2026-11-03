@@ -393,7 +393,7 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("settles the transfer as failed when audit-ledger admission is refused", async () => {
     const beginSpy = vi
-      .spyOn(AuditService.prototype, "beginCritical")
+      .spyOn(AuditService.prototype, "beginCriticalWithin")
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
 
     try {
@@ -534,7 +534,7 @@ describe("Payments routes — on-chain transfers", () => {
     const transferId = generatePaymentTransferId();
     await seedSolOfframpDeposit(transferId);
     const beginSpy = vi
-      .spyOn(AuditService.prototype, "beginCritical")
+      .spyOn(AuditService.prototype, "beginCriticalWithin")
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
 
     try {
