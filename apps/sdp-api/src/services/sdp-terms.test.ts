@@ -27,10 +27,20 @@ describe("SDP Terms and Conditions", () => {
   });
 
   it("reads every line of the source text into a section", () => {
-    const lines = (block: SdpTermsBlock) =>
-      block.kind === "list"
-        ? block.items
-        : [block.kind === "subheading" ? `### ${block.text}` : block.text];
+    const lines = (block: SdpTermsBlock): readonly string[] => {
+      switch (block.kind) {
+        case "list":
+          return block.items;
+        case "subheading":
+          return [`### ${block.text}`];
+        case "paragraph":
+          return [block.text];
+        default: {
+          const exhaustive: never = block;
+          return exhaustive;
+        }
+      }
+    };
     const rebuilt = SDP_TERMS.sections.flatMap((section) => [
       `## ${section.heading}`,
       ...section.blocks.flatMap(lines),

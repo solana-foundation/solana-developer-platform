@@ -1,11 +1,14 @@
+import { z } from "zod";
 import type { CountryCode } from "./countries";
 import { SDP_TERMS_MARKDOWN } from "./sdp-terms-text";
 
 /** One block of a terms section: a paragraph, a subsection's heading, or a bulleted list. */
-export type SdpTermsBlock =
-  | { kind: "paragraph"; text: string }
-  | { kind: "subheading"; text: string }
-  | { kind: "list"; items: readonly string[] };
+export const sdpTermsBlockSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("paragraph"), text: z.string() }),
+  z.object({ kind: z.literal("subheading"), text: z.string() }),
+  z.object({ kind: z.literal("list"), items: z.array(z.string()).readonly() }),
+]);
+export type SdpTermsBlock = z.infer<typeof sdpTermsBlockSchema>;
 
 export interface SdpTermsSection {
   heading: string;

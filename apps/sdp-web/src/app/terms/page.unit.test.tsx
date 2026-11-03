@@ -49,4 +49,11 @@ describe("TermsPage", () => {
     expect(doc.querySelector("strong")?.textContent).toBe("Company");
     expect(doc.body.textContent).not.toContain("**");
   });
+
+  it("keys every block uniquely", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderPage();
+    expect(error.mock.calls.flat().join("\n")).not.toContain("same key");
+    error.mockRestore();
+  });
 });

@@ -22,19 +22,18 @@ export function SdpTermsContent({
       {SDP_TERMS.sections.map((section) => (
         <section key={section.heading} className="space-y-3">
           <Section className="text-base font-medium text-primary">{section.heading}</Section>
-          {section.blocks.map((block, index) => (
-            <TermsBlock
-              // The text is fixed for a version and blocks never reorder, so the index is stable.
-              // biome-ignore lint/suspicious/noArrayIndexKey: see above.
-              key={index}
-              block={block}
-              subheading={headings.subsection}
-            />
+          {section.blocks.map((block) => (
+            <TermsBlock key={termsBlockKey(block)} block={block} subheading={headings.subsection} />
           ))}
         </section>
       ))}
     </div>
   );
+}
+
+/** A block's text is unique within its section, so it keys the block. */
+function termsBlockKey(block: SdpTermsBlock): string {
+  return block.kind === "list" ? `list:${block.items[0]}` : `${block.kind}:${block.text}`;
 }
 
 function TermsBlock({ block, subheading }: { block: SdpTermsBlock; subheading: "h3" | "h5" }) {
