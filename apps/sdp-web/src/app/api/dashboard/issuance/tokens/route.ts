@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   DEFAULT_ISSUANCE_LIST_QUERY,
   InvalidIssuanceSearchEncodingError,
@@ -10,6 +9,7 @@ import {
   type IssuanceTokensPage,
 } from "@/app/dashboard/[projectId]/issuance/issuance-tokens.data";
 import { assetProfiles } from "@/flags";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
 
     if (page.error) {
       trace.log({ ok: false, error: page.error, status: page.status ?? 500 });
-      return NextResponse.json(emptyResponse(page.page, page.pageSize, page.error), {
+      return dashboardJson(emptyResponse(page.page, page.pageSize, page.error), {
         // A failed upstream call is reported with its own status so the client can
         // tell "your filters are bad" from "the API is down".
         status: page.status ?? 500,
@@ -73,7 +73,7 @@ export async function GET(request: Request) {
       pageSize: page.pageSize,
     });
 
-    return NextResponse.json({
+    return dashboardJson({
       data: tokens,
       total: page.total,
       page: page.page,
@@ -85,6 +85,6 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Request failed";
     const status = error instanceof InvalidIssuanceSearchEncodingError ? 400 : 500;
     trace.log({ ok: false, error: message, status });
-    return NextResponse.json(emptyResponse(query.page, query.pageSize, message), { status });
+    return dashboardJson(emptyResponse(query.page, query.pageSize, message), { status });
   }
 }

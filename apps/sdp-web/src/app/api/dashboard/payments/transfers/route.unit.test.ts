@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   proxyToSdpApi: vi.fn(),
   proxyFailure: vi.fn(),
   createSdpApiClient: vi.fn(),
+  fetchDashboardPaymentTransfers: vi.fn(),
 }));
+
+const trace = {
+  traceId: "trace_test",
+  serverTiming: () => "app;dur=1",
+  childContext: () => undefined,
+};
 
 vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: mocks.proxyToSdpApi,
@@ -12,8 +20,12 @@ vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
+vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+  fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
+}));
+
 vi.mock("@/lib/request-tracing", () => ({
-  createTimedTrace: () => "trace",
+  createTimedTrace: () => trace,
   logRouteResult: vi.fn(),
 }));
 
@@ -50,8 +62,51 @@ describe("GET /api/dashboard/payments/transfers", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.proxyFailure).toHaveBeenCalledWith("trace", 400, "x-project-id header required");
+    expect(mocks.proxyFailure).toHaveBeenCalledWith(trace, 400, "x-project-id header required");
     expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
+  });
+
+  const unfiltered = () =>
+    new Request("https://dashboard.example/api/dashboard/payments/transfers", {
+      headers: { "x-project-id": "proj_1" },
+    });
+
+  it("marks the unfiltered aggregate uncacheable and traced", async () => {
+    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: true, data: [] });
+
+    const response = await GET(unfiltered());
+
+    expect(response.status).toBe(200);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
+    expect(response.headers.get("Server-Timing")).toBe("app;dur=1");
+    expect(await response.json()).toEqual({ data: [] });
+  });
+
+  it("marks an upstream failure of the aggregate uncacheable", async () => {
+    mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "unavailable",
+    });
+
+    const response = await GET(unfiltered());
+
+    expect(response.status).toBe(503);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
+  });
+
+  it("marks a thrown aggregate failure uncacheable", async () => {
+    mocks.createSdpApiClient.mockRejectedValue(new Error("client unavailable"));
+
+    const response = await GET(unfiltered());
+
+    expect(response.status).toBe(500);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
   });
 });
 
