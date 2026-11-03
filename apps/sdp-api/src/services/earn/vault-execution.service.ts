@@ -608,6 +608,7 @@ export async function simulateVaultPlan(
       createClusterRpc()
         .simulateTransaction(getBase64EncodedWireTransaction(transaction), {
           encoding: "base64",
+          commitment: "confirmed",
           sigVerify: false,
           replaceRecentBlockhash: false,
         })

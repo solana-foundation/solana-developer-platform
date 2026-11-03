@@ -1,4 +1,5 @@
 import { supportsProviderOrderCancellation } from "@sdp/earn/capabilities";
+import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
@@ -10,7 +11,6 @@ import {
   type SolanaRpc,
   sendTransaction,
 } from "@sdp/rpc/solana";
-import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { isEarnProviderActionChainStatus } from "@sdp/types/earn-provider-orders";
 import { signature } from "@solana/kit";
 import { asTransactionalClient, getDb } from "@/db/client";
