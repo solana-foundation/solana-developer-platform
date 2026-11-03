@@ -111,7 +111,7 @@ async function openReview(result: Wizard) {
   expect(result.current.canProceed).toBe(true);
 }
 
-const sentBatchSchema = z.object({ externalId: z.string().optional() }).passthrough();
+const sentBatchSchema = z.looseObject({ externalId: z.string().optional() });
 
 function batchSends() {
   return fetchMock.mock.calls
