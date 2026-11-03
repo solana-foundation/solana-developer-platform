@@ -8,7 +8,7 @@ import { Button } from "@sdp/ui/button";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Modal } from "@sdp/ui/modal";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
-import { CheckCircle2Icon, Loader2Icon } from "lucide-react";
+import { CheckCircle2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
@@ -231,15 +231,8 @@ function RequestFooter({
       <Button type="button" variant="secondary" disabled={submitting} onClick={onBack}>
         {t("Shared.mainnetAccess.back")}
       </Button>
-      <Button
-        type="button"
-        disabled={!canSubmit || submitting}
-        onClick={onSubmit}
-        iconLeft={
-          submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
-        }
-      >
-        {submitting ? t("Shared.mainnetAccess.submitting") : t("Shared.mainnetAccess.submit")}
+      <Button type="button" disabled={!canSubmit} loading={submitting} onClick={onSubmit}>
+        {t("Shared.mainnetAccess.submit")}
       </Button>
     </div>
   );
@@ -387,7 +380,7 @@ export function MainnetAccessResendButton() {
         type="button"
         variant="secondary"
         size="sm"
-        disabled={pending}
+        loading={pending}
         onClick={() =>
           startResend(async () => {
             setError(null);
@@ -397,7 +390,7 @@ export function MainnetAccessResendButton() {
           })
         }
       >
-        {pending ? t("Shared.mainnetAccess.resending") : t("Shared.mainnetAccess.resend")}
+        {t("Shared.mainnetAccess.resend")}
       </Button>
       {error ? (
         <p className="text-sm text-destructive" role="alert">

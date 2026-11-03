@@ -33,6 +33,12 @@ or a prop:
 - `apps/sdp-web/src/app/globals.css` adds `@source` for `packages/sdp-ui/src`, so Tailwind
   generates the classes the primitives use.
 
+`motion` holds the one entrance a dialog or a flow's step plays (`playEntrance`): 150 ms,
+ease-out, compositor properties only, with nothing left on the element afterwards and nothing
+under reduced motion. `Modal` opens with it, except when it takes over from a dialog that closed
+a moment before, so a loading dialog giving way to the real one does not blink its backdrop.
+Dialogs still close at once: callers often derive `isOpen` from the state their content reads.
+
 `shiki-code` holds the Shiki highlighting every code surface shares, with the one css-variables
 theme. `code-block` and `paginated-footer` stay in sdp-web: the first still reads the app's
 translations and `useCopy`, the second reads and writes the dashboard's URL state.

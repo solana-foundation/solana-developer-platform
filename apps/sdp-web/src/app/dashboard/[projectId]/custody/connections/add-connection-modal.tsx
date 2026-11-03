@@ -3,7 +3,6 @@
 import { isByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Modal } from "@sdp/ui/modal";
-import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { ByokCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
@@ -96,15 +95,8 @@ export function AddConnectionModal({
             {inRecovery ? t("DashboardCustody.close") : t("DashboardCustody.cancel")}
           </Button>
           {inRecovery ? null : (
-            <Button
-              type="submit"
-              form={formId}
-              disabled={submitting || !ready}
-              iconLeft={
-                submitting ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : undefined
-              }
-            >
-              {submitting ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
+            <Button type="submit" form={formId} disabled={!ready} loading={submitting}>
+              {t("DashboardCustody.byokConnect")}
             </Button>
           )}
         </div>

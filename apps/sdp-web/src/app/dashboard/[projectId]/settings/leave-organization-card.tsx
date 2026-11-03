@@ -70,8 +70,8 @@ export function LeaveOrganizationCard() {
             <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               {t("Shared.members.cancel")}
             </Button>
-            <Button variant="destructive" onClick={confirmLeave} disabled={isPending}>
-              {isPending ? t("Shared.members.leaving") : t("Shared.members.leaveOrganization")}
+            <Button variant="destructive" onClick={confirmLeave} loading={isPending}>
+              {t("Shared.members.leaveOrganization")}
             </Button>
           </div>
         </div>

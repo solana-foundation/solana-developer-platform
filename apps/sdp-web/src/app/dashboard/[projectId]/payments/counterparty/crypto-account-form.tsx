@@ -7,7 +7,7 @@ import { HeightReveal } from "@sdp/ui/height-reveal";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
-import { CheckIcon, Loader2Icon, PlusIcon, ShieldAlertIcon } from "lucide-react";
+import { CheckIcon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -79,26 +79,6 @@ export function CryptoAccountForm({
     : screenUnavailable
       ? t("DashboardPayments.counterparty.screeningUnavailable")
       : t("DashboardPayments.counterparty.screeningWarning");
-
-  const buttonState = ((): { label: string; icon: ReactNode } => {
-    switch (phase) {
-      case "submitting":
-        return {
-          label: t("DashboardPayments.counterparty.adding"),
-          icon: <Loader2Icon className="animate-spin" />,
-        };
-      case "screening":
-      case "revealing":
-        return {
-          label: t("DashboardPayments.counterparty.screening"),
-          icon: <Loader2Icon className="animate-spin" />,
-        };
-      case "ready":
-        return { label: t("DashboardPayments.counterparty.addAccount"), icon: <CheckIcon /> };
-      case "idle":
-        return { label: t("DashboardPayments.counterparty.addAccount"), icon: <PlusIcon /> };
-    }
-  })();
 
   function resetScreening() {
     setSnapshot(null);
@@ -263,10 +243,11 @@ export function CryptoAccountForm({
           <Button
             type="button"
             onClick={() => (phase === "ready" ? void createAccount() : void handleAdd())}
-            disabled={(phase !== "idle" && phase !== "ready") || !trimmedAddress}
-            iconLeft={buttonState.icon}
+            disabled={!trimmedAddress}
+            loading={busy}
+            iconLeft={phase === "ready" ? <CheckIcon /> : <PlusIcon />}
           >
-            {buttonState.label}
+            {t("DashboardPayments.counterparty.addAccount")}
           </Button>
         )}
       </div>

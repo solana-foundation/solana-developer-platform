@@ -17,6 +17,7 @@ import { useTranslations } from "@/i18n/provider";
 import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { useStepFade } from "@/lib/use-step-fade";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
   API_KEY_AUTHORING_STEPS,
@@ -561,6 +562,18 @@ function KeySummary({
   );
 }
 
+/** The footer's forward action: Continue until the review, then the save it commits to. */
+function primaryActionLabel(
+  step: ApiKeyAuthoringStep,
+  mode: ApiKeyAuthoringMode,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (step !== "review") return t("DashboardCustody.continue");
+  return mode === "create"
+    ? t("DashboardCustody.createKey")
+    : t("DashboardCustody.apiKeySaveChanges");
+}
+
 export function ApiKeyAuthoringWorkspace({
   mode,
   wallets,
@@ -585,6 +598,7 @@ export function ApiKeyAuthoringWorkspace({
       : t("DashboardCustody.sandbox");
   const currentStepIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
   const canContinue = isAuthoringStepComplete(currentStep, draft);
+  const stepRef = useStepFade<HTMLDivElement>(currentStep);
 
   const update = (patch: Partial<ApiKeyAuthoringDraft>) => {
     if ("grants" in patch) {
@@ -648,7 +662,7 @@ export function ApiKeyAuthoringWorkspace({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
         <div className="mx-auto grid w-full max-w-6xl gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0">
+          <div ref={stepRef} className="min-w-0">
             {currentStep === "details" ? (
               <DetailsStep draft={draft} environment={environment} update={update} />
             ) : null}
@@ -679,14 +693,8 @@ export function ApiKeyAuthoringWorkspace({
           <Button type="button" variant="secondary" onClick={handleBack} disabled={isPending}>
             {currentStepIndex === 0 ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
           </Button>
-          <Button type="button" onClick={handlePrimary} disabled={!canContinue || isPending}>
-            {currentStep === "review"
-              ? isPending
-                ? t("DashboardCustody.saving")
-                : mode === "create"
-                  ? t("DashboardCustody.createKey")
-                  : t("DashboardCustody.apiKeySaveChanges")
-              : t("DashboardCustody.continue")}
+          <Button type="button" onClick={handlePrimary} disabled={!canContinue} loading={isPending}>
+            {primaryActionLabel(currentStep, mode, t)}
           </Button>
         </div>
       </div>

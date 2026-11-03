@@ -8,7 +8,6 @@ import {
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
-  Loader2Icon,
   MenuIcon,
   PlusIcon,
 } from "lucide-react";
@@ -151,16 +150,9 @@ function DashboardHeaderDownloadAction({
       variant={variant === "primary" ? "default" : "outline"}
       size="sm"
       className={HEADER_ACTION_SIZE_CLASS}
-      disabled={pending}
-      aria-busy={pending || undefined}
+      loading={pending}
       onClick={() => void download()}
-      iconLeft={
-        pending ? (
-          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <DownloadIcon className="size-4" aria-hidden="true" />
-        )
-      }
+      iconLeft={<DownloadIcon className="size-4" aria-hidden="true" />}
     >
       {label}
     </Button>
