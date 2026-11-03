@@ -9,8 +9,9 @@ import {
   getTransactionEncoder,
   partiallySignTransaction,
 } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import type { UpdatePaymentTransferInput } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { AppError } from "@/lib/errors";
@@ -43,12 +44,34 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
   const rpc = installClusterRpcStub();
+  /** Runs the pending-transfer cron as its runner does, for the sandbox cluster. */
+  function runPendingTransferTracker(): Promise<void> {
+    return runWithSystemDatabaseIdentity("cron:track-pending-transfers", () =>
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        trackPendingTransfers(env)
+      )
+    );
+  }
+
+  async function countIntentOutcomes(auditIntentId: string): Promise<number> {
+    const row = await getDb(env)
+      .prepare(
+        `SELECT count(*)::integer AS count FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(auditIntentId)
+      .first<{ count: number }>();
+    return row?.count ?? 0;
+  }
+
   describe("signed submission boundary", () => {
     async function latestTransferRow() {
       const row = (await listTransferRows())[0];
@@ -352,11 +375,13 @@ describe("Payments routes — signed submission", () => {
         context: { slot: 600 },
         value: [{ slot: 500, confirmations: null, confirmationStatus: "finalized", err: null }],
       });
-      await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        trackPendingTransfers(env)
-      );
+      await runPendingTransferTracker();
 
-      expect(await readTransferRow(transfer.id)).toMatchObject({ status: "finalized", slot: 500 });
+      expect(await readTransferRow(transfer.id)).toMatchObject({
+        status: "finalized",
+        slot: 500,
+        audit_intent_id: null,
+      });
       expect(await audit.findCriticalOutcome(outcomeKey)).toMatchObject({
         status: "success",
         metadata: {
@@ -387,6 +412,64 @@ describe("Payments routes — signed submission", () => {
         .bind(intentId)
         .first<{ count: number }>();
       expect(outcomes?.count).toBe(1);
+    });
+
+    it("appends one outcome when the tracker settles the row while the request waits", async () => {
+      await mockSignedSubmissionAdapter();
+      vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      rpc.answer("getSignatureStatuses", {
+        context: { slot: 600 },
+        value: [{ slot: 500, confirmations: null, confirmationStatus: "finalized", err: null }],
+      });
+      // The request waits at confirmation while the tracker settles its row.
+      let atConfirmation = () => {};
+      const waiting = new Promise<void>((resolve) => {
+        atConfirmation = resolve;
+      });
+      let releaseConfirmation = () => {};
+      const trackerDone = new Promise<void>((resolve) => {
+        releaseConfirmation = resolve;
+      });
+      confirmTransactionMock.mockImplementationOnce(async () => {
+        atConfirmation();
+        await trackerDone;
+        throw new Error("confirmation timed out");
+      });
+
+      const pending = transferRequest("0.001");
+      await waiting;
+      const intentId = required((await latestTransferRow()).audit_intent_id);
+      await runPendingTransferTracker();
+      releaseConfirmation();
+      const res = await pending;
+
+      expect(res.status).toBe(200);
+      expect((await readTransferResponse(res)).data.transfer.status).toBe("finalized");
+      expect(await countIntentOutcomes(intentId)).toBe(1);
+    });
+
+    it("records no intent on the row when the ledger refuses the intent", async () => {
+      const db = getDb(env);
+      await db.execute(`
+        CREATE FUNCTION test_refuse_audit_intent() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.metadata::jsonb ->> 'auditPhase' = 'intent' THEN
+            RAISE EXCEPTION 'audit intent refused';
+          END IF;
+          RETURN NEW;
+        END $$`);
+      await db.execute(`CREATE TRIGGER test_refuse_audit_intent BEFORE INSERT ON audit_logs
+        FOR EACH ROW EXECUTE FUNCTION test_refuse_audit_intent()`);
+      onTestFinished(async () => {
+        await db.execute("DROP TRIGGER IF EXISTS test_refuse_audit_intent ON audit_logs");
+        await db.execute("DROP FUNCTION IF EXISTS test_refuse_audit_intent()");
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await latestTransferRow()).toMatchObject({ status: "failed", audit_intent_id: null });
     });
 
     it("fails a transfer whose first broadcast preflight refuses, keeping its signature", async () => {

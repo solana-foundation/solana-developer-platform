@@ -240,7 +240,10 @@ function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
     confirmed_at: (row.confirmed_at as string | null | undefined) ?? null,
     finalization_last_polled_at:
       (row.finalization_last_polled_at as string | null | undefined) ?? null,
-    audit_intent_id: (row.audit_intent_id as string | null | undefined) ?? null,
+    audit_intent_id: z
+      .string()
+      .nullable()
+      .parse(row.audit_intent_id ?? null),
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -669,6 +672,24 @@ export function createPostgresPaymentsRepository(
       return row !== null;
     },
 
+    async closeTransferAuditIntent(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?", "audit_intent_id = ?"],
+        extraValues: [input.transferId, input.auditIntentId],
+      });
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers SET audit_intent_id = NULL WHERE ${scope.where} RETURNING id`
+        )
+        .bind(...scope.values)
+        .first<{ id: string }>();
+      return row !== null;
+    },
+
     async updateOnchainTransferForRamp(input) {
       return applyRampTransition(
         {
@@ -747,12 +768,7 @@ export function createPostgresPaymentsRepository(
           ],
           clauseValues: [],
           // The released claim's key is no longer this row's: a retry under it runs again.
-          // Its audit intent is closed; the next claim records its own.
-          assignments: [
-            "idempotency_key = NULL",
-            "idempotency_fingerprint = NULL",
-            "audit_intent_id = NULL",
-          ],
+          assignments: ["idempotency_key = NULL", "idempotency_fingerprint = NULL"],
           assignmentValues: [],
         }
       );

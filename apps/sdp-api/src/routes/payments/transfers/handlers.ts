@@ -106,7 +106,13 @@ import {
 } from "@/routes/payments/wallets";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { type AuditIntent, type AuditLogEntry, AuditService } from "@/services/audit.service";
+import {
+  type AuditIntent,
+  type AuditLogEntry,
+  AuditService,
+  type CriticalOutcome,
+  criticalOutcomeEntry,
+} from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -995,14 +1001,14 @@ async function executeFireblocksTransfer(
   try {
     updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer);
   } catch (error) {
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: "failure",
       metadata: { status: "failed" },
     });
     throw error;
   }
   if (updated.provider_reference || updated.status === "failed") {
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       status: updated.status === "failed" ? "failure" : "success",
       metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
     });
@@ -1013,10 +1019,10 @@ async function executeFireblocksTransfer(
 }
 
 /**
- * Opens a transfer's critical audit intent and records its id on the row, so the
- * job that later settles an ambiguous submission closes this intent in the same
- * transaction as the settle. A row the id cannot be recorded on is never sent:
- * the intent is closed as failed and the error refuses the send.
+ * Opens a transfer's critical audit intent and records it on the row in the
+ * same ledger transaction, so the job that later settles an ambiguous
+ * submission finds and closes it. A row not ready to send records nothing and
+ * refuses the send.
  */
 async function beginTransferAudit(
   c: AppContext,
@@ -1024,27 +1030,60 @@ async function beginTransferAudit(
   transfer: TransferRow,
   entry: AuditLogEntry
 ): Promise<AuditIntent> {
-  const intent = await auditService.beginCritical(c, entry);
-  let failure: unknown = internalError("Payment transfer was not ready to record its audit intent");
+  const intent = await auditService.beginCriticalWithin(c, entry, (tx, auditIntentId) =>
+    createPostgresPaymentsRepository(tx, getRequestTenantScope(c)).recordTransferAuditIntent({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      auditIntentId,
+    })
+  );
+  if (intent === null) {
+    throw internalError("Payment transfer was not ready to record its audit intent");
+  }
+  return intent;
+}
+
+/**
+ * Closes the transfer's audit intent unless the pending-transfer job already
+ * did: the outcome commits with clearing the row's open intent, so of the
+ * request and the job only the first appends one. Best-effort like
+ * `completeCritical`: a ledger failure leaves the intent open for the job or
+ * for reconciliation.
+ */
+async function completeTransferAudit(
+  c: AppContext,
+  auditService: AuditService,
+  transfer: TransferRow,
+  intent: AuditIntent,
+  outcome: CriticalOutcome = {}
+): Promise<void> {
   try {
-    if (
-      await getPaymentsRepository(c).recordTransferAuditIntent({
+    await auditService.logWithin(c, async (tx) => {
+      const claimed = await createPostgresPaymentsRepository(
+        tx,
+        getRequestTenantScope(c)
+      ).closeTransferAuditIntent({
         transferId: transfer.id,
         organizationId: transfer.organization_id,
         projectId: transfer.project_id,
         auditIntentId: intent.id,
-      })
-    ) {
-      return intent;
-    }
+      });
+      return { entry: claimed ? criticalOutcomeEntry(intent, outcome) : null, result: undefined };
+    });
   } catch (error) {
-    failure = error;
+    getLogger().error(
+      {
+        event: "audit_critical_outcome_persistence_failed",
+        auditIntentId: intent.id,
+        targetAction: intent.entry.action,
+        targetResourceType: intent.entry.resourceType,
+        targetResourceId: intent.entry.resourceId ?? null,
+        error,
+      },
+      "Critical operation outcome was not persisted; durable audit intent requires reconciliation"
+    );
   }
-  await auditService.completeCritical(c, intent, {
-    status: "failure",
-    metadata: { error: "Audit intent was not recorded on the transfer" },
-  });
-  throw failure;
 }
 
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
@@ -1177,7 +1216,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           error: null,
         })
       );
-      await auditService.completeCritical(c, auditIntent, {
+      await completeTransferAudit(c, auditService, transfer, auditIntent, {
         metadata: { signature: solResult.signature, slot: solResult.slot?.toString() ?? null },
       });
       return success(c, { transfer: mapTransferRow(updated) });
@@ -1204,7 +1243,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         error: null,
       })
     );
-    await auditService.completeCritical(c, auditIntent, {
+    await completeTransferAudit(c, auditService, transfer, auditIntent, {
       metadata: { signature: result.signature, slot: result.slot?.toString() ?? null },
     });
 
@@ -1222,14 +1261,14 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           // proved the chain outcome; the intent resolves with that verdict
           // instead of dangling on an operation whose result is known.
           if (isSuccessfulPaymentTransferStatus(settled.status)) {
-            await auditService.completeCritical(c, auditIntent, {
+            await completeTransferAudit(c, auditService, transfer, auditIntent, {
               metadata: { signature: settled.signature, slot: settled.slot?.toString() ?? null },
             });
           }
         }
       );
     } catch (settledError) {
-      await auditService.completeCritical(c, auditIntent, {
+      await completeTransferAudit(c, auditService, transfer, auditIntent, {
         status: "failure",
         metadata: { error: error instanceof Error ? error.message : "Unknown transfer error" },
       });

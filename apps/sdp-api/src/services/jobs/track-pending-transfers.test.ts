@@ -8,6 +8,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -233,7 +234,7 @@ async function listIntentOutcomes(auditIntentId: string) {
     .all<{ status: string; metadata: string }>();
   return rows.results.map((row) => ({
     status: row.status,
-    metadata: JSON.parse(row.metadata) as Record<string, unknown>,
+    metadata: z.record(z.string(), z.unknown()).parse(JSON.parse(row.metadata)),
   }));
 }
 

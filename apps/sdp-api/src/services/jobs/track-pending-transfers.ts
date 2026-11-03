@@ -157,7 +157,7 @@ function partitionByValidStoredSignature<T extends PaymentTransferRow>(transfers
  * concurrent run that already settled the chunk makes this a no-op, so a
  * delayed observation can never regress a newer terminal status. Other
  * transfers settle through a processing-guarded update with the same
- * no-op-on-conflict semantics; one whose request recorded an audit intent
+ * no-op-on-conflict semantics; one whose request left its audit intent open
  * commits that intent's outcome with the update.
  *
  * @param env - Process environment.
@@ -206,15 +206,22 @@ async function updateTerminalTransfer(
   }
   // A request whose submission was ambiguous left its intent open; the settle
   // closes it in the same transaction, so a ledger failure leaves the row
-  // processing for the next run (HOO-2556).
+  // processing for the next run (HOO-2556). Clearing the row's open intent is
+  // the claim: a request that closed it first leaves nothing to append.
   return createSystemAuditService(env).logSystemWithin(async (tx) => {
+    const payments = createSystemTransactionalPaymentsRepository(tx);
     const settled =
-      (await createSystemTransactionalPaymentsRepository(tx).updateTransfer({
-        ...input,
-        expectedStatus: "processing",
-      })) !== null;
+      (await payments.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+    const claimed =
+      settled &&
+      (await payments.closeTransferAuditIntent({
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        projectId: transfer.project_id,
+        auditIntentId,
+      }));
     return {
-      entry: settled ? transferAuditOutcome(transfer, auditIntentId, input) : null,
+      entry: claimed ? transferAuditOutcome(transfer, auditIntentId, input) : null,
       result: settled,
     };
   });
