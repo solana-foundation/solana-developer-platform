@@ -187,8 +187,9 @@ test.describe
       return send;
     }
 
-    const submitted = (page: Page) =>
-      expect(page.locator("main").getByText("Transfer submitted")).toBeVisible({
+    // The heading names the outcome: sent once finalized, submitted while still confirming.
+    const sentOrSubmitted = (page: Page) =>
+      expect(page.locator("main").getByText(/^Transfer (sent|submitted)$/)).toBeVisible({
         timeout: 120_000,
       });
     const failed = (page: Page) =>
@@ -203,7 +204,7 @@ test.describe
         button.click();
         button.click();
       });
-      await submitted(page);
+      await sentOrSubmitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
       expect(keys.every(Boolean)).toBe(true);
@@ -225,7 +226,7 @@ test.describe
       // The transfer route answers a retry from the key's stored response or
       // its transfer row (`idempotent()`, `replayFromRecord`); both mark it.
       expect((await replay).headers()["idempotent-replayed"]).toBe("true");
-      await submitted(page);
+      await sentOrSubmitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
       expect(keys).toHaveLength(2);
@@ -249,7 +250,7 @@ test.describe
         await send.click();
         await expect(page.getByText(refusal.message).first()).toBeVisible({ timeout: 60_000 });
         await send.click();
-        await submitted(page);
+        await sentOrSubmitted(page);
 
         const keys = keysFor(sent, "POST", TRANSFERS);
         expect(keys).toHaveLength(3);
@@ -267,7 +268,7 @@ test.describe
       await failed(page);
       await page.reload();
       await (await reviewTransfer(page, amount)).click();
-      await submitted(page);
+      await sentOrSubmitted(page);
 
       const keys = keysFor(sent, "POST", TRANSFERS);
       expect(keys).toHaveLength(2);

@@ -10,11 +10,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   RecordAmount,
   RecordColumns,
@@ -33,7 +35,11 @@ import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
-import { cancelPaymentRequest, deriveTokenOptions } from "./payment-requests-page.data";
+import {
+  cancelPaymentRequest,
+  deriveTokenOptions,
+  fetchPaymentRequestFromBrowser,
+} from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -264,6 +270,37 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
 /** How often an open request's Cancel is re-decided, so it goes once the request expires. */
 const CANCEL_ELIGIBILITY_REFRESH_MS = 30_000;
 
+/**
+ * How often an open request is read again. The API marks a request paid within 30s of its
+ * payment landing, so a payment shows on the page within about 40s, without a reload.
+ */
+const PAYMENT_WATCH_INTERVAL_MS = 10_000;
+
+/**
+ * The request as the API holds it now. An open one is read again until it is paid, canceled or
+ * expired, in a visible tab, and never in demo mode, whose requests are fixtures. The newer of
+ * this read and the server's wins, so a cancel's refresh shows at once.
+ */
+function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
+  const demo = usePaymentsDemo();
+  const { data } = useSWR(
+    demo || served.status !== "awaiting_payment"
+      ? null
+      : paymentsQueryKeys.paymentRequestWatch(served.id),
+    ([, requestId]: readonly [string, string]) => fetchPaymentRequestFromBrowser(requestId),
+    {
+      // A fresh function each render re-arms SWR's timer with the latest read. Before the first
+      // read it sees nothing, and the server's open request stands in.
+      refreshInterval: (latest) =>
+        (latest ?? served).status === "awaiting_payment" ? PAYMENT_WATCH_INTERVAL_MS : 0,
+      revalidateOnMount: false,
+      revalidateOnFocus: true,
+      dedupingInterval: 2_000,
+    }
+  );
+  return data !== undefined && data.updatedAt > served.updatedAt ? data : served;
+}
+
 interface PaymentRequestDetailWorkspaceProps {
   request: PaymentRequest | null;
   /**
@@ -308,7 +345,7 @@ export function PaymentRequestDetailWorkspace({
 
 /** The record once the request could be read: the band, the amount and link, then the rows. */
 function PaymentRequestRecord({
-  request,
+  request: served,
   publicToken,
   walletName,
 }: {
@@ -316,6 +353,7 @@ function PaymentRequestRecord({
   publicToken: string | null;
   walletName: string | null;
 }) {
+  const request = useWatchedPaymentRequest(served);
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();

@@ -27,6 +27,11 @@ live feed with an idle back-off) uses `useCadencedSWR` (`src/lib`), which
 passes SWR a number derived from the last read so only a cadence change
 restarts the timer.
 
+The public pay page (`app/pay/[token]`) reads the API's `/pay/:token` on the
+web server, whose one address every payer shares under the API's anonymous
+limit (20 a minute). Anything that reads it again, like the page's status
+watch, calls the API from the payer's browser instead.
+
 Dollar totals come from `payments/payments-overview.utils.ts`:
 `resolveTotalBalance` sums held rows only and is null when nothing held has a
 price, `formatTotalBalance` shows that null as a dash, and

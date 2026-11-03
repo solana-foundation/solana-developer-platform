@@ -6,6 +6,7 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -52,9 +53,11 @@ const paymentRequest: PaymentRequest = {
 function renderDetail(demo: boolean, publicToken: string | null, request: PaymentRequest) {
   function wrapper({ children }: { children: ReactNode }) {
     return (
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <PaymentsDemoProvider value={demo}>{children}</PaymentsDemoProvider>
-      </I18nProvider>
+      <SWRConfig value={{ provider: () => new Map() }}>
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <PaymentsDemoProvider value={demo}>{children}</PaymentsDemoProvider>
+        </I18nProvider>
+      </SWRConfig>
     );
   }
   return render(
@@ -65,9 +68,49 @@ function renderDetail(demo: boolean, publicToken: string | null, request: Paymen
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   resetDashboardNavigation();
   workspace.role = "admin";
+});
+
+describe("PaymentRequestDetailWorkspace payment watch", () => {
+  const paid: PaymentRequest = {
+    ...paymentRequest,
+    status: "paid",
+    fulfilledByTransferId: "xfr_1",
+    updatedAt: "2026-09-14T00:05:00.000Z",
+  };
+
+  it("shows a payment land on an open request without a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
+    renderDetail(false, "tok_1", paymentRequest);
+
+    expect(screen.getAllByText("Awaiting payment").length).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await waitFor(() => expect(screen.getAllByText("Paid").length).toBeGreaterThan(0));
+    expect(read).toHaveBeenCalledWith("preq_1");
+  });
+
+  it("reads a request that is no longer open no more", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
+    renderDetail(false, "tok_1", paid);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("never reads a demo request, which is a fixture", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);
+    renderDetail(true, null, paymentRequest);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).not.toHaveBeenCalled();
+  });
 });
 
 describe("PaymentRequestDetailWorkspace payment link", () => {

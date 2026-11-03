@@ -12,6 +12,7 @@ import {
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { PayStatusWatch } from "./pay-status-watch";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,10 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
       {...refreshThemeProps}
       className="flex min-h-screen items-center justify-center bg-surface px-4 py-12"
     >
+      <PayStatusWatch
+        statusUrl={`${apiBaseUrl}/pay/${encodeURIComponent(token)}`}
+        status={request.status}
+      />
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
         <div className="p-8">
           <div className="flex items-center justify-center">

@@ -26,6 +26,7 @@ export const paymentsQueryKeys = {
     ["onramp-transfer-status", transferId] as const,
   offrampTransferStatus: ({ transferId }: { transferId: string }) =>
     ["offramp-transfer-status", transferId] as const,
+  paymentRequestWatch: (requestId: string) => ["payment-request-watch", requestId] as const,
   requirementsStatusPoll: ({ subjectKey }: { subjectKey: string }) =>
     ["counterparty-requirements-status-poll", subjectKey] as const,
   /** The counterparty lists a new counterparty or account appears in. */
