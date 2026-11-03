@@ -1173,6 +1173,59 @@ async function settleCollectionAttempt(
 }
 
 /**
+ * The failed-collection write matched no transfer row: the transfer is confirmed (a pull that
+ * landed meanwhile), whose signature the attempt then records. With `requireUnsubmitted`, a
+ * transfer that gained a saved send since recovery read it is refused for a retry instead
+ * (APE SOLA9-816).
+ *
+ * @param tx - The transaction the failed-collection write ran in.
+ * @param input - The failed collection, with the transfer whose write matched no row.
+ * @returns The confirmed transfer's signature.
+ * @throws AppError `CONFLICT` when the collector saved its send after recovery read the row.
+ */
+async function confirmedTransferSignatureAfterMissedFail(
+  tx: DatabaseExecutor,
+  input: Parameters<typeof markRecurringPaymentCollectionFailedAtomically>[0] & {
+    transfer: PaymentTransferRow;
+  }
+): Promise<Signature> {
+  const currentTransfer = await tx
+    .prepare(
+      `SELECT status, signature
+           FROM payment_transfers
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?`
+    )
+    .bind(input.transfer.id, input.organizationId, input.projectId)
+    .first<{ status: string; signature: string | null }>();
+
+  if (
+    input.requireUnsubmitted &&
+    currentTransfer !== null &&
+    currentTransfer.status !== "confirmed" &&
+    currentTransfer.signature !== null
+  ) {
+    // The collector saved its send after recovery read the row: it may land, so
+    // the next recovery reads that send instead of failing the cycle under it.
+    throw conflict("Recurring payment collection saved a send while recovering it; retry");
+  }
+  if (currentTransfer === null || currentTransfer.status !== "confirmed") {
+    throw internalError("Failed to mark collection transfer failed");
+  }
+
+  const currentSignature = currentTransfer.signature ?? input.submittedSignature;
+  if (!currentSignature) {
+    throw internalError("Confirmed collection transfer is missing signature");
+  }
+  return validatedStoredCollectionSignature({
+    attemptId: input.attempt.id,
+    signature: currentSignature,
+    transferId: input.transfer.id,
+  });
+}
+
+/**
  * Atomically settles a failed collection attempt and its linked transfer.
  *
  * Keep these status writes in one database transaction. Splitting them into
@@ -1187,6 +1240,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow | null;
   submittedSignature: Signature | null;
+  /**
+   * Fail the transfer only while it still holds no signature and no submission
+   * start: what recovery read before deciding the run never sent (APE SOLA9-816).
+   * A collector that saved its send since then keeps it, and recovery retries.
+   */
+  requireUnsubmitted: boolean;
   error: Error;
 }): Promise<void> {
   const failedAt = new Date().toISOString();
@@ -1211,7 +1270,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status IN ('pending', 'processing', 'failed')`
+              AND status IN ('pending', 'processing', 'failed')
+              AND (NOT ?::boolean OR (signature IS NULL AND submission_started_at IS NULL))`
         )
         .bind(
           input.submittedSignature !== null,
@@ -1220,33 +1280,14 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           failedAt,
           input.transfer.id,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.requireUnsubmitted
         )
         .run();
       if (transferRows === 0) {
-        const currentTransfer = await tx
-          .prepare(
-            `SELECT status, signature
-               FROM payment_transfers
-              WHERE id = ?
-                AND organization_id = ?
-                AND project_id = ?`
-          )
-          .bind(input.transfer.id, input.organizationId, input.projectId)
-          .first<{ status: string; signature: string | null }>();
-
-        if (currentTransfer === null || currentTransfer.status !== "confirmed") {
-          throw internalError("Failed to mark collection transfer failed");
-        }
-
-        const currentSignature = currentTransfer.signature ?? input.submittedSignature;
-        if (!currentSignature) {
-          throw internalError("Confirmed collection transfer is missing signature");
-        }
-        confirmedTransferSignature = validatedStoredCollectionSignature({
-          attemptId: input.attempt.id,
-          signature: currentSignature,
-          transferId: input.transfer.id,
+        confirmedTransferSignature = await confirmedTransferSignatureAfterMissedFail(tx, {
+          ...input,
+          transfer: input.transfer,
         });
       }
     }
@@ -1474,7 +1515,7 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
-  await markRecurringPaymentCollectionFailedAtomically(input);
+  await markRecurringPaymentCollectionFailedAtomically({ ...input, requireUnsubmitted: false });
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -1621,6 +1662,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer: null,
       submittedSignature: null,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before transfer creation"),
     });
     return null;
@@ -1647,6 +1689,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: null,
+      requireUnsubmitted: true,
       error: new Error("Recurring payment collection was interrupted before submission"),
     });
     return null;
@@ -1668,6 +1711,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before broadcast"),
     });
     return null;
@@ -1700,6 +1744,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: transactionFailed(message),
     });
     return null;
@@ -1777,6 +1822,7 @@ async function recoverRecurringPaymentCollection(input: {
         attempt: existing,
         transfer,
         submittedSignature: recoveredSignature,
+        requireUnsubmitted: false,
         error,
       });
       return null;
