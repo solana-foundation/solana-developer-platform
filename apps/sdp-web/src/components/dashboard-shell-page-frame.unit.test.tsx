@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerk from "@clerk/nextjs";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,13 +21,31 @@ import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navi
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
 
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-page-frame" }),
-  useUser: () => ({ isLoaded: true, isSignedIn: true, user: null }),
-  SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
-}));
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+/** A signed-in member of the test's Organization, as Clerk's hook reports one. */
+const SIGNED_IN: ReturnType<typeof clerk.useAuth> = {
+  isLoaded: true,
+  isSignedIn: true,
+  userId: "user_page_frame",
+  sessionId: "sess_page_frame",
+  sessionClaims: {
+    __raw: "",
+    iss: "https://clerk.page-frame.test",
+    sub: "user_page_frame",
+    sid: "sess_page_frame",
+    nbf: 0,
+    exp: 0,
+    iat: 0,
+  },
+  actor: null,
+  orgId: "org-page-frame",
+  orgRole: "org:admin",
+  orgSlug: null,
+  has: () => true,
+  signOut: async () => undefined,
+  getToken: async () => null,
+};
 
 // jsdom lays nothing out, so it has no scrollIntoView; the header tabs scroll the active one in.
 Element.prototype.scrollIntoView = () => {};
@@ -61,6 +80,7 @@ beforeEach(() => {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
   }));
+  vi.spyOn(clerk, "useAuth").mockReturnValue(SIGNED_IN);
   vi.spyOn(workspace, "useOptionalDashboardWorkspace").mockReturnValue(undefined);
   vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue({
     initialQuickStartStatus: null,
