@@ -1287,8 +1287,64 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
   });
 
+  it.each(["counterparty", "account", "legacy_parent"] as const)(
+    "refuses activation for an unavailable %s before claiming or signing",
+    async (target) => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      if (target === "legacy_parent") {
+        await getDb(env).execute("UPDATE counterparties SET status = 'archived' WHERE id = ?", [
+          created.counterpartyId,
+        ]);
+      } else {
+        const path = `/v1/counterparties/${created.counterpartyId}`;
+        const archived = await app.request(
+          target === "account" ? `${path}/accounts/${created.counterpartyAccountId}` : path,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
+      }
+      const before = await recurringExecutionSnapshot(created.id);
+      const calls = recurringExecutionCallCounts();
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(404);
+      expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(calls);
+    }
+  );
+
+  it("does not claim activation or sign when the recipient lookup fails", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const lookup = vi
+      .spyOn(counterpartyAccountResolution, "resolveSolanaCounterpartyAccount")
+      .mockRejectedValueOnce(new Error("recipient database unavailable"));
+    onTestFinished(() => lookup.mockRestore());
+    const before = await recurringExecutionSnapshot(created.id);
+    const calls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(500);
+    expect(await recurringExecutionSnapshot(created.id)).toEqual(before);
+    expect(recurringExecutionCallCounts()).toEqual(calls);
+  });
+
   it("activates recurring payments through SDP API routes", async () => {
     const signAsFeePayerMock = recurringExecution.signAsFeePayerMock();
+    const activationHeaders = {
+      ...RECURRING_HEADERS,
+      "Idempotency-Key": "activate-before-archive",
+    };
     const created = await createRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
@@ -1298,7 +1354,7 @@ describe("Payments routes — recurring", () => {
       `/v1/payments/recurring-payments/${created.id}/activate`,
       {
         method: "POST",
-        headers: RECURRING_HEADERS,
+        headers: activationHeaders,
         body: "{}",
       },
       env
@@ -1345,18 +1401,27 @@ describe("Payments routes — recurring", () => {
       authorization_signature: activateBody.data.recurringPayment.authorizationSignature,
     });
 
+    const archived = await app.request(
+      `/v1/counterparties/${created.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+
     const replayRes = await app.request(
       `/v1/payments/recurring-payments/${created.id}/activate`,
       {
         method: "POST",
-        headers: RECURRING_HEADERS,
+        headers: activationHeaders,
         body: "{}",
       },
       env
     );
 
     expect(replayRes.status).toBe(200);
+    expect(replayRes.headers.get("Idempotent-Replayed")).toBe("true");
     const replayBody = await parseRecurringResponse(replayRes);
+    expect(replayBody).toEqual(activateBody);
     expect(replayBody.data.recurringPayment).toMatchObject({
       id: created.id,
       status: "active",
@@ -6418,6 +6483,39 @@ describe("Payments routes — recurring", () => {
     });
   });
 
+  it("refuses new delegation signing during activation recovery after the recipient is archived", async () => {
+    const { recurringPayment, attemptId } = await seedStaleActivationAfterPlan();
+    await getDb(env).execute("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?", [
+      new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+      recurringPayment.id,
+    ]);
+    const archived = await app.request(
+      `/v1/counterparties/${recurringPayment.counterpartyId}`,
+      { method: "DELETE", headers: RECURRING_HEADERS },
+      env
+    );
+    expect(archived.status).toBe(204);
+    const calls = recurringExecutionCallCounts();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    expect((await recurringPaymentDueAt(recurringPayment.id)).status).toBe("pending_activation");
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(calls.custodySigner);
+    expect(createKoraAdapterMock).toHaveBeenCalledTimes(calls.feePaymentAdapter);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(calls.send);
+    expect(
+      await getDb(env)
+        .prepare("SELECT status FROM payment_recurring_payment_activation_attempts WHERE id = ?")
+        .bind(attemptId)
+        .first<{ status: string }>()
+    ).toEqual({ status: "failed" });
+  });
+
   it("refuses to recover a stale activation an incident revoke overtook after its first claim", async () => {
     // Its first claim saw no revoke on the wallet; an incident revoke then confirmed before the
     // recovery's claim, whose own recount would include it.
@@ -9581,6 +9679,12 @@ describe("Payments routes — recurring", () => {
             staleAt
           )
           .run();
+        const archived = await app.request(
+          `/v1/counterparties/${created.counterpartyId}`,
+          { method: "DELETE", headers: RECURRING_HEADERS },
+          env
+        );
+        expect(archived.status).toBe(204);
         const sent = sends();
 
         const retry = await app.request(
