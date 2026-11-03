@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Suspense, startTransition, use, useState } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -71,6 +72,27 @@ function panel(refusedOrganizationId: string | null) {
 
 function renderPanel(refusedOrganizationId: string | null = null) {
   return render(panel(refusedOrganizationId));
+}
+
+// The dashboard layout across a refresh: Next's refresh is a transition that
+// commits only once the server's render arrives, and the layout's answer is the
+// organization it refused that time.
+const refreshingLayout: { showVerdict: (verdict: Promise<string>) => void } = {
+  showVerdict: () => {},
+};
+
+function Verdict({ verdict }: { verdict: Promise<string> }) {
+  return panel(use(verdict));
+}
+
+function RefreshingLayout({ initialRefused }: { initialRefused: string }) {
+  const [verdict, setVerdict] = useState(() => Promise.resolve(initialRefused));
+  refreshingLayout.showVerdict = setVerdict;
+  return (
+    <Suspense fallback={null}>
+      <Verdict verdict={verdict} />
+    </Suspense>
+  );
 }
 
 function membership(id: string, name: string) {
@@ -169,20 +191,36 @@ describe("SelectExistingOrganizationPanel", () => {
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
   });
 
-  it("keeps the remaining choices usable when SDP refuses the next organization too", async () => {
-    const user = userEvent.setup();
+  it("holds the list until the refreshed layout answers, then unlocks on another refusal", async () => {
     mocks.memberships = [
       membership("org_alpha", "Alpha"),
       membership("org_beta", "Beta"),
       membership("org_gamma", "Gamma"),
     ];
-    const { rerender } = renderPanel("org_alpha");
+    let answerRefresh: (refusedOrganizationId: string) => void = () => {};
+    dashboardRouter.refresh.mockImplementationOnce(() => {
+      startTransition(() =>
+        refreshingLayout.showVerdict(
+          new Promise<string>((resolve) => {
+            answerRefresh = resolve;
+          })
+        )
+      );
+    });
+    await act(async () => {
+      render(<RefreshingLayout initialRefused="org_alpha" />);
+    });
 
-    await user.click(choice("Beta"));
+    await act(async () => {
+      choice("Beta").click();
+    });
     expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_beta" });
-    // The refreshed layout refuses Beta as well and renders this same panel again.
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+    expect(choice("Gamma").disabled).toBe(true);
+    expect(choice("Beta").parentElement?.getAttribute("aria-busy")).toBe("true");
+
     mocks.session.activeOrganization = { id: "org_beta", name: "Beta" };
-    rerender(panel("org_beta"));
+    await act(async () => answerRefresh("org_beta"));
 
     expect(screen.getByRole("heading", { name: "No access to Beta" })).toBeTruthy();
     expect(
