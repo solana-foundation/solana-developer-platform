@@ -45,7 +45,8 @@ function sourceFiles(dir: string, root: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const full = path.join(dir, entry);
     if (statSync(full).isDirectory()) return sourceFiles(full, root);
-    const relative = path.relative(root, full);
+    // Posix-separated, so it keys the same as PINNED_READS and SHARED_STEP on every platform.
+    const relative = path.relative(root, full).split(path.sep).join("/");
     return relative.endsWith(".ts") && !/\.test\.ts$/.test(relative) ? [relative] : [];
   });
 }
