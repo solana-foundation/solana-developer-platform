@@ -177,7 +177,9 @@
     "roleViewer": "Read-only",
     "inviteSubmit": "Send invite",
     "inviteSent": "Invitation sent to {email}.",
+    "inviteGranted": "{email} is invited. They already have this organization in their account, so no email was sent: they can join it the next time they sign in.",
     "inviteFailed": "Could not send the invitation: {error}",
+    "inviteFailedUnexpectedly": "Could not send the invitation. Try again in a moment.",
     "emailRequired": "Enter an email address.",
     "columnMember": "Member",
     "columnRole": "Role",
@@ -342,6 +344,8 @@
     "acceptInvitationFailed": "Could not accept the invitation. Try the link in your invitation email.",
     "noOrganizationAccessTitle": "No access to this organization",
     "noOrganizationAccessDescription": "You are not a member of this organization in SDP. Choose another organization, or ask an admin to invite you.",
+    "invitationExpiredTitle": "Your invitation has expired",
+    "invitationExpiredDescription": "Your invitation to this organization has expired. Ask an admin of the organization to send you a new one, or choose another organization.",
     "switchOrganizationFailed": "Joined, but could not switch to the organization. Choose it from the list."
   },
   "dashboardShell": {

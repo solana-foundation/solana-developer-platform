@@ -1,8 +1,12 @@
-import { MEMBER_STATUSES } from "@sdp/types/organizations";
+import {
+  INVITATION_EXPIRED_REASON,
+  INVITATION_STATUSES,
+  MEMBER_STATUSES,
+} from "@sdp/types/organizations";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
-import { conflict, missingAction, notFound } from "@/lib/errors";
+import { AppError, conflict, missingAction, notFound, unauthorized } from "@/lib/errors";
 
 export type MembershipChange =
   | { kind: "set_role"; memberId: string; role: OrganizationRole }
@@ -264,6 +268,56 @@ export async function findPendingInvitation(
   }
   const invitation = pendingInvitationSchema.parse(row);
   return { id: invitation.id, role: invitation.role, expiresAt: invitation.expires_at };
+}
+
+/**
+ * The refusal for a person whose invitation to the organization has expired.
+ * It carries `details.reason` so the dashboard can say so, rather than that
+ * they were never invited.
+ */
+export function invitationExpired(): AppError {
+  return new AppError("UNAUTHORIZED", "Invitation to this organization has expired", {
+    reason: INVITATION_EXPIRED_REASON,
+  });
+}
+
+const newestInvitationSchema = z.object({
+  status: z.enum(INVITATION_STATUSES),
+  expires_at: z.string(),
+});
+
+/**
+ * The refusal for a person with no active membership and no pending
+ * invitation that admits them (ADR 0012). It is read from the newest
+ * invitation of the address, so an expired one is reported on every attempt,
+ * whether its row was marked expired by an earlier sign-in, by a re-invite, or
+ * not at all yet.
+ *
+ * @param db - The database or open transaction.
+ * @param params.organizationId - The organization.
+ * @param params.email - The address, in any letter case.
+ * @returns The error to throw: expired, or no pending invitation.
+ */
+export async function uninvitedRefusal(
+  db: DatabaseExecutor,
+  params: { organizationId: string; email: string }
+): Promise<AppError> {
+  const row = await db
+    .prepare(
+      `SELECT status, expires_at
+         FROM invitations
+        WHERE organization_id = ? AND LOWER(email) = ?
+        ORDER BY created_at DESC
+        LIMIT 1`
+    )
+    .bind(params.organizationId, params.email.toLowerCase())
+    .first<Record<string, unknown>>();
+  const newest = row ? newestInvitationSchema.parse(row) : null;
+  const expired =
+    newest !== null &&
+    (newest.status === "expired" ||
+      (newest.status === "pending" && new Date(newest.expires_at) <= new Date()));
+  return expired ? invitationExpired() : unauthorized("No pending invitation to this organization");
 }
 
 /**

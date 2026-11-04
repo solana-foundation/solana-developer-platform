@@ -211,8 +211,15 @@ export async function listMemberApiKeys(memberId: string): Promise<MemberApiKey[
 }
 
 export type InviteMemberResult =
-  | { status: "success"; email: string }
+  /** `emailSent` is false when the address already holds the organization in its sign-in account, so no invitation email goes out. */
+  | { status: "success"; email: string; emailSent: boolean }
   | { status: "error"; message: string; answer?: ApiAnswer };
+
+// A null Clerk invitation id means the address already held the organization
+// in Clerk: the SDP invitation admits them, and no email was sent.
+const createdInvitationSchema = z.object({
+  invitation: z.object({ clerkInvitationId: z.string().nullable() }),
+});
 
 const inviteFormSchema = z.object({
   email: z.string().trim().toLowerCase().min(1),
@@ -239,9 +246,10 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
     return { status: "error", message: t("Shared.members.emailRequired") };
   }
 
+  let created: unknown;
   try {
     const client = await createSdpApiClient();
-    await client.fetch("/v1/members/invite", {
+    created = await client.fetch<unknown>("/v1/members/invite", {
       method: "POST",
       headers: { [IDEMPOTENCY_KEY_HEADER]: parsed.data.idempotencyKey },
       body: JSON.stringify({ email: parsed.data.email, role: parsed.data.role }),
@@ -252,5 +260,12 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
 
   // Members render inside the settings page; /members only redirects there.
   revalidatePath(await requestProjectHref("/dashboard/settings"));
-  return { status: "success", email: parsed.data.email };
+  return {
+    status: "success",
+    email: parsed.data.email,
+    // The invitation is created either way, so a body this cannot read is
+    // reported as the usual sent invitation rather than a failure.
+    emailSent:
+      createdInvitationSchema.safeParse(created).data?.invitation.clerkInvitationId !== null,
+  };
 }

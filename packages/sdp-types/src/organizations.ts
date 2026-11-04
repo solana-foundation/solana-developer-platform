@@ -64,6 +64,12 @@ export function memberStatusMayMoveMoney(status: string): boolean {
 
 export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
+/**
+ * `details.reason` on the 401 that refuses a person whose newest invitation to
+ * the organization expired, so the dashboard can tell them to ask for a new one
+ * rather than that they were never invited.
+ */
+export const INVITATION_EXPIRED_REASON = "invitation_expired";
 export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",

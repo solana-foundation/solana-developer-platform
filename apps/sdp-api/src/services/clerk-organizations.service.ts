@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
-import { describeClerkFailure } from "./clerk-error";
+import { ClerkRequestError, describeClerkFailure } from "./clerk-error";
 
 export interface ClerkOrganizationInvitation {
   id: string;
@@ -75,10 +75,7 @@ export class ClerkOrganizationsService {
         new Error(describeClerkFailure(res.status, body)),
         startedAt
       );
-      throw new AppError("INTERNAL_ERROR", describeClerkFailure(res.status, body), {
-        status: res.status,
-        body,
-      });
+      throw new ClerkRequestError(res.status, body);
     }
 
     if (res.status === 204) {
