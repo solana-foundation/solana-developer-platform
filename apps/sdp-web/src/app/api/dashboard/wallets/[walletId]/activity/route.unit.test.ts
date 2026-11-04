@@ -13,6 +13,7 @@ vi.mock("@/i18n/server", () => ({
 }));
 vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: mocks.createSdpApiClient,
+  rejectUnscopedDashboardRequest: async () => null,
 }));
 
 import { GET } from "./route";

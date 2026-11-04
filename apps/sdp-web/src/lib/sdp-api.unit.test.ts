@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { resetRequestProject, setApiRequest, setPageRequest } from "@/test/request-project";
+import { createTimedTrace } from "./request-tracing";
 
 const clerk = vi.hoisted(() => ({ auth: vi.fn() }));
 
@@ -13,6 +15,7 @@ import {
   createRequestScopedSdpApiClients,
   createSdpApiClient,
   proxyToSdpApi,
+  rejectUnscopedDashboardRequest,
   requestOnboardingStatus,
   requestProjectHref,
   requestProjectId,
@@ -440,20 +443,86 @@ describe("proxyToSdpApi", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("marks an unauthenticated refusal uncacheable", async () => {
-    clerk.auth.mockResolvedValue({ userId: null, orgId: null, getToken: vi.fn() });
-    const fetchMock = okFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
+  it("answers an unexpected throw with the fixed message and logs the thrown text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("connect ECONNREFUSED sdp-api-internal:8787");
+      })
+    );
 
     const response = await proxyToSdpApi({
       request: browserCall(SANDBOX_PROJECT.id),
-      traceSource: "test.proxy.cache",
+      traceSource: "test.proxy.unexpected",
       path: "/v1/earn/vault-deposits",
     });
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(response.headers.get("Vary")).toBe("x-project-id");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: { message: "SDP API proxy request failed" } });
+    const routeLogs = vi
+      .mocked(console.info)
+      .mock.calls.map(([payload]) =>
+        z.record(z.string(), z.unknown()).parse(JSON.parse(String(payload)))
+      )
+      .filter((event) => event.event === "sdp_web_route_timing");
+    expect(routeLogs).toEqual([
+      expect.objectContaining({
+        status: 500,
+        error: "connect ECONNREFUSED sdp-api-internal:8787",
+      }),
+    ]);
+  });
+});
+
+describe("rejectUnscopedDashboardRequest", () => {
+  function dashboardCall(headers: Record<string, string>) {
+    return new Request("https://dashboard.example.test/api/dashboard/home/activity", { headers });
+  }
+
+  it.each([
+    [
+      "a signed-out caller",
+      { userId: null, orgId: null },
+      { "x-project-id": SANDBOX_PROJECT.id },
+      401,
+      "Authentication required",
+    ],
+    [
+      "a caller without an active organization",
+      { userId: "user_test", orgId: null },
+      { "x-project-id": SANDBOX_PROJECT.id },
+      403,
+      "Active organization required",
+    ],
+    [
+      "a call without the tab's Project",
+      { userId: "user_test", orgId: "org_test" },
+      {},
+      400,
+      "x-project-id header required",
+    ],
+  ])("refuses %s uncacheably", async (_case, session, headers, status, message) => {
+    clerk.auth.mockResolvedValue(session);
+    const request = dashboardCall(headers);
+
+    const response = await rejectUnscopedDashboardRequest(
+      request,
+      createTimedTrace("test.reject", request)
+    );
+
+    if (response === null) {
+      throw new Error("request was not refused");
+    }
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error: { message } });
+    expectDashboardNoStore(response);
+  });
+
+  it("lets a signed-in member's call for a Project through", async () => {
+    const request = dashboardCall({ "x-project-id": SANDBOX_PROJECT.id });
+
+    await expect(
+      rejectUnscopedDashboardRequest(request, createTimedTrace("test.reject", request))
+    ).resolves.toBeNull();
   });
 });

@@ -4,8 +4,8 @@ import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   proxyToSdpApi: vi.fn(),
-  proxyFailure: vi.fn(),
   createSdpApiClient: vi.fn(),
+  auth: vi.fn(),
 }));
 
 const trace = {
@@ -14,13 +14,17 @@ const trace = {
   childContext: () => undefined,
 };
 
-vi.mock("@/lib/sdp-api", () => ({
+vi.mock("next/headers", () => import("@/test/next-headers"));
+vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   proxyToSdpApi: mocks.proxyToSdpApi,
-  proxyFailure: mocks.proxyFailure,
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-vi.mock("@/lib/request-tracing", () => ({
+vi.mock("@/lib/request-tracing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/request-tracing")>()),
   createTimedTrace: () => trace,
   logRouteResult: vi.fn(),
 }));
@@ -33,6 +37,7 @@ describe("GET /api/dashboard/payments/transfers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 204 }));
+    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
   });
 
   it.each(["?custodyWalletId=cwlt_1&includeObserved=true", "?wallet=provider-wallet"])(
@@ -53,14 +58,12 @@ describe("GET /api/dashboard/payments/transfers", () => {
   );
 
   it("refuses the unfiltered aggregate without the tab's Project header", async () => {
-    mocks.proxyFailure.mockReturnValue(new Response(null, { status: 400 }));
-
     const response = await GET(
       new Request("https://dashboard.example/api/dashboard/payments/transfers")
     );
 
     expect(response.status).toBe(400);
-    expect(mocks.proxyFailure).toHaveBeenCalledWith(trace, 400, "x-project-id header required");
+    expect(await response.json()).toEqual({ error: { message: "x-project-id header required" } });
     expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
   });
 
@@ -98,7 +101,7 @@ describe("GET /api/dashboard/payments/transfers", () => {
     expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
   });
 
-  it("marks a thrown aggregate failure uncacheable", async () => {
+  it("answers a thrown aggregate failure with an uncacheable fixed message", async () => {
     mocks.createSdpApiClient.mockRejectedValue(new Error("client unavailable"));
 
     const response = await GET(unfiltered());
@@ -106,6 +109,7 @@ describe("GET /api/dashboard/payments/transfers", () => {
     expect(response.status).toBe(500);
     expectDashboardNoStore(response);
     expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
+    expect(await response.json()).toEqual({ error: { message: "Transfer list request failed" } });
   });
 });
 

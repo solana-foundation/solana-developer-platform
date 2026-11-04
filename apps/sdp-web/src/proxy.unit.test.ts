@@ -1,8 +1,11 @@
 import { NextFetchEvent } from "next/dist/server/web/spec-extension/fetch-event";
 import { NextRequest } from "next/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const clerk = vi.hoisted(() => ({ protect: vi.fn(async () => undefined) }));
+const clerk = vi.hoisted(() => ({
+  protect: vi.fn(async () => undefined),
+  auth: vi.fn(async (): Promise<{ userId: string | null }> => ({ userId: "user_test" })),
+}));
 
 vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@clerk/nextjs/server")>();
@@ -11,13 +14,13 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
     clerkMiddleware:
       (
         handler: (
-          auth: { protect: typeof clerk.protect },
+          auth: typeof clerk.auth & { protect: typeof clerk.protect },
           request: NextRequest,
           event: NextFetchEvent
         ) => unknown
       ) =>
       (request: NextRequest, event: NextFetchEvent) =>
-        handler({ protect: clerk.protect }, request, event),
+        handler(Object.assign(clerk.auth, { protect: clerk.protect }), request, event),
   };
 });
 
@@ -29,9 +32,6 @@ describe("public web routes", () => {
     expect(isPublicRoute(new NextRequest("https://dashboard.example.com/workspace-loading"))).toBe(
       true
     );
-    expect(
-      isPublicRoute(new NextRequest("https://dashboard.example.com/api/workspace-status"))
-    ).toBe(true);
   });
 
   it("serves the Terms of Use to anyone, signed in or not", () => {
@@ -178,18 +178,51 @@ describe("rejectCrossSiteWrite", () => {
   });
 });
 
-describe("proxy request project", () => {
-  async function runProxy(request: NextRequest): Promise<Response> {
-    const result = await proxy(
-      request,
-      new NextFetchEvent({ request, page: "/", context: undefined })
-    );
-    if (!(result instanceof Response)) {
-      throw new Error(`proxy returned no response for ${request.nextUrl.pathname}`);
-    }
-    return result;
+async function runProxy(request: NextRequest): Promise<Response> {
+  const result = await proxy(
+    request,
+    new NextFetchEvent({ request, page: "/", context: undefined })
+  );
+  if (!(result instanceof Response)) {
+    throw new Error(`proxy returned no response for ${request.nextUrl.pathname}`);
   }
+  return result;
+}
 
+describe("proxy sign-in gate", () => {
+  beforeEach(() => {
+    clerk.protect.mockClear();
+  });
+
+  it("answers a signed-out API call with a JSON 401 instead of a sign-in redirect", async () => {
+    clerk.auth.mockResolvedValueOnce({ userId: null });
+
+    const response = await runProxy(
+      new NextRequest("https://dashboard.example.com/api/dashboard/home/activity", {
+        headers: { "x-project-id": SANDBOX_PROJECT.id },
+      })
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.json()).toEqual({ error: { message: "Authentication required" } });
+    expect(clerk.protect).not.toHaveBeenCalled();
+  });
+
+  it("guards a page request with a sign-in redirect back to the page", async () => {
+    await runProxy(
+      new NextRequest(
+        `https://dashboard.example.com/dashboard/${SANDBOX_PROJECT.id}/api-keys?tab=x`
+      )
+    );
+
+    expect(clerk.protect).toHaveBeenCalledExactlyOnceWith({
+      unauthenticatedUrl: `https://dashboard.example.com/sign-in?redirect_url=${encodeURIComponent(`/dashboard/${SANDBOX_PROJECT.id}/api-keys?tab=x`)}`,
+    });
+  });
+});
+
+describe("proxy request project", () => {
   function dashboardRequest(
     path: string,
     init: { method: string; headers: Record<string, string> }

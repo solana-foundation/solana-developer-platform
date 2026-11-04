@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 
 vi.mock("@/lib/sdp-api", () => ({
   createSdpApiClient: async () => ({ request: mocks.request }),
+  rejectUnscopedDashboardRequest: async () => null,
 }));
 // The modules a stable deployment shows today: Payments only.
 vi.mock("@/flags/dashboard", () => ({

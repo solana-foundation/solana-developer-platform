@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render as mount } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import DashboardError from "./error";
+import { RouteError } from "./route-error";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -13,12 +15,29 @@ vi.mock("@sentry/nextjs", () => ({
 function render(error: Error & { digest?: string }) {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <DashboardError error={error} reset={vi.fn()} />
+      <RouteError error={error} retry={vi.fn()} />
     </I18nProvider>
   );
 }
 
-describe("DashboardError", () => {
+afterEach(() => {
+  cleanup();
+});
+
+describe("RouteError", () => {
+  it("asks Next to retry the segment once per press", () => {
+    const retry = vi.fn();
+    const view = mount(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <RouteError error={new Error("boom")} retry={retry} />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: /^Try again/ }));
+
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("offers a retry and says the rest of the dashboard still works", () => {
     const markup = render(new Error("Selected project required"));
 

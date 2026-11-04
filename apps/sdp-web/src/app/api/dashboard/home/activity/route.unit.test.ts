@@ -18,7 +18,8 @@ vi.mock("@/app/(session)/dashboard/[projectId]/payments/payments-page.data", () 
   WALLET_TRANSFERS_DEADLINE_MS: 2_500,
 }));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
-vi.mock("@/lib/request-tracing", () => ({
+vi.mock("@/lib/request-tracing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/request-tracing")>()),
   createTimedTrace: () => ({
     childContext: () => undefined,
     log: () => undefined,
@@ -28,7 +29,11 @@ vi.mock("@/lib/request-tracing", () => ({
   }),
   logRouteResult: () => undefined,
 }));
-vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: mocks.createSdpApiClient }));
+vi.mock("@/lib/sdp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
+  createSdpApiClient: mocks.createSdpApiClient,
+  rejectUnscopedDashboardRequest: async () => null,
+}));
 
 import { GET } from "./route";
 
@@ -287,6 +292,6 @@ describe("GET /api/dashboard/home/activity", () => {
     expect(response.status).toBe(500);
     expectDashboardNoStore(response);
     expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
-    expect(body.error).toBe("client unavailable");
+    expect(body).toEqual({ error: { message: "Shared.homeWorkspace.failedToLoadActivity" } });
   });
 });
