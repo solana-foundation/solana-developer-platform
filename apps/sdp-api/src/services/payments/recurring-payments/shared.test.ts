@@ -1,8 +1,11 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { beforeEach, describe, expect, it } from "vitest";
+import { VERDICT_HISTORY_HORIZON_BLOCKS } from "@sdp/rpc/solana";
+import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE } from "@solana/kit";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
+import { rootLogger } from "@/runtime/logger";
 import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
@@ -12,7 +15,6 @@ import {
 import {
   epochInfoResult,
   type StubSignatureStatus,
-  signatureStatusesRead,
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -34,6 +36,9 @@ const SAVED_SEND = {
   lastValidBlockHeight: 1000n,
 } satisfies SavedStepSend;
 const CHAIN_TIP_SLOT = 2000;
+const HORIZON_EDGE_HEIGHT = Number(
+  SAVED_SEND.lastValidBlockHeight + VERDICT_HISTORY_HORIZON_BLOCKS
+);
 const SAVED_SEND_READS: ReadonlySet<string> = new Set(["getEpochInfo", "getSignatureStatuses"]);
 const STEP_EFFECTS = {
   finalized: { finalized: true, confirmed: true },
@@ -43,6 +48,12 @@ const STEP_EFFECTS = {
 
 function landedStatus(err: StubSignatureStatus["err"]): StubSignatureStatus {
   return { slot: 100, confirmations: null, confirmationStatus: "finalized", err };
+}
+
+function spyOnLog(level: "warn" | "error") {
+  const log = vi.spyOn(rootLogger, level).mockImplementation(() => undefined);
+  onTestFinished(() => log.mockRestore());
+  return log;
 }
 
 describe("readRecurringPaymentStep", () => {
@@ -241,22 +252,76 @@ describe("readRecurringPaymentStep", () => {
     expect(await savedRows()).toEqual(clearedRows);
   });
 
-  it("clears a saved send with no record past its expiry, reading the chain tip first, and sends the step", async () => {
-    answerChain(1001, CHAIN_TIP_SLOT, null);
+  it("clears a saved send with no record at the history horizon's edge, reading the finalized height first and flooring history at its slot, and sends the step", async () => {
+    answerChain(HORIZON_EDGE_HEIGHT, CHAIN_TIP_SLOT, null);
 
     expect(await readStep("none", SAVED_SEND)).toEqual({
       kind: "not_sent",
       account: { exists: false },
     });
-    expect(savedSendReads()).toEqual(["getEpochInfo", "getSignatureStatuses"]);
     expect(
       rpc.requests
-        .filter(({ method }) => method === "getSignatureStatuses")
-        .map(signatureStatusesRead)
+        .filter(({ method }) => SAVED_SEND_READS.has(method))
+        .map(({ cluster, method, params }) => ({ cluster, method, params }))
     ).toEqual([
-      { cluster: "devnet", signatures: [SAVED_SEND.signature], searchTransactionHistory: true },
+      { cluster: "devnet", method: "getEpochInfo", params: [] },
+      {
+        cluster: "devnet",
+        method: "getSignatureStatuses",
+        params: [
+          [SAVED_SEND.signature],
+          {
+            searchTransactionHistory: true,
+            minContextSlot: CHAIN_TIP_SLOT,
+            commitment: "finalized",
+          },
+        ],
+      },
     ]);
     expect(await savedRows()).toEqual(clearedRows);
+  });
+
+  it("keeps a step in flight and warns when its saved send's history is unavailable past expiry", async () => {
+    rpc.answer(
+      "getEpochInfo",
+      epochInfoResult({ absoluteSlot: CHAIN_TIP_SLOT, blockHeight: 1001 })
+    );
+    rpc.respond("getSignatureStatuses", () => ({
+      error: {
+        code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+        message: "Transaction history is not available from this node",
+      },
+    }));
+    const warn = spyOnLog("warn");
+
+    await expect(readStep("none", SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
+    expect(await savedRows()).toEqual(untouchedRows);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "sdp_api_recurring_saved_send_unresolved",
+        signature: SAVED_SEND.signature,
+        min_context_slot: String(CHAIN_TIP_SLOT),
+      }),
+      "sdp_api_recurring_saved_send_unresolved"
+    );
+  });
+
+  it("keeps a step in flight and alerts when its saved send has no record past the history horizon", async () => {
+    answerChain(HORIZON_EDGE_HEIGHT + 1, CHAIN_TIP_SLOT, null);
+    const error = spyOnLog("error");
+
+    await expect(readStep("none", SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
+    expect(await savedRows()).toEqual(untouchedRows);
+    expect(error).toHaveBeenCalledWith(
+      {
+        event: "sdp_api_recurring_saved_send_verdict_unprovable",
+        signature: SAVED_SEND.signature,
+        last_valid_block_height: String(SAVED_SEND.lastValidBlockHeight),
+        finalized_block_height: String(HORIZON_EDGE_HEIGHT + 1),
+        min_context_slot: String(CHAIN_TIP_SLOT),
+      },
+      "sdp_api_recurring_saved_send_verdict_unprovable"
+    );
   });
 
   it("leaves every row as it was when one no longer holds the expired send", async () => {
