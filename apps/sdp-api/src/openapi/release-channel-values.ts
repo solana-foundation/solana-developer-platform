@@ -188,8 +188,17 @@ type Context = { published: Published; inResponse: boolean; modules: ReadonlySet
 export const MODULE_GATE = "x-sdp-module";
 /** Marks a transfer status enum, without gating identically named payment-request statuses. */
 export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
+/** Alternate prose for a shared operation when its channel excludes a module. */
+export const DESCRIPTION_GATE = "x-sdp-description-without-module";
 
-const moduleGateSchema = z.enum(SDP_RELEASE_CHANNELS.experimental).optional();
+const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
+const moduleGateSchema = moduleNameSchema.optional();
+const descriptionGateSchema = z
+  .object({
+    module: moduleNameSchema,
+    description: z.string(),
+  })
+  .optional();
 
 /**
  * An enum without the unpublished values. In a request it narrows; in a
@@ -269,9 +278,18 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
         published(value) && !RAMP_ONLY_TRANSFER_STATUSES.some((status) => status === value),
     };
   }
+  const alternateDescription = descriptionGateSchema.parse(node[DESCRIPTION_GATE]);
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(node)) {
-    if (key === MODULE_GATE || key === TRANSFER_STATUS_GATE) continue;
+    if (key === MODULE_GATE || key === TRANSFER_STATUS_GATE || key === DESCRIPTION_GATE) continue;
+    if (
+      key === "description" &&
+      alternateDescription !== undefined &&
+      !context.modules.has(alternateDescription.module)
+    ) {
+      result.description = alternateDescription.description;
+      continue;
+    }
     if (key === "enum" && Array.isArray(value)) {
       const kept = pruneEnum(value, context);
       if (kept === EMPTY) return EMPTY;

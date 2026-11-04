@@ -797,6 +797,7 @@ describe("OpenAPI spec", () => {
       );
       expect(paymentRequest).toContain("awaiting_payment");
       expect(serialized).not.toContain("x-sdp-module");
+      expect(serialized).not.toContain("x-sdp-description-without-module");
     }
   );
 
@@ -807,6 +808,9 @@ describe("OpenAPI spec", () => {
       ).toHaveProperty("transferId");
       expect(JSON.stringify(doc)).toContain('"deliveryMode"');
       expect(JSON.stringify(doc)).toContain('"settling"');
+      expect(doc.paths?.["/v1/transactions"]?.get?.description).toContain(
+        "`onramp.read` or `offramp.read` for a ramp transfer"
+      );
     }
   });
 

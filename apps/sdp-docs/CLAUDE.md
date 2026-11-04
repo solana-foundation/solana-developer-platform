@@ -253,7 +253,9 @@ keep Swagger UI for their own release channel.
   Shared OpenAPI properties declare `MODULE_GATE` when a module owns the whole
   field; `pruneUnpublishedValues` removes it and its required entry on excluded
   channels. `TRANSFER_STATUS_GATE` scopes transfer status filtering to that
-  schema. Keep ownership on the source schema, not in the docs generator.
+  schema. `DESCRIPTION_GATE` supplies alternate shared prose when its module
+  is excluded, preserving the full description for experimental and internal
+  documents. Keep ownership on the source schema, not in the docs generator.
   It also drives `Run in dashboard` on operation pages
   (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
   The link carries the generated endpoint ID through sign-in and project
