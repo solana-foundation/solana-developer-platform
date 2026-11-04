@@ -43,6 +43,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Contact summary", () => {
+  it("reads a contact nobody has paid as never paid, with nothing paid so far", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ data: { accounts: [] } }))
+    );
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <CounterpartyDetailWorkspace
+          counterparty={counterparty}
+          initialAccounts={[]}
+          initialTransfers={[]}
+          payouts={[]}
+          rampsEnabled={false}
+        />
+      </SWRConfig>
+    );
+
+    expect(screen.getByText("DashboardPayments.counterparty.detail.neverPaid")).toBeTruthy();
+    expect(screen.getByText("DashboardPayments.counterparty.detail.nothingPaidYet")).toBeTruthy();
+  });
+});
+
 describe("Contacts provider accounts", () => {
   it.each([false, true])("respects ramps visibility when enabled is %s", async (rampsEnabled) => {
     const fetch = vi.fn(async (_input: RequestInfo | URL) =>
