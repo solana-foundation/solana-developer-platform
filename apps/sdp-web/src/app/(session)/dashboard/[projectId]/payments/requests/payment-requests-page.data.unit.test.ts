@@ -272,7 +272,7 @@ describe("fetchPaymentRequestCanceler", () => {
       canceledAt: "2026-09-15T00:00:00.000Z",
       ...overrides,
     });
-  const json = (body: unknown, status = 200) =>
+  const json = <T>(body: T, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const member = (id: string, name: string | null, email = `${id}@example.com`) => ({
     user: { id, email, name },
@@ -311,8 +311,8 @@ describe("fetchPaymentRequestCanceler", () => {
     const orgRequest = async (path: string) => {
       paths.push(path);
       return path.includes("page=1&")
-        ? json({ members: [member("usr_1", "Ada")], meta: { hasMore: true } })
-        : json({ members: [member("usr_2", " ")], meta: { hasMore: false } });
+        ? json({ data: { members: [member("usr_1", "Ada")], meta: { hasMore: true } } })
+        : json({ data: { members: [member("usr_2", " ")], meta: { hasMore: false } } });
     };
 
     expect(
@@ -327,7 +327,7 @@ describe("fetchPaymentRequestCanceler", () => {
   it("leaves the name out when the read is refused, fails, or finds nobody", async () => {
     const refused = async () => json({ error: { message: "Forbidden" } }, 403);
     const broken = async () => json({ unexpected: true });
-    const empty = async () => json({ members: [], meta: { hasMore: false } });
+    const empty = async () => json({ data: { members: [], meta: { hasMore: false } } });
 
     expect(
       await fetchPaymentRequestCanceler(

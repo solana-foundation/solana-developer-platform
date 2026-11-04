@@ -361,12 +361,14 @@ export type PaymentRequestCanceler =
 const apiKeyNameResponseSchema = z.object({ data: z.object({ id: z.string(), name: z.string() }) });
 
 const memberDirectoryPageSchema = z.object({
-  members: z.array(
-    z.object({
-      user: z.object({ id: z.string(), email: z.string(), name: z.string().nullable() }),
-    })
-  ),
-  meta: z.object({ hasMore: z.boolean() }),
+  data: z.object({
+    members: z.array(
+      z.object({
+        user: z.object({ id: z.string(), email: z.string(), name: z.string().nullable() }),
+      })
+    ),
+    meta: z.object({ hasMore: z.boolean() }),
+  }),
 });
 
 /** The members directory's largest page, so an organization's members come in one read. */
@@ -401,7 +403,7 @@ async function readMemberName(
     });
     const response = await orgRequest(`/v1/members?${query.toString()}`);
     if (!response.ok) return null;
-    const directory = memberDirectoryPageSchema.parse(await response.json());
+    const directory = memberDirectoryPageSchema.parse(await response.json()).data;
     const member = directory.members.find((candidate) => candidate.user.id === userId);
     if (member) return memberDisplayName(member.user);
     if (!directory.meta.hasMore) return null;

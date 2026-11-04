@@ -14,7 +14,7 @@ import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";
 import { PayStatusWatch } from "./pay-status-watch";
-import { isPlausiblePayToken } from "./pay-token";
+import { payTokenSchema } from "./pay-token";
 
 export const dynamic = "force-dynamic";
 
@@ -85,10 +85,11 @@ function isRenderablePayUrl(value: string): boolean {
  * below can call `notFound()`, and an unknown link must answer 404 (HOO-2619).
  */
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = await params;
-  if (!isPlausiblePayToken(token)) {
+  const parsedToken = payTokenSchema.safeParse((await params).token);
+  if (!parsedToken.success) {
     notFound();
   }
+  const token = parsedToken.data;
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
   if (!apiBaseUrl) {
     throw new Error("SDP API base URL is not configured");

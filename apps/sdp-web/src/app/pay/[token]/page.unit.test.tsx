@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import PayPage from "./page";
-import { isPlausiblePayToken } from "./pay-token";
+import { payTokenSchema } from "./pay-token";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
@@ -51,9 +51,9 @@ describe("PayPage unknown links", () => {
   });
 });
 
-describe("isPlausiblePayToken", () => {
+describe("payTokenSchema", () => {
   it("accepts the API's 16-character tokens", () => {
-    expect(isPlausiblePayToken("0123456789ABCDEF")).toBe(true);
-    expect(isPlausiblePayToken("abc-DEF-ghi-JKL-")).toBe(true);
+    expect(payTokenSchema.safeParse("0123456789ABCDEF").success).toBe(true);
+    expect(payTokenSchema.safeParse("abc-DEF-ghi-JKL-").success).toBe(true);
   });
 });

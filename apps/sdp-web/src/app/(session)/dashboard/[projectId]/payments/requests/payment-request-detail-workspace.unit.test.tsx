@@ -143,6 +143,24 @@ describe("PaymentRequestDetailWorkspace payment watch", () => {
     await waitFor(() => expect(screen.getAllByText("Expired").length).toBeGreaterThan(0));
   });
 
+  it("refreshes the page once when the watch sees someone else cancel it, to name them", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const canceled: PaymentRequest = {
+      ...paymentRequest,
+      status: "canceled",
+      canceledByUserId: "usr_1",
+      canceledAt: "2026-09-14T00:05:00.000Z",
+      updatedAt: "2026-09-14T00:05:00.000Z",
+    };
+    vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(canceled);
+    renderDetail(false, "tok_1", paymentRequest);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+  });
+
   it("reads a request that is no longer open no more", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const read = vi.spyOn(requestsData, "fetchPaymentRequestFromBrowser").mockResolvedValue(paid);

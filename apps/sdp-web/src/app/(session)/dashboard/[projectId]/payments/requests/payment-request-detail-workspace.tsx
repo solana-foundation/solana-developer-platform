@@ -71,18 +71,32 @@ function requestWhy(
   locale: string,
   t: Translate
 ): string {
-  const { status } = request;
-  if (status === "paid") {
-    return t("DashboardPayments.requestDetail.why.paid");
+  const status = request.status;
+  switch (status) {
+    case "paid":
+      return t("DashboardPayments.requestDetail.why.paid");
+    case "awaiting_payment":
+      return expires
+        ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
+        : t("DashboardPayments.requestDetail.why.awaiting");
+    case "expired":
+      return t("DashboardPayments.requestDetail.why.expired");
+    case "canceled":
+      return canceledWhy(request, canceler, locale, t);
+    default: {
+      const unhandled: never = status;
+      throw new Error(`Unhandled payment request status: ${String(unhandled)}`);
+    }
   }
-  if (status === "awaiting_payment") {
-    return expires
-      ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
-      : t("DashboardPayments.requestDetail.why.awaiting");
-  }
-  if (status === "expired") {
-    return t("DashboardPayments.requestDetail.why.expired");
-  }
+}
+
+/** A canceled request's why: who canceled it and when, as far as both are known. */
+function canceledWhy(
+  request: PaymentRequest,
+  canceler: PaymentRequestCanceler | null,
+  locale: string,
+  t: Translate
+): string {
   const actor = cancelerLabel(request, canceler, t);
   const date = request.canceledAt ? formatDateTime(request.canceledAt, locale) : null;
   if (actor && date) {
@@ -413,6 +427,13 @@ function PaymentRequestRecord({
   canceler: PaymentRequestCanceler | null;
 }) {
   const request = useWatchedPaymentRequest(served);
+  const router = useRouter();
+  // Who canceled is read on the server, so a cancel the watch sees first refreshes the page once;
+  // the refreshed request is canceled, so it does not refresh again.
+  const canceledUnderWatch = served.status === "awaiting_payment" && request.status === "canceled";
+  useEffect(() => {
+    if (canceledUnderWatch) router.refresh();
+  }, [canceledUnderWatch, router]);
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
