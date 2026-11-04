@@ -1,21 +1,23 @@
 "use client";
 
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
+import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RecordActionRow } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
-import type { saveOrganizationAlertEmailsAction } from "./organization-access-actions";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { saveOrganizationAlertEmails } from "./organization-settings";
 
-/** The save is passed in by the server card, so tests hand it a stand-in through the same prop. */
 export function OrganizationAlertEmailsSwitch({
+  organizationId,
   initialEnabled,
-  save: saveSetting,
 }: {
+  organizationId: string;
   initialEnabled: boolean;
-  save: typeof saveOrganizationAlertEmailsAction;
 }) {
   const t = useTranslations();
+  const router = useRouter();
   const [enabled, setEnabled] = useState(initialEnabled);
   // One key per intended value: a retried save repeats it, the other value gets a new one.
   const pendingSave = useRef<{ enabled: boolean; key: string } | null>(null);
@@ -26,15 +28,21 @@ export function OrganizationAlertEmailsSwitch({
       if (pendingSave.current?.enabled !== next) {
         pendingSave.current = { enabled: next, key: crypto.randomUUID() };
       }
-      const result = await saveSetting(next, pendingSave.current.key);
+      const result = await saveOrganizationAlertEmails(
+        organizationId,
+        next,
+        pendingSave.current.key
+      );
       if (!result.ok) {
         toast.error(t("Shared.organizationAlertEmails.saveFailed", { error: result.error }));
         return;
       }
-      setEnabled(result.enabled);
+      setEnabled(result.value);
       pendingSave.current = null;
+      // The tabs remount their panels from the page's server props, so those must hold the save.
+      refreshKeepingDashboardUrl(router);
       toast.success(
-        result.enabled
+        result.value
           ? t("Shared.organizationAlertEmails.savedOn")
           : t("Shared.organizationAlertEmails.savedOff")
       );

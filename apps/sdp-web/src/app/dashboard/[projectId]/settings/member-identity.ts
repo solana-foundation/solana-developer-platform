@@ -1,4 +1,4 @@
-import type { Member } from "@/app/members/actions";
+import type { Member } from "./members-load";
 
 /**
  * A misconfigured Clerk token customization can store an unsubstituted placeholder —

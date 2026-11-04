@@ -10,7 +10,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { formatDate } from "@/lib/date-format";
-import { loadMainnetAccess } from "./mainnet-access-actions";
+import { loadMainnetAccess } from "./mainnet-access-load";
 import { MainnetAccessRequestHost, MainnetAccessResendButton } from "./mainnet-access-request";
 
 function countryLabel(code: CountryCode): string {
@@ -42,8 +42,16 @@ export async function MainnetAccessSection() {
   return (
     <MainnetAccessRequestHost
       canRequest={loaded.access.state === "not_requested" && loaded.access.available}
+      organizationId={loaded.organizationId}
       organizationName={loaded.organizationName}
-      record={<MainnetAccessRecord access={loaded.access} locale={locale} t={t} />}
+      record={
+        <MainnetAccessRecord
+          organizationId={loaded.organizationId}
+          access={loaded.access}
+          locale={locale}
+          t={t}
+        />
+      }
     />
   );
 }
@@ -51,10 +59,12 @@ export async function MainnetAccessSection() {
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
 
 function MainnetAccessRecord({
+  organizationId,
   access,
   locale,
   t,
 }: {
+  organizationId: string;
   access: MainnetAccess;
   locale: string;
   t: Translate;
@@ -68,7 +78,11 @@ function MainnetAccessRecord({
           state={t("Shared.mainnetAccess.unsentTitle")}
           tone="attention"
           why={t("Shared.mainnetAccess.unsentBody")}
-          action={access.available ? <MainnetAccessResendButton /> : undefined}
+          action={
+            access.available ? (
+              <MainnetAccessResendButton organizationId={organizationId} />
+            ) : undefined
+          }
         />
       ) : null}
       <RecordList>

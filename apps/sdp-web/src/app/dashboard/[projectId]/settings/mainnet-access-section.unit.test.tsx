@@ -5,15 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishI18n } from "@/test/i18n";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
-import * as mainnetActions from "./mainnet-access-actions";
+import * as mainnetLoad from "./mainnet-access-load";
 import { MainnetAccessSection } from "./mainnet-access-section";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
 async function renderSection(access: MainnetAccess) {
-  vi.spyOn(mainnetActions, "loadMainnetAccess").mockResolvedValue({
+  vi.spyOn(mainnetLoad, "loadMainnetAccess").mockResolvedValue({
     ok: true,
+    organizationId: "org_sdp",
     organizationName: "Acme",
     access,
   });

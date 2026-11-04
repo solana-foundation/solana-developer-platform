@@ -12,7 +12,7 @@ import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-rec
 import { useTranslations } from "@/i18n/provider";
 import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
-import { saveOrganizationIpAllowlistAction } from "./organization-access-actions";
+import { saveOrganizationIpAllowlist } from "./organization-settings";
 
 const FIELD_ID = "organization-allowed-ips";
 const HELPER_ID = "organization-allowed-ips-helper";
@@ -23,7 +23,13 @@ function withEntries(entries: readonly string[], typed: string): string[] {
   return [...new Set([...entries, ...added])];
 }
 
-export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedIps: string[] }) {
+export function OrganizationIpAllowlist({
+  organizationId,
+  initialAllowedIps,
+}: {
+  organizationId: string;
+  initialAllowedIps: string[];
+}) {
   const t = useTranslations();
   const router = useRouter();
   const [entries, setEntries] = useState(initialAllowedIps);
@@ -66,22 +72,22 @@ export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedI
     }
     startTransition(async () => {
       idempotencyKey.current ??= crypto.randomUUID();
-      const result = await saveOrganizationIpAllowlistAction(
+      const result = await saveOrganizationIpAllowlist(
+        organizationId,
         toSave.join("\n"),
         idempotencyKey.current
       );
-      // The action's response re-renders the route at Next's copy of the URL, which a shallow tab
-      // switch never updated; re-reading at the live URL keeps the Security tab.
-      refreshKeepingDashboardUrl(router);
       if (!result.ok) {
         toast.error(t("Shared.organizationAccess.saveFailed", { error: result.error }));
         return;
       }
       // The list as the API stored it: each entry in canonical form.
-      setEntries(result.allowedIps);
+      setEntries(result.value);
       setDraft("");
       idempotencyKey.current = null;
       toast.success(t("Shared.organizationAccess.saved"));
+      // The tabs remount their panels from the page's server props, so those must hold the save.
+      refreshKeepingDashboardUrl(router);
     });
   };
 
