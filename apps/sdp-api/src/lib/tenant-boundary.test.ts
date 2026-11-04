@@ -1,9 +1,14 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PUBLIC_SYSTEM_PATH_PREFIXES } from "@/middleware/database-identity";
 
 const sourceRoot = join(process.cwd(), "src");
+
+/** A source file's path from `src`, posix-separated like the allowlists below on every platform. */
+function sourcePath(file: string): string {
+  return relative(sourceRoot, file).split(sep).join("/");
+}
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {
@@ -27,7 +32,7 @@ describe("tenant data-access boundary", () => {
     const violations = handlers
       .filter((path) => !path.endsWith(join("handlers", "metadata.ts")))
       .filter((path) => readFileSync(path, "utf8").includes("new TokenService("))
-      .map((path) => relative(sourceRoot, path));
+      .map((path) => sourcePath(path));
 
     expect(violations).toEqual([]);
   });
@@ -52,7 +57,7 @@ describe("tenant data-access boundary", () => {
     ];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").match(/createSystem[A-Z]\w+Repository/))
-      .map((path) => relative(sourceRoot, path))
+      .map((path) => sourcePath(path))
       .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
 
     expect(violations).toEqual([]);
@@ -66,7 +71,7 @@ describe("tenant data-access boundary", () => {
     const allowed = ["db/identity.ts", "db/operator-access.ts", "db/client.ts"];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithDatabaseIdentity"))
-      .map((path) => relative(sourceRoot, path))
+      .map((path) => sourcePath(path))
       .filter((path) => !allowed.includes(path));
 
     expect(violations).toEqual([]);
@@ -104,7 +109,7 @@ describe("tenant data-access boundary", () => {
     ];
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithSystemDatabaseIdentity"))
-      .map((path) => relative(sourceRoot, path))
+      .map((path) => sourcePath(path))
       .filter((path) => !allowedPrefixes.some((prefix) => path.startsWith(prefix)));
 
     expect(violations).toEqual([]);
@@ -115,8 +120,8 @@ describe("tenant data-access boundary", () => {
     // scripts; nothing in the request/worker paths may import it.
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("runWithOperatorDatabaseAccess"))
-      .map((path) => relative(sourceRoot, path))
-      .filter((path) => path !== join("db", "operator-access.ts"));
+      .map((path) => sourcePath(path))
+      .filter((path) => path !== "db/operator-access.ts");
 
     expect(violations).toEqual([]);
   });
@@ -124,8 +129,8 @@ describe("tenant data-access boundary", () => {
   it("keeps the test-only default database identity out of production code", () => {
     const violations = sourceFiles(sourceRoot)
       .filter((path) => readFileSync(path, "utf8").includes("setDefaultDatabaseIdentityForTesting"))
-      .map((path) => relative(sourceRoot, path))
-      .filter((path) => !path.startsWith("test/") && path !== join("db", "identity.ts"));
+      .map((path) => sourcePath(path))
+      .filter((path) => !path.startsWith("test/") && path !== "db/identity.ts");
 
     expect(violations).toEqual([]);
   });
@@ -139,7 +144,7 @@ describe("tenant data-access boundary", () => {
         const calls = source.matchAll(/createPostgresPaymentsRepository\(([^)]*)\)/g);
         return Array.from(calls)
           .filter((match) => !match[1]?.includes(","))
-          .map(() => relative(sourceRoot, path));
+          .map(() => sourcePath(path));
       });
 
     expect(violations).toEqual([]);
@@ -152,7 +157,7 @@ describe("tenant data-access boundary", () => {
         const calls = source.matchAll(/createSigningService\(([^)]*)\)/g);
         return Array.from(calls)
           .filter((match) => !match[1]?.includes(","))
-          .map(() => relative(sourceRoot, path));
+          .map(() => sourcePath(path));
       }
     );
 
