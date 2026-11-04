@@ -562,6 +562,7 @@ describe("Counterparties Routes", () => {
           { headers: { Authorization: authHeader } },
           env
         );
+        // SAFETY: the list route's response schema; a wrong shape fails the assertions below.
         const { accounts } = (await res.json()).data as { accounts: { id: string }[] };
         return accounts.map((account) => account.id);
       }

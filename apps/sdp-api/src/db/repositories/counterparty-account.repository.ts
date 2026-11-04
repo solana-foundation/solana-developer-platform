@@ -20,9 +20,14 @@ const ACTIVE_ADDRESS_INDEX = "counterparty_accounts_active_address_unique";
  * @returns True only for a unique violation on the active-address index.
  */
 export function isDuplicateCounterpartyAccountAddress(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const pg = error as { code?: unknown; constraint?: unknown };
-  return pg.code === "23505" && pg.constraint === ACTIVE_ADDRESS_INDEX;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505" &&
+    "constraint" in error &&
+    error.constraint === ACTIVE_ADDRESS_INDEX
+  );
 }
 
 export interface CounterpartyAccountRow {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { CounterpartyAccountStatus } from "@sdp/types/counterparties";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
@@ -31,7 +32,7 @@ async function insertAccount(row: {
   id: string;
   counterpartyId?: string;
   address: string;
-  status?: "active" | "archived";
+  status?: CounterpartyAccountStatus;
   createdAt: string;
   /** Pre-0036 rows carry the address only in `details`. */
   detailsOnly?: boolean;
@@ -56,7 +57,7 @@ async function insertAccount(row: {
 }
 
 async function statuses() {
-  const { rows } = await client.query<{ id: string; status: string }>(
+  const { rows } = await client.query<{ id: string; status: CounterpartyAccountStatus }>(
     "SELECT id, status FROM counterparty_accounts WHERE organization_id = $1 ORDER BY id",
     [tenant.organizationId]
   );
