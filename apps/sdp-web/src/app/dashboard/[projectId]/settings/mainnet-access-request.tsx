@@ -12,6 +12,7 @@ import { CheckCircle2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
+import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { SdpTermsContent } from "@/components/sdp-terms-content";
 import { useTranslations } from "@/i18n/provider";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -39,9 +40,9 @@ interface RequestProps {
 }
 
 /**
- * The card body: the one-time request while the organization has none, else the recorded one
- * (`record`). It owns the dialog and stays mounted when the page refreshes to the sent request,
- * so the dialog's confirmation outlives that refresh.
+ * The Mainnet section: the organization's mainnet record (`record`), with the one-time request
+ * at the heading while it has none. It owns the dialog and stays mounted when the page refreshes
+ * to the sent request, so the dialog's confirmation outlives that refresh.
  */
 export function MainnetAccessRequestHost({
   canRequest,
@@ -51,16 +52,20 @@ export function MainnetAccessRequestHost({
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
-    <>
-      {canRequest ? (
-        <Button type="button" onClick={() => setOpen(true)}>
-          {t("Shared.mainnetAccess.requestButton")}
-        </Button>
-      ) : (
-        record
-      )}
+    <RecordSection
+      id="mainnet-access"
+      title={t("Shared.mainnetAccess.title")}
+      aside={
+        canRequest ? (
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+            {t("Shared.mainnetAccess.requestButton")}
+          </Button>
+        ) : null
+      }
+    >
+      {record}
       {open ? <MainnetAccessRequestModal {...props} onClose={() => setOpen(false)} /> : null}
-    </>
+    </RecordSection>
   );
 }
 
@@ -375,10 +380,10 @@ export function MainnetAccessResendButton() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startResend] = useTransition();
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col items-start gap-2">
       <Button
         type="button"
-        variant="secondary"
+        variant="outline"
         size="sm"
         loading={pending}
         onClick={() =>
@@ -393,7 +398,7 @@ export function MainnetAccessResendButton() {
         {t("Shared.mainnetAccess.resend")}
       </Button>
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-meta text-error" role="alert">
           {t("Shared.mainnetAccess.submitFailed", { error })}
         </p>
       ) : null}

@@ -1,4 +1,4 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { getTranslations } from "@/i18n/server";
 import {
   loadOrganizationAlertEmails,
@@ -8,29 +8,23 @@ import { OrganizationAlertEmailsSwitch } from "./organization-alert-emails-switc
 
 /**
  * Alert emails to the organization's admins (HOO-2299): one switch for all of them.
- * Per-type controls, when they come, go below the switch in this card's content.
+ * Per-type controls, when they come, go below the switch in this section.
  */
 export async function OrganizationAlertEmailsSection() {
   const [t, alertEmails] = await Promise.all([getTranslations(), loadOrganizationAlertEmails()]);
 
   return (
-    <Card id="email-alerts" className="scroll-mt-6">
-      <CardHeader>
-        <CardTitle>{t("Shared.organizationAlertEmails.title")}</CardTitle>
-        <CardDescription>{t("Shared.organizationAlertEmails.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {alertEmails.ok ? (
-          <OrganizationAlertEmailsSwitch
-            initialEnabled={alertEmails.enabled}
-            save={saveOrganizationAlertEmailsAction}
-          />
-        ) : (
-          <p className="text-sm text-destructive" role="alert">
-            {t("Shared.organizationAlertEmails.loadFailed", { error: alertEmails.error })}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+    <RecordSection id="email-alerts" title={t("Shared.organizationAlertEmails.title")}>
+      {alertEmails.ok ? (
+        <OrganizationAlertEmailsSwitch
+          initialEnabled={alertEmails.enabled}
+          save={saveOrganizationAlertEmailsAction}
+        />
+      ) : (
+        <p className="text-body text-error" role="alert">
+          {t("Shared.organizationAlertEmails.loadFailed", { error: alertEmails.error })}
+        </p>
+      )}
+    </RecordSection>
   );
 }

@@ -13,6 +13,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { revokeInvitation } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 export function InvitationActions({
@@ -44,7 +45,7 @@ export function InvitationActions({
       }
 
       toast.success(t("Shared.members.revoked", { email }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 

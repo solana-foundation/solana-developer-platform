@@ -12,9 +12,13 @@ import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
 import { z } from "zod";
 import { accountQueryKeys } from "@/app/dashboard/[projectId]/account/account-query-key";
-import { formatDateTime } from "@/app/dashboard/[projectId]/payments/payments-presentation";
-import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-record";
+import {
+  RecordActionRow,
+  RecordFacts,
+  RecordSection,
+} from "@/app/dashboard/[projectId]/payments/payments-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { formatDateTime } from "@/lib/date-format";
 import { useZodForm } from "@/lib/use-zod-form";
 import { useReportAccountError } from "./account-errors";
 
@@ -166,7 +170,7 @@ function SessionsSection({ user }: { user: UserResource }) {
           <SkeletonBlock className="h-10 w-full" />
         </div>
       ) : (
-        <ul className="flex flex-col">
+        <div className="flex flex-col">
           {activeSessions.map((session) => (
             <SessionRow
               key={session.id}
@@ -175,7 +179,7 @@ function SessionsSection({ user }: { user: UserResource }) {
               onRevoked={() => void sessions.mutate()}
             />
           ))}
-        </ul>
+        </div>
       )}
     </RecordSection>
   );
@@ -197,14 +201,8 @@ function SessionRow({
   const revoke = useReverification(() => session.revoke());
   const { browserName, browserVersion, deviceType, city, country, ipAddress } =
     session.latestActivity;
-  const device = [
-    browserName && [browserName, browserVersion].filter(Boolean).join(" "),
-    deviceType,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const place = [[city, country].filter(Boolean).join(", "), ipAddress].filter(Boolean).join(" · ");
-  const lastActive = formatDateTime(session.lastActiveAt.toISOString(), locale);
+  const browser = [browserName, browserVersion].filter(Boolean).join(" ");
+  const lastActive = formatDateTime(locale, session.lastActiveAt.toISOString());
 
   const signOut = () => {
     startTransition(async () => {
@@ -218,32 +216,38 @@ function SessionRow({
   };
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-subtle py-2.5 last:border-b-0">
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-body text-primary">
-            {device || t("Shared.account.security.unknownDevice")}
-          </span>
+    <RecordActionRow
+      label={
+        <>
+          {browser || deviceType ? (
+            <RecordFacts facts={[browser, deviceType]} />
+          ) : (
+            <span className="truncate">{t("Shared.account.security.unknownDevice")}</span>
+          )}
           {isCurrent ? (
             <Badge variant="info">{t("Shared.account.security.thisDevice")}</Badge>
           ) : null}
-        </span>
-        <span className="truncate text-meta text-secondary">
-          {[
-            place,
+        </>
+      }
+      hint={
+        <RecordFacts
+          facts={[
+            city,
+            country,
+            ipAddress,
             lastActive === null
               ? null
               : t("Shared.account.security.lastActive", { time: lastActive }),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      </span>
-      {isCurrent ? null : (
-        <Button type="button" variant="outline" size="sm" loading={isPending} onClick={signOut}>
-          {t("Shared.account.security.signOutSession")}
-        </Button>
-      )}
-    </li>
+          ]}
+        />
+      }
+      control={
+        isCurrent ? null : (
+          <Button type="button" variant="outline" size="sm" loading={isPending} onClick={signOut}>
+            {t("Shared.account.security.signOutSession")}
+          </Button>
+        )
+      }
+    />
   );
 }

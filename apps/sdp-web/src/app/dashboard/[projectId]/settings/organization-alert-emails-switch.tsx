@@ -3,6 +3,7 @@
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { RecordActionRow } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
 import type { saveOrganizationAlertEmailsAction } from "./organization-access-actions";
 
@@ -41,24 +42,36 @@ export function OrganizationAlertEmailsSwitch({
   };
 
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <p id="organization-alert-emails-label" className="text-sm font-medium text-primary">
+    <RecordActionRow
+      label={
+        <span id="organization-alert-emails-label">
           {t("Shared.organizationAlertEmails.switchLabel")}
-        </p>
-        <p id="organization-alert-emails-helper" className="mt-1 text-xs text-secondary">
+        </span>
+      }
+      help={t("Shared.organizationAlertEmails.description")}
+      hint={
+        <span id="organization-alert-emails-helper">
           {enabled
             ? t("Shared.organizationAlertEmails.onHelper")
             : t("Shared.organizationAlertEmails.offHelper")}
-        </p>
-      </div>
-      <ToggleSwitch
-        aria-labelledby="organization-alert-emails-label"
-        aria-describedby="organization-alert-emails-helper"
-        checked={enabled}
-        onChange={save}
-        disabled={isPending}
-      />
-    </div>
+        </span>
+      }
+      control={
+        <span className="flex items-center gap-3">
+          <span aria-hidden="true" className="text-body text-secondary">
+            {enabled
+              ? t("Shared.organizationAlertEmails.stateOn")
+              : t("Shared.organizationAlertEmails.stateOff")}
+          </span>
+          <ToggleSwitch
+            aria-labelledby="organization-alert-emails-label"
+            aria-describedby="organization-alert-emails-helper"
+            checked={enabled}
+            onChange={save}
+            disabled={isPending}
+          />
+        </span>
+      }
+    />
   );
 }

@@ -24,6 +24,8 @@ const REFRESH_ROUTES = [
   /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/,
   // Account: profile, security and preferences, as ?tab= tabs of one page.
   /^\/dashboard\/account\/?$/,
+  // Organization settings: General and Members, as ?tab= tabs of one page.
+  /^\/dashboard\/settings\/?$/,
 ] as const;
 
 /**

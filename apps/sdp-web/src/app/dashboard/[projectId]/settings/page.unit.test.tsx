@@ -1,5 +1,11 @@
 import type { OrganizationRole } from "@sdp/types/roles";
-import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
+import {
+  Children,
+  type ComponentProps,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import * as sdpApi from "@/lib/sdp-api";
@@ -12,16 +18,20 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
-import { LeaveOrganizationCard } from "./leave-organization-card";
+import { LeaveOrganizationSection } from "./leave-organization-section";
 import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 import { OrganizationDetailsSection } from "./organization-details-section";
 import SettingsPage from "./page";
+import { SettingsWorkspace } from "./settings-workspace";
 
-function sectionTypes(page: ReactElement<{ children: ReactNode }>): ReactElement["type"][] {
-  return Children.toArray(page.props.children).flatMap((child) =>
+type SectionTypes = ReactElement["type"][];
+
+function sectionTypes(panel: ReactNode): SectionTypes | null {
+  if (!isValidElement<{ children: ReactNode }>(panel)) return null;
+  return Children.toArray(panel.props.children).flatMap((child) =>
     isValidElement(child) ? [child.type] : []
   );
 }
@@ -33,24 +43,45 @@ describe("settings page", () => {
     mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
   });
 
-  it.each<[OrganizationRole, ReactElement["type"][]]>([
+  it.each<
+    [
+      OrganizationRole,
+      { general: SectionTypes; members: SectionTypes | null; security: SectionTypes | null },
+    ]
+  >([
     [
       "admin",
-      [
-        OrganizationDetailsSection,
-        DashboardQuickStart,
-        MembersSection,
-        MainnetAccessSection,
-        OrganizationAccessSection,
-        OrganizationAlertEmailsSection,
-      ],
+      {
+        general: [
+          OrganizationDetailsSection,
+          DashboardQuickStart,
+          MainnetAccessSection,
+          OrganizationAlertEmailsSection,
+        ],
+        members: [MembersSection],
+        security: [OrganizationAccessSection],
+      },
     ],
-    ["member", [OrganizationDetailsSection, LeaveOrganizationCard]],
-  ])("renders the sections SDP's %s role holds", async (role, sections) => {
+    [
+      "member",
+      {
+        general: [OrganizationDetailsSection, LeaveOrganizationSection],
+        members: null,
+        security: null,
+      },
+    ],
+  ])("fills each tab with the sections SDP's %s role holds", async (role, panels) => {
     vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue(role);
 
-    const page = await SettingsPage({ searchParams: Promise.resolve({}) });
+    const page: ReactElement<ComponentProps<typeof SettingsWorkspace>> = await SettingsPage({
+      searchParams: Promise.resolve({}),
+    });
 
-    expect(sectionTypes(page)).toEqual(sections);
+    expect(page.type).toBe(SettingsWorkspace);
+    expect({
+      general: sectionTypes(page.props.general),
+      members: sectionTypes(page.props.members),
+      security: sectionTypes(page.props.security),
+    }).toEqual(panels);
   });
 });

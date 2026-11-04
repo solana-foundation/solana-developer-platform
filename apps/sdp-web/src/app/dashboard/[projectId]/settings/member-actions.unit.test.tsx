@@ -7,7 +7,9 @@ import * as membersActions from "@/app/members/actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { restoreWindowLocation } from "@/test/window-location";
 import { MemberActions } from "./member-actions";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -17,6 +19,8 @@ const REFUSED: membersActions.MemberActionResult = {
   message: "upstream unavailable",
   answer: { status: 503, replayed: false, code: null },
 };
+
+const MEMBERS_TAB_URL = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
 
 function row(memberId: string, role: OrganizationRole) {
   return (
@@ -41,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  restoreWindowLocation();
 });
 
 describe("MemberActions role change", () => {
@@ -72,6 +77,21 @@ describe("MemberActions role change", () => {
     ]);
     expect(keys[1]).toBe(keys[0]);
     expect(new Set(keys).size).toBe(3);
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the page at the live URL after a change, keeping the Members tab", async () => {
+    window.history.replaceState(null, "", MEMBERS_TAB_URL);
+    vi.spyOn(membersActions, "changeMemberRole").mockResolvedValue({ status: "success" });
+    const user = userEvent.setup();
+    render(row("mem_test_1", "member"));
+
+    await user.click(screen.getByRole("button", { name: "Actions for Teammate" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Make admin" }));
+
+    await waitFor(() =>
+      expect(dashboardRouter.replace).toHaveBeenCalledWith(MEMBERS_TAB_URL, { scroll: false })
+    );
   });
 });
 
@@ -127,6 +147,23 @@ describe("MemberActions removal", () => {
     ).toBeTruthy();
     await waitFor(() =>
       expect(remove).toHaveBeenCalledWith("mem_test_keys_failed", expect.any(String))
+    );
+  });
+
+  it("re-reads the page at the live URL after a removal, keeping the Members tab", async () => {
+    window.history.replaceState(null, "", MEMBERS_TAB_URL);
+    vi.spyOn(membersActions, "listMemberApiKeys").mockResolvedValue([]);
+    vi.spyOn(membersActions, "removeMember").mockResolvedValue({ status: "success" });
+    const user = userEvent.setup();
+    render(row("mem_test_removed", "member"));
+
+    const dialog = await openRemoval(user);
+    const confirm = dialog.getByRole("button", { name: "Remove member" });
+    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(false));
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(dashboardRouter.replace).toHaveBeenCalledWith(MEMBERS_TAB_URL, { scroll: false })
     );
   });
 });

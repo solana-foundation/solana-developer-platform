@@ -2,6 +2,7 @@
 
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -101,10 +102,12 @@ export function RecordList({ children }: { children: ReactNode }) {
  */
 export function RecordRow({
   label,
+  help,
   copy,
   children,
 }: {
   label: string;
+  help?: string;
   copy?: string;
   children: ReactNode;
 }) {
@@ -113,7 +116,10 @@ export function RecordRow({
       data-slot="record-row"
       className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 last:border-b-0"
     >
-      <dt className="shrink-0 text-meta leading-5 text-secondary">{label}</dt>
+      <dt className="flex shrink-0 items-center gap-1 text-meta leading-5 text-secondary">
+        {label}
+        {help ? <InfoHint text={help} /> : null}
+      </dt>
       <dd className="flex min-w-0 items-center gap-1 text-right text-body text-primary">
         <span className="min-w-0 truncate">{children}</span>
         {copy ? <RecordCopyButton value={copy} label={label} /> : null}
@@ -124,25 +130,81 @@ export function RecordRow({
 
 /**
  * A titled part of the record: an 18px heading 32px under what is above, its rows 14px under.
- * `aside` sits at the heading's right end, for the part's one action (Edit, Add).
+ * `aside` sits at the heading's right end, for the part's one action (Edit, Add). The heading row
+ * has a fixed height so a part with an aside button lines up with one without; the button
+ * centers on it and may overhang it.
  */
 export function RecordSection({
   title,
   aside,
+  id,
   children,
 }: {
   title: string;
   aside?: ReactNode;
+  id?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3.5 pt-5.5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-subheading font-medium text-primary">{title}</h2>
-        {aside}
+    <section id={id} className="flex scroll-mt-6 flex-col gap-3.5 pt-5.5">
+      <div className="flex h-8 items-center justify-between gap-3">
+        <h2 className="min-w-0 truncate text-subheading font-medium text-primary">{title}</h2>
+        {aside ? <div className="flex shrink-0 items-center gap-2">{aside}</div> : null}
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * Something that can be acted on, on one rule: its name and a line on it at the left, the control
+ * at the right from 36rem, under the name on a phone.
+ */
+export function RecordActionRow({
+  label,
+  help,
+  hint,
+  control,
+}: {
+  label: ReactNode;
+  help?: string;
+  hint?: ReactNode;
+  control?: ReactNode;
+}) {
+  return (
+    <div
+      data-slot="record-action-row"
+      className="flex flex-col gap-3 border-b border-border-subtle py-3 last:border-b-0 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6"
+    >
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-w-0 items-center gap-2 text-body font-medium text-primary">
+          {label}
+          {help ? <InfoHint text={help} /> : null}
+        </div>
+        {hint ? <div className="text-meta text-secondary">{hint}</div> : null}
+      </div>
+      {control ? <div className="shrink-0">{control}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * Facts about one thing on a single line, each its own span: a dot drawn between them stands in
+ * for punctuation, which differs by language. Empty and repeated facts are skipped (a city-state's
+ * city and country are the same name).
+ */
+export function RecordFacts({ facts }: { facts: readonly (string | null | undefined)[] }) {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      {[...new Set(facts.filter((fact): fact is string => Boolean(fact)))].map((fact, index) => (
+        <span key={fact} className="flex min-w-0 items-center gap-x-1.5">
+          {index > 0 ? (
+            <span aria-hidden="true" className="size-0.5 shrink-0 rounded-full bg-current" />
+          ) : null}
+          <span className="truncate">{fact}</span>
+        </span>
+      ))}
+    </span>
   );
 }
 

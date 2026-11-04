@@ -6,7 +6,10 @@ import * as membersActions from "@/app/members/actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
-import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { EnglishI18n } from "@/test/i18n";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { restoreWindowLocation } from "@/test/window-location";
 import { InviteMemberForm } from "./invite-member-form";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -20,6 +23,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  restoreWindowLocation();
 });
 
 describe("InviteMemberForm", () => {
@@ -58,5 +62,24 @@ describe("InviteMemberForm", () => {
     const keys = invite.mock.calls.map(([formData]) => formData.get("idempotencyKey"));
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[0]);
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+  });
+
+  it("re-reads the page at the live URL after an invitation, keeping the Members tab", async () => {
+    const membersTabUrl = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
+    window.history.replaceState(null, "", membersTabUrl);
+    vi.spyOn(membersActions, "inviteMember").mockResolvedValue({
+      status: "success",
+      email: "invitee@example.com",
+    });
+    const user = userEvent.setup();
+    render(<InviteMemberForm />, { wrapper: EnglishI18n });
+
+    await user.type(screen.getByRole("textbox", { name: "Email address" }), "invitee@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+
+    await waitFor(() =>
+      expect(dashboardRouter.replace).toHaveBeenCalledWith(membersTabUrl, { scroll: false })
+    );
   });
 });

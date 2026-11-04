@@ -1,45 +1,15 @@
-import type { OrganizationRole } from "@sdp/types/roles";
-import { Badge } from "@sdp/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
-import { cn } from "@sdp/ui/cn";
-import { TableCell } from "@sdp/ui/table";
-import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { listMembers, type Member, type PendingInvitation } from "@/app/members/actions";
-import { getTranslations } from "@/i18n/server";
+import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { formatDate } from "@/lib/date-format";
 import { readableApiError } from "@/lib/sdp-api-error";
-import { InvitationActions } from "./invitation-actions";
 import { InviteMemberForm } from "./invite-member-form";
-import { MemberActions } from "./member-actions";
 import { resolveMemberIdentity } from "./member-identity";
+import { MembersDirectory } from "./members-directory";
 import { MembersPagination } from "./members-pagination";
 
-type Translate = Awaited<ReturnType<typeof getTranslations>>;
-
-function formatJoined(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
-function roleLabel(role: OrganizationRole, t: Translate): string {
-  switch (role) {
-    case "admin":
-      return t("Shared.members.roleAdmin");
-    case "member":
-      return t("Shared.members.roleMember");
-    case "viewer":
-      return t("Shared.members.roleViewer");
-    default: {
-      const exhaustive: never = role;
-      throw new Error(`Unhandled organization role: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
 export async function MembersSection({ page }: { page: number }) {
-  const t = await getTranslations();
+  const [t, locale] = await Promise.all([getTranslations(), getRequestLocale()]);
 
   let members: Member[] = [];
   let invitations: PendingInvitation[] = [];
@@ -57,117 +27,39 @@ export async function MembersSection({ page }: { page: number }) {
     loadError = readableApiError(error);
   }
 
-  const isEmpty = members.length === 0 && invitations.length === 0;
-
   return (
-    // Anchored so the retired /dashboard/members route can deep-link here.
-    <Card id="members" className="scroll-mt-6">
-      <CardHeader>
-        <CardTitle>{t("Shared.members.title")}</CardTitle>
-        <CardDescription>{t("Shared.members.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <>
+      <RecordSection title={t("Shared.members.inviteTitle")}>
         <InviteMemberForm />
+      </RecordSection>
 
+      {/* Anchored so the retired /dashboard/members route can deep-link here. */}
+      <RecordSection id="members" title={t("Shared.members.title")}>
         {loadError ? (
-          <div className="rounded-xl border border-destructive-border bg-destructive-bg px-3 py-2 text-destructive-strong text-sm">
+          <p role="alert" className="text-body text-error">
             {t("Shared.members.loadFailed", { error: loadError })}
-          </div>
-        ) : isEmpty ? (
-          <p className="text-secondary text-sm">{t("Shared.members.empty")}</p>
+          </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("Shared.members.columnMember")}</TableHead>
-                <TableHead className="w-40">{t("Shared.members.columnRole")}</TableHead>
-                <TableHead className="w-40">{t("Shared.members.columnJoined")}</TableHead>
-                <TableHead className="w-16 text-right">
-                  <span className="sr-only">{t("Shared.members.columnActions")}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {members.map((member) => {
-                const identity = resolveMemberIdentity(
-                  member.user,
-                  t("Shared.members.unnamedMember")
-                );
-
-                return (
-                  <TableRow key={member.id}>
-                    <TableCell className="min-w-0">
-                      {/* Without a name the email is the identity, so it moves
-                          up rather than sitting under an "Unnamed" placeholder
-                          that says nothing and reads as an error. */}
-                      <span className="block truncate font-medium text-primary text-sm">
-                        {identity.label}
-                      </span>
-                      {identity.secondary ? (
-                        <span
-                          className={cn(
-                            "block truncate text-muted text-xs",
-                            identity.isUnresolved && "font-mono"
-                          )}
-                        >
-                          {identity.secondary}
-                        </span>
-                      ) : null}
-                      {identity.isUnresolved ? (
-                        <span className="block truncate text-muted text-xs">
-                          {t("Shared.members.emailUnavailable")}
-                        </span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-secondary text-sm">
-                      {roleLabel(member.role, t)}
-                    </TableCell>
-                    <TableCell className="text-secondary text-sm">
-                      {formatJoined(member.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <MemberActions
-                        memberId={member.id}
-                        label={identity.actionLabel}
-                        role={member.role}
-                        isSelf={Boolean(member.isSelf)}
-                        isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-
-              {/* Invited people hold no membership row until they accept, so
-                  without this an invite looks like it did nothing. */}
-              {invitations.map((invitation) => (
-                <TableRow key={invitation.id}>
-                  <TableCell className="min-w-0">
-                    <span className="flex items-center gap-2">
-                      <span className="truncate font-medium text-primary text-sm">
-                        {invitation.email}
-                      </span>
-                      <Badge variant="warning">{t("Shared.members.statusPending")}</Badge>
-                    </span>
-                    <span className="block truncate text-muted text-xs">
-                      {t("Shared.members.invitedOn", { date: formatJoined(invitation.createdAt) })}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-secondary text-sm">
-                    {roleLabel(invitation.role, t)}
-                  </TableCell>
-                  <TableCell className="text-muted text-sm">—</TableCell>
-                  <TableCell className="text-right">
-                    <InvitationActions invitationId={invitation.id} email={invitation.email} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <MembersDirectory
+            members={members.map((member) => ({
+              id: member.id,
+              identity: resolveMemberIdentity(member.user, t("Shared.members.unnamedMember")),
+              role: member.role,
+              joinedOn: formatDate(locale, member.createdAt),
+              isSelf: Boolean(member.isSelf),
+              isLastAdmin: member.role === "admin" && meta.activeAdminCount <= 1,
+            }))}
+            invitations={invitations.map((invitation) => ({
+              id: invitation.id,
+              email: invitation.email,
+              role: invitation.role,
+              invitedOn: formatDate(locale, invitation.createdAt),
+            }))}
+          />
         )}
 
         {!loadError && meta.total > meta.pageSize ? <MembersPagination meta={meta} /> : null}
-      </CardContent>
-    </Card>
+      </RecordSection>
+    </>
   );
 }

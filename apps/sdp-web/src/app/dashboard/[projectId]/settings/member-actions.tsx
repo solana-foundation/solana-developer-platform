@@ -24,6 +24,7 @@ import {
 import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { membersQueryKeys } from "./members-query-key";
 
@@ -75,7 +76,7 @@ export function MemberActions({
         return;
       }
       toast.success(t("Shared.members.roleChanged", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -115,7 +116,7 @@ export function MemberActions({
 
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 

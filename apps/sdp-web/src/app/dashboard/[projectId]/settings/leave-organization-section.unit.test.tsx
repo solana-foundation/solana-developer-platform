@@ -6,7 +6,7 @@ import * as membersActions from "@/app/members/actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { LeaveOrganizationCard } from "./leave-organization-card";
+import { LeaveOrganizationSection } from "./leave-organization-section";
 
 const clerk = vi.hoisted(() => ({ setActive: vi.fn() }));
 
@@ -23,7 +23,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("LeaveOrganizationCard", () => {
+describe("LeaveOrganizationSection", () => {
   it("refreshes the page after a failed leave, since the membership may have ended", async () => {
     vi.spyOn(membersActions, "leaveOrganization").mockResolvedValue({
       status: "error",
@@ -33,7 +33,7 @@ describe("LeaveOrganizationCard", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <LeaveOrganizationCard />
+        <LeaveOrganizationSection />
       </I18nProvider>
     );
 

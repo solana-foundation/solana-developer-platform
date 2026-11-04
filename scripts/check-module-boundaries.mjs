@@ -66,6 +66,7 @@ const MODULE_METADATA = [
     allowedDependencies: [
       "@sdp/api-catalog",
       "@sdp/design-tokens",
+      "@sdp/ip",
       "@sdp/issuance",
       "@sdp/private-channels",
       "@sdp/redaction",
