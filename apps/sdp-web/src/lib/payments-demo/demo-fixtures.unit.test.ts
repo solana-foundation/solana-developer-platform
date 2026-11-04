@@ -152,6 +152,7 @@ vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: ({ path }: { path: string }) => harness.request(path),
   getSelectedProjectId: async () => "demo_prj",
   createSdpApiClient: async () => harness.apiClient,
+  createOrgSdpApiClient: async () => harness.apiClient,
 }));
 vi.mock("@/lib/request-tracing", () => ({
   createTimedTrace: () => harness.trace,
@@ -678,9 +679,12 @@ describe("Requests", () => {
       const props = propsOf<{
         request: PaymentRequest | null;
         walletName: string | null;
+        canceler: { name: string | null } | null;
       }>(detail.children);
       expect(props.request?.id).toBe(request.id);
       expect(props.walletName).not.toBeNull();
+      // A canceled request names the demo's own member, read from the demo, not the real org.
+      expect(props.canceler?.name ?? null).toBe(request.status === "canceled" ? "Ops team" : null);
     }
   });
 });
