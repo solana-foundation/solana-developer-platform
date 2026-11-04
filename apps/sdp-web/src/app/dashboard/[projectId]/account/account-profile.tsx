@@ -9,15 +9,18 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { type ChangeEvent, type FormEvent, useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import {
   RecordList,
   RecordRow,
   RecordSection,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
-import { UserAvatar, userDisplayName } from "@/components/user-avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useZodForm } from "@/lib/use-zod-form";
+import { userDisplayName } from "@/lib/user-display-name";
 import { useReportAccountError } from "./account-errors";
 
 // Clerk's own uploader accepts these and nothing over 10 MB; the API does not say why it refuses.
@@ -29,6 +32,11 @@ const ROLE_LABEL_KEYS = {
   member: "Shared.members.roleMember",
   viewer: "Shared.members.roleViewer",
 } as const satisfies Record<OrganizationRole, MessageKey>;
+
+const PROFILE_NAME_SCHEMA = z.object({
+  firstName: z.string().trim(),
+  lastName: z.string().trim(),
+});
 
 export function AccountProfile() {
   const { user } = useUser();
@@ -170,15 +178,21 @@ function ProfileNameForm({ user, close }: { user: UserResource; close: () => voi
   const reportError = useReportAccountError();
   const firstNameId = useId();
   const lastNameId = useId();
-  const [firstName, setFirstName] = useState(user.firstName ?? "");
-  const [lastName, setLastName] = useState(user.lastName ?? "");
+  const form = useZodForm(PROFILE_NAME_SCHEMA, {
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+  });
   const [isPending, startTransition] = useTransition();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const parsed = form.validate();
+    if (!parsed.ok) {
+      return;
+    }
     startTransition(async () => {
       try {
-        await user.update({ firstName: firstName.trim(), lastName: lastName.trim() });
+        await user.update(parsed.data);
         toast.success(t("Shared.account.profile.nameSaved"));
         close();
       } catch (error) {
@@ -194,18 +208,18 @@ function ProfileNameForm({ user, close }: { user: UserResource; close: () => voi
           <Label htmlFor={firstNameId}>{t("Shared.account.profile.firstName")}</Label>
           <Input
             id={firstNameId}
-            value={firstName}
+            value={form.values.firstName}
             autoComplete="given-name"
-            onChange={(event) => setFirstName(event.target.value)}
+            onChange={(event) => form.setField("firstName", event.target.value)}
           />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={lastNameId}>{t("Shared.account.profile.lastName")}</Label>
           <Input
             id={lastNameId}
-            value={lastName}
+            value={form.values.lastName}
             autoComplete="family-name"
-            onChange={(event) => setLastName(event.target.value)}
+            onChange={(event) => form.setField("lastName", event.target.value)}
           />
         </div>
       </div>
@@ -225,13 +239,23 @@ function EmailAddressesSection({ user }: { user: UserResource }) {
   const t = useTranslations();
   const [verifying, setVerifying] = useState<EmailAddressResource | null>(null);
   const [isAdding, setAdding] = useState(false);
+  // One email request at a time: while any row or form waits on Clerk, every control that
+  // could open, close or replace a form is disabled, so a late result never lands in a form
+  // the person has since swapped for another.
+  const [isRequestPending, setRequestPending] = useState(false);
 
   return (
     <RecordSection
       title={t("Shared.account.emails.title")}
       aside={
         isAdding || verifying ? null : (
-          <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isRequestPending}
+            onClick={() => setAdding(true)}
+          >
             {t("Shared.account.emails.add")}
           </Button>
         )
@@ -244,6 +268,8 @@ function EmailAddressesSection({ user }: { user: UserResource }) {
             key={emailAddress.id}
             user={user}
             emailAddress={emailAddress}
+            isRequestPending={isRequestPending}
+            onPendingChange={setRequestPending}
             onVerify={() => {
               setAdding(false);
               setVerifying(emailAddress);
@@ -254,6 +280,7 @@ function EmailAddressesSection({ user }: { user: UserResource }) {
       {isAdding ? (
         <AddEmailForm
           user={user}
+          onPendingChange={setRequestPending}
           onCreated={(emailAddress) => {
             setAdding(false);
             setVerifying(emailAddress);
@@ -265,6 +292,7 @@ function EmailAddressesSection({ user }: { user: UserResource }) {
         <VerifyEmailForm
           key={verifying.id}
           emailAddress={verifying}
+          onPendingChange={setRequestPending}
           close={() => setVerifying(null)}
         />
       ) : null}
@@ -275,10 +303,14 @@ function EmailAddressesSection({ user }: { user: UserResource }) {
 function EmailAddressRow({
   user,
   emailAddress,
+  isRequestPending,
+  onPendingChange,
   onVerify,
 }: {
   user: UserResource;
   emailAddress: EmailAddressResource;
+  isRequestPending: boolean;
+  onPendingChange: (pending: boolean) => void;
   onVerify: () => void;
 }) {
   const t = useTranslations();
@@ -292,11 +324,14 @@ function EmailAddressRow({
   const remove = useReverification(() => emailAddress.destroy());
 
   const run = (action: () => Promise<void>) => {
+    onPendingChange(true);
     startTransition(async () => {
       try {
         await action();
       } catch (error) {
         reportError(error);
+      } finally {
+        onPendingChange(false);
       }
     });
   };
@@ -323,7 +358,7 @@ function EmailAddressRow({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={isPending}
+              disabled={isRequestPending}
               onClick={() => run(makePrimary)}
             >
               {t("Shared.account.emails.makePrimary")}
@@ -333,7 +368,7 @@ function EmailAddressRow({
               type="button"
               variant="ghost"
               size="sm"
-              disabled={isPending}
+              disabled={isRequestPending}
               onClick={() => run(sendCode)}
             >
               {t("Shared.account.emails.verify")}
@@ -344,6 +379,7 @@ function EmailAddressRow({
             variant="ghost"
             size="sm"
             loading={isPending}
+            disabled={isRequestPending}
             onClick={() => run(remove)}
           >
             {t("Shared.account.emails.remove")}
@@ -356,10 +392,12 @@ function EmailAddressRow({
 
 function AddEmailForm({
   user,
+  onPendingChange,
   onCreated,
   onCancel,
 }: {
   user: UserResource;
+  onPendingChange: (pending: boolean) => void;
   onCreated: (emailAddress: EmailAddressResource) => void;
   onCancel: () => void;
 }) {
@@ -374,12 +412,15 @@ function AddEmailForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    onPendingChange(true);
     startTransition(async () => {
       try {
         const emailAddress = await createEmailAddress(email.trim());
         await emailAddress.prepareVerification({ strategy: "email_code" });
+        onPendingChange(false);
         onCreated(emailAddress);
       } catch (error) {
+        onPendingChange(false);
         reportError(error);
       }
     });
@@ -413,9 +454,11 @@ function AddEmailForm({
 
 function VerifyEmailForm({
   emailAddress,
+  onPendingChange,
   close,
 }: {
   emailAddress: EmailAddressResource;
+  onPendingChange: (pending: boolean) => void;
   close: () => void;
 }) {
   const t = useTranslations();
@@ -427,26 +470,32 @@ function VerifyEmailForm({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    onPendingChange(true);
     startTransition(async () => {
       try {
         await emailAddress.attemptVerification({ code: code.trim() });
+        onPendingChange(false);
         toast.success(
           t("Shared.account.emails.verifiedToast", { email: emailAddress.emailAddress })
         );
         close();
       } catch (error) {
+        onPendingChange(false);
         reportError(error);
       }
     });
   };
 
   const resend = () => {
+    onPendingChange(true);
     startResend(async () => {
       try {
         await emailAddress.prepareVerification({ strategy: "email_code" });
         toast.success(t("Shared.account.emails.codeResent"));
       } catch (error) {
         reportError(error);
+      } finally {
+        onPendingChange(false);
       }
     });
   };
@@ -470,7 +519,7 @@ function VerifyEmailForm({
         <p className="text-meta text-secondary">{t("Shared.account.emails.codeHint")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" loading={isPending}>
+        <Button type="submit" size="sm" loading={isPending} disabled={isResending}>
           {t("Shared.account.emails.confirmCode")}
         </Button>
         <Button
@@ -483,7 +532,13 @@ function VerifyEmailForm({
         >
           {t("Shared.account.emails.resendCode")}
         </Button>
-        <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={close}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={isPending || isResending}
+          onClick={close}
+        >
           {t("Shared.account.cancel")}
         </Button>
       </div>

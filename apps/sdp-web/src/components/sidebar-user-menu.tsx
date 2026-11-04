@@ -28,13 +28,14 @@ import {
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
-import { UserAvatar, userDisplayName } from "@/components/user-avatar";
+import { UserAvatar } from "@/components/user-avatar";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_ACCOUNT_HREF } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { userDisplayName } from "@/lib/user-display-name";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
 // opens the account menu — account settings, the colour theme, API docs,

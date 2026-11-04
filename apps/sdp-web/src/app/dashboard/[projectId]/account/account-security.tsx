@@ -10,13 +10,18 @@ import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { type FormEvent, useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR, { useSWRConfig } from "swr";
+import { z } from "zod";
+import { accountQueryKeys } from "@/app/dashboard/[projectId]/account/account-query-key";
+import { formatDateTime } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { RecordSection } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useZodForm } from "@/lib/use-zod-form";
 import { useReportAccountError } from "./account-errors";
 
-function accountSessionsKey(userId: string) {
-  return ["account-sessions", userId] as const;
-}
+const PASSWORD_SCHEMA = z.object({
+  currentPassword: z.string(),
+  newPassword: z.string().min(1),
+});
 
 export function AccountSecurity() {
   const { user } = useUser();
@@ -65,8 +70,7 @@ function PasswordForm({ user, close }: { user: UserResource; close: () => void }
   const t = useTranslations();
   const currentPasswordId = useId();
   const newPasswordId = useId();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const form = useZodForm(PASSWORD_SCHEMA, { currentPassword: "", newPassword: "" });
   const reportError = useReportAccountError();
   const { mutate } = useSWRConfig();
   const [isPending, startTransition] = useTransition();
@@ -76,16 +80,20 @@ function PasswordForm({ user, close }: { user: UserResource; close: () => void }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const parsed = form.validate();
+    if (!parsed.ok) {
+      return;
+    }
     startTransition(async () => {
       try {
         await updatePassword({
-          newPassword,
-          currentPassword: user.passwordEnabled ? currentPassword : undefined,
+          newPassword: parsed.data.newPassword,
+          currentPassword: user.passwordEnabled ? parsed.data.currentPassword : undefined,
           signOutOfOtherSessions: true,
         });
         toast.success(t("Shared.account.security.passwordSaved"));
         close();
-        void mutate(accountSessionsKey(user.id));
+        void mutate(accountQueryKeys.sessions({ userId: user.id }));
       } catch (error) {
         reportError(error);
       }
@@ -102,8 +110,8 @@ function PasswordForm({ user, close }: { user: UserResource; close: () => void }
             type="password"
             required
             autoComplete="current-password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
+            value={form.values.currentPassword}
+            onChange={(event) => form.setField("currentPassword", event.target.value)}
           />
         </div>
       ) : null}
@@ -114,8 +122,8 @@ function PasswordForm({ user, close }: { user: UserResource; close: () => void }
           type="password"
           required
           autoComplete="new-password"
-          value={newPassword}
-          onChange={(event) => setNewPassword(event.target.value)}
+          value={form.values.newPassword}
+          onChange={(event) => form.setField("newPassword", event.target.value)}
         />
         <p className="text-meta text-secondary">{t("Shared.account.security.newPasswordHint")}</p>
       </div>
@@ -134,7 +142,7 @@ function PasswordForm({ user, close }: { user: UserResource; close: () => void }
 function SessionsSection({ user }: { user: UserResource }) {
   const t = useTranslations();
   const { session: currentSession } = useSession();
-  const sessions = useSWR(accountSessionsKey(user.id), () => user.getSessions());
+  const sessions = useSWR(accountQueryKeys.sessions({ userId: user.id }), () => user.getSessions());
   const activeSessions = (sessions.data ?? [])
     .filter((session) => ["active", "pending"].includes(session.status))
     .toSorted(
@@ -196,6 +204,7 @@ function SessionRow({
     .filter(Boolean)
     .join(" · ");
   const place = [[city, country].filter(Boolean).join(", "), ipAddress].filter(Boolean).join(" · ");
+  const lastActive = formatDateTime(session.lastActiveAt.toISOString(), locale);
 
   const signOut = () => {
     startTransition(async () => {
@@ -222,12 +231,9 @@ function SessionRow({
         <span className="truncate text-meta text-secondary">
           {[
             place,
-            t("Shared.account.security.lastActive", {
-              time: new Intl.DateTimeFormat(locale, {
-                dateStyle: "medium",
-                timeStyle: "short",
-              }).format(session.lastActiveAt),
-            }),
+            lastActive === null
+              ? null
+              : t("Shared.account.security.lastActive", { time: lastActive }),
           ]
             .filter(Boolean)
             .join(" · ")}

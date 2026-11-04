@@ -15,5 +15,9 @@ export function AccountWorkspace() {
       return <AccountSecurity />;
     case "preferences":
       return <AccountPreferences />;
+    default: {
+      const exhaustive: never = activeTab;
+      throw new Error(`Unhandled account tab: ${JSON.stringify(exhaustive)}`);
+    }
   }
 }

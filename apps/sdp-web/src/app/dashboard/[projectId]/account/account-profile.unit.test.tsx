@@ -91,6 +91,37 @@ describe("AccountProfile email addresses", () => {
     );
   });
 
+  it("holds every email control while one row's request is in flight", async () => {
+    const user = testUser([
+      testEmailAddress(PRIMARY_EMAIL_ID, "jane@example.com", "verified"),
+      testEmailAddress("idn_test_work", "jane@work.example", "verified"),
+      testEmailAddress("idn_test_team", "jane@team.example", "verified"),
+      testEmailAddress("idn_test_old", "jane@old.example", "unverified"),
+    ]);
+    const updated = Promise.withResolvers<void>();
+    user.update.mockReturnValue(updated.promise);
+    renderProfile(user);
+    const actor = userEvent.setup();
+    const controlsDisabled = () =>
+      [
+        ...screen.getAllByRole("button", { name: "Make primary" }),
+        screen.getByRole("button", { name: "Verify" }),
+        ...screen.getAllByRole("button", { name: "Remove" }),
+        screen.getByRole("button", { name: "Add email" }),
+      ].map((control) => control.hasAttribute("disabled"));
+
+    await actor.click(screen.getAllByRole("button", { name: "Make primary" })[0]);
+
+    expect(user.update).toHaveBeenCalledExactlyOnceWith({ primaryEmailAddressId: "idn_test_work" });
+    expect(controlsDisabled()).toEqual([true, true, true, true, true, true]);
+
+    updated.resolve();
+
+    await waitFor(() =>
+      expect(controlsDisabled()).toEqual([false, false, false, false, false, false, false])
+    );
+  });
+
   it("sends a code to an unverified address before asking for it", async () => {
     const unverified = testEmailAddress("idn_test_old", "jane@old.example", "unverified");
     const codeSent = Promise.withResolvers<TestEmailAddress>();

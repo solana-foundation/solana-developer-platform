@@ -1,10 +1,4 @@
-import type { UserResource } from "@clerk/nextjs/types";
 import { cn } from "@sdp/ui/cn";
-
-export function userDisplayName(user: UserResource): string | undefined {
-  const joinedName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  return user.fullName || joinedName || user.username || user.primaryEmailAddress?.emailAddress;
-}
 
 export function UserAvatar({
   name,
