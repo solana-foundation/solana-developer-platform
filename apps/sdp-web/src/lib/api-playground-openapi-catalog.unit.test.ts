@@ -1,3 +1,4 @@
+import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 
 import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/custody/wallets-playground-config";
@@ -152,7 +153,7 @@ describe("API playground release channel", () => {
       .find((endpoint) => endpoint.id === "list-transfers")
       ?.pathFields.find((field) => field.key === "status")
       ?.options?.map((option) => option.value);
-    expect(statuses).toEqual(["pending", "processing", "confirmed", "finalized", "failed"]);
+    expect(statuses).toEqual(ONCHAIN_TRANSFER_STATUSES);
     const experimental = buildPaymentsPlaygroundEndpointConfigs(
       { wallets: [], transfers: [], rampProviders: ["moonpay"] },
       t

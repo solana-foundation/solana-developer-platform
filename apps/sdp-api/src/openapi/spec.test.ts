@@ -3,6 +3,7 @@ import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
 } from "@sdp/types/idempotency-required-routes";
+import { RAMP_ONLY_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
@@ -787,7 +788,7 @@ describe("OpenAPI spec", () => {
         doc.paths?.["/v1/payments/transfers/{transferId}"]?.get?.responses?.["200"]
       ).properties?.data?.properties?.transfer;
       expect(transfer).toBeDefined();
-      for (const status of ["awaiting_payment", "settling", "completed", "canceled", "expired"]) {
+      for (const status of RAMP_ONLY_TRANSFER_STATUSES) {
         expect(JSON.stringify(transfer)).not.toContain(`"${status}"`);
       }
       // Payment requests own these statuses independently of Ramps.
