@@ -33,6 +33,7 @@ import {
   getTransactionEncoder,
   type Instruction,
   pipe,
+  type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
@@ -113,6 +114,7 @@ import {
   type CriticalOutcome,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -867,13 +869,20 @@ async function executeSponsoredTransfer(
   });
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: params.submissionStore,
-  });
+  let signature: Signature;
+  try {
+    signature = await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: params.submissionStore,
+    });
+  } catch (error) {
+    // The sponsor simulates before it signs: a source wallet short of funds
+    // is the caller's to fix, not an upstream failure (HOO-2621).
+    throw callerInsufficientFundsError(error, instructions) ?? error;
+  }
 
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: params.landingStatus,
@@ -996,7 +1005,7 @@ function recordedFailureCode(row: TransferRow): ErrorCode {
 function failedTransferError(row: TransferRow): AppError {
   return new AppError(
     recordedFailureCode(row),
-    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+    `${(row.error ?? "The transfer failed").replace(/\.$/, "")}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
     { transferId: row.id, status: row.status }
   );
 }

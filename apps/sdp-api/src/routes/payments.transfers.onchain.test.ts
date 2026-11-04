@@ -1,3 +1,4 @@
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -12,6 +13,7 @@ import { generatePaymentTransferId } from "@/db/repositories/payments.repository
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
@@ -47,7 +49,7 @@ import {
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
-import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 function testProjectPaymentsRepository() {
   return createPostgresPaymentsRepository(
@@ -870,5 +872,101 @@ describe("Payments routes — on-chain transfers", () => {
     expect(transfers).toHaveLength(1);
     expect(transfers[0]?.status).toBe("failed");
     expect(transfers[0]?.error).toBeTruthy();
+  });
+
+  describe("a source wallet short of funds (HOO-2621)", () => {
+    const koraShortfall = (instructionIndex: number) =>
+      new FeePaymentError(
+        `Failed to sign transaction as fee payer: Kora Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction ${instructionIndex}: custom program error: 0x1`,
+        "PROVIDER_REJECTED"
+      );
+
+    function sponsorRefuses(error: FeePaymentError) {
+      createKoraAdapterMock.mockReturnValue(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+          signAsFeePayer: vi.fn().mockRejectedValue(error),
+        })
+      );
+    }
+
+    function expectTenantSafe(message: string) {
+      expect(message).toBe(INSUFFICIENT_FUNDS_MESSAGE);
+      expect(message).not.toMatch(/kora|simulation|fee payer|program error/i);
+    }
+
+    it("answers an SPL transfer 400 TRANSACTION_FAILED, records why, and replays the same error", async () => {
+      answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
+      // Instruction 1 is the token transfer; instruction 0 creates the destination account.
+      sponsorRefuses(koraShortfall(1));
+      const request = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: DEVNET_USDC_MINT,
+        amount: "500",
+      };
+
+      const res = await postTransfer(request, { idempotencyKey: "hoo-2621-spl-shortfall" });
+
+      expect(res.status).toBe(400);
+      const body = await readErrorResponse(res);
+      expect(body.error.code).toBe("TRANSACTION_FAILED");
+      expectTenantSafe(body.error.message);
+      const transfers = await listTransferRows();
+      expect(transfers).toHaveLength(1);
+      expect(transfers[0]?.status).toBe("failed");
+      expectTenantSafe(required(transfers[0]?.error));
+
+      const replay = await postTransfer(request, { idempotencyKey: "hoo-2621-spl-shortfall" });
+
+      expect(replay.status).toBe(400);
+      const replayed = await readErrorResponse(replay);
+      expect(replayed.error.code).toBe("TRANSACTION_FAILED");
+      expect(replayed.error.message).toContain(
+        "does not have enough funds. Add funds and try again."
+      );
+      expect(replayed.error.message).not.toContain("again..");
+      expect(replayed.error.message).not.toMatch(/kora|simulation|fee payer/i);
+      expect(await listTransferRows()).toHaveLength(1);
+    });
+
+    it("answers a SOL transfer short of lamports 400 TRANSACTION_FAILED", async () => {
+      sponsorRefuses(koraShortfall(0));
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(400);
+      const body = await readErrorResponse(res);
+      expect(body.error.code).toBe("TRANSACTION_FAILED");
+      expectTenantSafe(body.error.message);
+      expectTenantSafe(required((await listTransferRows())[0]?.error));
+    });
+
+    it("keeps 0x1 on the sponsor-funded account creation an upstream failure", async () => {
+      answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
+      sponsorRefuses(koraShortfall(0));
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(502);
+      expect((await readErrorResponse(res)).error.code).toBe("SOLANA_RPC_ERROR");
+    });
   });
 });

@@ -68,6 +68,7 @@ import { transactions } from "@/routes/transactions";
 import { webhooks } from "@/routes/webhooks";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
+import { mapFeePaymentError } from "@/services/fee-payment-errors";
 import type { Env } from "@/types/env";
 
 export interface SdpPlugin {
@@ -153,78 +154,6 @@ function getSafeSigningErrorMessage(err: SigningError): string {
       return "The signing provider is not configured. Check provider configuration and try again.";
     default:
       return redactCredentialString(err.message);
-  }
-}
-
-/**
- * Maps a fee payment port failure to the public error contract.
- *
- * These come from the transaction fee sponsor (Kora), never from the custody
- * signer, so the copy names the sponsor: telling a caller their signing
- * provider is down sends them to check custody when custody is fine. Codes and
- * statuses are unchanged; clients branch on those.
- */
-function mapFeePaymentError(err: FeePaymentError): {
-  status: 400 | 422 | 429 | 502 | 503;
-  code: string;
-  message: string;
-} {
-  const programError = /custom program error: (0x[0-9a-f]+)/i.exec(err.message)?.[1].toLowerCase();
-  if (programError === "0x1") {
-    return {
-      status: 400,
-      code: "TRANSACTION_FAILED",
-      message:
-        "The wallet used for this payment does not have enough funds. Add funds and try again.",
-    };
-  }
-  if (programError) {
-    return {
-      status: 400,
-      code: "TRANSACTION_FAILED",
-      message: "The transaction was rejected on Solana. Check the payment wallet and try again.",
-    };
-  }
-
-  switch (err.code) {
-    case "INSUFFICIENT_BALANCE":
-      return {
-        status: 400,
-        code: "TRANSACTION_FAILED",
-        message:
-          "The wallet used for this payment does not have enough funds. Add funds and try again.",
-      };
-    case "RATE_LIMITED":
-      return {
-        status: 429,
-        code: err.code,
-        message: "The transaction fee sponsor is busy. Try again.",
-      };
-    case "PROVIDER_REJECTED":
-      // The provider returned a structured refusal of these exact bytes
-      // (policy, allowlist, malformed request). Nothing was signed and a
-      // retry cannot succeed, so do not tell the caller to try again.
-      // SIGNING_FAILED stays on the ambiguous 502 path below: Kora answers it
-      // for a malformed JSON-RPC request, which says nothing about these bytes.
-      return {
-        status: 422,
-        code: "SIGNING_REJECTED",
-        message:
-          "The transaction fee sponsor rejected this transaction. Retrying will not help; check the transaction and sponsorship policy.",
-      };
-    case "PROVIDER_NOT_AVAILABLE":
-    case "NETWORK_ERROR":
-      return {
-        status: 503,
-        code: "PROVIDER_UNAVAILABLE",
-        message: "Transaction fees can't be sponsored right now. Try again.",
-      };
-    default:
-      return {
-        status: 502,
-        code: "TRANSACTION_FAILED",
-        message: "The transaction could not be signed or submitted. Try again.",
-      };
   }
 }
 

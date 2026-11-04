@@ -2232,6 +2232,12 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `details.recipientIndexes` (`[0]`) or `details.sourceRemainder` identifies the problem; `details.minimumAmount` gives the minimum. Fund the address, send at least the minimum, or send the source wallet's whole balance. The `409` is not stored under the `Idempotency-Key`, so the same request can run after the balance changes. Token transfers are unaffected: SDP sponsors rent for a missing token account.
 
+## Insufficient funds
+
+When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+
+A source wallet that has never held the token has no token account for it, so the request is refused earlier with `400 BAD_REQUEST` ("Source wallet has no token account for this mint").
+
 ## Deduplication
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
@@ -2443,7 +2449,7 @@ if (response.ok) {
 
 ### Recovering from a partial failure
 
-A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. Its `error` says why; when the source wallet could not cover the amount, it reads "The wallet used for this payment does not have enough funds", so fund the wallet before you retry. To finish the run, retry the batch:
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
@@ -20514,7 +20520,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfers`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review.
+Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key. A source wallet with no token account for the token is refused earlier with 400 `BAD_REQUEST`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfers.execute` action.
 
@@ -22432,7 +22438,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfer-batches`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
+Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). A token batch is refused with 409 `SPONSORED_RENT_OVER_CAP` when one recipient's new token account costs more rent than the sponsor funds in a transaction (`details.recipientIndex`). A chunk the source wallet cannot fund fails its recipients and transfer with the reason in `error` (the wallet does not have enough funds); the batch still returns 200. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 TRANSFER_BATCH_RUN_EXISTS` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfer_batches.execute` action.
 
@@ -22600,7 +22606,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -23547,7 +23553,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -24182,7 +24188,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`error`** · `string | null` · required
 
-        Recipient-level failure reason, when available.
+        Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."
 
       - **`createdAt`** · `string` · required · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
@@ -26787,7 +26793,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation.
+Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -26981,9 +26987,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -27446,7 +27452,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "attemptedAt": "2025-01-01T00:00:00.000Z",
       "status": "pending",
       "signature": "example",
-      "error": "example",
+      "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
       "metadata": {
         "recurringPaymentId": "recurringpayment_example",
         "initiatedByKeyId": "initiatedbykey_example",
@@ -27979,9 +27985,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -28142,7 +28148,7 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
         "attemptedAt": "2025-01-01T00:00:00.000Z",
         "status": "pending",
         "signature": "example",
-        "error": "example",
+        "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
         "metadata": {
           "recurringPaymentId": "recurringpayment_example",
           "initiatedByKeyId": "initiatedbykey_example",
@@ -32415,9 +32421,9 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -32614,7 +32620,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
       "attemptedAt": "2025-01-01T00:00:00.000Z",
       "status": "pending",
       "signature": "example",
-      "error": "example",
+      "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
       "metadata": {
         "recurringPaymentId": "recurringpayment_example",
         "initiatedByKeyId": "initiatedbykey_example",
@@ -32963,9 +32969,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Solana transaction signature.
 
-      - **`error`** · `string | null` · required
+      - **`error`** · `string | null` · required · example `The wallet used for this payment does not have enough funds. Add funds and try again.`
 
-        Collection error, if any.
+        Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.
 
       - **`metadata`** · `object` · required
 
@@ -33126,7 +33132,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscriptions/psub_example/
         "attemptedAt": "2025-01-01T00:00:00.000Z",
         "status": "pending",
         "signature": "example",
-        "error": "example",
+        "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
         "metadata": {
           "recurringPaymentId": "recurringpayment_example",
           "initiatedByKeyId": "initiatedbykey_example",

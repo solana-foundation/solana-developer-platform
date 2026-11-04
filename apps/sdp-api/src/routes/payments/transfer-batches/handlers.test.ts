@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import {
@@ -42,6 +43,7 @@ import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
 import { SigningService } from "@/services/domain/signing.service";
+import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -2001,6 +2003,197 @@ describe("payment transfer batches", () => {
     const { intent, outcome } = await readChunkAudit(required(body.data.transfers[0]).id);
     expect(required(outcome)).toMatchObject({ status: "failure" });
     expect(required(outcome).metadata.auditIntentId).toBe(required(intent).resource_id);
+  });
+
+  describe("a source wallet short of funds (HOO-2621)", () => {
+    const shortfallResponseSchema = z.object({
+      data: z.object({
+        batch: z.object({ status: z.string() }),
+        recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+        transfers: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+      }),
+    });
+
+    async function postShortfallBatch(preflight: boolean) {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+      const counterpartyId = await seedCounterparty(`batch_shortfall_${String(preflight)}`);
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: testRunId(),
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "500" }],
+            options: { preflight },
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(200);
+      return shortfallResponseSchema.parse(await response.json());
+    }
+
+    function expectShortfallRecorded(body: z.infer<typeof shortfallResponseSchema>) {
+      expect(body.data.batch.status).toBe("failed");
+      const [recipient] = body.data.recipients;
+      const [transfer] = body.data.transfers;
+      expect(required(recipient)).toMatchObject({
+        status: "failed",
+        error: INSUFFICIENT_FUNDS_MESSAGE,
+      });
+      expect(required(transfer)).toMatchObject({
+        status: "failed",
+        error: INSUFFICIENT_FUNDS_MESSAGE,
+      });
+    }
+
+    it("fails a chunk the sponsor's simulation finds short with the tenant-safe reason", async () => {
+      const signAsFeePayer = vi
+        .fn()
+        .mockRejectedValue(
+          new FeePaymentError(
+            "Failed to sign transaction as fee payer: Kora Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1",
+            "PROVIDER_REJECTED"
+          )
+        );
+      createKoraAdapterMock.mockReturnValueOnce(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+          signAsFeePayer,
+        })
+      );
+
+      const body = await postShortfallBatch(false);
+
+      expect(signAsFeePayer).toHaveBeenCalledOnce();
+      expectShortfallRecorded(body);
+    });
+
+    it("gives the failed row of a partially failed batch readable text, on create and on read", async () => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+      createKoraAdapterMock.mockReturnValueOnce(
+        ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+      );
+      // Chunks run concurrently: whichever simulates second comes back short.
+      let simulations = 0;
+      rpc.respond("simulateTransaction", () => {
+        simulations += 1;
+        return {
+          result: {
+            context: { slot: 1 },
+            value: {
+              err: simulations === 1 ? null : { InstructionError: [0, { Custom: 1 }] },
+              logs: [],
+              accounts: null,
+              unitsConsumed: 150,
+              returnData: null,
+            },
+          },
+        };
+      });
+      const counterpartyId = await seedCounterparty("batch_partial_shortfall");
+      const recipients = await Promise.all(
+        [TEST_SOLANA_ADDRESSES.wallet2, TEST_SOLANA_ADDRESSES.wallet3].map(
+          async (walletAddress, position) => ({
+            counterpartyId,
+            counterpartyAccountId: await seedCryptoWalletCounterpartyAccount({
+              counterpartyId,
+              walletAddress,
+            }),
+            amount: position === 0 ? "0.1" : "0.2",
+          })
+        )
+      );
+
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: testRunId(),
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const partialSchema = z.object({
+        data: z.object({
+          batch: z.object({ id: z.string() }),
+          recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+        }),
+      });
+      const created = partialSchema.parse(await response.json());
+      const failedRows = (body: z.infer<typeof partialSchema>) =>
+        body.data.recipients.filter((recipient) => recipient.status === "failed");
+      expect(failedRows(created)).toEqual([
+        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
+      ]);
+      expect(created.data.recipients).toHaveLength(2);
+
+      const read = await app.request(
+        `/v1/payments/transfer-batches/${created.data.batch.id}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(read.status).toBe(200);
+      expect(failedRows(partialSchema.parse(await read.json()))).toEqual([
+        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
+      ]);
+    });
+
+    it("fails a chunk SDP's preflight finds short with the same reason, before the sponsor signs", async () => {
+      const signAsFeePayer = vi.fn().mockImplementation(fullySignTestTransaction);
+      createKoraAdapterMock.mockReturnValueOnce(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+          signAsFeePayer,
+        })
+      );
+      // Answered at the JSON-RPC layer so the real helper serializes the verdict
+      // (its bigints become strings: {"InstructionError":["0",{"Custom":"1"}]}).
+      rpc.answer("simulateTransaction", {
+        context: { slot: 1 },
+        value: {
+          err: { InstructionError: [0, { Custom: 1 }] },
+          logs: ["Program 11111111111111111111111111111111 failed: custom program error: 0x1"],
+          accounts: null,
+          unitsConsumed: 150,
+          returnData: null,
+        },
+      });
+
+      const body = await postShortfallBatch(true);
+
+      expect(signAsFeePayer).not.toHaveBeenCalled();
+      expectShortfallRecorded(body);
+    });
   });
 
   it("admits runtime execution only for new transfer batches", async () => {
