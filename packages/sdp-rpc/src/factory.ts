@@ -16,10 +16,16 @@ import {
   type RpcTransport,
   type Signature,
   type Slot,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
-import { RpcTimeoutError, RpcUnavailableError, SdpRpcError } from "./errors";
+import {
+  MinContextSlotNotReachedError,
+  RpcTimeoutError,
+  RpcUnavailableError,
+  SdpRpcError,
+} from "./errors";
 import {
   MANAGED_RPC_ENV_KEYS,
   MANAGED_RPC_HOSTS,
@@ -750,6 +756,12 @@ export function createClusterHistoryRpc(): SolanaRpc {
   );
 }
 
+/** Why one endpoint left a floored history read unanswered. */
+export type EndpointHistoryFailure =
+  /** The endpoint had not reached the floor: SDP's own `context.slot` check or a served `-32016`. */
+  | { reason: "node_behind_floor"; contextSlot: bigint }
+  | { reason: "history_unavailable"; errorName: string; errorMessage: string };
+
 /** One signature's history status across every endpoint of the scope's managed pool. */
 export type EveryEndpointSignatureStatus =
   /** At least one endpoint has a status for it; other endpoints' failures do not matter. */
@@ -757,7 +769,7 @@ export type EveryEndpointSignatureStatus =
   /** Every endpoint answered at the floor, and none has a status for it. */
   | { kind: "absent" }
   /** No endpoint has a status for it and at least one could not answer at the floor. */
-  | { kind: "unresolved"; failures: unknown[] };
+  | { kind: "unresolved"; failures: EndpointHistoryFailure[] };
 
 /**
  * Signature statuses from transaction history on every endpoint of the scope's managed pool, each
@@ -791,13 +803,25 @@ export async function getSignatureStatusesFromEveryEndpoint(
     read.status === "fulfilled" ? [read.value] : []
   );
   const failures = endpointReads.flatMap((read) =>
-    read.status === "rejected" ? [read.reason] : []
+    read.status === "rejected" ? [endpointHistoryFailure(read.reason)] : []
   );
   return signatures.map((_signature, index): EveryEndpointSignatureStatus => {
     const found = mostConfirmedStatus(answers.map((statuses) => statuses[index]));
     if (found !== null) return { kind: "found", status: found };
     return failures.length === 0 ? { kind: "absent" } : { kind: "unresolved", failures };
   });
+}
+
+function endpointHistoryFailure(cause: unknown): EndpointHistoryFailure {
+  if (cause instanceof MinContextSlotNotReachedError) {
+    return { reason: "node_behind_floor", contextSlot: cause.contextSlot };
+  }
+  if (isSolanaError(cause, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
+    return { reason: "node_behind_floor", contextSlot: cause.context.contextSlot };
+  }
+  return cause instanceof Error
+    ? { reason: "history_unavailable", errorName: cause.name, errorMessage: cause.message }
+    : { reason: "history_unavailable", errorName: typeof cause, errorMessage: String(cause) };
 }
 
 function mostConfirmedStatus(

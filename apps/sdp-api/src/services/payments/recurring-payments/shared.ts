@@ -65,7 +65,7 @@ import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
 import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { describeError, logEvent } from "@/runtime/money-path-events";
+import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import {
   isNativePaymentToken,
@@ -712,7 +712,11 @@ export async function readSavedSend(
       signature,
       last_valid_block_height: lastValidBlockHeight.toString(),
       min_context_slot: finalized.absoluteSlot.toString(),
-      endpoint_failures: read.failures.map(describeError),
+      endpoint_failures: read.failures.map((failure) =>
+        failure.reason === "node_behind_floor"
+          ? { reason: failure.reason, context_slot: failure.contextSlot.toString() }
+          : { reason: failure.reason, error_name: failure.errorName }
+      ),
     });
     return "pending";
   }

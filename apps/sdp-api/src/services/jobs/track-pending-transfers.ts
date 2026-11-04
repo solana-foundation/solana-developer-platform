@@ -19,9 +19,9 @@
  * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 
-import { MinContextSlotNotReachedError } from "@sdp/rpc/errors";
 import {
   createClusterRpc,
+  type EndpointHistoryFailure,
   type EveryEndpointSignatureStatus,
   getSignatureStatusesFromEveryEndpoint,
 } from "@sdp/rpc/factory";
@@ -35,14 +35,7 @@ import {
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
-import {
-  assertIsSignature,
-  commitmentComparator,
-  isSolanaError,
-  type Signature,
-  type Slot,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-} from "@solana/kit";
+import { assertIsSignature, commitmentComparator, type Signature, type Slot } from "@solana/kit";
 import {
   TRANSFER_BATCH_ATTEMPT_LIFETIME_MS,
   transferBatchChunkAuditIntentId,
@@ -817,7 +810,7 @@ async function reconcileCacheMisses(
       read.kind === "unresolved"
   );
   if (unresolvedRead !== undefined) {
-    logUnavailableHistory(unresolvedRead.failures, finalized.absoluteSlot);
+    logUnavailableHistory(unresolvedRead.failures);
   }
 
   for (const [index, transfer] of candidates.entries()) {
@@ -839,23 +832,29 @@ async function reconcileCacheMisses(
 }
 
 function unresolvedHistoryVerdict(
-  failures: readonly unknown[],
+  failures: readonly EndpointHistoryFailure[],
   minContextSlot: Slot
 ): UnresolvedVerdict {
-  const lags = failures.map((failure) => nodeBehindFloor(failure, minContextSlot));
+  const lags = failures.flatMap((failure) =>
+    failure.reason === "node_behind_floor" ? [failure] : []
+  );
   const [firstLag] = lags;
-  if (firstLag === undefined || firstLag === null || lags.some((lag) => lag === null)) {
+  if (firstLag === undefined || lags.length < failures.length) {
     return { reason: "history_unavailable" };
   }
-  return firstLag;
+  return {
+    reason: "node_behind_floor",
+    contextSlot: firstLag.contextSlot.toString(),
+    minContextSlot: minContextSlot.toString(),
+  };
 }
 
-function logUnavailableHistory(failures: readonly unknown[], minContextSlot: Slot): void {
+function logUnavailableHistory(failures: readonly EndpointHistoryFailure[]): void {
   for (const failure of failures) {
-    if (nodeBehindFloor(failure, minContextSlot) !== null) continue;
+    if (failure.reason !== "history_unavailable") continue;
     getLogger().error(
       {
-        error: failure instanceof Error ? failure.message : String(failure),
+        error: failure.errorMessage,
         environment: currentClusterScope().environment,
       },
       "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
@@ -921,35 +920,6 @@ async function settleFromHistory(
     finalized_block_height: finalized.blockHeight.toString(),
     min_context_slot: finalized.absoluteSlot.toString(),
   });
-}
-
-/**
- * The lag behind a refused floored read, when the refusal says the answering node had not reached
- * the floor: SDP's own `context.slot` check, or a served `-32016` once every pool endpoint refused.
- *
- * @param cause - What the floored read threw.
- * @param minContextSlot - The floor the read demanded.
- * @returns The answering node's slot and the floor, or null when the read failed for another reason.
- */
-function nodeBehindFloor(
-  cause: unknown,
-  minContextSlot: Slot
-): Extract<UnresolvedVerdict, { reason: "node_behind_floor" }> | null {
-  if (cause instanceof MinContextSlotNotReachedError) {
-    return {
-      reason: "node_behind_floor",
-      contextSlot: cause.contextSlot.toString(),
-      minContextSlot: cause.minContextSlot.toString(),
-    };
-  }
-  if (isSolanaError(cause, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
-    return {
-      reason: "node_behind_floor",
-      contextSlot: String(cause.context.contextSlot),
-      minContextSlot: minContextSlot.toString(),
-    };
-  }
-  return null;
 }
 
 /**
