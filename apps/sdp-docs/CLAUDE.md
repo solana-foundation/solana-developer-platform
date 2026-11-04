@@ -106,6 +106,8 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 
 A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab.
 
+A guide's `<Tabs>` panel is a card. A code sample's tabs (` ```lang tab="…" ` fences) are not: the tab card is the one frame, and the copy button sits at the end of the tab row instead of over the code (`globals.css`, "Tab panels").
+
 ### CSS classes (for custom elements within pages)
 
 | Class                       | Element                                                                                                                                                  |
@@ -132,7 +134,7 @@ A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so 
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree), optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`.
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (the page tree cut to what the sidebar draws, `sidebarTreeOf`, since every page ships it), `sectionOverrides`, optional `dashboardUrl` and `agentSetup`. Search sits above the compact Dashboard link and **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds one environment-status line (its mainnet half links Go to mainnet) and the Fumadocs `ThemeSwitch` (light, dark, system); AI resources link to `llms.txt`. The top-level entry a page sits under stays highlighted like the page: its breadcrumb's first page, which the layout passes for the pages whose path does not say it (`sidebarSectionOverrides`, `src/lib/breadcrumbs.ts`), else the longest top-level URL its path extends (`sectionByPath`, `src/lib/sidebar-section.ts`).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
@@ -140,6 +142,11 @@ The root `meta.json` pins Get started and Go to mainnet first, then groups direc
 links under Learn, Modules and Resources. Keep other detailed guides linked from
 their section landing pages and searchable; `generate:ai` includes every
 published page in `llms-full.txt` whether or not it appears in the sidebar.
+API Reference is the one folder there (`reference/api`): it stays shut elsewhere
+and opens to the current family and group inside the reference, each operation
+with its method. `generate:api` writes its `meta.json` without `index`, so the
+directory page stays the folder's own row (Fumadocs makes a listed `index` a
+child instead). The sidebar scrolls the current row into view when it changes.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
@@ -164,7 +171,7 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-sidebar-search`     | Search trigger, `--control-height-md`, `--wash` fill; the `⌘K` keys are chips                                                     |
 | `.launch-docs-sidebar-nav`        | Scrollable nav area                                                                                                               |
 | `.launch-docs-nav-item`           | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover                                                               |
-| `.launch-docs-nav-item.is-active` | Active page: `--wash-strong` bg, `--ink`, weight 500                                                                              |
+| `.launch-docs-nav-item.is-active` | Active page, or the top-level entry the page sits under: `--wash-strong` bg, `--ink`, weight 500                                  |
 | `.launch-docs-nav-folder`         | Folder container                                                                                                                  |
 | `.launch-docs-nav-folder-row`     | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
 | `.launch-docs-nav-folder-btn`     | Non-linked folder label that toggles the folder: `--ink`, weight 500                                                              |
@@ -281,7 +288,7 @@ keep Swagger UI for their own release channel.
   component needs both forms. `check:links` accepts a page's `.md`, and
   `generate-ai-resources.ts` reads a family folder's index as its first page
   and names a group's section after its family (`Payments: Transfers`).
-- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
+- On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, turns a family table's method cells into `.launch-api-method` badges (the Markdown keeps the code span), and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
 - On an operation page, `apiReference: true` makes the page full width with no table of contents and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`). Each sample is a box whose code scrolls inside it. From 1280px its `<ApiPanel>` (the samples and example responses) sits beside the body; on a window at least 750px tall it stays in view, sized to the window, and never scrolls itself: the last box (the example responses) takes the height left, which 750px keeps at 10 lines or more. Below, it follows the body.
 
 Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.

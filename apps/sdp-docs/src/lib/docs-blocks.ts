@@ -313,8 +313,8 @@ function embedGuideExample(
 
 /**
  * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
- * reference page it also sets a field's facts apart and points the code at this deployment's API
- * (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`), where the Markdown keeps the canonical one.
+ * reference page it also lays out what the page shows differently from its Markdown
+ * (`referenceNodes`).
  */
 export function remarkDocsBlocks(
   options: { surface?: PublicSurface; examples?: GuideApiExamples } = {}
@@ -354,19 +354,42 @@ export function remarkDocsBlocks(
           };
           return [child];
         }
-        if (referencePage && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
-          return spacedFacts(child.value);
-        }
-        if (referencePage && child.type === "code") {
-          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
-          return [child];
-        }
+        const referenceContent = referencePage ? referenceNodes(child, parent) : undefined;
+        if (referenceContent !== undefined) return referenceContent;
         if ("children" in child) walk(child);
         return [child];
       });
     };
     walk(tree);
   };
+}
+
+/**
+ * A generated reference page's node as the page shows it, where the Markdown agents get keeps the
+ * node as it is: a field's facts with their separators set apart, a family table's method cell as
+ * its badge, and code pointed at this deployment's API (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`)
+ * instead of the canonical one.
+ *
+ * @param child - The node.
+ * @param parent - The node that holds it.
+ * @returns The nodes to show in its place, or undefined to leave it and walk its children.
+ */
+function referenceNodes(child: RootContent, parent: Parent): RootContent[] | undefined {
+  if (child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+    return spacedFacts(child.value);
+  }
+  if (
+    parent.type === "tableCell" &&
+    child.type === "inlineCode" &&
+    Object.hasOwn(API_METHOD_NAMES, child.value)
+  ) {
+    return [methodBadge(child.value)];
+  }
+  if (child.type === "code") {
+    child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+    return [child];
+  }
+  return undefined;
 }
 
 /** What separates a field's facts on a generated reference page (scripts/lib/api-reference-page.ts). */
@@ -395,6 +418,22 @@ function spacedFacts(value: string): RootContent[] {
       ...text,
     ];
   });
+}
+
+/**
+ * A family table's method cell as the badge the operation's page leads with (`ApiEndpoint`), in
+ * its method's colour. The Markdown agents get keeps the code span.
+ */
+function methodBadge(method: string): RootContent {
+  return {
+    type: "mdxJsxTextElement",
+    name: "span",
+    attributes: [
+      { type: "mdxJsxAttribute", name: "className", value: "launch-api-method" },
+      { type: "mdxJsxAttribute", name: "data-method", value: method },
+    ],
+    children: [{ type: "text", value: method }],
+  };
 }
 
 /**
