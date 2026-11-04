@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import {
   RecordActionRow,
   RecordSection,
-} from "@/app/dashboard/[projectId]/payments/payments-record";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {

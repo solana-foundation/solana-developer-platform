@@ -9,7 +9,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { z } from "zod";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { dashboardJson, dashboardResponseHeaders } from "./dashboard-response";

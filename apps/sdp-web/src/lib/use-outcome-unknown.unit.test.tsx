@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import useSWR, { SWRConfig } from "swr";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { type OutcomeUnknownLists, useOutcomeUnknownRefresh } from "./use-outcome-unknown";
 

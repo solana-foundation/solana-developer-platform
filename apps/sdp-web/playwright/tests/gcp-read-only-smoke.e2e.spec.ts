@@ -6,7 +6,7 @@ import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-pat
 import {
   formatCurrencyAmount,
   resolveTotalBalance,
-} from "../../src/app/dashboard/[projectId]/payments/payments-overview.utils";
+} from "../../src/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { getE2EEnv } from "../env";
 import { CLERK_ORGANIZATION_ACTIVATION_TIMEOUT_MS } from "../support/clerk-activation";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";

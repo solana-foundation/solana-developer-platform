@@ -2,7 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { SDP_TERMS_PATH } from "@sdp/types/site";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
@@ -95,73 +95,76 @@ export function demoSessionCookiesToDrop(req: NextRequest): string[] {
 }
 
 function getUnauthenticatedUrl(req: NextRequest): string {
-  const authEntryUrl = new URL(AUTH_ENTRY_PATH, req.url);
-  authEntryUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-  return authEntryUrl.toString();
+  const signInUrl = new URL(SIGN_IN_PATH, req.url);
+  signInUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+  return signInUrl.toString();
 }
 
-export const proxy = clerkMiddleware(async (auth, req) => {
-  const crossSiteWrite = rejectCrossSiteWrite(req);
-  if (crossSiteWrite) {
-    return crossSiteWrite;
-  }
-
-  if (!isPublicRoute(req)) {
-    await auth.protect({
-      unauthenticatedUrl: getUnauthenticatedUrl(req),
-    });
-  }
-
-  // A project-less page URL (old bookmarks, emailed links) matches no route under
-  // `[projectId]` once it is nested, so it is resolved before routing: the bare
-  // landing picks the Project and returns to the same page and query inside it.
-  const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
-  if (projectId === null && /^\/dashboard\/[^/]/.test(req.nextUrl.pathname)) {
-    const landingUrl = new URL("/dashboard", req.url);
-    landingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-    return NextResponse.redirect(landingUrl);
-  }
-
-  const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
-  const droppedDemoCookies = demoSessionCookiesToDrop(req);
-  if (droppedDemoCookies.length > 0) {
-    // Filter the raw header, so every other cookie reaches the page byte for byte.
-    const kept = (req.headers.get("cookie") ?? "")
-      .split(";")
-      .filter((pair) => !isDemoSessionCookie(pair.split("=", 1)[0]?.trim() ?? ""));
-    requestHeaders.set("cookie", kept.join(";").trim());
-  }
-
-  // The request's Project is the one its tab renders: page renders and server
-  // actions (Next posts actions to the tab's URL) take it from this URL, browser
-  // calls to /api/* send it themselves (dashboardRequest). Server code reads only
-  // this header, through createSdpApiClient (HOO-1965).
-  if (!req.nextUrl.pathname.startsWith("/api/")) {
-    if (projectId === null) {
-      requestHeaders.delete(PROJECT_HEADER_NAME);
-    } else {
-      requestHeaders.set(PROJECT_HEADER_NAME, projectId);
+export const proxy = clerkMiddleware(
+  async (auth, req) => {
+    const crossSiteWrite = rejectCrossSiteWrite(req);
+    if (crossSiteWrite) {
+      return crossSiteWrite;
     }
-  }
 
-  const response = NextResponse.next({
-    request: {
-      headers: requestHeaders,
-    },
-  });
+    if (!isPublicRoute(req)) {
+      await auth.protect({
+        unauthenticatedUrl: getUnauthenticatedUrl(req),
+      });
+    }
 
-  for (const name of droppedDemoCookies) {
-    response.cookies.set(name, "", { path: "/", maxAge: 0 });
-  }
+    // A project-less page URL (old bookmarks, emailed links) matches no route under
+    // `[projectId]` once it is nested, so it is resolved before routing: the bare
+    // landing picks the Project and returns to the same page and query inside it.
+    const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
+    if (projectId === null && /^\/dashboard\/[^/]/.test(req.nextUrl.pathname)) {
+      const landingUrl = new URL("/dashboard", req.url);
+      landingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
+      return NextResponse.redirect(landingUrl);
+    }
 
-  // Last-used hint for the bare `/dashboard` landing only; nothing renders or
-  // sends requests from it, and it is validated against the Project list when read.
-  if (projectId !== null) {
-    response.cookies.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
-  }
-  return response;
-});
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
+    const droppedDemoCookies = demoSessionCookiesToDrop(req);
+    if (droppedDemoCookies.length > 0) {
+      // Filter the raw header, so every other cookie reaches the page byte for byte.
+      const kept = (req.headers.get("cookie") ?? "")
+        .split(";")
+        .filter((pair) => !isDemoSessionCookie(pair.split("=", 1)[0]?.trim() ?? ""));
+      requestHeaders.set("cookie", kept.join(";").trim());
+    }
+
+    // The request's Project is the one its tab renders: page renders and server
+    // actions (Next posts actions to the tab's URL) take it from this URL, browser
+    // calls to /api/* send it themselves (dashboardRequest). Server code reads only
+    // this header, through createSdpApiClient (HOO-1965).
+    if (!req.nextUrl.pathname.startsWith("/api/")) {
+      if (projectId === null) {
+        requestHeaders.delete(PROJECT_HEADER_NAME);
+      } else {
+        requestHeaders.set(PROJECT_HEADER_NAME, projectId);
+      }
+    }
+
+    const response = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
+
+    for (const name of droppedDemoCookies) {
+      response.cookies.set(name, "", { path: "/", maxAge: 0 });
+    }
+
+    // Last-used hint for the bare `/dashboard` landing only; nothing renders or
+    // sends requests from it, and it is validated against the Project list when read.
+    if (projectId !== null) {
+      response.cookies.set(PROJECT_COOKIE_NAME, projectId, PROJECT_COOKIE_OPTIONS);
+    }
+    return response;
+  },
+  { signInUrl: SIGN_IN_PATH, signUpUrl: SIGN_UP_PATH }
+);
 
 export const config = {
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],

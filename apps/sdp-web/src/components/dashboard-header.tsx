@@ -14,13 +14,13 @@ import {
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
-import { ACCOUNT_TABS } from "@/app/dashboard/[projectId]/account/account-tabs";
+import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
-import { SETTINGS_TABS } from "@/app/dashboard/[projectId]/settings/settings-tabs";
+} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";

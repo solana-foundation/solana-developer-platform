@@ -9,8 +9,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import {
   DashboardHeaderAction,
   DashboardTopBar,
@@ -428,7 +428,7 @@ export function DashboardShell({
     ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
-  const { isLoaded, isSignedIn, orgId } = useAuth();
+  const { isSignedIn, orgId } = useAuth();
   const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
@@ -647,12 +647,6 @@ export function DashboardShell({
       setMobileSidebarOpen(false);
     }
   }, [pathname]);
-
-  if (!isLoaded) {
-    return (
-      <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
-    );
-  }
 
   if (!isSignedIn) {
     return (

@@ -1,4 +1,4 @@
-import type { EarnTableColumns } from "@/app/dashboard/[projectId]/markets/earn/earn-table-layout";
+import type { EarnTableColumns } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-table-layout";
 
 function percent(token: string | undefined): number | undefined {
   const match = token?.match(/w-\[(\d+)%\]$/);

@@ -27,7 +27,7 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
 
 vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-release-channel" }),
+  useAuth: () => ({ isSignedIn: true, orgId: "org-release-channel" }),
   useUser: () => ({ isLoaded: true, isSignedIn: true, user: null }),
   SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));

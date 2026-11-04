@@ -1,7 +1,7 @@
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import * as homePageData from "@/app/dashboard/[projectId]/home-page.data";
+import * as homePageData from "@/app/(session)/dashboard/[projectId]/home-page.data";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
-vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS: 2_500,

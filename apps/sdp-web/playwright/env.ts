@@ -206,22 +206,6 @@ export function getE2EEnv(): E2EEnv {
       NEXT_PUBLIC_DISABLE_SENTRY: "1",
       NEXT_PUBLIC_SENTRY_DSN: "",
       PLAYWRIGHT_DISABLE_SENTRY: "1",
-      NEXT_PUBLIC_CLERK_SIGN_IN_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_IN_URL ??
-        "/sign-in",
-      NEXT_PUBLIC_CLERK_SIGN_UP_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_UP_URL ??
-        "/sign-up",
-      NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL ??
-        "/dashboard",
-      NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL:
-        process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-        fallback.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL ??
-        "/dashboard",
       NODE_ENV: process.env.NODE_ENV ?? "development",
     },
   };

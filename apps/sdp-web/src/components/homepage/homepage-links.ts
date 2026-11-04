@@ -1,5 +1,5 @@
 import { DEFAULT_SDP_AI_LLMS_URL, DEFAULT_SDP_DOCS_URL } from "@sdp/types/site";
-import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
 import { resolveDocsUrl } from "@/lib/docs-url";
 
 /** Where a signed-in visitor goes instead of the sign-in and sign-up forms. */
@@ -98,7 +98,7 @@ export function resolveHomepageLinks({
       signup = { href: DASHBOARD_PATH, label: dashboardLabel, external: false };
       break;
     case "signup":
-      signup = { href: "/sign-up", label: createAccountLabel, external: false };
+      signup = { href: SIGN_UP_PATH, label: createAccountLabel, external: false };
       break;
     case "waitlist":
       signup = { href: waitlistHref, label: joinWaitlistLabel, external: true };
@@ -110,7 +110,7 @@ export function resolveHomepageLinks({
   }
   return {
     signup,
-    signIn: signedIn ? DASHBOARD_PATH : AUTH_ENTRY_PATH,
+    signIn: signedIn ? DASHBOARD_PATH : SIGN_IN_PATH,
     signedIn,
     docs: resolveDocsUrl(),
     openapi: resolveDocsUrl(OPENAPI_PATH),

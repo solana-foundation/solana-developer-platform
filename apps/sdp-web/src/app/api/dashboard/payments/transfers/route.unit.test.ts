@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as paymentsPageData from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import * as paymentsPageData from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
