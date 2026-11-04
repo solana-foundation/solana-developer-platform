@@ -22,14 +22,18 @@ function saveResultSchema<TValue extends z.ZodType>(valueSchema: TValue) {
   ]);
 }
 
-type SaveResult<TValue extends z.ZodType> = z.infer<ReturnType<typeof saveResultSchema<TValue>>>;
+const allowlistSaveResultSchema = saveResultSchema(z.array(z.string()));
+const alertEmailsSaveResultSchema = saveResultSchema(z.boolean());
 
-async function patchOrganizationSettings<TValue extends z.ZodType>(
+// `answerSchema` reads sdp-api's organization into the saved setting; `resultSchema` checks that
+// setting as the save's value, so the two never parse each other's shape.
+async function patchOrganizationSettings<TResult extends z.ZodType>(
   organizationId: string,
   settings: { allowedIpAddresses: string[] } | { alertEmails: boolean },
   idempotencyKey: string,
-  answerSchema: TValue
-): Promise<SaveResult<TValue>> {
+  answerSchema: z.ZodType,
+  resultSchema: TResult
+): Promise<z.output<TResult>> {
   const result = await dashboardFetch<unknown>(
     `/api/dashboard/organizations/${encodeURIComponent(organizationId)}`,
     {
@@ -38,17 +42,11 @@ async function patchOrganizationSettings<TValue extends z.ZodType>(
       body: { settings },
     }
   );
-  const resultSchema = saveResultSchema(answerSchema);
   if (!result.ok) return resultSchema.parse({ ok: false, error: result.error });
-  // sdp-api answers `{ data, meta }`; the setting is the organization under `data`.
-  const answer = z
-    .object({ data: z.unknown() })
-    .transform((envelope) => envelope.data)
-    .pipe(answerSchema)
-    .safeParse(result.data);
+  const answer = z.object({ data: answerSchema }).safeParse(result.data);
   return resultSchema.parse(
     answer.success
-      ? { ok: true, value: answer.data }
+      ? { ok: true, value: answer.data.data }
       : { ok: false, error: z.prettifyError(answer.error) }
   );
 }
@@ -61,12 +59,13 @@ export function saveOrganizationIpAllowlist(
   organizationId: string,
   value: string,
   idempotencyKey: string
-): Promise<SaveResult<typeof organizationAllowlistSchema>> {
+): Promise<z.output<typeof allowlistSaveResultSchema>> {
   return patchOrganizationSettings(
     organizationId,
     { allowedIpAddresses: parseAllowedIps(value) },
     idempotencyKey,
-    organizationAllowlistSchema
+    organizationAllowlistSchema,
+    allowlistSaveResultSchema
   );
 }
 
@@ -75,11 +74,12 @@ export function saveOrganizationAlertEmails(
   organizationId: string,
   enabled: boolean,
   idempotencyKey: string
-): Promise<SaveResult<typeof organizationAlertEmailsSchema>> {
+): Promise<z.output<typeof alertEmailsSaveResultSchema>> {
   return patchOrganizationSettings(
     organizationId,
     { alertEmails: enabled },
     idempotencyKey,
-    organizationAlertEmailsSchema
+    organizationAlertEmailsSchema,
+    alertEmailsSaveResultSchema
   );
 }
