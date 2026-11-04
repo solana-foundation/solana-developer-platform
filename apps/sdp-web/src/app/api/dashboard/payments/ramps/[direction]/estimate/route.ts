@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = {
@@ -8,7 +8,7 @@ type RouteContext = {
 export async function POST(request: Request, context: RouteContext) {
   const { direction } = await context.params;
   if (direction !== "onramp" && direction !== "offramp") {
-    return NextResponse.json(
+    return dashboardJson(
       {
         error: {
           message: "Unsupported ramp estimate direction",

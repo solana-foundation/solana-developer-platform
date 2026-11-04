@@ -10,7 +10,7 @@ import { useTranslations } from "@/i18n/provider";
 import { resolveDashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 import { useDashboardPathname } from "@/lib/use-dashboard-project";
 
-// Preparation, scope reconciliation, and client auth all paint the same destination.
+// Preparation, scope reconciliation, and a lost organization all paint the same destination.
 export function DashboardLoadingScreen({
   pathname,
   flags,

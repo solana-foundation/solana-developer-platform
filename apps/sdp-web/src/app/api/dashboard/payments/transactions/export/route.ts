@@ -2,14 +2,14 @@ import type {
   UnifiedTransaction,
   UnifiedTransactionsListResponse,
 } from "@sdp/types/unified-transactions";
-import { NextResponse } from "next/server";
-import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
+import { enabledTransactionModules } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-modules";
 import {
   parseTransactionFilters,
   toTransactionsApiQuery,
-} from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
+} from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { toCsv } from "@/lib/csv";
+import { dashboardJson, dashboardResponseHeaders } from "@/lib/dashboard-response";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 const EXPORT_PAGE_SIZE = 100;
@@ -96,7 +96,7 @@ export async function GET(request: Request) {
         waitedMs += waitMs;
         continue;
       }
-      return NextResponse.json(
+      return dashboardJson(
         {
           error: {
             code: "RATE_LIMITED",
@@ -112,7 +112,7 @@ export async function GET(request: Request) {
       error?: { message?: string };
     };
     if (!response.ok) {
-      return NextResponse.json(
+      return dashboardJson(
         {
           error: {
             message: body.error?.message ?? `Transaction export failed (${response.status}).`,
@@ -134,11 +134,10 @@ export async function GET(request: Request) {
       rows.map((row) => COLUMNS.map(([, read]) => read(row)))
     ),
     {
-      headers: {
+      headers: dashboardResponseHeaders(undefined, {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
-      },
+      }),
     }
   );
 }

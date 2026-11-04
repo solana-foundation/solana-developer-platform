@@ -1,22 +1,22 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/dashboard/[projectId]/(home)/loading";
-import AllowlistLoading from "@/app/dashboard/[projectId]/allowlist/loading";
-import ApiKeyEditLoading from "@/app/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
-import { ApiKeysListSkeleton } from "@/app/dashboard/[projectId]/api-keys/api-key-page-skeletons";
-import ApiKeyNewLoading from "@/app/dashboard/[projectId]/api-keys/new/loading";
-import { HeliusRingsSkeleton } from "@/app/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
+import DashboardLoading from "@/app/(session)/dashboard/[projectId]/(home)/loading";
+import AllowlistLoading from "@/app/(session)/dashboard/[projectId]/allowlist/loading";
+import ApiKeyEditLoading from "@/app/(session)/dashboard/[projectId]/api-keys/[keyId]/edit/loading";
+import { ApiKeysListSkeleton } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
+import ApiKeyNewLoading from "@/app/(session)/dashboard/[projectId]/api-keys/new/loading";
+import { HeliusRingsSkeleton } from "@/app/(session)/dashboard/[projectId]/helius-rings/helius-rings-skeleton";
 import {
   IntegrationDetailSkeleton,
   IntegrationsFlagsSkeleton,
-} from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
-import { PrivateChannelsSetupSkeleton } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
+} from "@/app/(session)/dashboard/[projectId]/integrations/integrations-skeleton";
+import { PrivateChannelsSetupSkeleton } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
 import {
   CurrentIssuanceCreateSkeleton,
   CurrentIssuanceDetailSkeleton,
   CurrentIssuancePageSkeleton,
-} from "@/app/dashboard/[projectId]/issuance/issuance-route-skeletons";
+} from "@/app/(session)/dashboard/[projectId]/issuance/issuance-route-skeletons";
 import {
   DvpCreateSkeleton,
   DvpTradeDetailSkeleton,
@@ -25,10 +25,10 @@ import {
   EmbeddedYieldPortfolioSkeleton,
   MarketsLandingFlagsSkeleton,
   TreasurySolutionsSkeleton,
-} from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
-import { SettingsPageSkeleton } from "@/app/dashboard/[projectId]/operations-card-page-skeletons";
-import CounterpartyDirectoryLoading from "@/app/dashboard/[projectId]/payments/counterparty/loading";
-import { PaymentsPageSkeleton } from "@/app/dashboard/[projectId]/payments/payments-page-skeleton";
+} from "@/app/(session)/dashboard/[projectId]/markets/markets-route-skeletons";
+import { SettingsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
+import CounterpartyDirectoryLoading from "@/app/(session)/dashboard/[projectId]/payments/counterparty/loading";
+import { PaymentsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-page-skeleton";
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
@@ -41,15 +41,15 @@ import {
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
-} from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
-import PaymentRequestsLoading from "@/app/dashboard/[projectId]/payments/requests/loading";
-import TokenHoldingsLoading from "@/app/dashboard/[projectId]/tokens/loading";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import PaymentRequestsLoading from "@/app/(session)/dashboard/[projectId]/payments/requests/loading";
+import TokenHoldingsLoading from "@/app/(session)/dashboard/[projectId]/tokens/loading";
 import {
   WalletConnectionsListSkeleton,
   WalletDetailSkeleton,
   WalletSetupSkeleton,
   WalletsOverviewSkeleton,
-} from "@/app/dashboard/[projectId]/wallets/wallet-route-skeletons";
+} from "@/app/(session)/dashboard/[projectId]/wallets/wallet-route-skeletons";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 

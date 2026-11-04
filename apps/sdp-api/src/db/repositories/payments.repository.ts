@@ -55,6 +55,8 @@ export interface PaymentTransferRow {
   idempotency_fingerprint: string | null;
   confirmed_at: string | null;
   finalization_last_polled_at: string | null;
+  /** The sending request's audit intent while it is open; whoever closes it clears it. */
+  audit_intent_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -284,6 +286,27 @@ export interface PaymentsRepository {
     lastValidBlockHeight: string;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Records the audit intent a request opened for an unsent transfer, so the job
+   * that settles the row can close it. Matches only a row with no signed bytes.
+   */
+  recordTransferAuditIntent(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    auditIntentId: string;
+  }): Promise<boolean>;
+  /**
+   * Claims the row's open audit intent for closing: clears it while it still
+   * names `auditIntentId`. Run in the ledger transaction that appends the
+   * outcome, so of two closers only the first appends one.
+   */
+  closeTransferAuditIntent(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    auditIntentId: string;
+  }): Promise<boolean>;
   markTransferSubmissionStarted(input: {
     transferId: string;
     organizationId: string;

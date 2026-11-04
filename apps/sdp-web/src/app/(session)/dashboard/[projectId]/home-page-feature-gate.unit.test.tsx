@@ -1,0 +1,83 @@
+import type { SdpModule } from "@sdp/types/release-channels";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const {
+  authMock,
+  createSdpApiClientMock,
+  custodyMock,
+  issuanceMock,
+  fetchPaymentsAggregateMock,
+  fetchPaymentsIssuedTokenSymbolsMock,
+  fetchPaymentsWalletsMock,
+} = vi.hoisted(() => ({
+  authMock: vi.fn(),
+  createSdpApiClientMock: vi.fn(),
+  custodyMock: vi.fn(),
+  issuanceMock: vi.fn(),
+  fetchPaymentsAggregateMock: vi.fn(),
+  fetchPaymentsIssuedTokenSymbolsMock: vi.fn(),
+  fetchPaymentsWalletsMock: vi.fn(),
+}));
+
+vi.mock("@clerk/nextjs/server", () => ({ auth: authMock }));
+vi.mock("@/flags", () => ({ issuance: issuanceMock }));
+// Custody has no flag of its own: the release channel alone decides (HOO-1956).
+vi.mock("@/flags/release-channel", () => ({
+  isModuleInDeploymentReleaseChannel: (module: SdpModule) => module !== "custody" || custodyMock(),
+}));
+vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
+vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: createSdpApiClientMock }));
+vi.mock("./payments/payments-page.data", () => ({
+  fetchPaymentsAggregate: fetchPaymentsAggregateMock,
+  fetchPaymentsIssuedTokenSymbols: fetchPaymentsIssuedTokenSymbolsMock,
+  fetchPaymentsWallets: fetchPaymentsWalletsMock,
+}));
+
+import DashboardPage from "./(home)/page";
+
+async function renderPage() {
+  // SAFETY: the page is an async server component; its element is read only for the props it passes on.
+  const page = (await DashboardPage()) as { props: Record<string, unknown> } | null;
+  if (!page) throw new Error("Expected the home workspace");
+  return page;
+}
+
+describe("dashboard home module flags", () => {
+  beforeEach(() => {
+    authMock.mockReset();
+    createSdpApiClientMock.mockReset();
+    custodyMock.mockReset();
+    issuanceMock.mockReset();
+    fetchPaymentsAggregateMock.mockReset();
+    fetchPaymentsIssuedTokenSymbolsMock.mockReset();
+    fetchPaymentsWalletsMock.mockReset();
+    authMock.mockResolvedValue({ orgId: "org_test" });
+    issuanceMock.mockResolvedValue(false);
+  });
+
+  it("does not load wallet or issuance data when the release channel leaves Custody out", async () => {
+    custodyMock.mockReturnValue(false);
+
+    const page = await renderPage();
+
+    expect(createSdpApiClientMock).not.toHaveBeenCalled();
+    expect(page.props).toMatchObject({
+      wallets: [],
+      balances: [],
+      walletCount: 0,
+      issuedTokens: [],
+    });
+  });
+
+  it("does not load issuance token metadata when Issuance is disabled", async () => {
+    custodyMock.mockReturnValue(true);
+    createSdpApiClientMock.mockResolvedValue({ request: vi.fn() });
+    fetchPaymentsAggregateMock.mockResolvedValue({ ok: true, data: { balances: [] } });
+    fetchPaymentsWalletsMock.mockResolvedValue({ ok: true, data: [] });
+
+    const page = await renderPage();
+
+    expect(fetchPaymentsIssuedTokenSymbolsMock).not.toHaveBeenCalled();
+    expect(page.props.issuedTokens).toEqual([]);
+  });
+});

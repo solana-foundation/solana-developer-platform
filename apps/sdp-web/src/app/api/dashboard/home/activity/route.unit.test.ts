@@ -1,7 +1,8 @@
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import * as homePageData from "@/app/dashboard/[projectId]/home-page.data";
+import * as homePageData from "@/app/(session)/dashboard/[projectId]/home-page.data";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   issuance: vi.fn(),
@@ -11,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
-vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS: 2_500,
@@ -99,6 +100,8 @@ describe("GET /api/dashboard/home/activity", () => {
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
     expect(fetchOrgIssuanceActivity).not.toHaveBeenCalled();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).not.toHaveBeenCalled();
     expect(buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
@@ -282,6 +285,8 @@ describe("GET /api/dashboard/home/activity", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
     expect(body.error).toBe("client unavailable");
   });
 });

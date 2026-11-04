@@ -4,8 +4,9 @@ import { cn } from "@sdp/ui/cn";
 import { Modal } from "@sdp/ui/modal";
 import { useThemeScope } from "@sdp/ui/theme-scope";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
+import { useStepFade } from "@/lib/use-step-fade";
 
 interface WizardFrameProps {
   /** Persistent right-hand rail rendered beside the step content on large screens. */
@@ -185,9 +186,10 @@ export function WizardFrame({
   const [summaryOpen, setSummaryOpen] = useState(false);
   const scrollRegionRef = useRef<HTMLDivElement>(null);
   const lastStepRef = useRef(currentStep);
+  const stepRef = useStepFade<HTMLDivElement>(currentStep);
   // A new step opens at its top. The column keeps its own scroll offset otherwise, so a tall
   // step after a scrolled one would open mid-form with its heading out of view.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (lastStepRef.current === currentStep) return;
     lastStepRef.current = currentStep;
     // Assigning scrollTop works in every environment, jsdom included; scrollTo does not.
@@ -197,20 +199,23 @@ export function WizardFrame({
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
 
+  // A fill-height step's `flex-1` content still sits in a flex column through this wrapper.
   const stepContent = (
-    <WizardStepBody aside={aside}>
-      <WizardStepHeading
-        title={currentStepTitle ?? activeStep.title}
-        titleBadge={titleBadge}
-        description={description}
-        header={header}
-        showSummaryButton={showSummaryButton}
-        summaryTrigger={summaryTrigger}
-        refresh={refresh}
-        onOpenSummary={() => setSummaryOpen(true)}
-      />
-      {children}
-    </WizardStepBody>
+    <div ref={stepRef} className={cn(fillHeight && "flex flex-1 flex-col")} data-wizard-step>
+      <WizardStepBody aside={aside}>
+        <WizardStepHeading
+          title={currentStepTitle ?? activeStep.title}
+          titleBadge={titleBadge}
+          description={description}
+          header={header}
+          showSummaryButton={showSummaryButton}
+          summaryTrigger={summaryTrigger}
+          refresh={refresh}
+          onOpenSummary={() => setSummaryOpen(true)}
+        />
+        {children}
+      </WizardStepBody>
+    </div>
   );
 
   const summaryModal =

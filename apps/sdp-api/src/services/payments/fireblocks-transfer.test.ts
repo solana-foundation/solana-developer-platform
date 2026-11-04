@@ -740,8 +740,8 @@ describe("native Fireblocks BYOK payment routes", () => {
         grants: ["transfers.execute"],
       });
       token = raw;
-      const original = AuditService.prototype.beginCritical;
-      vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+      const original = AuditService.prototype.beginCriticalWithin;
+      vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
         this: AuditService,
         ...args
       ) {
@@ -788,8 +788,8 @@ describe("native Fireblocks BYOK payment routes", () => {
   ] as const)("refuses %s changed during preparation without a provider POST", async (change) => {
     const mock = await ready();
     const db = getDb(env);
-    const original = AuditService.prototype.beginCritical;
-    vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+    const original = AuditService.prototype.beginCriticalWithin;
+    vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
       this: AuditService,
       ...args
     ) {

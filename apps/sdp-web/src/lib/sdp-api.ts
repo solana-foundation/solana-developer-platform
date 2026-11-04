@@ -9,9 +9,10 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { z } from "zod";
-import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
+import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
+import { dashboardJson, dashboardResponseHeaders } from "./dashboard-response";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
 import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
@@ -485,17 +486,7 @@ export function proxyFailure(
   message: string
 ): NextResponse {
   logRouteResult(trace, status, { error: message });
-  return NextResponse.json(
-    { error: { message } },
-    {
-      status,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
-      },
-    }
-  );
+  return dashboardJson({ error: { message } }, { status, trace });
 }
 
 /**
@@ -587,14 +578,10 @@ export async function proxyToSdpApi({
 
     return new NextResponse(response.body, {
       status: response.status,
-      headers: {
+      headers: dashboardResponseHeaders(trace, {
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
-        // Per-org financial state: never storable by browsers or intermediaries.
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
         ...idempotencyResponseHeaders(response),
-      },
+      }),
     });
   } catch (error) {
     return proxyFailure(

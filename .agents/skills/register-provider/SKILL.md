@@ -97,11 +97,11 @@ Hosts are not env keys: they follow `ctx.mode` inside the adapter. A missing key
 At minimum update:
 
 - `apps/sdp-web/src/lib/ramps.ts`: logo and ordered label option.
-- `apps/sdp-web/src/app/dashboard/integrations/integrations-status.ts`: label and description key.
+- `apps/sdp-web/src/app/(session)/dashboard/integrations/integrations-status.ts`: label and description key.
 - `apps/sdp-web/messages/*/shared.json`: provider description in every locale.
 - `apps/sdp-web/public/provider-logos/`: provider asset.
 
-If the provider introduces a new onboarding lifecycle, manual instruction shape, or session-widget fields, update the provider helpers and quote renderer under `apps/sdp-web/src/app/dashboard/payments/ramps/`. Reuse an existing delivery-mode renderer only when its contract already fits.
+If the provider introduces a new onboarding lifecycle, manual instruction shape, or session-widget fields, update the provider helpers and quote renderer under `apps/sdp-web/src/app/(session)/dashboard/payments/ramps/`. Reuse an existing delivery-mode renderer only when its contract already fits.
 
 ## 7. Document setup and limits
 

@@ -1,15 +1,15 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   WALLET_ACTIVITY_LIMIT,
   WALLET_ACTIVITY_MAX_LIMIT,
   type WalletActivityIdentity,
-} from "@/app/dashboard/[projectId]/custody/wallet-activity.data";
-import { loadWalletActivity } from "@/app/dashboard/[projectId]/custody/wallet-activity.server";
+} from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.data";
+import { loadWalletActivity } from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.server";
 import type { MessageKey } from "@/i18n/messages";
 import { getTranslations } from "@/i18n/server";
 import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
@@ -91,14 +91,11 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     try {
       resolvedWalletId = decodeURIComponent(walletId);
     } catch {
-      const response = NextResponse.json(
+      const response = dashboardJson(
         { error: { message: t("DashboardCustody.invalidWalletId") } },
         {
           status: 400,
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
+          trace,
         }
       );
       logRouteResult(trace, 400, {
@@ -117,16 +114,13 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
     );
     if (!visibility.ok || !visibility.wallet) {
       const status = visibility.status ?? 500;
-      const response = NextResponse.json(
+      const response = dashboardJson(
         {
           error: { message: visibility.error ?? t("DashboardCustody.walletActivityRequestFailed") },
         },
         {
           status,
-          headers: {
-            "X-SDP-Trace-ID": trace.traceId,
-            "Server-Timing": trace.serverTiming(),
-          },
+          trace,
         }
       );
       logRouteResult(trace, status, {
@@ -145,7 +139,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       loadWalletActivity(apiClient.request, wallet, t, { pageSize })
     );
     const status = result.ok ? 200 : (result.status ?? 500);
-    const response = NextResponse.json(
+    const response = dashboardJson(
       result.ok
         ? {
             data: result.data ?? {
@@ -161,10 +155,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
           },
       {
         status,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
 
@@ -176,7 +167,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
 
     return response;
   } catch (error) {
-    const response = NextResponse.json(
+    const response = dashboardJson(
       {
         error: {
           message:
@@ -187,10 +178,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       },
       {
         status: 500,
-        headers: {
-          "X-SDP-Trace-ID": trace.traceId,
-          "Server-Timing": trace.serverTiming(),
-        },
+        trace,
       }
     );
     logRouteResult(trace, 500, {

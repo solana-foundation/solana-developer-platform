@@ -8,12 +8,14 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
+import { createSystemAuditService } from "@/services/audit.service";
 import {
   type ClusterRpcReply,
   type ClusterRpcRequest,
@@ -204,6 +206,61 @@ function failHistoryReads(request: ClusterRpcRequest): ClusterRpcReply {
   return read.searchTransactionHistory
     ? HISTORY_UNAVAILABLE
     : signatureStatusesReply(read.signatures.map(() => null));
+}
+
+/** Opens a transfer's critical intent and records it on the row, as the sending request does. */
+async function openTransferAuditIntent(transferId: string): Promise<string> {
+  const intent = await createSystemAuditService(env).beginCriticalSystem({
+    organizationId: TEST_ORG_ID,
+    action: "transfer",
+    resourceType: "payment_transfer",
+    resourceId: transferId,
+  });
+  await getDb(env)
+    .prepare("UPDATE payment_transfers SET audit_intent_id = ? WHERE id = ?")
+    .bind(intent.id, transferId)
+    .run();
+  return intent.id;
+}
+
+async function listIntentOutcomes(auditIntentId: string) {
+  const rows = await getDb(env)
+    .prepare(
+      `SELECT status, metadata FROM audit_logs
+       WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+         AND metadata::jsonb ->> 'auditIntentId' = ?`
+    )
+    .bind(auditIntentId)
+    .all<{ status: string; metadata: string }>();
+  return rows.results.map((row) => ({
+    status: row.status,
+    metadata: z.record(z.string(), z.unknown()).parse(JSON.parse(row.metadata)),
+  }));
+}
+
+/**
+ * Makes every audit outcome insert fail until the returned restore runs or the test ends.
+ *
+ * @returns Drops the refusal; safe to call more than once.
+ */
+async function refuseAuditOutcomes(): Promise<() => Promise<void>> {
+  const db = getDb(env);
+  await db.execute(`
+    CREATE FUNCTION test_refuse_audit_outcome() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.metadata::jsonb ->> 'auditPhase' = 'outcome' THEN
+        RAISE EXCEPTION 'audit outcome refused';
+      END IF;
+      RETURN NEW;
+    END $$`);
+  await db.execute(`CREATE TRIGGER test_refuse_audit_outcome BEFORE INSERT ON audit_logs
+    FOR EACH ROW EXECUTE FUNCTION test_refuse_audit_outcome()`);
+  const restore = async () => {
+    await db.execute("DROP TRIGGER IF EXISTS test_refuse_audit_outcome ON audit_logs");
+    await db.execute("DROP FUNCTION IF EXISTS test_refuse_audit_outcome()");
+  };
+  onTestFinished(restore);
+  return restore;
 }
 
 describe("trackPendingTransfers", () => {
@@ -1183,6 +1240,118 @@ describe("trackPendingTransfers", () => {
         status: "confirmed",
         finalization_last_polled_at: expect.any(String),
       });
+    });
+  });
+
+  describe("audit intents recorded by the sending request", () => {
+    it("closes the intent with the verdict when the sync pass confirms the row", async () => {
+      rpc.respondSignatureStatuses(() => ({
+        slot: 321,
+        confirmations: 3,
+        confirmationStatus: "confirmed",
+        err: null,
+      }));
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_audit_confirmed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
+      const intentId = await openTransferAuditIntent("xfr_audit_confirmed");
+
+      await trackSandboxTransfers();
+      await trackSandboxTransfers();
+
+      expect(await getTransfer("xfr_audit_confirmed")).toMatchObject({ status: "confirmed" });
+      expect(await listIntentOutcomes(intentId)).toEqual([
+        {
+          status: "success",
+          metadata: expect.objectContaining({
+            status: "confirmed",
+            signature: String(TEST_SIG_1),
+            slot: "321",
+          }),
+        },
+      ]);
+    });
+
+    it("closes the intent as a failure when a stuck unsigned row times out", async () => {
+      await insertTransfer({
+        id: "xfr_audit_stuck",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(6),
+        updatedAt: minutesAgo(6),
+      });
+      const intentId = await openTransferAuditIntent("xfr_audit_stuck");
+
+      await trackSandboxTransfers();
+
+      expect(await getTransfer("xfr_audit_stuck")).toMatchObject({ status: "failed" });
+      expect(await listIntentOutcomes(intentId)).toEqual([
+        {
+          status: "failure",
+          metadata: expect.objectContaining({
+            status: "failed",
+            error: "Transfer processing timed out",
+          }),
+        },
+      ]);
+    });
+
+    it("keeps the row processing when the ledger refuses the outcome, then settles it", async () => {
+      rpc.respondSignatureStatuses(() => ({
+        slot: 654,
+        confirmations: null,
+        confirmationStatus: "finalized",
+        err: null,
+      }));
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_audit_refused",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
+      const intentId = await openTransferAuditIntent("xfr_audit_refused");
+      spyOnLog("error");
+      spyOnLog("warn");
+      const restoreAuditOutcomes = await refuseAuditOutcomes();
+
+      await trackSandboxTransfers();
+
+      expect(await getTransfer("xfr_audit_refused")).toMatchObject({ status: "processing" });
+      expect(await listIntentOutcomes(intentId)).toEqual([]);
+
+      await restoreAuditOutcomes();
+      await trackSandboxTransfers();
+
+      expect(await getTransfer("xfr_audit_refused")).toMatchObject({ status: "finalized" });
+      expect(await listIntentOutcomes(intentId)).toHaveLength(1);
+    });
+
+    it("settles a row without an intent without writing an outcome", async () => {
+      await insertTransfer({
+        id: "xfr_no_intent_stuck",
+        status: "processing",
+        signature: null,
+        createdAt: minutesAgo(6),
+        updatedAt: minutesAgo(6),
+      });
+
+      await trackSandboxTransfers();
+
+      expect(await getTransfer("xfr_no_intent_stuck")).toMatchObject({ status: "failed" });
+      const outcomes = await getDb(env)
+        .prepare(
+          `SELECT count(*)::integer AS count FROM audit_logs
+           WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'`
+        )
+        .first<{ count: number }>();
+      expect(outcomes?.count).toBe(0);
     });
   });
 
