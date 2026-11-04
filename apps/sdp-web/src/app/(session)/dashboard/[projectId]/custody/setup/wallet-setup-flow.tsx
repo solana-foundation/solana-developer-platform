@@ -1104,6 +1104,8 @@ function WalletSetupBody({
           ) : null}
           {detailsProvider !== null ? (
             <WalletDetailsForm
+              // A chosen account belongs to its provider: another starts with none chosen.
+              key={detailsProvider.id}
               connectionOptions={model.connectionOptions}
               hasManagedConfig={model.hasManagedConfig}
               onSubmit={onDetailsSubmit}

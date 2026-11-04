@@ -2,6 +2,7 @@
 
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -636,6 +637,46 @@ describe("connection picker", () => {
     });
     expect(pickerField()).toBeTruthy();
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
+  });
+
+  // Greptile (#2727): the Account picker outlived a provider switch. An option both providers
+  // offer ("Managed by SDP") stayed chosen, so the new provider's wallet skipped the question.
+  it("asks for the account again when the provider changes", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      connectedProviders: ["privy", "fireblocks"],
+      custodyAvailability: availableCustodyProviders(
+        projectProviderAvailability({
+          project: SANDBOX_PROJECT,
+          custody: [
+            { provider: "privy", modes: ["managed", "byok"] },
+            { provider: "fireblocks", modes: ["managed", "byok"] },
+          ],
+          compliance: [],
+          ramps: [],
+          earn: [],
+        })
+      ),
+      connections: [
+        connection({ id: "conn-privy", label: "Privy signing" }),
+        connection({ id: "conn-fireblocks", provider: "fireblocks", label: "Fireblocks vaults" }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
+    await user.click(await screen.findByRole("option", { name: "Managed by SDP" }));
+    expect(asElement(pickerField(), HTMLInputElement).value).toBe("managed");
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Fireblocks/ }));
+    expect(asElement(pickerField(), HTMLInputElement).value).toBe("");
+    typeLabel("Ops");
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Choose the account the wallet is created in."
+    );
+    expect(mocks.createWallet).not.toHaveBeenCalled();
   });
 
   // Connections belong to one provider; switching provider must not carry them over.
