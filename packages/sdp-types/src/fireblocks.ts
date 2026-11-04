@@ -17,6 +17,23 @@ const failedTransactions: ReadonlySet<string> = new Set(FIREBLOCKS_FAILED_TRANSA
 export function isFireblocksTransactionFailed(status: string): boolean {
   return failedTransactions.has(status);
 }
+
+/**
+ * Whether Fireblocks confirmed it refused a transaction because of a policy rule: status
+ * `BLOCKED` with the documented sub-status `BLOCKED_BY_POLICY`
+ * (https://developers.fireblocks.com/reference/transaction-substatuses). Any other terminal
+ * state, including `BLOCKED` without that sub-status, stays the provider's own failure.
+ *
+ * @param transaction - The Fireblocks transaction's status and sub-status.
+ * @returns True only for a confirmed policy refusal.
+ */
+export function isFireblocksPolicyRefusal(transaction: {
+  status: string;
+  subStatus?: string | null;
+}): boolean {
+  return transaction.status === "BLOCKED" && transaction.subStatus === "BLOCKED_BY_POLICY";
+}
+
 export const FIREBLOCKS_ADDRESS_STATUSES = [
   "WAITING_FOR_APPROVAL",
   "APPROVED",

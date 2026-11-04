@@ -321,6 +321,18 @@ export function transactionExpired(message?: string, details?: Record<string, un
 }
 
 /**
+ * The safe message for a custody policy refusal, naming the provider that holds the policy. A
+ * signing error and a refused native transfer (HOO-2478) both carry it.
+ *
+ * @param provider - The provider resolved for this custody wallet.
+ * @returns The caller-facing message; nothing in it comes from the provider's response.
+ */
+export function custodyPolicyRefusalMessage(provider: CustodyProvider): string {
+  const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
+  return `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`;
+}
+
+/**
  * A signing call the custody provider's own policy declined (HOO-2333).
  * The shared custody signer raises it for every flow that signs.
  *
@@ -329,9 +341,9 @@ export function transactionExpired(message?: string, details?: Record<string, un
  * @returns The 422 `CUSTODY_POLICY_REFUSED` error.
  */
 export function custodyPolicyRefused(cause: Error, provider: CustodyProvider): AppError {
-  const label = CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label;
-  const message = `${label} blocked signing due to a wallet policy. Review the policy in ${label} or adjust the request.`;
-  return new AppError("CUSTODY_POLICY_REFUSED", message, undefined, { cause });
+  return new AppError("CUSTODY_POLICY_REFUSED", custodyPolicyRefusalMessage(provider), undefined, {
+    cause,
+  });
 }
 
 export function rateLimited(message?: string): AppError {

@@ -207,7 +207,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
 
-A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
+A recorded failure (such as `400 TRANSACTION_FAILED`, or `422 CUSTODY_POLICY_REFUSED` when the wallet's policy at its custody provider refused to sign) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 

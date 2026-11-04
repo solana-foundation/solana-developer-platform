@@ -971,6 +971,22 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
 }
 
 /**
+ * The code a failed transfer row recorded, or `TRANSACTION_FAILED` for a row
+ * the reconciler failed from the chain, which records none.
+ *
+ * @param row - A transfer row whose status is `failed`.
+ * @returns The error code the row answers with.
+ */
+function recordedFailureCode(row: TransferRow): ErrorCode {
+  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
+  const recordedCode =
+    typeof recorded === "object" && recorded !== null && "code" in recorded
+      ? recorded.code
+      : undefined;
+  return isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
+}
+
+/**
  * The error a failed transfer row answers with: the code its request recorded,
  * or `TRANSACTION_FAILED` for a row the reconciler failed from the chain.
  *
@@ -978,16 +994,8 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
  * @returns The error a replay of the row's key answers with.
  */
 function failedTransferError(row: TransferRow): AppError {
-  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
-  const recordedCode =
-    typeof recorded === "object" && recorded !== null && "code" in recorded
-      ? recorded.code
-      : undefined;
-  // A row the reconciler failed from the chain records no code: it is a
-  // transaction failure.
-  const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
   return new AppError(
-    code,
+    recordedFailureCode(row),
     `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
     { transferId: row.id, status: row.status }
   );
@@ -1067,8 +1075,13 @@ async function executeFireblocksTransfer(
       metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
     });
   }
+  // The same code a replay of the key reads, so a confirmed policy block answers
+  // 422 CUSTODY_POLICY_REFUSED both times (HOO-2478).
   if (updated.status === "failed")
-    throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
+    throw new AppError(
+      recordedFailureCode(updated),
+      updated.error ?? "Fireblocks refused the transfer"
+    );
   return success(c, { transfer: mapTransferRow(updated) });
 }
 
