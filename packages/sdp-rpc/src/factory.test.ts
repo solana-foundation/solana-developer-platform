@@ -143,16 +143,7 @@ function devnetHttpStatus(status: number): Endpoint {
   };
 }
 
-function readRequest(
-  input: Parameters<typeof fetch>[0],
-  init: Parameters<typeof fetch>[1]
-): {
-  url: string;
-  id: unknown;
-  method: string;
-  params: unknown;
-  signal: AbortSignal | null | undefined;
-} {
+function readRequest(input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) {
   assert.ok(typeof input === "string");
   assert.ok(init !== undefined && typeof init.body === "string");
   const payload: unknown = JSON.parse(init.body);
