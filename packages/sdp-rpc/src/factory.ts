@@ -6,6 +6,7 @@ import {
 } from "@sdp/types/well-known-tokens";
 import {
   type Commitment,
+  commitmentComparator,
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   getAbortablePromise,
@@ -758,12 +759,6 @@ export type EveryEndpointSignatureStatus =
   /** No endpoint has a status for it and at least one could not answer at the floor. */
   | { kind: "unresolved"; failures: unknown[] };
 
-const CONFIRMATION_RANK = {
-  processed: 1,
-  confirmed: 2,
-  finalized: 3,
-} as const satisfies Record<Commitment, number>;
-
 /**
  * Signature statuses from transaction history on every endpoint of the scope's managed pool, each
  * read floored at `minContextSlot` against the `commitment` bank. The pool takes the first
@@ -811,15 +806,15 @@ function mostConfirmedStatus(
   let mostConfirmed: SignatureStatusInfo | null = null;
   for (const status of statuses) {
     if (status === null) continue;
-    if (mostConfirmed === null || confirmationRank(status) > confirmationRank(mostConfirmed)) {
-      mostConfirmed = status;
-    }
+    if (mostConfirmed === null || isMoreConfirmed(status, mostConfirmed)) mostConfirmed = status;
   }
   return mostConfirmed;
 }
 
-function confirmationRank(status: SignatureStatusInfo): number {
-  return status.confirmationStatus === null ? 0 : CONFIRMATION_RANK[status.confirmationStatus];
+function isMoreConfirmed(status: SignatureStatusInfo, than: SignatureStatusInfo): boolean {
+  if (status.confirmationStatus === null) return false;
+  if (than.confirmationStatus === null) return true;
+  return commitmentComparator(status.confirmationStatus, than.confirmationStatus) > 0;
 }
 
 /**
