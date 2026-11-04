@@ -163,11 +163,12 @@ function ExitRouteOptions({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const offersProviderInstant = ready?.providerRedemptionModes?.includes("instant") ?? false;
   return (
     <>
       <p className="mt-2 text-body text-secondary">{t("DashboardEarn.exitRoute.description")}</p>
       <div className="mt-5 grid gap-2">
-        {ready?.providerRedemptionModes?.includes("instant") ? (
+        {offersProviderInstant ? (
           <RouteOption
             description={t("DashboardEarn.exitRoute.providerInstantDescription")}
             icon={ZapIcon}
