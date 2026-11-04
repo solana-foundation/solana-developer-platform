@@ -1,4 +1,3 @@
-import type { MainnetAccess } from "@sdp/types/mainnet-access";
 import { z } from "zod";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
@@ -7,12 +6,18 @@ import { resolveOrganizationId } from "./organization-id";
 
 const organizationNameSchema = z.object({ name: z.string() });
 
-export type MainnetAccessLoad =
-  | { ok: true; organizationId: string; organizationName: string; access: MainnetAccess }
-  | { ok: false; error: string };
+const mainnetAccessLoadSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    organizationId: z.string(),
+    organizationName: z.string(),
+    access: mainnetAccessSchema,
+  }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
 
 /** Where the signed-in organization's mainnet access stands, with the name an admin accepts for. */
-export async function loadMainnetAccess(): Promise<MainnetAccessLoad> {
+export async function loadMainnetAccess(): Promise<z.infer<typeof mainnetAccessLoadSchema>> {
   try {
     const client = await createOrgSdpApiClient();
     const organizationId = await resolveOrganizationId(client);

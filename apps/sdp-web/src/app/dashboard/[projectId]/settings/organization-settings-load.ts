@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createOrgSdpApiClient } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 import { resolveOrganizationId } from "./organization-id";
@@ -6,42 +7,48 @@ import {
   organizationAllowlistSchema,
 } from "./organization-settings";
 
-export type OrganizationIpAllowlist =
-  | { ok: true; organizationId: string; allowedIps: string[] }
-  | { ok: false; error: string };
+const loadFailureSchema = z.object({ ok: z.literal(false), error: z.string() });
 
-export type OrganizationAlertEmails =
-  | { ok: true; organizationId: string; enabled: boolean }
-  | { ok: false; error: string };
+const organizationIpAllowlistLoadSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), organizationId: z.string(), allowedIps: z.array(z.string()) }),
+  loadFailureSchema,
+]);
 
-async function readOrganization(): Promise<{ organizationId: string; organization: unknown }> {
+const organizationAlertEmailsLoadSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), organizationId: z.string(), enabled: z.boolean() }),
+  loadFailureSchema,
+]);
+
+async function readOrganization<T>(
+  settingSchema: z.ZodType<T>
+): Promise<{ organizationId: string; setting: T }> {
   const client = await createOrgSdpApiClient();
   const organizationId = await resolveOrganizationId(client);
   const organization = await client.fetch<unknown>(
     `/v1/organizations/${encodeURIComponent(organizationId)}`
   );
-  return { organizationId, organization };
+  return { organizationId, setting: settingSchema.parse(organization) };
 }
 
 /** The organization-wide API-key IP allowlist; empty when unrestricted. */
-export async function loadOrganizationIpAllowlist(): Promise<OrganizationIpAllowlist> {
+export async function loadOrganizationIpAllowlist(): Promise<
+  z.infer<typeof organizationIpAllowlistLoadSchema>
+> {
   try {
-    const { organizationId, organization } = await readOrganization();
-    return {
-      ok: true,
-      organizationId,
-      allowedIps: organizationAllowlistSchema.parse(organization),
-    };
+    const { organizationId, setting } = await readOrganization(organizationAllowlistSchema);
+    return { ok: true, organizationId, allowedIps: setting };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }
 }
 
 /** Whether the organization's admins get alert emails (HOO-2299); on unless turned off. */
-export async function loadOrganizationAlertEmails(): Promise<OrganizationAlertEmails> {
+export async function loadOrganizationAlertEmails(): Promise<
+  z.infer<typeof organizationAlertEmailsLoadSchema>
+> {
   try {
-    const { organizationId, organization } = await readOrganization();
-    return { ok: true, organizationId, enabled: organizationAlertEmailsSchema.parse(organization) };
+    const { organizationId, setting } = await readOrganization(organizationAlertEmailsSchema);
+    return { ok: true, organizationId, enabled: setting };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
   }

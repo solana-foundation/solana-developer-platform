@@ -23,9 +23,12 @@ const requestInputSchema = z.object({
   termsVersion: z.string().min(1).max(64),
 });
 
-export type RequestMainnetAccessResult =
-  | { ok: true; access: MainnetAccess }
-  | { ok: false; error: string };
+const requestMainnetAccessResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), access: mainnetAccessSchema }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+
+export type RequestMainnetAccessResult = z.infer<typeof requestMainnetAccessResultSchema>;
 
 function mainnetAccessPath(organizationId: string): string {
   return `/api/dashboard/organizations/${encodeURIComponent(organizationId)}/mainnet-access`;
