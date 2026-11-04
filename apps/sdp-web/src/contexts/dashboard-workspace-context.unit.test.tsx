@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactNode, useState } from "react";
@@ -30,7 +31,6 @@ const clerk = vi.hoisted(() => {
   return { auth };
 });
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/dashboard-url-state", () => ({
   readDashboardTabFromUrl: () => null,
@@ -56,8 +56,10 @@ function Probe() {
   );
 }
 
+const privatePageQueryKeys = { resource: () => ["session-isolation", "private-resource"] as const };
+
 function PrivatePage({ fetcher }: { fetcher: () => Promise<string> }) {
-  const { data } = useSWR("same-private-resource", fetcher);
+  const { data } = useSWR(privatePageQueryKeys.resource(), fetcher);
   const [draft, setDraft] = useState("");
   return (
     <>
@@ -108,6 +110,7 @@ function WorkspaceFixture({
 }
 
 beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => clerk.auth);
   cleanup();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
@@ -121,6 +124,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("DashboardWorkspaceProvider project selection", () => {

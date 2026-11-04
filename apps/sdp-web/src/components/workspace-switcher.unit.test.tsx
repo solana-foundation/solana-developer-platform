@@ -1,42 +1,27 @@
 // @vitest-environment jsdom
 
+import * as clerk from "@clerk/nextjs";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as workspace from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   setActive: vi.fn(),
   toastError: vi.fn(),
   switching: vi.fn(),
-  organizationLoaded: true,
-}));
-vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
-vi.mock("@clerk/nextjs", () => ({
-  useOrganization: () => ({
-    isLoaded: mocks.organizationLoaded,
-    organization: { id: "org_a", name: "Alpha", imageUrl: null },
-  }),
-  useOrganizationList: () => ({
-    isLoaded: true,
-    setActive: mocks.setActive,
-    userMemberships: {
-      data: ["Alpha", "Beta"].map((name, index) => ({
-        organization: { id: index === 0 ? "org_a" : "org_b", name, imageUrl: null },
-      })),
-    },
-  }),
-}));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    projects: [],
-    selectedProjectId: "project_a",
-    selectProject: vi.fn(),
-    isProjectSwitching: false,
-  }),
-}));
+};
+
+function organizationState(isLoaded = true) {
+  vi.mocked(vi.spyOn(clerk, "useOrganization"), { partial: true, deep: true }).mockReturnValue({
+    isLoaded,
+    organization: { id: "org_a", name: "Alpha", imageUrl: "" },
+  });
+}
 
 function fixture() {
   return render(
@@ -48,14 +33,33 @@ function fixture() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.organizationLoaded = true;
+  organizationState();
+  vi.spyOn(toast, "error").mockImplementation(mocks.toastError);
+  vi.mocked(vi.spyOn(clerk, "useOrganizationList"), { partial: true, deep: true }).mockReturnValue({
+    isLoaded: true,
+    setActive: mocks.setActive,
+    userMemberships: {
+      data: ["Alpha", "Beta"].map((name, index) => ({
+        organization: { id: index === 0 ? "org_a" : "org_b", name, imageUrl: "" },
+      })),
+    },
+  });
+  vi.mocked(vi.spyOn(workspace, "useDashboardWorkspace"), { partial: true }).mockReturnValue({
+    projects: [],
+    selectedProjectId: "project_a",
+    selectProject: vi.fn(),
+    isProjectSwitching: false,
+  });
   mocks.setActive.mockResolvedValue(undefined);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("workspace organization switching", () => {
   it("shows a loading placeholder while Clerk resolves the organization", () => {
-    mocks.organizationLoaded = false;
+    organizationState(false);
     fixture();
     expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
     expect(screen.queryByText("Select organization")).toBeNull();

@@ -4,9 +4,15 @@ import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
-import { getE2EEnv } from "../env";
-import { resolveClerkTestIdentity } from "../support/clerk-admin";
-import { provisionLinkedOrgProjects } from "../support/local-dashboard-bootstrap";
+import { getE2EEnv } from "@/playwright/env";
+import { resolveClerkTestIdentity } from "@/playwright/support/clerk-admin";
+import { provisionLinkedOrgProjects } from "@/playwright/support/local-dashboard-bootstrap";
+
+declare global {
+  interface Window {
+    restoreSessionIsolationActivation?: () => void;
+  }
+}
 
 const env = getE2EEnv();
 const clerkAdmin = createClerkClient({ secretKey: env.clerkSecretKey });
@@ -19,6 +25,8 @@ let primaryOrgId: string;
 let productionProject: string;
 let secondProject: string;
 let secondOrgId: string;
+let secondLocalOrg: string;
+const contactIds = [`cp_${randomUUID()}`, `cp_${randomUUID()}`];
 
 async function expectContacts(page: Page, projectId: string, own: string, other: string) {
   await page.goto(projectHref(projectId, "/dashboard/payments/counterparty"));
@@ -71,7 +79,7 @@ test.describe
       await db.connect();
       try {
         await db.query("BEGIN");
-        const secondLocalOrg = `org_session_${randomUUID()}`;
+        secondLocalOrg = `org_session_${randomUUID()}`;
         secondProject = `prj_${randomUUID()}`;
         await db.query(
           `INSERT INTO organizations (id, name, slug, tier, status, settings, onboarding_completed_at, onboarding_version)
@@ -101,14 +109,14 @@ test.describe
          SELECT 'pm_' || gen_random_uuid(), $1, user_id FROM project_members WHERE project_id = $2`,
           [secondProject, primaryProject]
         );
-        for (const [project, name] of [
-          [primaryProject, contactA],
-          [secondProject, contactB],
+        for (const [project, name, id] of [
+          [primaryProject, contactA, contactIds[0]],
+          [secondProject, contactB, contactIds[1]],
         ]) {
           await db.query(
             `INSERT INTO counterparties (id, organization_id, project_id, entity_type, display_name, provider_data, status)
-           SELECT 'cp_' || gen_random_uuid(), organization_id, id, 'individual', $2, '{}', 'active' FROM projects WHERE id = $1`,
-            [project, name]
+           SELECT $3, organization_id, id, 'individual', $2, '{}', 'active' FROM projects WHERE id = $1`,
+            [project, name, id]
           );
         }
         await db.query("COMMIT");
@@ -122,7 +130,26 @@ test.describe
     });
 
     test.afterAll(async () => {
-      if (secondOrgId) await clerkAdmin.organizations.deleteOrganization(secondOrgId);
+      try {
+        if (secondLocalOrg) {
+          const db = new Client({ connectionString: process.env.DATABASE_URL });
+          await db.connect();
+          try {
+            await db.query("BEGIN");
+            await db.query("DELETE FROM counterparties WHERE id = ANY($1::text[])", [contactIds]);
+            // The fixture's organization owns its projects, memberships and auth mapping.
+            await db.query("DELETE FROM organizations WHERE id = $1", [secondLocalOrg]);
+            await db.query("COMMIT");
+          } catch (error) {
+            await db.query("ROLLBACK");
+            throw error;
+          } finally {
+            await db.end();
+          }
+        }
+      } finally {
+        if (secondOrgId) await clerkAdmin.organizations.deleteOrganization(secondOrgId);
+      }
     });
 
     test("fresh browser sign-in opens the right organization and project", async ({
@@ -168,9 +195,7 @@ test.describe
         secondContact: string;
       }) => {
         const check = () => {
-          const client = (
-            window as unknown as { Clerk?: { organization?: { id: string }; session?: unknown } }
-          ).Clerk;
+          const client = window.Clerk;
           const content = document.querySelector("[data-sdp-dashboard-shell]")?.textContent;
           if (content && client) {
             if (
@@ -230,18 +255,12 @@ test.describe
     }) => {
       await expectContacts(page, primaryProject, contactA, contactB);
       await page.evaluate(() => {
-        const client = (
-          window as unknown as {
-            Clerk: { setActive: (params: { organization: string }) => Promise<void> };
-            restoreActivation?: () => void;
-          }
-        ).Clerk;
+        const client = window.Clerk;
         const original = client.setActive;
-        Object.assign(window, {
-          restoreActivation: () => {
-            client.setActive = original;
-          },
-        });
+        window.restoreSessionIsolationActivation = () => {
+          client.setActive = original;
+          delete window.restoreSessionIsolationActivation;
+        };
         client.setActive = async () => {
           throw new Error("Simulated activation failure");
         };
@@ -256,9 +275,7 @@ test.describe
           "false"
         );
       } finally {
-        await page.evaluate(() =>
-          (window as unknown as { restoreActivation: () => void }).restoreActivation()
-        );
+        await page.evaluate(() => window.restoreSessionIsolationActivation?.());
       }
     });
 

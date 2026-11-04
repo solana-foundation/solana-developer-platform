@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardSessionCleanup } from "./dashboard-session-cleanup";
 
-const clerk = vi.hoisted(() => ({
-  auth: { isLoaded: true, sessionId: "session_a" as string | null },
-}));
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => clerk.auth }));
+const clerk: { auth: { isLoaded: boolean; sessionId: string | null } } = {
+  auth: { isLoaded: true, sessionId: "session_a" },
+};
 
 beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => clerk.auth);
   clerk.auth = { isLoaded: true, sessionId: "session_a" };
   for (const storage of [localStorage, sessionStorage]) {
     storage.setItem("sdp.dashboard.cache.user:org:project.wallets", "private data");
