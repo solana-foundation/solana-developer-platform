@@ -15,7 +15,7 @@ import { cn } from "@sdp/ui/cn";
 import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
+import { ExternalLinkIcon, Loader2Icon, MapPinIcon, SearchIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   applyRequirementMask,
@@ -161,6 +161,8 @@ function RequirementFieldInput({
         </div>
       );
     }
+    case "consent":
+      return <ConsentFieldInput field={field} value={value} onChange={onChange} />;
     case "address":
       throw new Error(`Address field "${field.key}" renders through its nested fields.`);
     default: {
@@ -168,6 +170,45 @@ function RequirementFieldInput({
       throw new Error(`Unhandled requirement field kind: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+/**
+ * A provider document the person accepts by ticking the box.
+ * Its link sits inside the sentence being accepted, so reading and accepting happen in one place.
+ * The value is the literal "true", or "" when unticked.
+ */
+function ConsentFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: Extract<RequirementField, { kind: "consent" }>;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        id={field.key}
+        className="mt-1"
+        checked={value === "true"}
+        onChange={(event) => onChange(event.currentTarget.checked ? "true" : "")}
+      />
+      <Label htmlFor={field.key} className="text-body font-normal text-secondary">
+        {field.label}{" "}
+        <a
+          href={field.documentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-primary underline underline-offset-2"
+        >
+          {field.documentLabel ?? field.documentUrl}
+          <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
+        </a>
+      </Label>
+    </div>
+  );
 }
 
 /**

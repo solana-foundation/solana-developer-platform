@@ -2,6 +2,7 @@ import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { rampAmountLimitOf, SdpPaymentsError } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
+  type RampCustomerLink,
   type RampDirectionMembers,
   type RampProvider,
   type RampRuntimeContext,
@@ -28,11 +29,19 @@ import type {
 } from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
 import type { z } from "zod";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { GetCounterpartyProviderAccountInput } from "@/db/repositories/counterparty-provider-account.repository";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
-import { AppError, conflict, unsupportedRampCorridor } from "@/lib/errors";
+import {
+  AppError,
+  conflict,
+  counterpartyNotProvisioned,
+  unsupportedRampCorridor,
+} from "@/lib/errors";
 import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
@@ -47,6 +56,7 @@ import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/mon
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { auditedRampWrite } from "@/services/payments/ramp-audit";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
+import { createRampCustomerLinkStore } from "@/services/ramps/customer-link-store";
 import { admitRamp } from "./admission";
 import type { createOfframpQuoteSchema } from "./offramp/schemas";
 import type { createOnrampQuoteSchema } from "./onramp/schemas";
@@ -146,6 +156,8 @@ export interface RampQuoteResolved {
   counterparty: CounterpartyRow;
   wallet: ScopedRampWallet;
   walletAddress: string;
+  /** The provider-side customer the quote acts for, once the provider has cleared it. */
+  customerLink: RampCustomerLink | null;
 }
 
 interface PersistRampQuoteTransferInput {
@@ -201,7 +213,38 @@ export async function resolveRampQuoteRequest(
     // The quote's deposit is a transfer from this wallet; refuse it before quoting.
     assertCallerMaySignWith(scope.auth, wallet, "payments.transfer");
   }
-  return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
+  const customerLink = await resolveClearedCustomerLink(c, direction, {
+    organizationId: scope.auth.organizationId,
+    projectId,
+    counterpartyId: counterparty.id,
+    provider: input.provider,
+  });
+  return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey, customerLink };
+}
+
+/**
+ * The customer a provider that settles its own requirements (ADR 0008) quotes for.
+ * It is null for a provider that keeps none.
+ * A customer the provider has not cleared gets no quote.
+ * The refusal names the requirements step instead of letting the provider refuse the order.
+ */
+async function resolveClearedCustomerLink(
+  c: AppContext,
+  direction: RampQuoteDirection,
+  scope: GetCounterpartyProviderAccountInput
+): Promise<RampCustomerLink | null> {
+  const { requirements } = RAMP_PROVIDER_CLIENTS[scope.provider];
+  if (requirements === undefined) {
+    return null;
+  }
+  const link = await createRampCustomerLinkStore(
+    createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+    scope
+  ).read();
+  if (link === null || !requirements.isCustomerReady(link)) {
+    throw counterpartyNotProvisioned(scope.provider, direction);
+  }
+  return link;
 }
 
 export async function persistRampQuoteTransfer(

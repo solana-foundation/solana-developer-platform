@@ -232,8 +232,8 @@ deposit signature untouched, and withdraws the instruction for review.
 
 ## Ramps: retired provider ids
 
-A removed ramp provider's id moves from `RAMP_PROVIDERS` to
-`RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
+A removed ramp provider's id moves from `RAMP_PROVIDERS` to `RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused for another provider.
+It returns to `RAMP_PROVIDERS` only when the provider it named comes back, as Hercle did; its historical rows then read as live ones.
 - **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
   schema and the `ramp_webhook_events` row parse `provider` against
   `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id

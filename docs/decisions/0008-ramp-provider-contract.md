@@ -108,6 +108,16 @@ stateful providers fit the model at all.
 
   None of it is built until a KYB or bank-payout provider returns.
 
+**Amended 2026-10-30:** Hercle, a KYB on-ramp provider, returned and built the parts it needs.
+- `RampProvider.requirements` has `describe`, `submit` and `isCustomerReady`. The requirements routes call `describe` and `submit` for a provider that has the member, and `validateCounterparty` for one that does not.
+- `describe` only reads at the provider, because it serves `GET /requirements` under a read grant. Anything the provider must start (Hercle's verification) starts in `submit`.
+- The store port is `RampCustomerLinkStore` (`read`, `link`, `recordStatus`), backed by the counterparty's `customer_link` row (`apps/sdp-api/src/services/ramps/customer-link-store.ts`). The provider's verdict lives in `provider_status`, verbatim. Funding-wallet and payout-account ports wait for a provider that needs them.
+- `resolveRampQuoteRequest` refuses a quote with `counterpartyNotProvisioned` unless `isCustomerReady` accepts the link, and hands the link to the quote handler.
+- `manual_instructions` quotes carry Hercle's `fiat_funding` instruction.
+- `RampProvider.simulateSandboxSettlement` has a sandbox provider settle its order as its rail would. The order waits for its wire from the moment it opens, so the simulate route accepts the quote's `pending` as well as `awaiting_payment`.
+- A webhook key may be a provider's public key: Hercle signs with ECDSA P-256, and its key is `HERCLE_<MODE>_WEBHOOK_PUBLIC_KEY`.
+- A key whose format is the same in both modes (Hercle's secret) cannot name its mode, so the contract suite requires only that each key which does name its mode is refused in the other.
+
 ## Considered Options
 
 - **A plugin framework or capability registry:** rejected. Two launch providers

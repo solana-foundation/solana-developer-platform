@@ -263,6 +263,7 @@ const USD_PER_UNIT: Record<string, number> = {
 const PROVIDER_FEE_RATE: Record<RampProviderId, number> = {
   moonpay: 0.035,
   stripe: 0.029,
+  hercle: 0.01,
 };
 const QUOTE_TTL_MS = 15 * MINUTE_MS;
 
@@ -391,10 +392,42 @@ interface QuoteContext {
   transferId: string;
 }
 
-/** A provider's on-ramp hosted checkout or widget session. */
-function onrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRampQuote {
+/** What an on-ramp quote also needs: the fiat the customer sends. */
+interface OnrampQuoteContext extends QuoteContext {
+  fiatCurrency: string;
+  fiatAmount: string;
+  expiresAt: string;
+}
+
+/** A provider's on-ramp hosted checkout, widget session, or bank wire instructions. */
+function onrampQuoteFor(provider: RampProviderId, q: OnrampQuoteContext): PaymentRampQuote {
   const base = { id: q.quoteId, status: "pending" as const };
   switch (provider) {
+    case "hercle": {
+      const paymentReference = `HRC-${q.quoteId.slice(-10).toUpperCase()}`;
+      return {
+        ...base,
+        provider,
+        deliveryMode: "manual_instructions",
+        expiresAt: q.expiresAt,
+        paymentInstructions: [
+          {
+            provider,
+            kind: "fiat_funding",
+            fiatCurrency: q.fiatCurrency,
+            bankAccount: {
+              iban: "CH93 0076 2011 6238 5295 7",
+              bic: "DEMOCHZZ",
+              bankName: "Demo Bank",
+              accountHolder: "Hercle (demo)",
+              paymentReference,
+              payerAccountHolder: "Demo Business AG",
+            },
+            instructionsNotes: `Wire ${q.fiatAmount} ${q.fiatCurrency} from an account held by Demo Business AG, and include the payment reference.`,
+          },
+        ],
+      };
+    }
     case "moonpay":
       return {
         ...base,
@@ -426,6 +459,7 @@ function offrampQuoteFor(provider: RampProviderId, q: QuoteContext): PaymentRamp
         hostedUrl: `https://sell-sandbox.moonpay.com/?externalTransactionId=${q.transferId}`,
       };
     case "stripe":
+    case "hercle":
       throw new Error(`${getRampProviderLabel(provider)} runs no off-ramp in the demo.`);
   }
 }
@@ -479,7 +513,12 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
       Number(input.data.fiatAmount)
     );
     const crypto = cryptoText(amounts);
-    const onrampQuote = onrampQuoteFor(provider, context);
+    const onrampQuote = onrampQuoteFor(provider, {
+      ...context,
+      fiatCurrency,
+      fiatAmount: scaled(amounts.fiat, 2),
+      expiresAt: new Date(at + QUOTE_TTL_MS).toISOString(),
+    });
     return record(
       [
         {

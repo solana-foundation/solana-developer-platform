@@ -309,6 +309,12 @@ async function clearPlaywrightOrganizations(
   );
 
   if (organizationIds.length > 0) {
+    // Provider customer links reference their counterparty with NO ACTION, and no cascade reaches them.
+    // A run that submitted a provider's requirements for real (Hercle's KYB) leaves one behind.
+    await client.query(
+      "DELETE FROM counterparty_provider_accounts WHERE organization_id = ANY($1::text[])",
+      [organizationIds]
+    );
     await client.query("DELETE FROM organizations WHERE id = ANY($1::text[])", [organizationIds]);
   }
 }

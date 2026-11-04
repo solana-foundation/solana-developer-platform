@@ -1658,7 +1658,28 @@ export interface CryptoDepositPaymentRampInstruction {
   instructionsNotes?: string;
 }
 
-export type PaymentRampInstruction = never;
+export interface HercleBankFundingDetails {
+  /** The business's own account at Hercle's bank; Hercle attributes a wire by the account it lands on. */
+  iban: string;
+  bic?: string;
+  bankName?: string;
+  accountHolder?: string;
+  /** Wire reference the sender must include so Hercle can match the payment to the order. */
+  paymentReference: string;
+  /** The holder the wire must come from: the business itself. The bank returns a wire from anyone else. */
+  payerAccountHolder: string;
+}
+
+/** On-ramp: wire fiat to the Hercle-issued account to receive crypto. */
+export interface HercleFiatFundingInstruction {
+  provider: "hercle";
+  kind: "fiat_funding";
+  fiatCurrency: string;
+  bankAccount: HercleBankFundingDetails;
+  instructionsNotes: string;
+}
+
+export type PaymentRampInstruction = HercleFiatFundingInstruction;
 
 export const RAMP_DIRECTIONS = ["onramp", "offramp"] as const;
 
@@ -1809,4 +1830,11 @@ export type PaymentRampQuote =
       sessionId: string;
       publishableKey: string;
       redirectUrl?: string;
+    })
+  | (BasePaymentRampQuote & {
+      provider: "hercle";
+      deliveryMode: "manual_instructions";
+      paymentInstructions: HercleFiatFundingInstruction[];
+      /** When the order's funding window closes; a wire after it is not matched to the order. */
+      expiresAt?: string;
     });

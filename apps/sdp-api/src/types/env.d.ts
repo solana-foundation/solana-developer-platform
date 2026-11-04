@@ -274,6 +274,12 @@ export interface Env extends ManagedRpcEnv {
   STRIPE_PRODUCTION_PUBLISHABLE_KEY?: string;
   STRIPE_PRODUCTION_SECRET_KEY?: string;
   STRIPE_PRODUCTION_WEBHOOK_SECRET?: string;
+  HERCLE_SANDBOX_CLIENT_ID?: string;
+  HERCLE_SANDBOX_SECRET_KEY?: string;
+  HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY?: string;
+  HERCLE_PRODUCTION_CLIENT_ID?: string;
+  HERCLE_PRODUCTION_SECRET_KEY?: string;
+  HERCLE_PRODUCTION_WEBHOOK_PUBLIC_KEY?: string;
 
   // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;

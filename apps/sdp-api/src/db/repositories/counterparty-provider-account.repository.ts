@@ -53,6 +53,11 @@ export interface GetCounterpartyProviderAccountInput {
   provider: RampProviderId;
 }
 
+export interface RecordCustomerLinkStatusInput extends GetCounterpartyProviderAccountInput {
+  /** The provider's lifecycle status for the customer, verbatim. */
+  providerStatus: string;
+}
+
 export interface ListProviderAccountsInput {
   organizationId: string;
   projectId: string;
@@ -87,6 +92,16 @@ export interface CounterpartyProviderAccountsRepository {
   upsertProviderAccount(
     input: UpsertCounterpartyProviderAccountInput
   ): Promise<CounterpartyProviderAccountRow>;
+
+  /**
+   * Records the provider's latest status on the counterparty's active customer link.
+   * The provider's status is an observation, so the latest read wins.
+   * A stale write heals on the next read, which asks the provider again.
+   *
+   * @param input - Tenant scope, counterparty, provider, and the status.
+   * @returns Whether an active customer link in scope took the status.
+   */
+  recordCustomerLinkStatus(input: RecordCustomerLinkStatusInput): Promise<boolean>;
 
   /**
    * Lists all payout-account, customer-link, and funding-wallet rows for one

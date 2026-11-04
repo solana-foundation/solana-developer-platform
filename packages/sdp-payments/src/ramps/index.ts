@@ -1,6 +1,7 @@
 import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { badRequest, providerNotConfigured } from "#/errors";
+import { HercleRampClient } from "./providers/hercle/client";
 import { MoonpayRampClient } from "./providers/moonpay/client";
 import type { MoonpaySettlementEvent } from "./providers/moonpay/event-status-mapping";
 import { StripeRampClient } from "./providers/stripe/client";
@@ -15,6 +16,7 @@ import {
 interface RampProviderSettlementEvents {
   moonpay: MoonpaySettlementEvent;
   stripe: RampSettlementEvent;
+  hercle: RampSettlementEvent;
 }
 
 /**
@@ -26,6 +28,7 @@ export const RAMP_PROVIDER_CLIENTS: {
 } = {
   moonpay: new MoonpayRampClient(),
   stripe: new StripeRampClient(),
+  hercle: new HercleRampClient(),
 };
 
 export function isRampProviderId(value: string): value is RampProviderId {

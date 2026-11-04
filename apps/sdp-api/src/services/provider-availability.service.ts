@@ -260,6 +260,7 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
   ramps: {
     moonpay: managedRampDefinition("moonpay"),
     stripe: managedRampDefinition("stripe"),
+    hercle: managedRampDefinition("hercle"),
   },
   earn: {
     // Keyless like Kamino, though for a cluster reason rather than Kamino's

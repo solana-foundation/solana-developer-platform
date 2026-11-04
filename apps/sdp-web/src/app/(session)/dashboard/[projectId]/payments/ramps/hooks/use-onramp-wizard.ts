@@ -1,11 +1,14 @@
 "use client";
 
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type {
   PaymentOnrampQuoteRequest,
   PaymentRampQuote,
+  PaymentTransferStatus,
   PaymentTransferSummary,
 } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -34,7 +37,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
-import { onrampPairs } from "@/lib/ramps";
+import { offersSandboxSettlement, onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -81,14 +84,21 @@ interface SimulationContext {
   transferStatus: PaymentTransferSummary | undefined;
   succeeded: boolean;
   demo: boolean;
-  sandbox: boolean;
+  environment: SdpEnvironment;
+  /** The providers the channel-capped flags offer on this request. */
+  enabledRampProviders: readonly RampProviderId[];
+}
+
+/** A bank-instruction order waits for its wire from the moment it opens, so its transfer can still be `pending`. */
+function awaitsPayment(quote: PaymentRampQuote, status: PaymentTransferStatus): boolean {
+  if (status === "awaiting_payment") return true;
+  return quote.deliveryMode === "manual_instructions" && status === "pending";
 }
 
 /**
- * Whether a deposit can be marked paid: while it waits for its money (and as done until it
- * finishes), through a sandbox provider's own simulation, or in demo mode for any provider, the
- * demo standing in for checkouts that would open elsewhere. A production deposit never offers
- * it: the sandbox can't fund a live deposit.
+ * Whether a deposit can be marked paid: while it waits for its money, and as done until it finishes.
+ * The demo offers it for any provider, standing in for checkouts that would open elsewhere.
+ * Outside the demo, only a sandbox provider the API settles on request offers it, never a production deposit.
  */
 function simulationOffered(context: SimulationContext): context is SimulationContext & {
   quote: PaymentRampQuote;
@@ -97,8 +107,11 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   const { quote, transferId, transferStatus } = context;
   if (quote === null || transferId === null || transferStatus === undefined) return false;
   if (getRampTransferState(transferStatus.status).terminal) return false;
-  if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
-  return context.demo;
+  if (!awaitsPayment(quote, transferStatus.status) && !context.succeeded) return false;
+  return (
+    context.demo ||
+    offersSandboxSettlement(quote.provider, context.environment, context.enabledRampProviders)
+  );
 }
 
 export function useOnrampWizard(props: UseRampWizardProps) {
@@ -169,7 +182,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const transferStatusKey = wizard.quoteTransferId
     ? paymentsQueryKeys.onrampTransferStatus({ transferId: wizard.quoteTransferId })
     : null;
-  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
+  const {
+    data: transferStatus,
+    isValidating: transferStatusLoading,
+    mutate: refreshTransferStatus,
+  } = useSWR(
     transferStatusKey,
     ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
@@ -189,7 +206,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     transferStatus,
     succeeded: quoteSimulationSucceeded,
     demo,
-    sandbox: sdpEnvironment === "sandbox",
+    environment: sdpEnvironment,
+    enabledRampProviders: props.enabledRampProviders,
   };
   const simulateAvailable = simulationOffered(simulation);
 
@@ -207,6 +225,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     try {
       await simulateSandboxTransfer({ transferId }, t);
       setQuoteSimulationSucceeded(true);
+      // The provider moves the transfer once it settles the order; read it now, not on the next tick.
+      void refreshTransferStatus();
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,
         position: "bottom-right",

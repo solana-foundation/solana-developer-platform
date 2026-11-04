@@ -50,7 +50,7 @@ Update every applicable site:
 
 | Site | Decision |
 |---|---|
-| `apps/sdp-api/src/services/ramps/runtime.ts` | add the provider's own term for its public key to `PUBLIC_KEY_TERMS` (typecheck fails until you do); the names follow from it and `keyFormats`, and every runtime, availability check, discovery run and webhook verification resolves keys here |
+| `apps/sdp-api/src/services/ramps/runtime.ts` | add the provider's own term for its public key to `PUBLIC_KEY_TERMS` and for its webhook key to `WEBHOOK_KEY_TERMS` (`WEBHOOK_SECRET`, or `WEBHOOK_PUBLIC_KEY` for a provider that signs with a key pair; typecheck fails until you do); the names follow from it and `keyFormats`, and every runtime, availability check, discovery run and webhook verification resolves keys here |
 | `apps/sdp-api/src/services/provider-availability.service.ts` | `managedRampDefinition("<id>")`: configured only while every key it declares fits the project's mode |
 | `apps/sdp-api/src/services/provider-setup-registry.ts` | add `rampSetup("<id>")`; ramps are deployment-managed today |
 | `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the provider-specific submit-requirements schema arm; add the id only to the directions actually supported |

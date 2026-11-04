@@ -1,18 +1,22 @@
 "use client";
 
+import { isFundableRampTransferStatus } from "@sdp/types/payments";
 import type { OnrampWizard } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
+import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
 import { RampCompleteScreen } from "./ramp-complete-screen";
+import { onboardingPanelCopy, RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
 import { RampQuoteError } from "./ramp-quote-error";
 import { RampQuoteSkeleton } from "./ramp-quote-skeleton";
+import { RampStatusPanel } from "./ramp-status-panel";
 import { RequirementsFields } from "./requirements-fields";
 import { StripeOnrampFrame } from "./stripe-onramp-frame";
 
@@ -24,6 +28,7 @@ interface StepContentProps {
 
 type OnrampQuote = NonNullable<OnrampWizard["quote"]>;
 type HostedQuoteRecord = Extract<OnrampQuote, { deliveryMode: "hosted" }>;
+type ManualInstructionsQuoteRecord = Extract<OnrampQuote, { deliveryMode: "manual_instructions" }>;
 
 /** The details step: the contact, then the amount, wallet, currency pair and provider. */
 function DepositStep({ wizard, contact }: StepContentProps) {
@@ -113,6 +118,30 @@ function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
 }
 
 /**
+ * A quote paid by bank transfer. The instructions apply while the transfer can still be funded.
+ * Once the money has moved, or the transfer has ended, its status takes their place.
+ */
+function ManualInstructionsStep({
+  wizard,
+  quote,
+}: {
+  wizard: OnrampWizard;
+  quote: ManualInstructionsQuoteRecord;
+}) {
+  const { fields, selectedRampPair, transferStatus } = wizard;
+  if (transferStatus !== undefined && !isFundableRampTransferStatus(transferStatus.status)) {
+    return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
+  }
+  return (
+    <ManualInstructionsQuote
+      amount={fields.amount.trim()}
+      fiatCurrency={selectedRampPair.fiatCurrency}
+      quote={quote}
+    />
+  );
+}
+
+/**
  * The provider step once its quote exists: the outcome once the transfer is done, otherwise the
  * quote's own surface (a hosted frame, a widget, bank instructions).
  */
@@ -125,6 +154,11 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
       return <RampQuoteSkeleton />;
     }
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  // Bank instructions are SDP's own surface, so the demo shows them as they are.
+  if (quote.deliveryMode === "manual_instructions") {
+    return <ManualInstructionsStep wizard={wizard} quote={quote} />;
   }
 
   // A provider's own checkout can't open on sample data; the demo stands in for it.
@@ -158,10 +192,18 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
  * the onboarding or error that stands in its way, or the outcome once the transfer is done.
  */
 function ProviderStep({ wizard }: { wizard: OnrampWizard }) {
-  const { quote, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } = wizard;
+  const t = useTranslations();
+  const { onboarding, quote, quoteCreationError, quoteCreationRetrying, retryQuoteCreation } =
+    wizard;
 
   if (quote) {
     return <QuoteStep wizard={wizard} quote={quote} />;
+  }
+
+  // The quote waits for the provider to clear the business, so its onboarding stands in for it.
+  const onboardingCopy = onboarding === null ? null : onboardingPanelCopy(onboarding, t);
+  if (onboardingCopy !== null) {
+    return <RampOnboardingPanel copy={onboardingCopy} />;
   }
 
   if (quoteCreationError) {

@@ -37,6 +37,7 @@ const COMPLIANCE_PARTNERS = {
 const RAMP_PARTNERS = {
   moonpay: { name: "MoonPay", logo: "moonpay" },
   stripe: { name: "Stripe", logo: "stripe" },
+  hercle: { name: "Hercle", logo: "hercle" },
 } as const satisfies Record<RampProviderId, Partner>;
 const PUBLISHED_RAMP_PROVIDERS = new Set(publicSurface.rampProviders);
 

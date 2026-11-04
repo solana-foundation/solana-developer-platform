@@ -10,6 +10,7 @@ import {
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { SdpPaymentsError } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "./index";
+import { HERCLE_TEST_KIT } from "./providers/hercle/test-kit";
 import { MOONPAY_TEST_KIT } from "./providers/moonpay/test-kit";
 import { STRIPE_TEST_KIT } from "./providers/stripe/test-kit";
 import { checkRampCredentials, checkRampWebhookSecret } from "./shared";
@@ -36,6 +37,7 @@ import {
 const KITS = {
   moonpay: MOONPAY_TEST_KIT,
   stripe: STRIPE_TEST_KIT,
+  hercle: HERCLE_TEST_KIT,
 } as const satisfies Record<RampProviderId, RampProviderTestKit>;
 
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -148,6 +150,9 @@ function assertQuoteContract(quote: PaymentRampQuote, provider: RampProviderId):
     case "session_widget":
       assert.ok(quote.clientSecret.trim() !== "");
       return;
+    case "manual_instructions":
+      assert.ok(quote.paymentInstructions.length > 0, "a manual quote says how to pay");
+      return;
     default: {
       const exhaustive: never = quote;
       assert.fail(`Unknown delivery mode: ${JSON.stringify(exhaustive)}`);
@@ -220,17 +225,32 @@ describe("ramp provider contract", () => {
           checkRampCredentials(client, credentials, "production"),
           `${client.label} production keys must be live-mode keys.`
         );
-        for (const mixed of [
-          { ...credentials, publicKey: liveCredentials.publicKey },
-          { ...credentials, secretKey: liveCredentials.secretKey },
-        ]) {
-          for (const mode of SDP_ENVIRONMENTS) {
-            assert.notEqual(
-              checkRampCredentials(client, mixed, mode),
-              null,
-              `mixed keys in ${mode}`
-            );
-          }
+        // A key with one format in both modes (a Hercle secret) cannot tell them apart.
+        // The check swaps each key that names its mode into a pair of the other mode.
+        const namingRoles = (["publicKey", "secretKey"] as const).filter(
+          (role) =>
+            client.keyFormats.sandbox[role].source !== client.keyFormats.production[role].source
+        );
+        assert.ok(namingRoles.length > 0, "at least one key names its mode");
+        for (const role of namingRoles) {
+          assert.notEqual(
+            checkRampCredentials(
+              client,
+              { ...credentials, [role]: liveCredentials[role] },
+              "sandbox"
+            ),
+            null,
+            `a live ${role} in sandbox`
+          );
+          assert.notEqual(
+            checkRampCredentials(
+              client,
+              { ...liveCredentials, [role]: credentials[role] },
+              "production"
+            ),
+            null,
+            `a test ${role} in production`
+          );
         }
       });
 

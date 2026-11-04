@@ -48,14 +48,14 @@ export async function extractOfframpQuoteRequest(
   c: ValidatedBodyContext<typeof createOfframpQuoteSchema>
 ): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
-  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+  const resolved: RampQuoteResolved = await resolveRampQuoteRequest(
     c,
     "offramp",
     input,
     input.sourceCustodyWalletId
   );
 
-  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
+  return { body: input, resolved };
 }
 
 export async function estimateOfframp(c: ValidatedBodyContext<typeof estimateOfframpSchema>) {

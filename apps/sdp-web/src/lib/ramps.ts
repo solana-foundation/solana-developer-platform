@@ -25,17 +25,51 @@ export type RampProviderOption = {
 export const RAMP_PROVIDER_LOGOS = {
   moonpay: "/provider-logos/moonpay.svg",
   stripe: "/provider-logos/stripe.svg",
+  hercle: "/provider-logos/hercle.png",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_WEBSITES = {
   moonpay: "https://www.moonpay.com",
   stripe: "https://stripe.com",
+  hercle: "https://www.hercle.financial",
 } as const satisfies Record<RampProviderId, string>;
 
 export const RAMP_PROVIDER_OPTIONS: RampProviderOption[] = [
   { id: "moonpay", title: "MoonPay" },
   { id: "stripe", title: "Stripe" },
+  { id: "hercle", title: "Hercle" },
 ];
+
+/**
+ * Whether the API settles a provider's sandbox on-ramp on request (`POST /v1/payments/ramps/sandbox/simulate`).
+ * Hercle settles its sandbox orders only this way; the API refuses the others.
+ */
+export const RAMP_PROVIDER_SANDBOX_SETTLEMENT = {
+  moonpay: false,
+  stripe: false,
+  hercle: true,
+} as const satisfies Record<RampProviderId, boolean>;
+
+/**
+ * Whether a deposit through `provider` can be marked paid outside the demo.
+ * It needs a sandbox project, a provider the channel-capped flags offer, and one the API settles on request.
+ *
+ * @param provider - The provider the deposit was quoted with.
+ * @param environment - The project's environment.
+ * @param enabledProviders - The providers enabled for the current request.
+ * @returns Whether the sandbox settlement action is offered.
+ */
+export function offersSandboxSettlement(
+  provider: RampProviderId,
+  environment: SdpEnvironment,
+  enabledProviders: readonly RampProviderId[]
+): boolean {
+  return (
+    environment === "sandbox" &&
+    enabledProviders.includes(provider) &&
+    RAMP_PROVIDER_SANDBOX_SETTLEMENT[provider]
+  );
+}
 
 /**
  * Returns the ramp providers surfaced for an environment and enabled by feature flags.

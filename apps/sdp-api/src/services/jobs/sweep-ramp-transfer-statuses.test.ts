@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
+import { installHercleTestEnv } from "@/test/helpers/hercle-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -38,9 +39,17 @@ function minutesAgo(minutes: number): string {
   return new Date(Date.now() - minutes * 60_000).toISOString();
 }
 
+type SweptProvider = "moonpay" | "stripe" | "hercle";
+
+const DELIVERY_MODES = {
+  moonpay: "hosted",
+  stripe: "session_widget",
+  hercle: "manual_instructions",
+} as const satisfies Record<SweptProvider, string>;
+
 interface SeedTransfer {
   id: string;
-  provider: "moonpay" | "stripe";
+  provider: SweptProvider;
   type?: "onramp" | "offramp";
   status?: PaymentTransferStatus;
   reference?: string | null;
@@ -70,7 +79,7 @@ async function seedTransfer(input: SeedTransfer): Promise<void> {
       "wallet_ramp_status_sweep",
       type === "offramp" ? WALLET : null,
       type === "onramp" ? WALLET : null,
-      input.token ?? (input.provider === "stripe" ? USDC : SOL_MINT),
+      input.token ?? (input.provider === "moonpay" ? SOL_MINT : USDC),
       type === "offramp" ? "1" : null,
       type,
       type === "onramp" ? "inbound" : "outbound",
@@ -78,7 +87,7 @@ async function seedTransfer(input: SeedTransfer): Promise<void> {
       input.provider,
       input.reference ?? null,
       input.observedAt ?? null,
-      input.provider === "stripe" ? "session_widget" : "hosted",
+      DELIVERY_MODES[input.provider],
       input.providerData ?? {},
       input.createdAt ?? updatedAt,
       updatedAt
@@ -149,7 +158,7 @@ function session(id: string, status: string, details: Record<string, unknown>) {
   };
 }
 
-function resultFor(results: RampStatusSweepResult[], provider: "moonpay" | "stripe") {
+function resultFor(results: RampStatusSweepResult[], provider: SweptProvider) {
   const found = results.find((result) => result.provider === provider);
   if (!found) throw new Error(`no ${provider} tally`);
   return found;
@@ -161,6 +170,8 @@ function sweep() {
 
 describe("sweepRampTransferStatuses", () => {
   installStripeTestEnv();
+
+  installHercleTestEnv();
 
   let savedMoonpay: ManagedRampKeysEnv;
 
@@ -256,6 +267,43 @@ describe("sweepRampTransferStatuses", () => {
     expect(recovered.provider_data.providerSettlement).toMatchObject({
       onchain: { signature: SIG, destinationAddress: WALLET },
     });
+  });
+
+  it("moves a Hercle order whose settlement webhook never arrived, in one request", async () => {
+    await seedTransfer({ id: "xfr_lost_order", provider: "hercle", reference: "ord_lost" });
+    answer("/partner/v1/orders/ord_lost", 200, {
+      orderId: "ord_lost",
+      direction: "onramp",
+      status: "settled",
+      fiatCurrency: "USD",
+      fiatAmount: "10.00",
+      error: null,
+    });
+
+    const results = await sweep();
+
+    expect(requestsTo("publicapi.sandbox.hercle.financial")).toBe(1);
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 1, applied: 1, expired: 0 });
+    const settling = await row("xfr_lost_order");
+    expect(settling.status).toBe("settling");
+    expect(settling.provider_data.providerSettlement).toMatchObject({ reference: "ord_lost" });
+  });
+
+  it("expires a quiet Hercle order Hercle no longer holds, but never on a bare 404", async () => {
+    await seedTransfer({ id: "xfr_gone_order", provider: "hercle", reference: "ord_gone" });
+    answer("/partner/v1/orders/ord_gone", 404, {
+      code: "ORDER_NOT_FOUND",
+      message: "Order not found",
+      traceId: "trace_sweep",
+    });
+    // An unanswered path gets a bare 404, which is Hercle's ramp surface being off.
+    await seedTransfer({ id: "xfr_surface_off", provider: "hercle", reference: "ord_dark" });
+
+    const results = await sweep();
+
+    expect(resultFor(results, "hercle")).toMatchObject({ polled: 2, failed: 1, expired: 1 });
+    expect((await row("xfr_gone_order")).status).toBe("expired");
+    expect((await row("xfr_surface_off")).status).toBe("pending");
   });
 
   it("leaves settling rows the chain verifier already holds evidence for", async () => {

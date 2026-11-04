@@ -134,12 +134,27 @@ const requirementDateFieldSchema = z.object({
   before: z.string().optional(),
 });
 
+const requirementConsentFieldSchema = z.object({
+  kind: z.literal("consent"),
+  key: z.string(),
+  label: withOpenApi(z.string(), {
+    description: "The sentence up to the document's name; `documentLabel` completes it.",
+  }),
+  required: z.boolean(),
+  documentUrl: withOpenApi(z.string(), {
+    description:
+      "The provider document the counterparty accepts. Submit the literal `true` to accept.",
+  }),
+  documentLabel: z.string().optional(),
+});
+
 const requirementFieldSchema = z.discriminatedUnion("kind", [
   requirementTextFieldSchema,
   requirementSelectFieldSchema,
   requirementCountryFieldSchema,
   requirementCurrencyFieldSchema,
   requirementDateFieldSchema,
+  requirementConsentFieldSchema,
   z.object({
     kind: z.literal("address"),
     key: z.string(),
@@ -187,6 +202,25 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
       reason: z.string(),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verification_required"),
+      verificationUrl: withOpenApi(z.string(), {
+        description:
+          "Hercle's hosted business verification. Minted for this response and never stored; read the requirements again for a fresh link.",
+      }),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verifying"),
+    }),
+    z.object({
+      ...requirementBase,
+      provider: z.literal("hercle"),
+      status: z.literal("customer_verification_failed"),
     }),
   ]),
   {

@@ -283,6 +283,7 @@ const DEMO_RAMP_PROVIDERS: Record<
 > = {
   moonpay: { deliveryMode: "hosted", reference: "MP" },
   stripe: { deliveryMode: "session_widget", reference: "STR" },
+  hercle: { deliveryMode: "manual_instructions", reference: "HRC" },
 };
 
 /** The reference a provider shows for a demo quote. */

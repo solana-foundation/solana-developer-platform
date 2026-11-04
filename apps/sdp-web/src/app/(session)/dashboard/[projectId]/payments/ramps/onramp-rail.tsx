@@ -93,8 +93,13 @@ function onrampFrameState(
   onCancel: (() => void) | undefined,
   t: ReturnType<typeof useTranslations>
 ) {
-  const verificationUrl: string | undefined = undefined;
-  const verificationPending = false;
+  // The provider's onboarding answers on the provider step, where the quote waits for it.
+  const onboarding = wizard.currentStepId === "PROVIDER" ? wizard.onboarding : null;
+  const verificationUrl =
+    onboarding?.status === "customer_verification_required"
+      ? onboarding.verificationUrl
+      : undefined;
+  const verificationPending = onboarding?.status === "customer_verifying";
   const transferState =
     wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
   const cancelable = transferState?.cancelable === true;

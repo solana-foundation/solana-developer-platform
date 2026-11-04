@@ -7,6 +7,7 @@ import type {
   CounterpartyProviderAccountsRepository,
   GetCounterpartyProviderAccountInput,
   ListProviderAccountsInput,
+  RecordCustomerLinkStatusInput,
   UpsertCounterpartyProviderAccountInput,
 } from "./counterparty-provider-account.repository";
 import {
@@ -91,6 +92,30 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         throw internalError("Counterparty provider-account upsert escaped its tenant scope.");
       }
       return parseProviderAccountRow(row);
+    },
+
+    async recordCustomerLinkStatus(input: RecordCustomerLinkStatusInput) {
+      const row = await db
+        .prepare(
+          `UPDATE counterparty_provider_accounts
+           SET provider_status = ?, updated_at = sdp_iso_now()
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND counterparty_id = ?
+             AND provider = ?
+             AND kind = 'customer_link'
+             AND status = 'active'
+           RETURNING id`
+        )
+        .bind(
+          input.providerStatus,
+          input.organizationId,
+          input.projectId,
+          input.counterpartyId,
+          input.provider
+        )
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async listProviderAccounts(input: ListProviderAccountsInput) {

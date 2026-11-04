@@ -30,6 +30,12 @@ import { dashboardRequest } from "@/lib/dashboard-fetch";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
+/**
+ * How often a pending provider verification is read again.
+ * Each read asks the provider for its verdict, and a review can stay pending for days while the page is open.
+ */
+const ONBOARDING_POLL_MS = 10_000;
+
 async function fetchCounterpartyRequirements(
   counterpartyId: string,
   provider: RampProviderId,
@@ -357,7 +363,9 @@ export function useCounterpartyRequirements(
     },
     {
       refreshInterval: (latest) =>
-        latest !== undefined && !isCounterpartyRequirementsPollStatus(latest.status) ? 0 : 4000,
+        latest !== undefined && !isCounterpartyRequirementsPollStatus(latest.status)
+          ? 0
+          : ONBOARDING_POLL_MS,
       revalidateOnFocus: false,
       dedupingInterval: 0,
       onSuccess: (latest) => {

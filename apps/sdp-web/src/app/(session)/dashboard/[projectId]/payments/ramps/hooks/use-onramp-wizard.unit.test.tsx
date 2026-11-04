@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RenderHookResult } from "@testing-library/react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -93,6 +94,7 @@ const PROPS: UseRampWizardProps = {
 
 let currentTransfer: PaymentTransferSummary = transferFixture("awaiting_payment");
 let currentQuote: object = MOONPAY_QUOTE;
+let currentRequirements: object = REQUIREMENTS_READY;
 let demoMode = false;
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -141,6 +143,7 @@ beforeEach(() => {
   resetIdempotencyKeyStoresForTests();
   currentTransfer = transferFixture("awaiting_payment");
   currentQuote = MOONPAY_QUOTE;
+  currentRequirements = REQUIREMENTS_READY;
   demoMode = false;
   fetchMock.mockReset().mockImplementation((input, init) => {
     const url = String(input);
@@ -152,7 +155,7 @@ beforeEach(() => {
       return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
     }
     if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
-      return Promise.resolve(Response.json({ data: REQUIREMENTS_READY }));
+      return Promise.resolve(Response.json({ data: currentRequirements }));
     }
     if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
       return Promise.resolve(
@@ -161,6 +164,10 @@ beforeEach(() => {
     }
     if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
       return Promise.resolve(Response.json({ data: { transfer: currentTransfer } }));
+    }
+    if (url === "/api/dashboard/payments/ramps/sandbox/simulate" && method === "POST") {
+      // The API settles a sandbox Hercle order and answers with no body.
+      return Promise.resolve(new Response(null, { status: 204 }));
     }
     return Promise.resolve(Response.json({ data: {} }));
   });
@@ -182,9 +189,9 @@ type WizardRender = RenderHookResult<ReturnType<typeof useOnrampWizard>, unknown
  * the review to the PROVIDER step, let the readiness effect fire the quote
  * POST, and wait for the transfer-status poll to deliver the scenario transfer.
  */
-async function driveToTransferStatus(rendered: WizardRender) {
+async function driveToTransferStatus(rendered: WizardRender, provider: RampProviderId = "moonpay") {
   await act(async () => {});
-  act(() => rendered.result.current.selectProvider("moonpay"));
+  act(() => rendered.result.current.selectProvider(provider));
   act(() => rendered.result.current.setField("amount", "100"));
   act(() => rendered.result.current.setField("walletId", WALLET.id));
   await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
@@ -273,6 +280,151 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     const callsBefore = transferStatusCalls();
     await allowPollingTick();
     expect(transferStatusCalls()).toBe(callsBefore);
+  });
+});
+
+describe("useOnrampWizard — a provider that verifies the business first", () => {
+  const HERCLE_VERIFYING = {
+    provider: "hercle",
+    direction: "onramp",
+    status: "customer_verifying",
+  };
+  const HERCLE_READY = { provider: "hercle", direction: "onramp", status: "ready" };
+  const HERCLE_QUOTE = {
+    id: "ord_hercle",
+    provider: "hercle",
+    status: "pending",
+    deliveryMode: "manual_instructions",
+    paymentInstructions: [],
+  };
+
+  function quoteCalls(): number {
+    return fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/dashboard/payments/ramps/onramp/quote"
+    ).length;
+  }
+
+  it("holds the quote while Hercle reviews the business, and quotes once it approves", async () => {
+    currentRequirements = HERCLE_VERIFYING;
+    currentQuote = HERCLE_QUOTE;
+    const rendered = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["hercle"] }),
+      { wrapper }
+    );
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("hercle"));
+    act(() => rendered.result.current.setField("amount", "100"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    // Details, then the memo (which advances the requirements), then the review.
+    for (let press = 0; press < 3; press += 1) {
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+
+    expect(rendered.result.current.currentStepId).toBe("PROVIDER");
+    expect(rendered.result.current.onboarding).toEqual(HERCLE_VERIFYING);
+    // A full poll interval while Hercle still reviews: no order is opened.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 4300));
+    });
+    expect(quoteCalls()).toBe(0);
+
+    currentRequirements = HERCLE_READY;
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID), {
+      timeout: 6000,
+    });
+    expect(rendered.result.current.onboarding).toEqual(HERCLE_READY);
+    expect(quoteCalls()).toBe(1);
+  }, 20_000);
+});
+
+describe("useOnrampWizard — sandbox settlement on request", () => {
+  const HERCLE_READY = { provider: "hercle", direction: "onramp", status: "ready" };
+  const HERCLE_QUOTE = {
+    id: "ord_hercle",
+    provider: "hercle",
+    status: "pending",
+    deliveryMode: "manual_instructions",
+    paymentInstructions: [],
+  };
+
+  function simulateCalls() {
+    return fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/dashboard/payments/ramps/sandbox/simulate"
+    );
+  }
+
+  async function renderHercleDeposit(): Promise<WizardRender> {
+    currentRequirements = HERCLE_READY;
+    currentQuote = HERCLE_QUOTE;
+    currentTransfer = transferFixture("awaiting_payment", { provider: "hercle" });
+    const rendered = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["hercle"] }),
+      { wrapper }
+    );
+    await driveToTransferStatus(rendered, "hercle");
+    return rendered;
+  }
+
+  it("offers a sandbox Hercle deposit awaiting its wire, and re-reads the transfer after the 204", async () => {
+    const rendered = await renderHercleDeposit();
+    expect(rendered.result.current.simulateAvailable).toBe(true);
+
+    const readsBefore = transferStatusCalls();
+    currentTransfer = transferFixture("settling", { provider: "hercle" });
+    await act(async () => {
+      await rendered.result.current.simulateCurrentQuote();
+    });
+
+    expect(simulateCalls()).toHaveLength(1);
+    expect(JSON.parse(String(simulateCalls()[0]?.[1]?.body))).toEqual({
+      transferId: TRANSFER_ID,
+    });
+    expect(rendered.result.current.quoteSimulationSucceeded).toBe(true);
+    expect(mocks.toastSuccess).toHaveBeenCalled();
+    await waitFor(() => expect(rendered.result.current.transferStatus?.status).toBe("settling"));
+    expect(transferStatusCalls()).toBeGreaterThan(readsBefore);
+  });
+
+  it("offers a Hercle order that is still the quote's pending transfer", async () => {
+    currentRequirements = HERCLE_READY;
+    currentQuote = HERCLE_QUOTE;
+    currentTransfer = transferFixture("pending", { provider: "hercle" });
+    const rendered = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["hercle"] }),
+      { wrapper }
+    );
+    await driveToTransferStatus(rendered, "hercle");
+
+    expect(rendered.result.current.transferStatus?.status).toBe("pending");
+    expect(rendered.result.current.simulateAvailable).toBe(true);
+  });
+
+  it("offers nothing once the transfer no longer waits for its wire", async () => {
+    currentRequirements = HERCLE_READY;
+    currentQuote = HERCLE_QUOTE;
+    currentTransfer = transferFixture("settling", { provider: "hercle" });
+    const rendered = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["hercle"] }),
+      { wrapper }
+    );
+    await driveToTransferStatus(rendered, "hercle");
+
+    expect(rendered.result.current.simulateAvailable).toBe(false);
+  });
+
+  it("offers nothing for a provider the API does not settle on request", async () => {
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await driveToTransferStatus(rendered);
+
+    expect(rendered.result.current.transferStatus?.status).toBe("awaiting_payment");
+    expect(rendered.result.current.simulateAvailable).toBe(false);
+    await act(async () => {
+      await rendered.result.current.simulateCurrentQuote();
+    });
+    expect(simulateCalls()).toHaveLength(0);
   });
 });
 

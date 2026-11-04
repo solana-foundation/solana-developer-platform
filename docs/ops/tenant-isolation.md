@@ -63,7 +63,11 @@ provider's counterparty-row lookup key unique. Nothing reads or writes that key
 any more, but its unique indexes remain until a follow-up migration removes
 them.
 
-The customer-link uniqueness applies only to the two retired integrations whose
+Migration `0091_scope_customer_link_uniqueness_hercle.sql` adds Hercle to the same uniqueness, and Hercle is live.
+SDP opens one Hercle account per counterparty, so a Hercle account id links exactly one tenant's counterparty.
+SDP never resolves a tenant from a Hercle reference: Hercle settlements match the transfer's `provider_reference`, and its verification verdict is read through the counterparty's own link.
+
+The customer-link uniqueness applies only to the integrations whose
 customers SDP created one-per-counterparty. MoonPay settlements are matched by
 the transfer's `provider_reference` and record the customer link as a
 byproduct, and one MoonPay account legitimately links to many

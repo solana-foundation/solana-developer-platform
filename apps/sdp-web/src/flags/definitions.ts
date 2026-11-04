@@ -212,6 +212,7 @@ export function defineDashboardFlags({
 
   const rampProviderMoonpay = rampProviderFlag("moonpay", "MoonPay");
   const rampProviderStripe = rampProviderFlag("stripe", "Stripe");
+  const rampProviderHercle = rampProviderFlag("hercle", "Hercle");
 
   return {
     homepageOpenSignup,
@@ -225,5 +226,6 @@ export function defineDashboardFlags({
     paymentsDemoMode,
     rampProviderMoonpay,
     rampProviderStripe,
+    rampProviderHercle,
   };
 }

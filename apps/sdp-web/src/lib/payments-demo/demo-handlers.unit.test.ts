@@ -263,6 +263,7 @@ describe("ramp estimates and quotes", () => {
     expect(modes).toEqual({
       moonpay: "hosted",
       stripe: "session_widget",
+      hercle: "manual_instructions",
     });
   });
 

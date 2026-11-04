@@ -46,14 +46,14 @@ export async function extractOnrampQuoteRequest(
   c: ValidatedBodyContext<typeof createOnrampQuoteSchema>
 ): Promise<RequestGateExtraction> {
   const input = c.req.valid("json");
-  const { scope, projectId, counterparty, wallet, walletAddress } = await resolveRampQuoteRequest(
+  const resolved: RampQuoteResolved = await resolveRampQuoteRequest(
     c,
     "onramp",
     input,
     input.destinationCustodyWalletId
   );
 
-  return { body: input, resolved: { scope, projectId, counterparty, wallet, walletAddress } };
+  return { body: input, resolved };
 }
 
 export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnrampSchema>) {
@@ -83,12 +83,15 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       counterparty,
       wallet: destinationWallet,
       walletAddress: destinationWalletAddress,
+      customerLink,
     },
   } = getRequestGateContext<CreateOnrampQuoteBody, RampQuoteResolved>(c);
 
   // Requirements have succeeded. Reserve the ID now so the provider
   // quote and the eventual transfer row share the same internal transfer ID.
   const reservedTransferId = generatePaymentTransferId();
+  // A token this cluster has no mint for (USDT on devnet) is refused before any provider opens an order for it.
+  rampTransferTokenMint(input.assetRail);
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
   switch (input.provider) {
@@ -171,6 +174,21 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         customerIpAddress: getClientIp(c) ?? undefined,
+      });
+      break;
+    }
+    case "hercle": {
+      if (customerLink === null) {
+        throw internalError("A Hercle quote requires the business's cleared Hercle account.");
+      }
+      // The order acts for the business's own Hercle account, keyed on the transfer id it is stored under.
+      quote = await rampClientFor("hercle", "onramp").createOnrampQuote(rampRuntime(c, "hercle"), {
+        assetRail: input.assetRail,
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: customerLink.providerCustomerReference,
+        paymentTransferId: reservedTransferId,
       });
       break;
     }

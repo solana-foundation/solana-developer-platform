@@ -30,6 +30,7 @@ const FLAG_CAPS = {
   earn: { module: "earn" },
   rampProviderMoonpay: { rampProvider: "moonpay" },
   rampProviderStripe: { rampProvider: "stripe" },
+  rampProviderHercle: { rampProvider: "hercle" },
 } as const satisfies Record<keyof DashboardFlags, FlagCap>;
 
 /** Stands in for Vercel: serves every flag on, so a capped flag is the only way to read false. */
@@ -81,6 +82,7 @@ const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)
 const RAMP_PROVIDER_FLAG_NAMES = {
   moonpay: "rampProviderMoonpay",
   stripe: "rampProviderStripe",
+  hercle: "rampProviderHercle",
 } as const satisfies Record<RampProviderId, keyof DashboardFlags>;
 
 describe("defineDashboardFlags", () => {

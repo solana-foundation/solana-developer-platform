@@ -54,4 +54,5 @@ export const {
   paymentsDemoMode,
   rampProviderMoonpay,
   rampProviderStripe,
+  rampProviderHercle,
 } = flags;

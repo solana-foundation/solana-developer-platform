@@ -17,6 +17,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { installHercleTestEnv } from "@/test/helpers/hercle-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -429,6 +430,250 @@ describe("Counterparties Routes", () => {
       const body = await res.json();
       expect(body.error.details.reason).toBe("provider_not_entitled");
       expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    describe("Hercle business onboarding", () => {
+      installHercleTestEnv();
+
+      const HERCLE_BASE_URL = "https://publicapi.sandbox.hercle.financial";
+      const KYB = {
+        registeredCompanyName: "Hercle Test Business Holding AG",
+        registrationNumber: "CHE-123.456.789",
+        registrationCountry: "CH",
+        registeredAddressLine1: "Bahnhofstrasse 1",
+        registeredAddressCity: "Zurich",
+        registeredAddressPostalCode: "8001",
+        acceptHercleTerms: "true",
+        acceptHerclePrivacy: "true",
+      };
+
+      function hercleReplies(replies: readonly { status: number; body: unknown }[]) {
+        const calls: { url: string; method: string; body: string }[] = [];
+        vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+          calls.push({
+            url: String(input),
+            method: init?.method ?? "GET",
+            body: typeof init?.body === "string" ? init.body : "",
+          });
+          const reply = replies[calls.length - 1];
+          if (reply === undefined) {
+            throw new Error(`Unexpected Hercle call ${String(input)}`);
+          }
+          return new Response(JSON.stringify(reply.body), {
+            status: reply.status,
+            headers: { "Content-Type": "application/json" },
+          });
+        });
+        return calls;
+      }
+
+      const requirementsQuery = `provider=hercle&direction=onramp&assetRail=usdc.solana&fiatCurrency=EUR&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`;
+
+      async function createBusiness(externalId: string) {
+        const created = await createCounterparty({
+          externalId,
+          entityType: "business",
+          displayName: "Hercle Test Business AG",
+        });
+        return (await created.json()).data.counterparty as { id: string };
+      }
+
+      function readLink(counterpartyId: string) {
+        return createPostgresCounterpartyProviderAccountsRepository(getDb(env)).getProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId,
+          provider: "hercle",
+        });
+      }
+
+      it("asks a business with no Hercle account for its KYB details without calling Hercle", async () => {
+        const cp = await createBusiness("hercle_collect");
+        const calls = hercleReplies([]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?${requirementsQuery}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()).data;
+        expect(body).toMatchObject({ provider: "hercle", direction: "onramp", status: "collect" });
+        expect(body.fields.map((field: { key: string }) => field.key)).toEqual(Object.keys(KYB));
+        expect(calls).toHaveLength(0);
+      });
+
+      it("refuses an individual", async () => {
+        const created = await createCounterparty({ externalId: "hercle_individual" });
+        const cp = (await created.json()).data.counterparty;
+        hercleReplies([]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?${requirementsQuery}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+
+        expect((await res.json()).data).toMatchObject({
+          status: "unsupported",
+          reason: "Hercle supports business counterparties only.",
+        });
+      });
+
+      it("opens the Hercle account on submit, links it, and stores none of the KYB details", async () => {
+        const cp = await createBusiness("hercle_submit");
+        const calls = hercleReplies([
+          { status: 201, body: { accountId: "acct_route_test", externalReference: cp.id } },
+          {
+            status: 200,
+            body: {
+              status: "action_required",
+              verificationUrl: "https://verify.hercle.test/acct_route_test",
+            },
+          },
+        ]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "hercle", direction: "onramp", collectedData: KYB }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toEqual({
+          provider: "hercle",
+          direction: "onramp",
+          status: "customer_verification_required",
+          verificationUrl: "https://verify.hercle.test/acct_route_test",
+        });
+        expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+          `POST ${HERCLE_BASE_URL}/partner/v1/accounts`,
+          `POST ${HERCLE_BASE_URL}/partner/v1/accounts/acct_route_test/verifications`,
+        ]);
+        expect(JSON.parse(calls[0]?.body ?? "{}")).toMatchObject({
+          companyName: KYB.registeredCompanyName,
+          externalReference: cp.id,
+        });
+        const link = await readLink(cp.id);
+        expect(link).toMatchObject({
+          provider_customer_reference: "acct_route_test",
+          provider_status: "action_required",
+          kind: "customer_link",
+        });
+        expect(JSON.stringify(link)).not.toContain(KYB.registrationNumber);
+        expect(JSON.stringify(link)).not.toContain(KYB.registeredAddressLine1);
+        expect(JSON.stringify(link)).not.toContain(KYB.registeredCompanyName);
+      });
+
+      it("refuses a submission without Hercle's terms before calling Hercle", async () => {
+        const cp = await createBusiness("hercle_no_consent");
+        const calls = hercleReplies([]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "hercle",
+              direction: "onramp",
+              collectedData: { ...KYB, acceptHercleTerms: "" },
+            }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        expect(calls).toHaveLength(0);
+        expect(await readLink(cp.id)).toBeNull();
+      });
+
+      it("refuses an off-ramp submission", async () => {
+        const cp = await createBusiness("hercle_offramp");
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "hercle", direction: "offramp", collectedData: KYB }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+      });
+
+      it("reads Hercle's verdict on a linked business and records the approval", async () => {
+        const cp = await createBusiness("hercle_approved");
+        await createPostgresCounterpartyProviderAccountsRepository(
+          getDb(env)
+        ).upsertProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: cp.id,
+          provider: "hercle",
+          providerCustomerReference: "acct_route_approved",
+        });
+        await createPostgresCounterpartyProviderAccountsRepository(
+          getDb(env)
+        ).recordCustomerLinkStatus({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: cp.id,
+          provider: "hercle",
+          providerStatus: "pending",
+        });
+        const calls = hercleReplies([{ status: 200, body: { status: "approved" } }]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?${requirementsQuery}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+
+        expect((await res.json()).data).toEqual({
+          provider: "hercle",
+          direction: "onramp",
+          status: "ready",
+        });
+        expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+          `GET ${HERCLE_BASE_URL}/partner/v1/accounts/acct_route_approved/verification`,
+        ]);
+        expect((await readLink(cp.id))?.provider_status).toBe("approved");
+      });
+
+      it("never asks Hercle to start a verification from a requirements read", async () => {
+        const cp = await createBusiness("hercle_read_only");
+        await createPostgresCounterpartyProviderAccountsRepository(
+          getDb(env)
+        ).upsertProviderAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: cp.id,
+          provider: "hercle",
+          providerCustomerReference: "acct_route_unstarted",
+        });
+        const calls = hercleReplies([
+          { status: 404, body: { code: "VERIFICATION_NOT_STARTED", message: "not started" } },
+        ]);
+
+        const res = await app.request(
+          `/v1/counterparties/${cp.id}/requirements?${requirementsQuery}`,
+          { headers: { Authorization: authHeader } },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).data).toMatchObject({ status: "collect" });
+        expect(calls.map((call) => call.method)).toEqual(["GET"]);
+        expect((await readLink(cp.id))?.provider_status).toBeNull();
+      });
     });
 
     describe("Stripe off-ramp", () => {

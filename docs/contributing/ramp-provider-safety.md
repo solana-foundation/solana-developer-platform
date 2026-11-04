@@ -27,10 +27,9 @@ contract; this document defines the money movement acceptance gate.
 ## Managed keys
 
 SDP keeps one account per provider and mode, each key under
-`<PROVIDER>_<MODE>_<ROLE>`. `MODE` is `SANDBOX` or `PRODUCTION`. The public
-key keeps the provider's own term (MoonPay `API_KEY`, Stripe
-`PUBLISHABLE_KEY`); the others are `SECRET_KEY` and `WEBHOOK_SECRET`, which
-only a provider that just polls goes without.
+`<PROVIDER>_<MODE>_<ROLE>`. `MODE` is `SANDBOX` or `PRODUCTION`.
+The public key keeps the provider's own term (MoonPay `API_KEY`, Stripe `PUBLISHABLE_KEY`, Hercle `CLIENT_ID`); the others are `SECRET_KEY` and `WEBHOOK_SECRET`, which only a provider that just polls goes without.
+A provider that signs its webhooks with a key pair names the verifying key `WEBHOOK_PUBLIC_KEY` instead (Hercle).
 `apps/sdp-api/src/services/ramps/runtime.ts` derives the names from the
 provider's `keyFormats` and resolves every key, so availability, provider
 calls, discovery and webhook verification never disagree.

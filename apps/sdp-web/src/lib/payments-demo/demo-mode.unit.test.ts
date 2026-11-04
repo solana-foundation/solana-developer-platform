@@ -502,8 +502,12 @@ describe("every ramp provider", () => {
       provider: string;
       estimate: { cryptoAmount: string; fees: { total: string } };
     }[] = estimate.body.data.estimates;
-    expect(results.map((result) => result.provider).sort()).toEqual(["moonpay", "stripe"]);
-    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(2);
+    expect(results.map((result) => result.provider).sort()).toEqual([
+      "hercle",
+      "moonpay",
+      "stripe",
+    ]);
+    expect(new Set(results.map((result) => result.estimate.fees.total)).size).toBe(3);
     // 250 USD less MoonPay's 3.5%, at 148.20 USD a SOL.
     expect(results.find((result) => result.provider === "moonpay")?.estimate.cryptoAmount).toBe(
       "1.6279"

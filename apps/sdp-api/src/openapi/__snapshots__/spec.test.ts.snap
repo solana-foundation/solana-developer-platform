@@ -24,6 +24,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "enum": [
                       "moonpay",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },
@@ -235,6 +236,41 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                             "key",
                             "label",
                             "required",
+                          ],
+                          "type": "object",
+                        },
+                        {
+                          "properties": {
+                            "documentLabel": {
+                              "type": "string",
+                            },
+                            "documentUrl": {
+                              "description": "The provider document the counterparty accepts. Submit the literal \`true\` to accept.",
+                              "type": "string",
+                            },
+                            "key": {
+                              "type": "string",
+                            },
+                            "kind": {
+                              "enum": [
+                                "consent",
+                              ],
+                              "type": "string",
+                            },
+                            "label": {
+                              "description": "The sentence up to the document's name; \`documentLabel\` completes it.",
+                              "type": "string",
+                            },
+                            "required": {
+                              "type": "boolean",
+                            },
+                          },
+                          "required": [
+                            "kind",
+                            "key",
+                            "label",
+                            "required",
+                            "documentUrl",
                           ],
                           "type": "object",
                         },
@@ -463,6 +499,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "enum": [
                       "moonpay",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },
@@ -496,6 +533,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "enum": [
                       "moonpay",
                       "stripe",
+                      "hercle",
                     ],
                     "type": "string",
                   },
@@ -514,6 +552,104 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                   "provider",
                   "status",
                   "reason",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "hercle",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "customer_verification_required",
+                    ],
+                    "type": "string",
+                  },
+                  "verificationUrl": {
+                    "description": "Hercle's hosted business verification. Minted for this response and never stored; read the requirements again for a fresh link.",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                  "verificationUrl",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "hercle",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "customer_verifying",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
+                ],
+                "type": "object",
+              },
+              {
+                "properties": {
+                  "direction": {
+                    "description": "Ramp direction evaluated for this counterparty.",
+                    "enum": [
+                      "onramp",
+                      "offramp",
+                    ],
+                    "example": "onramp",
+                    "type": "string",
+                  },
+                  "provider": {
+                    "enum": [
+                      "hercle",
+                    ],
+                    "type": "string",
+                  },
+                  "status": {
+                    "enum": [
+                      "customer_verification_failed",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "direction",
+                  "provider",
+                  "status",
                 ],
                 "type": "object",
               },

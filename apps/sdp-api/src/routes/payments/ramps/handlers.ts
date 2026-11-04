@@ -5,7 +5,7 @@ import { isRetiredRampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { noContent, success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "@/routes/payments/context";
@@ -134,7 +134,9 @@ export async function simulateSandboxTransfer(
   if (transfer.type !== "onramp") {
     throw badRequest("Only on-ramp transfers can be simulated.");
   }
-  if (transfer.status !== "awaiting_payment") {
+  // A bank-funded order waits for its wire from the moment it opens, with no separate "awaiting payment" moment.
+  // Its transfer can therefore still be `pending` here.
+  if (transfer.status !== "pending" && transfer.status !== "awaiting_payment") {
     throw conflict(`Transfer is not awaiting payment (status: ${transfer.status}).`);
   }
   if (transfer.custody_wallet_id === null) {
@@ -143,7 +145,13 @@ export async function simulateSandboxTransfer(
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }
-  const provider = resolveRampProviderClient(transfer.provider).id;
-  await assertProviderAvailable(c, { family: "ramps", provider });
-  throw badRequest(`Sandbox simulation is not available for provider: ${provider}.`);
+  const client = resolveRampProviderClient(transfer.provider);
+  await assertProviderAvailable(c, { family: "ramps", provider: client.id });
+  if (client.simulateSandboxSettlement === undefined || transfer.provider_reference === null) {
+    throw badRequest(`Sandbox simulation is not available for provider: ${client.id}.`);
+  }
+  // The provider reports the simulated outcome as it would a real one.
+  // The transfer settles through its webhook and status pull, not here.
+  await client.simulateSandboxSettlement(rampRuntime(c, client.id), transfer.provider_reference);
+  return noContent(c);
 }
