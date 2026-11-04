@@ -84,6 +84,7 @@ export function ProjectOrganizationSwitch({
         }
       }
       if (mountedRef.current) {
+        // react-doctor-disable-next-line nextjs-no-client-side-redirect -- only the browser can mint other organizations' tokens, and the tab shows a loading frame until it goes
         router.replace(fallbackHref);
       }
     }
@@ -93,6 +94,7 @@ export function ProjectOrganizationSwitch({
     switchToProjectOrganization().catch((error: unknown) => {
       console.error("Could not find the organization of the requested project", error);
       if (mountedRef.current) {
+        // react-doctor-disable-next-line nextjs-no-client-side-redirect -- only the browser can mint other organizations' tokens, and the tab shows a loading frame until it goes
         router.replace(fallbackHref);
       }
     });
