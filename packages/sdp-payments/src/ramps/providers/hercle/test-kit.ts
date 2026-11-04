@@ -79,6 +79,33 @@ const ORDER_LOOKUP = {
   providerReference: ORDER_ID,
 } as const;
 
+/**
+ * Hercle's sandbox answer to `GET /partner/v1/orders/{id}` for an id it holds nothing for, recorded on 2026-11-04.
+ * Only the trace id is replaced. The sandbox gave the same answer for an order it had settled the day before.
+ */
+const ORDER_NOT_FOUND = {
+  code: "ORDER_NOT_FOUND",
+  message: "Order not found",
+  traceId: "trace_contract",
+};
+
+/**
+ * Hercle's sandbox refusals of the same lookup, recorded on 2026-11-04 with the trace id replaced.
+ * Each one is a failure to ask, never an order Hercle does not hold.
+ */
+export const HERCLE_ORDER_LOOKUP_REFUSALS = {
+  "a request signed outside Hercle's 300-second window": orderLookupExchange(401, {
+    code: "AUTH_STALE_TIMESTAMP",
+    message: "Timestamp outside the ±300s window",
+    traceId: "trace_contract",
+  }),
+  "a request signed with another secret": orderLookupExchange(401, {
+    code: "AUTH_INVALID_SIGNATURE",
+    message: "Invalid signature",
+    traceId: "trace_contract",
+  }),
+} satisfies Record<string, RecordedExchange>;
+
 /** Hercle's contract kit. Hercle runs onramp only, and every order acts for a business account. */
 export const HERCLE_TEST_KIT: RampProviderTestKit = {
   credentials: {
@@ -163,13 +190,7 @@ export const HERCLE_TEST_KIT: RampProviderTestKit = {
     },
     "an order Hercle does not hold": {
       input: ORDER_LOOKUP,
-      exchanges: [
-        orderLookupExchange(404, {
-          code: "ORDER_NOT_FOUND",
-          message: "Order not found",
-          traceId: "trace_contract",
-        }),
-      ],
+      exchanges: [orderLookupExchange(404, ORDER_NOT_FOUND)],
       events: [],
     },
   },

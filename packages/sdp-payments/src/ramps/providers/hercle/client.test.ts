@@ -11,7 +11,7 @@ import type {
 } from "#/ramps/types";
 import { buildHercleSignature } from "./client";
 import { HERCLE_FIELD_KEYS } from "./counterparty";
-import { HERCLE_ORDER, HERCLE_TEST_KIT } from "./test-kit";
+import { HERCLE_ORDER, HERCLE_ORDER_LOOKUP_REFUSALS, HERCLE_TEST_KIT } from "./test-kit";
 
 const hercle = RAMP_PROVIDER_CLIENTS.hercle;
 const sandbox = rampTestRuntime("sandbox", HERCLE_TEST_KIT.credentials);
@@ -303,6 +303,105 @@ describe("Hercle status lookup", () => {
         providerReference: "ord_contract_onramp",
       }),
       SdpPaymentsError
+    );
+  });
+
+  const KIT_LOOKUP = {
+    transferId: "xfr_7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+    rampType: "onramp",
+    providerReference: "ord_contract_onramp",
+  } as const;
+
+  it("asks for the order by its id in one signed GET with no body, acting for no business", async () => {
+    const calls = scriptedFetch([
+      { status: 200, body: { orderId: "ord 1/x", status: "settling", error: null } },
+    ]);
+    const events = await hercle.fetchTransferStatus(sandbox, {
+      ...KIT_LOOKUP,
+      providerReference: "ord 1/x",
+    });
+    assert.equal(calls.length, 1);
+    const [call] = calls;
+    assert.ok(call);
+    assert.equal(call.method, "GET");
+    assert.equal(call.url, `${BASE_URL}/partner/v1/orders/ord%201%2Fx`);
+    assert.equal(call.body, "");
+    assert.equal(call.headers.get("X-Hercle-Client"), HERCLE_TEST_KIT.credentials.publicKey);
+    assert.equal(
+      call.headers.get("X-Hercle-Signature"),
+      await buildHercleSignature(
+        HERCLE_TEST_KIT.credentials.secretKey,
+        Number(call.headers.get("X-Hercle-Ts")),
+        "GET",
+        "/partner/v1/orders/ord%201%2Fx",
+        ""
+      )
+    );
+    // A status lookup carries no customer reference, so it reads on SDP's partner keys alone.
+    assert.equal(call.headers.get("on-behalf-of"), null);
+    assert.deepEqual(events, [{ provider: "hercle", kind: "settling", reference: "ord 1/x" }]);
+  });
+
+  for (const [name, exchange] of Object.entries(HERCLE_ORDER_LOOKUP_REFUSALS)) {
+    it(`fails on Hercle's refusal of ${name} after one request, never reading it as none`, async () => {
+      const replay = replayExchanges([exchange]);
+      await assert.rejects(
+        hercle.fetchTransferStatus(sandbox, KIT_LOOKUP),
+        (cause: unknown) =>
+          cause instanceof SdpPaymentsError &&
+          cause.code === "PROVIDER_NOT_CONFIGURED" &&
+          cause.details?.outcome === "rejected"
+      );
+      assert.equal(replay.requests.length, 1);
+    });
+  }
+
+  it("fails after one request on the sandbox's empty 404, an outage and a lost connection", async () => {
+    const cases = [
+      { name: "empty 404", reply: () => new Response(null, { status: 404 }), code: "BAD_REQUEST" },
+      {
+        name: "503",
+        reply: () => new Response(null, { status: 503 }),
+        code: "PROVIDER_UNAVAILABLE",
+        outcome: "unknown",
+      },
+      {
+        name: "lost connection",
+        reply: () => {
+          throw new TypeError("fetch failed");
+        },
+        code: "PROVIDER_UNAVAILABLE",
+        outcome: "unknown",
+      },
+    ];
+    for (const { name, reply, code, outcome = "rejected" } of cases) {
+      let requests = 0;
+      globalThis.fetch = async () => {
+        requests += 1;
+        return reply();
+      };
+      await assert.rejects(
+        hercle.fetchTransferStatus(sandbox, KIT_LOOKUP),
+        (cause: unknown) =>
+          cause instanceof SdpPaymentsError &&
+          cause.code === code &&
+          cause.details?.outcome === outcome,
+        name
+      );
+      assert.equal(requests, 1, name);
+    }
+  });
+
+  it("refuses an answer about another order", async () => {
+    scriptedFetch([
+      { status: 200, body: { orderId: "ord_other", status: "settled", error: null } },
+    ]);
+    await assert.rejects(
+      hercle.fetchTransferStatus(sandbox, KIT_LOOKUP),
+      (cause: unknown) =>
+        cause instanceof SdpPaymentsError &&
+        cause.code === "PROVIDER_RESPONSE_INVALID" &&
+        cause.details?.outcome === "unknown"
     );
   });
 
