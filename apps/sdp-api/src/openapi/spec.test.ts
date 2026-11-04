@@ -347,7 +347,7 @@ describe("OpenAPI spec", () => {
     );
     const generatedModule = readFileSync(
       new URL(
-        "../../../sdp-web/src/app/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts",
+        "../../../sdp-web/src/app/(session)/dashboard/[projectId]/markets/earn/earn-integration-snippets.ts",
         import.meta.url
       ),
       "utf8"

@@ -8,8 +8,8 @@ import {
   formatDisplayAmount,
   formatTimestamp,
   shortenAddress,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { findPublicSdpApiBaseUrl } from "@/lib/sdp-api-base-url";

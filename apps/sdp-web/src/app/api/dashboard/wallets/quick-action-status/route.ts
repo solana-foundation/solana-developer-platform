@@ -2,7 +2,7 @@ import {
   CUSTODY_PROVIDER_CATALOG,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
+} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
 import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";

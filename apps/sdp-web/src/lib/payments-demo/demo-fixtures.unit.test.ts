@@ -20,6 +20,53 @@ import {
 } from "@sdp/types/unified-transactions";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import CounterpartyDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/counterparty/[counterpartyId]/page";
+import {
+  fetchCounterparties,
+  fetchCounterparty,
+} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import CounterpartyPage from "@/app/(session)/dashboard/[projectId]/payments/counterparty/page";
+import {
+  normalizeAggregateBalances,
+  resolveTotalBalance,
+  selectTopAggregateBalanceRows,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import {
+  fetchDashboardPaymentTransfers,
+  fetchIssuedTokensByMint,
+  fetchPaymentsAggregate,
+  fetchPaymentsIssuedTokenSymbols,
+  fetchPaymentsWallets,
+  fetchPaymentTransfers,
+  fetchTransferBatches,
+  fetchTransferBatchRecipients,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
+import { summarizeBatch } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import {
+  fetchAllCounterparties,
+  fetchBatchRecipients,
+  fetchCounterpartyAccounts,
+  fetchTransfers,
+  fetchWalletAggregate,
+  fetchWallets,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import RecurringPaymentDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/recurring/[recurringPaymentId]/page";
+import RecurringPaymentsPage from "@/app/(session)/dashboard/[projectId]/payments/recurring/page";
+import {
+  fetchRecurringPaymentCollectionAttempts,
+  fetchRecurringPayments,
+  getRecurringPayment,
+  listRecurringPayments,
+} from "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments.data";
+import PaymentRequestDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/requests/[requestId]/page";
+import PaymentRequestsPage from "@/app/(session)/dashboard/[projectId]/payments/requests/page";
+import { fetchPaymentRequests } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
+import TransactionsPage from "@/app/(session)/dashboard/[projectId]/payments/transactions/page";
+import {
+  fetchTransactionsPageFromDashboard,
+  transactionsApiQuery,
+} from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-page.data";
+import { parseTransactionFilters } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { GET as counterpartyAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/accounts/route";
 import { GET as providerAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/provider-accounts/route";
 import { GET as projectAccountsGET } from "@/app/api/dashboard/counterparty/accounts/route";
@@ -30,53 +77,6 @@ import { GET as transactionsGET } from "@/app/api/dashboard/payments/transaction
 import { GET as transfersGET } from "@/app/api/dashboard/payments/transfers/route";
 import { GET as aggregateGET } from "@/app/api/dashboard/wallets/aggregate/route";
 import { GET as walletsGET } from "@/app/api/dashboard/wallets/route";
-import CounterpartyDetailRoute from "@/app/dashboard/[projectId]/payments/counterparty/[counterpartyId]/page";
-import {
-  fetchCounterparties,
-  fetchCounterparty,
-} from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import CounterpartyPage from "@/app/dashboard/[projectId]/payments/counterparty/page";
-import {
-  normalizeAggregateBalances,
-  resolveTotalBalance,
-  selectTopAggregateBalanceRows,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import {
-  fetchDashboardPaymentTransfers,
-  fetchIssuedTokensByMint,
-  fetchPaymentsAggregate,
-  fetchPaymentsIssuedTokenSymbols,
-  fetchPaymentsWallets,
-  fetchPaymentTransfers,
-  fetchTransferBatches,
-  fetchTransferBatchRecipients,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { summarizeBatch } from "@/app/dashboard/[projectId]/payments/payments-presentation";
-import {
-  fetchAllCounterparties,
-  fetchBatchRecipients,
-  fetchCounterpartyAccounts,
-  fetchTransfers,
-  fetchWalletAggregate,
-  fetchWallets,
-} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import RecurringPaymentDetailRoute from "@/app/dashboard/[projectId]/payments/recurring/[recurringPaymentId]/page";
-import RecurringPaymentsPage from "@/app/dashboard/[projectId]/payments/recurring/page";
-import {
-  fetchRecurringPaymentCollectionAttempts,
-  fetchRecurringPayments,
-  getRecurringPayment,
-  listRecurringPayments,
-} from "@/app/dashboard/[projectId]/payments/recurring/recurring-payments.data";
-import PaymentRequestDetailRoute from "@/app/dashboard/[projectId]/payments/requests/[requestId]/page";
-import PaymentRequestsPage from "@/app/dashboard/[projectId]/payments/requests/page";
-import { fetchPaymentRequests } from "@/app/dashboard/[projectId]/payments/requests/payment-requests-page.data";
-import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
-import {
-  fetchTransactionsPageFromDashboard,
-  transactionsApiQuery,
-} from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data";
-import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { paymentsDemoBody } from "./demo-fixtures";
 
@@ -162,35 +162,49 @@ vi.mock("@/lib/dashboard-page-trace", () => ({
     run({ trace: harness.trace, apiClient: harness.apiClient }),
 }));
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ userId: "user_demo", orgId: "org_demo" }),
+  auth: async () => ({ orgId: "org_demo" }),
 }));
 vi.mock("@/i18n/server", () => ({
   getTranslations: async () => (key: string) => key,
   getRequestLocale: async () => "en",
 }));
-vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 // The screens themselves are client components; the tests read the props the pages hand them.
-vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-workspace", () => ({
-  CounterpartyWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace", () => ({
-  CounterpartyDetailWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/[projectId]/payments/requests/payment-requests-workspace", () => ({
-  PaymentRequestsWorkspace: () => null,
-}));
-vi.mock("@/app/dashboard/[projectId]/payments/recurring/recurring-payments-workspace", () => ({
-  RecurringPaymentsWorkspace: () => null,
-}));
 vi.mock(
-  "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace",
+  "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-workspace",
+  () => ({
+    CounterpartyWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace",
+  () => ({
+    CounterpartyDetailWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-workspace",
+  () => ({
+    PaymentRequestsWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments-workspace",
+  () => ({
+    RecurringPaymentsWorkspace: () => null,
+  })
+);
+vi.mock(
+  "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace",
   () => ({
     RecurringPaymentDetailWorkspace: () => null,
   })
 );
-vi.mock("@/app/dashboard/[projectId]/payments/transactions/transactions-workspace", () => ({
-  TransactionsWorkspace: () => null,
-}));
+vi.mock(
+  "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-workspace",
+  () => ({
+    TransactionsWorkspace: () => null,
+  })
+);
 
 const NOW = harness.state.now;
 const t = ((key: string) => key) as Parameters<typeof fetchRecurringPayments>[1];

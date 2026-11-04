@@ -2,11 +2,11 @@ import type {
   UnifiedTransaction,
   UnifiedTransactionsListResponse,
 } from "@sdp/types/unified-transactions";
-import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
+import { enabledTransactionModules } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-modules";
 import {
   parseTransactionFilters,
   toTransactionsApiQuery,
-} from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
+} from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { toCsv } from "@/lib/csv";
 import { dashboardJson, dashboardResponseHeaders } from "@/lib/dashboard-response";
