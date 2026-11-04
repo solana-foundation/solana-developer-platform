@@ -1502,7 +1502,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/ramps/onramp/currency",
-            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters."
+            "description": "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there (devnet has no USDT)."
           }
         },
         {
@@ -1511,7 +1511,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/ramps/offramp/currency",
-            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters."
+            "description": "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there."
           }
         },
         {
@@ -1550,7 +1550,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
-            "description": "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+            "description": "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"transferId\": \"xfr_example\"\n}",
