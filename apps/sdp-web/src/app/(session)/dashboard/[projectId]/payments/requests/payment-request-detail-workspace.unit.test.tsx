@@ -51,7 +51,12 @@ const paymentRequest: PaymentRequest = {
   updatedAt: "2026-09-14T00:00:00.000Z",
 };
 
-function renderDetail(demo: boolean, publicToken: string | null, request: PaymentRequest) {
+function renderDetail(
+  demo: boolean,
+  publicToken: string | null,
+  request: PaymentRequest,
+  canceler: requestsData.PaymentRequestCanceler | null = null
+) {
   function wrapper({ children }: { children: ReactNode }) {
     return (
       // The dashboard's own SWR defaults, which keep a key's last read once it goes null.
@@ -63,7 +68,12 @@ function renderDetail(demo: boolean, publicToken: string | null, request: Paymen
     );
   }
   return render(
-    <PaymentRequestDetailWorkspace request={request} publicToken={publicToken} walletName={null} />,
+    <PaymentRequestDetailWorkspace
+      request={request}
+      publicToken={publicToken}
+      walletName={null}
+      canceler={canceler}
+    />,
     { wrapper }
   );
 }
@@ -183,6 +193,85 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
     expect(screen.queryByText(/\/pay\/tok_1/)).toBeNull();
+  });
+});
+
+describe("PaymentRequestDetailWorkspace dead link", () => {
+  // HOO-2616: a link the page calls dead is not handed out again.
+  it.each<{ status: PaymentRequest["status"]; expiresAt: string | null }>([
+    { status: "paid", expiresAt: null },
+    { status: "canceled", expiresAt: null },
+    { status: "expired", expiresAt: null },
+    // The clock expired it before the API said so.
+    { status: "awaiting_payment", expiresAt: "2020-01-01T00:00:00.000Z" },
+  ])(
+    "shows no link, QR code, copy or share for a $status request expiring $expiresAt",
+    async ({ status, expiresAt }) => {
+      renderDetail(false, "tok_1", { ...paymentRequest, status, expiresAt });
+
+      await waitFor(() => expect(screen.queryByText(/\/pay\//)).toBeNull());
+      expect(screen.queryByText("Payment link")).toBeNull();
+      expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
+      for (const name of ["Copy link", "Share…", "Download QR code"]) {
+        expect(screen.queryByRole("button", { name })).toBeNull();
+      }
+    }
+  );
+});
+
+describe("PaymentRequestDetailWorkspace canceled by", () => {
+  const canceledAt = "2026-09-15T10:30:00.000Z";
+  const byMember: PaymentRequest = {
+    ...paymentRequest,
+    status: "canceled",
+    canceledByUserId: "usr_1",
+    canceledAt,
+    updatedAt: canceledAt,
+  };
+  const byKey: PaymentRequest = {
+    ...byMember,
+    canceledByUserId: null,
+    canceledByApiKeyId: "key_1",
+  };
+
+  it("names the member who canceled it, with when", () => {
+    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_1", name: "Ada Lovelace" });
+
+    expect(
+      screen.getByText(/^Ada Lovelace canceled it on .+2026.*, before anyone paid\./)
+    ).toBeTruthy();
+  });
+
+  it("names the API key that canceled it", () => {
+    renderDetail(false, "tok_1", byKey, { kind: "api_key", id: "key_1", name: "Checkout bot" });
+
+    expect(
+      screen.getByText(/^The API key “Checkout bot” canceled it on .+, before anyone paid\./)
+    ).toBeTruthy();
+  });
+
+  it("says a member or an API key when the name could not be read", () => {
+    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_1", name: null });
+    expect(screen.getByText(/^A member canceled it on /)).toBeTruthy();
+    cleanup();
+
+    renderDetail(false, "tok_1", byKey, null);
+    expect(screen.getByText(/^An API key canceled it on /)).toBeTruthy();
+  });
+
+  it("never names a canceler read for someone else", () => {
+    renderDetail(false, "tok_1", byMember, { kind: "member", id: "usr_2", name: "Grace Hopper" });
+
+    expect(screen.queryByText(/Grace Hopper/)).toBeNull();
+    expect(screen.getByText(/^A member canceled it on /)).toBeTruthy();
+  });
+
+  it("keeps the plain words for a cancel that names nobody", () => {
+    renderDetail(false, "tok_1", { ...paymentRequest, status: "canceled" });
+
+    expect(
+      screen.getByText("Canceled before anyone paid it. The link is dead and cannot be reopened.")
+    ).toBeTruthy();
   });
 });
 

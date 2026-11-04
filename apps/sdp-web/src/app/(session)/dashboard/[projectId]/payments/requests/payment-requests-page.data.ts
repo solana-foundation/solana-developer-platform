@@ -352,3 +352,98 @@ export async function cancelPaymentRequest(
   );
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
+
+/** Who canceled a request, by the name the dashboard shows; `name` is null when it cannot be read. */
+export type PaymentRequestCanceler =
+  | { kind: "api_key"; id: string; name: string | null }
+  | { kind: "member"; id: string; name: string | null };
+
+const apiKeyNameResponseSchema = z.object({ data: z.object({ id: z.string(), name: z.string() }) });
+
+const memberDirectoryPageSchema = z.object({
+  members: z.array(
+    z.object({
+      user: z.object({ id: z.string(), email: z.string(), name: z.string().nullable() }),
+    })
+  ),
+  meta: z.object({ hasMore: z.boolean() }),
+});
+
+/** The members directory's largest page, so an organization's members come in one read. */
+const MEMBERS_LOOKUP_PAGE_SIZE = 100;
+/** Pages read before the canceler is left unnamed: 1,000 members. */
+const MEMBERS_LOOKUP_MAX_PAGES = 10;
+
+function memberDisplayName(user: { email: string; name: string | null }): string | null {
+  const name = user.name?.trim();
+  if (name) return name;
+  const email = user.email.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+async function readApiKeyName(
+  request: SdpApiClient["request"],
+  apiKeyId: string
+): Promise<string | null> {
+  const response = await request(`/v1/api-keys/${encodeURIComponent(apiKeyId)}`);
+  if (!response.ok) return null;
+  return apiKeyNameResponseSchema.parse(await response.json()).data.name.trim() || null;
+}
+
+async function readMemberName(
+  orgRequest: SdpApiClient["request"],
+  userId: string
+): Promise<string | null> {
+  for (let page = 1; page <= MEMBERS_LOOKUP_MAX_PAGES; page += 1) {
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(MEMBERS_LOOKUP_PAGE_SIZE),
+    });
+    const response = await orgRequest(`/v1/members?${query.toString()}`);
+    if (!response.ok) return null;
+    const directory = memberDirectoryPageSchema.parse(await response.json());
+    const member = directory.members.find((candidate) => candidate.user.id === userId);
+    if (member) return memberDisplayName(member.user);
+    if (!directory.meta.hasMore) return null;
+  }
+  return null;
+}
+
+/**
+ * Who canceled a request: the API key's name, read in the request's Project, or the member's
+ * name (else email) from the organization's members. A key since deleted, a member since
+ * removed, or a role that may not read either leaves the name null, and the page says "an API
+ * key" or "a member" instead.
+ *
+ * @param fetchers - `request` for the Project's API keys, `orgRequest` for the members directory.
+ * @param paymentRequest - The request as the API returned it.
+ * @returns The canceler, or null when the request is not canceled or names nobody; never throws.
+ */
+export async function fetchPaymentRequestCanceler(
+  fetchers: { request: SdpApiClient["request"]; orgRequest: SdpApiClient["request"] },
+  paymentRequest: PaymentRequest
+): Promise<PaymentRequestCanceler | null> {
+  if (paymentRequest.status !== "canceled") return null;
+  const { canceledByApiKeyId: apiKeyId, canceledByUserId: userId } = paymentRequest;
+  try {
+    if (apiKeyId) {
+      return {
+        kind: "api_key",
+        id: apiKeyId,
+        name: await readApiKeyName(fetchers.request, apiKeyId),
+      };
+    }
+    if (userId) {
+      return {
+        kind: "member",
+        id: userId,
+        name: await readMemberName(fetchers.orgRequest, userId),
+      };
+    }
+  } catch {
+    // A failed read only costs the name.
+    if (apiKeyId) return { kind: "api_key", id: apiKeyId, name: null };
+    if (userId) return { kind: "member", id: userId, name: null };
+  }
+  return null;
+}

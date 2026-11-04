@@ -3,12 +3,13 @@ import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { PaymentRequestDetailWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
 import {
+  fetchPaymentRequestCanceler,
   fetchPaymentRequestDetail,
   fetchPaymentRequestLinkToken,
 } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
-import { requestProjectHref } from "@/lib/sdp-api";
+import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,23 @@ export default async function PaymentRequestDetailRoute({
               candidate.walletId === request.walletId || candidate.id === request.walletId
           )
         : undefined;
+      // Only a canceled request names who did it; its key or member is read after the request.
+      const canceler =
+        request?.status === "canceled"
+          ? await trace.step("fetch_payment_request_canceler", async () =>
+              fetchPaymentRequestCanceler(
+                {
+                  request: apiClient.request,
+                  orgRequest: (
+                    await createOrgSdpApiClient(
+                      trace.childContext("dashboard.payment-requests.detail.canceler.api")
+                    )
+                  ).request,
+                },
+                request
+              )
+            )
+          : null;
 
       return (
         <div className="flex h-full min-h-0 w-full flex-col">
@@ -57,6 +75,7 @@ export default async function PaymentRequestDetailRoute({
             request={request}
             publicToken={link.ok ? link.publicToken : null}
             walletName={wallet?.label ?? null}
+            canceler={canceler}
             error={detail.status === "error" ? detail.error : undefined}
           />
         </div>
