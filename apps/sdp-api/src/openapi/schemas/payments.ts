@@ -373,11 +373,11 @@ export const transferSchema = z
       description: "When SDP confirmed the transfer on chain.",
       example: "2025-01-01T00:00:00.000Z",
     }),
-    fee: z
-      .number()
-      .int()
-      .nullable()
-      .openapi({ description: "Transaction fee in lamports.", example: 5000 }),
+    fee: z.number().int().nullable().openapi({
+      description:
+        "Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.",
+      example: 0,
+    }),
     error: z.string().nullable().openapi({
       description: "Error message if the transaction failed.",
       example: "Signature failed",
@@ -597,7 +597,8 @@ const transferBatchRecipientSchema = z
     amount: tokenAmountSchema,
     status: paymentTransferBatchRecipientStatusSchema,
     error: z.string().nullable().openapi({
-      description: "Recipient-level failure reason, when available.",
+      description:
+        'Recipient-level failure reason, when available. A recipient the source wallet could not fund reads "The wallet used for this payment does not have enough funds. Add funds and try again."',
     }),
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
@@ -1435,7 +1436,12 @@ const paymentSubscriptionCollectionAttemptSchema = z
     attemptedAt: isoDateTimeSchema.nullable(),
     status: paymentSubscriptionCollectionAttemptStatusSchema,
     signature: z.string().nullable().openapi({ description: "Solana transaction signature." }),
-    error: z.string().nullable().openapi({ description: "Collection error, if any." }),
+    error: z.string().nullable().openapi({
+      description:
+        "Why the collection failed, if it did. A source wallet that cannot cover the amount records the same text the collect request returned with `400 TRANSACTION_FAILED`.",
+      example:
+        "The wallet used for this payment does not have enough funds. Add funds and try again.",
+    }),
     metadata: paymentSubscriptionCollectionAttemptMetadataSchema.describe(
       "Provider/job metadata for the attempt."
     ),
