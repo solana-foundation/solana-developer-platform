@@ -1,84 +1,140 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import * as clerk from "@clerk/nextjs";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as workspace from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import * as unlinkedOrganizations from "@/lib/use-unlinked-organizations";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
-const mocks = vi.hoisted(() => ({
-  releaseChannel: "stable" as string,
-  unlinkedIds: new Set<string>() as ReadonlySet<string>,
-}));
+const mocks = {
+  setActive: vi.fn(),
+  toastError: vi.fn(),
+  switching: vi.fn(),
+};
 
-vi.mock("@clerk/nextjs", () => ({
-  useOrganization: () => ({
-    organization: { id: "org_prod", name: "Prod workspace", imageUrl: "" },
-  }),
-  useOrganizationList: () => ({
-    isLoaded: true,
-    setActive: vi.fn(),
-    userMemberships: {
-      data: [
-        { organization: { id: "org_prod", name: "Prod workspace", imageUrl: null } },
-        { organization: { id: "org_beta", name: "Beta workspace", imageUrl: null } },
-      ],
-    },
-  }),
-}));
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({
-    flags: { releaseChannel: mocks.releaseChannel },
+function organizationState(isLoaded = true) {
+  vi.mocked(vi.spyOn(clerk, "useOrganization"), { partial: true, deep: true }).mockReturnValue({
+    isLoaded,
+    organization: { id: "org_a", name: "Alpha", imageUrl: "" },
+  });
+}
+
+function workspaceState(releaseChannel = "stable") {
+  vi.mocked(vi.spyOn(workspace, "useDashboardWorkspace"), { partial: true }).mockReturnValue({
+    flags: { releaseChannel } as ReturnType<typeof workspace.useDashboardWorkspace>["flags"],
     projects: [],
-    selectedProjectId: null,
+    selectedProjectId: "project_a",
     selectProject: vi.fn(),
     isProjectSwitching: false,
-  }),
-}));
+  });
+}
 
-function renderSwitcher() {
+function unlinkedState(unlinkedIds: ReadonlySet<string> = new Set()) {
+  vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockReturnValue({
+    unlinkedIds,
+    isResolved: true,
+  });
+}
+
+function fixture() {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <WorkspaceSwitcher />
+      <WorkspaceSwitcher onOrganizationSwitchingChange={mocks.switching} />
     </I18nProvider>
   );
 }
 
-describe("WorkspaceSwitcher", () => {
-  beforeEach(() => {
-    cleanup();
-    mocks.releaseChannel = "stable";
-    mocks.unlinkedIds = new Set();
-    vi.restoreAllMocks();
-    vi.spyOn(unlinkedOrganizations, "useUnlinkedOrganizations").mockImplementation(() => ({
-      unlinkedIds: mocks.unlinkedIds,
-      isResolved: true,
-    }));
+beforeEach(() => {
+  vi.clearAllMocks();
+  organizationState();
+  vi.spyOn(toast, "error").mockImplementation(mocks.toastError);
+  vi.mocked(vi.spyOn(clerk, "useOrganizationList"), { partial: true, deep: true }).mockReturnValue({
+    isLoaded: true,
+    setActive: mocks.setActive,
+    userMemberships: {
+      data: ["Alpha", "Beta"].map((name, index) => ({
+        organization: { id: index === 0 ? "org_a" : "org_b", name, imageUrl: "" },
+      })),
+    },
+  });
+  workspaceState();
+  unlinkedState();
+  mocks.setActive.mockResolvedValue(undefined);
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("workspace organization switching", () => {
+  it("shows a loading placeholder while Clerk resolves the organization", () => {
+    organizationState(false);
+    fixture();
+    expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("Select organization")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the current organization without restarting the workspace", async () => {
+    fixture();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: /Alpha/ }));
+    expect(mocks.setActive).not.toHaveBeenCalled();
+    expect(mocks.switching).not.toHaveBeenCalled();
+  });
+
+  it("shows a pending switch until Clerk has made the organization active", async () => {
+    const pending = Promise.withResolvers<void>();
+    mocks.setActive.mockReturnValue(pending.promise);
+    fixture();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: /Beta/ }));
+    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_b" });
+    expect(screen.getByRole("button", { name: "Alpha" }).getAttribute("aria-busy")).toBe("true");
+    expect(mocks.switching.mock.calls).toEqual([[true]]);
+    pending.resolve();
+    await waitFor(() => expect(mocks.switching.mock.calls).toEqual([[true], [false]]));
+  });
+
+  it("reports a refused switch and makes the current workspace usable again", async () => {
+    mocks.setActive.mockRejectedValue(new Error("Switch refused"));
+    fixture();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: /Beta/ }));
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith("Could not switch organizations. Try again.")
+    );
+    expect(mocks.switching.mock.calls).toEqual([[true], [false]]);
+    expect(screen.getByRole("button", { name: "Alpha" }).getAttribute("aria-busy")).toBe("false");
   });
 
   it("does not list an organization this deployment does not link", async () => {
-    mocks.unlinkedIds = new Set(["org_beta"]);
+    unlinkedState(new Set(["org_b"]));
+    fixture();
     const user = userEvent.setup();
-    renderSwitcher();
-
-    await user.click(screen.getByRole("button", { name: "Prod workspace" }));
-
-    expect(screen.getByRole("menuitem", { name: /Prod workspace/ })).toBeTruthy();
-    expect(screen.queryByRole("menuitem", { name: /Beta workspace/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Alpha" }));
+    expect(screen.getByRole("menuitem", { name: /Alpha/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Beta/ })).toBeNull();
   });
+});
 
+describe("workspace beta mark", () => {
   it("marks the beta deployment beside the organization's name", () => {
-    mocks.releaseChannel = "beta";
-    renderSwitcher();
-
+    workspaceState("beta");
+    fixture();
     expect(screen.getByText("Beta")).toBeTruthy();
   });
 
   it("shows no beta mark elsewhere", () => {
-    renderSwitcher();
-
+    fixture();
     expect(screen.queryByText("Beta")).toBeNull();
   });
 });

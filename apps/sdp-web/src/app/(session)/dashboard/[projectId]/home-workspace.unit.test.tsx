@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
       sdpEnvironment: "sandbox",
       dashboardCacheScope: { userId: "user_h", orgId: "org_h" },
       selectedProjectId: "prj_test_sandbox",
-      initialQuickStartStatus: { custodyProvider: null, apiKeyCount: 0, lastCallAt: null },
+      initialQuickStartStatus: { hasWallet: false, apiKeyCount: 0, lastCallAt: null },
       flags: { custody: true, issuance: true, payments: true },
       dashboardAccess: {
         capabilities: {

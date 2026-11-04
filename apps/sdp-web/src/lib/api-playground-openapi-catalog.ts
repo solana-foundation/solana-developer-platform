@@ -30,6 +30,8 @@ interface GeneratedPlaygroundCatalog {
   modules: Record<PlaygroundModule, GeneratedPlaygroundOperation[]>;
   /** apps/sdp-api/src/openapi/release-channel-values.ts: the owner of each module value. */
   valueGates: Record<string, { module?: string; rampProvider?: string }>;
+  /** Only forms that differ from experimental, projected from each channel's public document. */
+  channelOverrides: Record<SdpReleaseChannel, Record<string, ApiPlaygroundEndpointConfig>>;
 }
 
 // SAFETY: scripts/generate-playground-catalog.ts writes this package artifact from
@@ -265,12 +267,18 @@ export function filterPlaygroundEndpointsToReleaseChannel(
           releaseChannel
         ) !== undefined
     )
-    .map((endpoint) => ({
-      ...endpoint,
-      pathFields: pruneFields(endpoint.pathFields, published),
-      bodyFields: pruneFields(endpoint.bodyFields, published),
-      expectedResponse: pruneExample(jsonSchema.parse(endpoint.expectedResponse), published),
-    }));
+    .map((endpoint) => {
+      const override = catalog.channelOverrides[releaseChannel][operationKey(endpoint)];
+      // Curated forms keep their wallet choices and translated labels. Generated
+      // forms use the channel's complete projection, including response fields.
+      if (override?.id === endpoint.id) return { ...endpoint, ...override };
+      return {
+        ...endpoint,
+        pathFields: pruneFields(endpoint.pathFields, published),
+        bodyFields: pruneFields(endpoint.bodyFields, published),
+        expectedResponse: pruneExample(jsonSchema.parse(endpoint.expectedResponse), published),
+      };
+    });
 }
 
 /**

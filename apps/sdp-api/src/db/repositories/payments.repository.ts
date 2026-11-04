@@ -106,6 +106,8 @@ export interface CreatePaymentTransferInput {
   serializedTx: string | null;
   signature: string | null;
   slot: number | null;
+  /** The network fee the source wallet pays, in lamports, when known at creation. */
+  fee?: number | null;
   initiatedByKeyId: string | null;
   idempotencyKey?: string | null;
   idempotencyFingerprint?: string | null;

@@ -10,6 +10,7 @@ import {
   toPlaygroundEndpoint,
 } from "@sdp/api-catalog/catalog";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { buildApiReference } from "@/openapi/reference";
 import { valueGates } from "@/openapi/release-channel-values";
 import routeActionsJson from "@/openapi/route-actions.generated.json";
@@ -92,6 +93,32 @@ function generateCatalog(): string {
     });
   }
 
+  // Derive narrower forms from the same public document the API and docs use.
+  // Store only changed operations, so every deployment need not ship three catalogs.
+  const widest = new Map(
+    Object.values(modules)
+      .flat()
+      .map((endpoint) => [endpoint.operationId, endpoint])
+  );
+  const channelOverrides = Object.fromEntries(
+    SDP_RELEASE_CHANNEL_NAMES.map((releaseChannel) => {
+      const operations = listApiCatalogOperations(
+        buildApiReference(createPublicOpenApiDocument({ releaseChannel }))
+      );
+      const overrides: Record<string, PlaygroundEndpoint> = {};
+      for (const { operation } of operations) {
+        const original = widest.get(operation.operationId);
+        if (original === undefined) continue;
+        const endpoint = toPlaygroundEndpoint(operation);
+        const { releaseModule: _module, shadowedBy: _shadows, ...baseline } = original;
+        if (JSON.stringify(endpoint) !== JSON.stringify(baseline)) {
+          overrides[`${endpoint.method} ${operation.path}`] = endpoint;
+        }
+      }
+      return [releaseChannel, overrides];
+    })
+  );
+
   return `${JSON.stringify(
     {
       _generated: {
@@ -108,6 +135,7 @@ function generateCatalog(): string {
       // shared reference contains every public operation, including Health and Projects.
       modules,
       valueGates: valueGates(),
+      channelOverrides,
     },
     null,
     2

@@ -268,7 +268,7 @@ const contracts: ValueMovingContract[] = [
       file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
       section: "transfers.post(",
       before:
-        'requireAction("transfers.execute"),\n  validateBody(createTransferSchema),\n  authorize(authorizeTransfer)',
+        'requireAction("transfers.execute"),\n  validateBody((c) =>\n    isModuleInChannel(c, "ramps") ? createTransferSchema : walletTransferSchema\n  ),\n  authorize(authorizeTransfer)',
       through: "replayFromRecord(findTransferRecordReplay),\n  admit(",
       after: "\n  createTransfer\n",
     },

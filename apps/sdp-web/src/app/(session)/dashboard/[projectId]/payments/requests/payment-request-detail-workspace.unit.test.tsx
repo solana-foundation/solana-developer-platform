@@ -186,6 +186,18 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
   });
 });
 
+describe("PaymentRequestDetailWorkspace facts", () => {
+  it("reads who pays and where it lands, then its reference, expiry and creation", () => {
+    renderDetail(false, "tok_1", paymentRequest);
+
+    expect(
+      [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
+    ).toEqual(["From", "To", "Reference", "Expires", "Created"]);
+    // A request names no payer: anyone holding the link can pay it.
+    expect(screen.getByText("Anyone with the link")).toBeTruthy();
+  });
+});
+
 describe("PaymentRequestDetailWorkspace cancel", () => {
   it.each<{
     role: OrganizationRole;
@@ -208,7 +220,8 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
       workspace.role = role;
       renderDetail(false, "tok_1", { ...paymentRequest, status, expiresAt });
 
-      expect(screen.queryByRole("button", { name: "Cancel request" }) !== null).toBe(shown);
+      expect(screen.queryByRole("button", { name: "Cancel request…" }) !== null).toBe(shown);
+      expect(screen.queryByRole("heading", { name: "Danger zone" }) !== null).toBe(shown);
     }
   );
 
@@ -218,7 +231,10 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
     const user = userEvent.setup();
     renderDetail(false, "tok_1", paymentRequest);
 
-    await user.click(await screen.findByRole("button", { name: "Cancel request" }));
+    expect(
+      await screen.findByText("The link stops accepting payments. Cannot be undone.")
+    ).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Cancel request…" }));
     const dialog = within(await screen.findByRole("dialog", { name: "Cancel request" }));
     expect(dialog.getByText("This link will stop accepting payments.")).toBeTruthy();
     await user.click(dialog.getByRole("button", { name: "Cancel request" }));

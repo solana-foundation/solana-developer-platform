@@ -190,6 +190,7 @@ export function WalletActivityTab({
 
   const anyLabel = t("Shared.SharedComponents.any");
   const { type, status, filtered, pageSize, currentPage, pageCount } = filters;
+  const transactionsHref = projectHref(walletTransactionsHref(custodyWalletId));
   return (
     <div className="flex min-w-0 flex-col gap-5" data-wallet-activity-tab>
       <ListToolbar
@@ -242,6 +243,13 @@ export function WalletActivityTab({
           placeholder={t("DashboardCustody.walletSearchActivity")}
           className="min-w-0 flex-1 sm:w-56 sm:flex-none"
         />
+        {/* The ledger narrowed to this wallet, which pages its whole history; on a phone the
+            same button sits under the list. */}
+        <Button asChild variant="outline" size="sm" className="hidden shrink-0 @2xl:inline-flex">
+          <Link href={transactionsHref}>
+            {t("DashboardCustody.walletActivityOpenTransactions")}
+          </Link>
+        </Button>
       </ListToolbar>
       {data.activityNotice ? (
         <p className="text-meta text-tertiary">{data.activityNotice}</p>
@@ -251,13 +259,7 @@ export function WalletActivityTab({
       ) : null}
       {data.hasMore ? (
         <p className="text-meta text-tertiary" data-wallet-activity-capped>
-          {t("DashboardCustody.walletActivityLatestOnly", { count: rows.length })}{" "}
-          <Link
-            href={projectHref(walletTransactionsHref(custodyWalletId))}
-            className="text-primary hover:underline"
-          >
-            {t("DashboardCustody.walletActivityOpenTransactions")}
-          </Link>
+          {t("DashboardCustody.walletActivityLatestOnly", { count: rows.length })}
         </p>
       ) : null}
       {filtered.length === 0 ? (
@@ -283,6 +285,13 @@ export function WalletActivityTab({
           onLoad={activity.loadOlder}
         />
       ) : null}
+      <div className="flex @2xl:hidden">
+        <Button asChild variant="outline" size="sm">
+          <Link href={transactionsHref}>
+            {t("DashboardCustody.walletActivityOpenTransactions")}
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

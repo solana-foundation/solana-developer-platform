@@ -26,18 +26,18 @@
       "skipped": "skipped",
       "pending": "not done yet"
     },
-    "custodyTitle": "Connect custody",
-    "custodyDoneDescription": "A custody provider holds this organization’s funds.",
-    "custodyDoneMeta": "Connected",
-    "custodySkippedDescription": "Skipped {when}. Nothing holds funds until a provider is connected.",
+    "custodyTitle": "Create a wallet",
+    "custodyDoneDescription": "This project has a wallet.",
+    "custodyDoneMeta": "Created",
+    "custodySkippedDescription": "Skipped {when}. You can create one anytime.",
     "custodySkippedMeta": "Skipped · {when}",
-    "custodyPendingDescription": "Connect a provider so wallets have somewhere to hold funds.",
-    "custodyPendingMeta": "Not connected",
-    "custodyConnect": "Connect",
+    "custodyPendingDescription": "Wallets hold your funds and sign your transactions.",
+    "custodyPendingMeta": "No wallet yet",
+    "custodyCreate": "Create wallet",
     "custodySkip": "Skip for now",
-    "custodyManage": "Manage",
-    "firstCallTitle": "Your first call has arrived",
-    "firstCallNeedsKeyDescription": "Opens once you create a key to sign requests.",
+    "custodyViewWallets": "View wallets",
+    "firstCallTitle": "Make your first API call",
+    "firstCallNeedsKeyDescription": "Start with an API key to sign your requests.",
     "firstCallNeedsKeyMeta": "Needs a key",
     "firstCallWaitingDescription": "Sign a request with one of your keys and it lands here.",
     "firstCallWaitingMeta": "Waiting for a call",
@@ -71,7 +71,7 @@
     "finish": "Finish quick start",
     "newDesign": {
       "title": "Quick start",
-      "settingsDescription": "Connect custody and make your first API call.",
+      "settingsDescription": "Create a wallet and make your first API call.",
       "settingsSandbox": "Switch to Sandbox to use the quick start."
     }
   },
@@ -345,6 +345,7 @@
     "acceptInvitationFailed": "Could not accept the invitation. Try the link in your invitation email.",
     "noOrganizationAccessTitle": "No access to this organization",
     "noOrganizationAccessDescription": "You are not a member of this organization in SDP. Choose another organization, or ask an admin to invite you.",
+    "changeOrganizationFailed": "Could not switch organizations. Try again.",
     "switchOrganizationFailed": "Joined, but could not switch to the organization. Choose it from the list."
   },
   "dashboardShell": {

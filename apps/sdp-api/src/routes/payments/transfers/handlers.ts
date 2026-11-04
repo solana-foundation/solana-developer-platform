@@ -33,6 +33,7 @@ import {
   getTransactionEncoder,
   type Instruction,
   pipe,
+  type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
@@ -113,6 +114,7 @@ import {
   type CriticalOutcome,
   criticalOutcomeEntry,
 } from "@/services/audit.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   assertPaymentProjectScope,
   isNativePaymentToken,
@@ -130,6 +132,7 @@ import {
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
+import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -150,6 +153,15 @@ import {
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
 import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
+
+/**
+ * The fee a new transfer row records before broadcast: a sponsored send's 0, so a row the
+ * recovery job confirms keeps it too. A Fireblocks vault pays its own fee, recorded once
+ * Fireblocks reports it.
+ */
+function walletFeeAtCreation(isFireblocks: boolean): number | undefined {
+  return isFireblocks ? undefined : SPONSORED_WALLET_FEE_LAMPORTS;
+}
 
 async function createTransferRecord(
   c: AppContext,
@@ -177,6 +189,8 @@ async function createTransferRecord(
      */
     idempotency: { key: string; fingerprint: string } | null;
     providerData?: Record<string, unknown>;
+    /** The network fee the source wallet will pay, when known before broadcast. */
+    fee?: number | null;
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotency?.key ?? null;
@@ -208,6 +222,7 @@ async function createTransferRecord(
       serializedTx: input.serializedTx ?? null,
       signature: null,
       slot: null,
+      fee: input.fee ?? null,
       initiatedByKeyId: input.initiatedByKeyId ?? null,
       idempotencyKey,
       idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
@@ -867,13 +882,20 @@ async function executeSponsoredTransfer(
   });
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
-  const signature = await submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: params.submissionStore,
-  });
+  let signature: Signature;
+  try {
+    signature = await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: params.submissionStore,
+    });
+  } catch (error) {
+    // The sponsor simulates before it signs: a source wallet short of funds
+    // is the caller's to fix, not an upstream failure (HOO-2621).
+    throw callerInsufficientFundsError(error, instructions) ?? error;
+  }
 
   const confirmation = await confirmTransaction(rpc, signature, {
     commitment: params.landingStatus,
@@ -971,6 +993,22 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
 }
 
 /**
+ * The code a failed transfer row recorded, or `TRANSACTION_FAILED` for a row
+ * the reconciler failed from the chain, which records none.
+ *
+ * @param row - A transfer row whose status is `failed`.
+ * @returns The error code the row answers with.
+ */
+function recordedFailureCode(row: TransferRow): ErrorCode {
+  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
+  const recordedCode =
+    typeof recorded === "object" && recorded !== null && "code" in recorded
+      ? recorded.code
+      : undefined;
+  return isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
+}
+
+/**
  * The error a failed transfer row answers with: the code its request recorded,
  * or `TRANSACTION_FAILED` for a row the reconciler failed from the chain.
  *
@@ -978,17 +1016,9 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
  * @returns The error a replay of the row's key answers with.
  */
 function failedTransferError(row: TransferRow): AppError {
-  const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
-  const recordedCode =
-    typeof recorded === "object" && recorded !== null && "code" in recorded
-      ? recorded.code
-      : undefined;
-  // A row the reconciler failed from the chain records no code: it is a
-  // transaction failure.
-  const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
   return new AppError(
-    code,
-    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+    recordedFailureCode(row),
+    `${(row.error ?? "The transfer failed").replace(/\.$/, "")}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
     { transferId: row.id, status: row.status }
   );
 }
@@ -1067,8 +1097,13 @@ async function executeFireblocksTransfer(
       metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
     });
   }
+  // The same code a replay of the key reads, so a confirmed policy block answers
+  // 422 CUSTODY_POLICY_REFUSED both times (HOO-2478).
   if (updated.status === "failed")
-    throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
+    throw new AppError(
+      recordedFailureCode(updated),
+      updated.error ?? "Fireblocks refused the transfer"
+    );
   return success(c, { transfer: mapTransferRow(updated) });
 }
 
@@ -1204,6 +1239,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         initiatedByKeyId: scope.auth.id,
         idempotency,
         providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
+        fee: walletFeeAtCreation(fireblocks !== null),
       });
 
   if (replayed) {
@@ -1267,6 +1303,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
+          // The sponsor pays the network fee, so the source wallet paid nothing (HOO-2614).
+          fee: SPONSORED_WALLET_FEE_LAMPORTS,
           error: null,
         })
       );
@@ -1294,6 +1332,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,
+        fee: SPONSORED_WALLET_FEE_LAMPORTS,
         error: null,
       })
     );
