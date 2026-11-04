@@ -9,7 +9,7 @@ export function generateCounterpartyAccountId(): string {
   return `cpacct_${crypto.randomUUID()}`;
 }
 
-/** Unique over a counterparty's active crypto_wallet accounts by network and address (0212). */
+/** Unique over a counterparty's active crypto_wallet accounts by network and address (0211). */
 const ACTIVE_ADDRESS_INDEX = "counterparty_accounts_active_address_unique";
 
 /**

@@ -19,10 +19,7 @@ function readMigration(file: string) {
 
 // The test runs inside a transaction, where CONCURRENTLY is not allowed; the
 // index definition is otherwise the migration's own.
-const archiveDuplicates = readMigration(
-  "0211_counterparty_accounts_archive_duplicate_addresses.sql"
-);
-const buildIndex = readMigration("0212_counterparty_accounts_active_address_unique.sql").replace(
+const buildIndex = readMigration("0211_counterparty_accounts_active_address_unique.sql").replace(
   "INDEX CONCURRENTLY",
   "INDEX"
 );
@@ -92,17 +89,29 @@ afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0211/0212 one active account per counterparty address", () => {
-  it("archives every duplicate but the oldest, then refuses a new one", async () => {
+describe("0211 one active account per counterparty address", () => {
+  it("refuses a second active account for one address, details-only rows included", async () => {
+    await client.query(buildIndex);
     await insertAccount({ id: "cpa_first", address: ADDRESS_A, createdAt: "2026-10-01T00:00:00Z" });
-    // Same address held only in details: still the same key.
-    await insertAccount({
-      id: "cpa_legacy_dup",
-      address: ADDRESS_A,
-      createdAt: "2026-10-02T00:00:00Z",
-      detailsOnly: true,
-    });
-    await insertAccount({ id: "cpa_dup", address: ADDRESS_A, createdAt: "2026-10-03T00:00:00Z" });
+
+    // Pre-0036 rows carry the address only in details: still the same key.
+    for (const detailsOnly of [false, true]) {
+      await client.query("SAVEPOINT probe");
+      await expect(
+        insertAccount({
+          id: "cpa_dup",
+          address: ADDRESS_A,
+          createdAt: "2026-10-02T00:00:00Z",
+          detailsOnly,
+        })
+      ).rejects.toMatchObject({ code: UNIQUE_VIOLATION, constraint: INDEX });
+      await client.query("ROLLBACK TO SAVEPOINT probe");
+    }
+  });
+
+  it("allows archived accounts, other addresses and other counterparties", async () => {
+    await client.query(buildIndex);
+    await insertAccount({ id: "cpa_first", address: ADDRESS_A, createdAt: "2026-10-01T00:00:00Z" });
     await insertAccount({
       id: "cpa_archived",
       address: ADDRESS_A,
@@ -121,25 +130,7 @@ describe("0211/0212 one active account per counterparty address", () => {
       createdAt: "2026-10-05T00:00:00Z",
     });
 
-    await client.query(archiveDuplicates);
-    await client.query(buildIndex);
-
-    expect(await statuses()).toEqual({
-      cpa_archived: "archived",
-      cpa_dup: "archived",
-      cpa_first: "active",
-      cpa_legacy_dup: "archived",
-      cpa_other_address: "active",
-      cpa_other_counterparty: "active",
-    });
-
-    await client.query("SAVEPOINT probe");
-    await expect(
-      insertAccount({ id: "cpa_race", address: ADDRESS_A, createdAt: "2026-11-01T00:00:00Z" })
-    ).rejects.toMatchObject({ code: UNIQUE_VIOLATION, constraint: INDEX });
-    await client.query("ROLLBACK TO SAVEPOINT probe");
-
-    // An archived account never blocks re-adding its address.
+    // Archiving frees the address for a new account.
     await client.query(
       "UPDATE counterparty_accounts SET status = 'archived' WHERE id = 'cpa_first'"
     );
@@ -147,6 +138,14 @@ describe("0211/0212 one active account per counterparty address", () => {
       id: "cpa_readded",
       address: ADDRESS_A,
       createdAt: "2026-11-02T00:00:00Z",
+    });
+
+    expect(await statuses()).toEqual({
+      cpa_archived: "archived",
+      cpa_first: "archived",
+      cpa_other_address: "active",
+      cpa_other_counterparty: "active",
+      cpa_readded: "active",
     });
   });
 });
