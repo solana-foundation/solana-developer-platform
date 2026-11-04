@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as walletActivityServer from "@/app/dashboard/[projectId]/custody/wallet-activity.server";
+import * as walletActivityServer from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.server";
 import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({

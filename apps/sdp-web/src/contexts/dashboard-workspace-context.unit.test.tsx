@@ -14,8 +14,7 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { DashboardWorkspaceProvider, useDashboardWorkspace } from "./dashboard-workspace-context";
 
 const clerk = vi.hoisted(() => {
-  const auth: { isLoaded: boolean; userId: string | null; orgId: string | null } = {
-    isLoaded: true,
+  const auth: { userId: string | null; orgId: string | null } = {
     userId: "user_test",
     orgId: "org_test",
   };
@@ -86,7 +85,7 @@ beforeEach(() => {
   cleanup();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
-  clerk.auth = { isLoaded: true, userId: "user_test", orgId: "org_test" };
+  clerk.auth = { userId: "user_test", orgId: "org_test" };
 });
 
 afterEach(() => {
@@ -128,7 +127,7 @@ describe("DashboardWorkspaceProvider project selection", () => {
   it("lands on the bare dashboard when Clerk switches organization under the page", async () => {
     const view = render(<WorkspaceFixture />);
 
-    clerk.auth = { isLoaded: true, userId: "user_test", orgId: "org_test_other" };
+    clerk.auth = { userId: "user_test", orgId: "org_test_other" };
     view.rerender(<WorkspaceFixture />);
 
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));

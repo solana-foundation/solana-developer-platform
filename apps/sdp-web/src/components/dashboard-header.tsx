@@ -17,8 +17,8 @@ import { toast } from "sonner";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";

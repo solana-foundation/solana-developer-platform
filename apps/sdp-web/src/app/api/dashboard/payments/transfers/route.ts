@@ -1,4 +1,4 @@
-import { fetchDashboardPaymentTransfers } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { fetchDashboardPaymentTransfers } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";

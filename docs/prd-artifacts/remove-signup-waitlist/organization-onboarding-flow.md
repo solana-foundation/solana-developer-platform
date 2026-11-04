@@ -145,13 +145,13 @@ complete. Never accept a client-only `completed=true` flag.
 
 ## Existing components to reuse
 
-- `apps/sdp-web/src/app/dashboard/custody/setup/wallet-setup-flow.tsx`: provider card and stable
+- `apps/sdp-web/src/app/(session)/dashboard/custody/setup/wallet-setup-flow.tsx`: provider card and stable
   wizard-footer behavior
 - `apps/sdp-web/src/components/ui/wizard-step-progress.tsx`: two-step progress indicator
-- `apps/sdp-web/src/app/dashboard/settings/actions.ts`: organization RPC persistence
-- `apps/sdp-web/src/app/dashboard/settings/organization-rpc-settings-form.tsx`: labels and configured
+- `apps/sdp-web/src/app/(session)/dashboard/settings/actions.ts`: organization RPC persistence
+- `apps/sdp-web/src/app/(session)/dashboard/settings/organization-rpc-settings-form.tsx`: labels and configured
   RPC handling
-- `apps/sdp-web/src/app/dashboard/custody/actions.ts`: idempotent custody initialization and wallet
+- `apps/sdp-web/src/app/(session)/dashboard/custody/actions.ts`: idempotent custody initialization and wallet
   creation behavior
 - `apps/sdp-api/src/routes/onboarding/handlers.ts`: organization-scoped setup status
 

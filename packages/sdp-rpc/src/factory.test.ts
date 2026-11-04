@@ -5,21 +5,25 @@ import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import {
   address,
   blockhash,
+  type Commitment,
   compileTransaction,
   createTransactionMessage,
   type GetSlotApi,
+  getBase58Decoder,
   getBase64EncodedWireTransaction,
   isSolanaError,
   lamports,
   pipe,
   type RequestAirdropApi,
   type Rpc,
+  type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { RpcUnavailableError } from "./errors";
 import {
@@ -28,6 +32,7 @@ import {
   createClusterRpc,
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
+  getSignatureStatusesFromEveryEndpoint,
   POOL_WALK_TIMEOUT_MS,
   proveEarnClusterEndpoint,
 } from "./factory";
@@ -50,6 +55,14 @@ type Endpoint = { genesis: GenesisAnswer; answer: Answer };
 type RpcCall = { url: string; method: string };
 
 type JsonRpcBody = { result: unknown } | { error: { code: number; message: string } };
+
+type StubStatus = { slot: number; confirmationStatus: Commitment };
+
+type StatusesAnswer =
+  | { contextSlot: number; statuses: ReadonlyArray<StubStatus | null> }
+  | { httpStatus: number };
+
+type StatusesCall = { url: string; params: unknown };
 
 const SLOT = 7;
 
@@ -132,10 +145,7 @@ function devnetHttpStatus(status: number): Endpoint {
   };
 }
 
-function readRequest(
-  input: Parameters<typeof fetch>[0],
-  init: Parameters<typeof fetch>[1]
-): { url: string; id: unknown; method: string; signal: AbortSignal | null | undefined } {
+function readRequest(input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) {
   assert.ok(typeof input === "string");
   assert.ok(init !== undefined && typeof init.body === "string");
   const payload: unknown = JSON.parse(init.body);
@@ -144,9 +154,16 @@ function readRequest(
       payload !== null &&
       "id" in payload &&
       "method" in payload &&
+      "params" in payload &&
       typeof payload.method === "string"
   );
-  return { url: input, id: payload.id, method: payload.method, signal: init.signal };
+  return {
+    url: input,
+    id: payload.id,
+    method: payload.method,
+    params: payload.params,
+    signal: init.signal,
+  };
 }
 
 function respond(id: unknown, body: JsonRpcBody): Response {
@@ -230,6 +247,26 @@ function stubStalledDevnetRead(stalledUrl: string): {
     });
   };
   return { calls, readStalled };
+}
+
+function stubSignatureStatusEndpoints(
+  endpoints: Readonly<Record<string, StatusesAnswer>>
+): StatusesCall[] {
+  const calls: StatusesCall[] = [];
+  globalThis.fetch = async (input, init) => {
+    const request = readRequest(input, init);
+    if (request.method === "getGenesisHash") {
+      return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
+    }
+    calls.push({ url: request.url, params: request.params });
+    const answer = endpoints[request.url];
+    if ("httpStatus" in answer) return new Response("Bad Request", { status: answer.httpStatus });
+    const value = answer.statuses.map((status) =>
+      status === null ? null : { ...status, confirmations: null, err: null }
+    );
+    return respond(request.id, { result: { context: { slot: answer.contextSlot }, value } });
+  };
+  return calls;
 }
 
 function genesisProbe(url: string): RpcCall {
@@ -1411,6 +1448,158 @@ describe("createClusterHistoryRpc", () => {
       genesisProbe(alchemy),
       slotRead(alchemy),
     ]);
+  });
+});
+
+describe("getSignatureStatusesFromEveryEndpoint", () => {
+  beforeEach(isolateRpcEnv);
+
+  afterEach(restoreRpcEnv);
+
+  const floorSlot = 500;
+  const firstSignature = signature(getBase58Decoder().decode(new Uint8Array(64).fill(1)));
+  const secondSignature = signature(getBase58Decoder().decode(new Uint8Array(64).fill(2)));
+
+  async function readFromTwoEndpoints(
+    slug: string,
+    answers: readonly [StatusesAnswer, StatusesAnswer],
+    signatures: Signature[]
+  ) {
+    const endpointUrls = [
+      `https://devnet-every-${slug}-triton.example.test`,
+      `https://devnet-every-${slug}-helius.example.test`,
+    ];
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: endpointUrls[0],
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: endpointUrls[1],
+    });
+    const calls = stubSignatureStatusEndpoints({
+      [endpointUrls[0]]: answers[0],
+      [endpointUrls[1]]: answers[1],
+    });
+    const reads = await runInClusterScope(SANDBOX, () =>
+      getSignatureStatusesFromEveryEndpoint(signatures, {
+        minContextSlot: BigInt(floorSlot),
+        commitment: "finalized",
+      })
+    );
+    return { endpointUrls, calls, reads };
+  }
+
+  function found(slot: number, confirmationStatus: Commitment) {
+    return {
+      kind: "found",
+      status: { slot: BigInt(slot), confirmations: null, confirmationStatus, err: null },
+    };
+  }
+
+  it("finds each signature on whichever endpoint has it, reading every endpoint's history at the floor", async () => {
+    const { endpointUrls, calls, reads } = await readFromTwoEndpoints(
+      "crossed",
+      [
+        { contextSlot: floorSlot, statuses: [null, { slot: 42, confirmationStatus: "finalized" }] },
+        { contextSlot: floorSlot, statuses: [{ slot: 41, confirmationStatus: "finalized" }, null] },
+      ],
+      [firstSignature, secondSignature]
+    );
+
+    assert.deepEqual(reads, [found(41, "finalized"), found(42, "finalized")]);
+    assert.deepEqual(
+      endpointUrls.map((url) => calls.filter((call) => call.url === url)),
+      endpointUrls.map((url) => [
+        {
+          url,
+          params: [
+            [firstSignature, secondSignature],
+            { searchTransactionHistory: true, minContextSlot: floorSlot, commitment: "finalized" },
+          ],
+        },
+      ])
+    );
+  });
+
+  it("is absent only when every endpoint answers at the floor without it", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "absent",
+      [
+        { contextSlot: floorSlot, statuses: [null] },
+        { contextSlot: floorSlot, statuses: [null] },
+      ],
+      [firstSignature]
+    );
+
+    assert.deepEqual(reads, [{ kind: "absent" }]);
+  });
+
+  it("is unresolved as node_behind_floor when one endpoint has none and another answers below the floor", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "unresolved",
+      [
+        { contextSlot: floorSlot, statuses: [null] },
+        { contextSlot: floorSlot - 1, statuses: [null] },
+      ],
+      [firstSignature]
+    );
+
+    assert.deepEqual(reads, [
+      {
+        kind: "unresolved",
+        failures: [{ reason: "node_behind_floor", contextSlot: BigInt(floorSlot - 1) }],
+      },
+    ]);
+  });
+
+  it("is unresolved as history_unavailable, naming the error, when an endpoint fails for another reason", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "history-unavailable",
+      [{ contextSlot: floorSlot, statuses: [null] }, { httpStatus: 400 }],
+      [firstSignature]
+    );
+
+    assert.partialDeepStrictEqual(reads, [
+      {
+        kind: "unresolved",
+        failures: [{ reason: "history_unavailable", errorName: "SolanaError" }],
+      },
+    ]);
+  });
+
+  it("finds a status one endpoint has while another fails", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "found-despite-failure",
+      [
+        { contextSlot: floorSlot, statuses: [{ slot: 41, confirmationStatus: "finalized" }] },
+        { contextSlot: floorSlot - 1, statuses: [null] },
+      ],
+      [firstSignature]
+    );
+
+    assert.deepEqual(reads, [found(41, "finalized")]);
+  });
+
+  it("takes the most confirmed status whichever endpoint answered it", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "most-confirmed",
+      [
+        {
+          contextSlot: floorSlot,
+          statuses: [
+            { slot: 40, confirmationStatus: "processed" },
+            { slot: 43, confirmationStatus: "finalized" },
+          ],
+        },
+        {
+          contextSlot: floorSlot,
+          statuses: [
+            { slot: 41, confirmationStatus: "confirmed" },
+            { slot: 44, confirmationStatus: "confirmed" },
+          ],
+        },
+      ],
+      [firstSignature, secondSignature]
+    );
+
+    assert.deepEqual(reads, [found(41, "confirmed"), found(43, "finalized")]);
   });
 });
 

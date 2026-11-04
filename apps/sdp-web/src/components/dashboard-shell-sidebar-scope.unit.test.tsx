@@ -9,7 +9,7 @@ import { SANDBOX_PROJECT } from "@/test/projects";
 import { DashboardShell } from "./dashboard-shell";
 
 vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-sidebar-scope" }),
+  useAuth: () => ({ isSignedIn: true, orgId: "org-sidebar-scope" }),
   useUser: () => ({ isLoaded: true, isSignedIn: true, user: null }),
   SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));

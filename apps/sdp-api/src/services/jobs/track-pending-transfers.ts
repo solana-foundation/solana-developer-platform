@@ -19,22 +19,23 @@
  * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 
-import { MinContextSlotNotReachedError } from "@sdp/rpc/errors";
-import { createClusterRpc } from "@sdp/rpc/factory";
+import {
+  createClusterRpc,
+  type EndpointHistoryFailure,
+  type EveryEndpointSignatureStatus,
+  getSignatureStatusesFromEveryEndpoint,
+} from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
-import { getChainHeight, getSignatureStatuses } from "@sdp/rpc/solana";
+import {
+  getChainHeight,
+  getSignatureStatuses,
+  VERDICT_HISTORY_HORIZON_BLOCKS,
+} from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
-import {
-  assertIsSignature,
-  commitmentComparator,
-  isSolanaError,
-  type Signature,
-  type Slot,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-} from "@solana/kit";
+import { assertIsSignature, commitmentComparator, type Signature, type Slot } from "@solana/kit";
 import {
   TRANSFER_BATCH_ATTEMPT_LIFETIME_MS,
   transferBatchChunkAuditIntentId,
@@ -73,30 +74,6 @@ const MAX_SIGNATURES_PER_BATCH = 256;
 // still-confirmed row ages out of the finalization poll and rests at
 // confirmed instead of costing an RPC history search forever.
 const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
-/**
- * How many blocks past a row's last valid block height the tracker still trusts a floored history
- * null to prove the transaction never landed. On the five-minute cron a row is judged within a
- * pass of its expiry, so the horizon only matters when the tracker has been down for more than
- * about an hour (9,000 blocks of Agave's 400 ms target slot): past it the row stays processing and
- * `sdp_api_payment_verdict_unprovable` pages an operator, who resolves it by hand until HOO-2338's
- * second provider replaces that.
- *
- * The transaction could have landed up to 150 blocks before its last valid block height
- * (`MAX_PROCESSING_AGE`), so the history must cover 9,150 blocks. Agave purges each node's
- * blockstore oldest-slot-first by shred count, never by slot count (`--limit-blockstore-size`:
- * 400M shreds by default and no fewer than 100M; `ledger/src/blockstore/cleanup_service.rs`), and
- * skipped slots carry no shreds, so retention is counted in blocks and shrinks as load grows. A
- * node at Agave's smallest limit keeps 9,150 blocks until they average about 10,900 shreds
- * (~55,000 TPS at the 4 transactions a shred `ledger/src/shred.rs` assumes); an indexer-backed node
- * keeps everything. Snapshot-booted nodes and history-backend errors read as null (Agave `rpc.rs`
- * `.unwrap_or(None)`) are outside what any horizon can bound.
- *
- * The history read asks for the `finalized` bank, so on Agave 4.4 and later the floor is checked
- * against the node's root and the answer comes from it. Before 4.4 nodes ignore that commitment:
- * SDP's own `context.slot` check is then the only floor, and it tests the node's processed slot.
- */
-const VERDICT_HISTORY_HORIZON_BLOCKS = 9_000n;
-
 type WithSignature<T extends PaymentTransferRow> = T & { signature: Signature };
 type PaymentTransferWithSignedSubmission = WithSignature<SignedSubmissionTransferRow>;
 
@@ -763,14 +740,14 @@ async function syncProcessingTransfersOnChain(
 }
 
 /**
- * Judges the processing rows the recent-status cache did not answer, by the lag-aware rule the
- * sponsorship budget and Earn reconcilers share. The `finalized` block height proves a signed
- * row's blockhash expired: every later block descends from one that can no longer include it.
- * Every row that may have been broadcast is then re-read from transaction history at the
- * finalized slot (`minContextSlot` against the `finalized` bank, with SDP's own `context.slot`
- * check), so a node behind that proof cannot report a landed transaction absent. A node behind the
- * floor is a miss: no verdict this pass. A null from a node at the floor fails the row only while
- * its landing window is inside the history horizon; past it the row stays processing and alerts.
+ * Judges the processing rows the recent-status cache did not answer. The `finalized` block height
+ * proves a signed row's blockhash expired: every later block descends from one that can no longer
+ * include it. Every row that may have been broadcast is then re-read from transaction history on
+ * every pool endpoint at the finalized slot (`minContextSlot` against the `finalized` bank, with
+ * SDP's own `context.slot` check), so neither a node behind that proof nor one endpoint's missing
+ * history can report a landed transaction absent. An endpoint that cannot answer is a miss: no
+ * verdict this pass. A null from every endpoint fails the row only while its landing window is
+ * inside the history horizon; past it the row stays processing and alerts.
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
@@ -824,57 +801,76 @@ async function reconcileCacheMisses(
   const candidates = expiredSigned.filter((transfer) => transfer.submission_started_at !== null);
   if (candidates.length === 0) return;
 
-  let history: Array<SignatureStatusInfo | null>;
-  try {
-    history = await getSignatureStatuses(
-      rpc,
-      candidates.map((transfer) => transfer.signature),
-      {
-        searchTransactionHistory: true,
-        minContextSlot: finalized.absoluteSlot,
-        commitment: "finalized",
-      }
-    );
-  } catch (err) {
-    const behind = nodeBehindFloor(err, finalized.absoluteSlot);
-    if (behind === null) {
-      getLogger().error(
-        {
-          error: err instanceof Error ? err.message : String(err),
-          environment: currentClusterScope().environment,
-        },
-        "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
-      );
-    }
-    for (const transfer of candidates) {
+  const history = await getSignatureStatusesFromEveryEndpoint(
+    candidates.map((transfer) => transfer.signature),
+    { minContextSlot: finalized.absoluteSlot, commitment: "finalized" }
+  );
+  const unresolvedRead = history.find(
+    (read): read is Extract<EveryEndpointSignatureStatus, { kind: "unresolved" }> =>
+      read.kind === "unresolved"
+  );
+  if (unresolvedRead !== undefined) {
+    logUnavailableHistory(unresolvedRead.failures);
+  }
+
+  for (const [index, transfer] of candidates.entries()) {
+    const read = history[index];
+    if (read.kind === "unresolved") {
       await keepStartedSubmissionForReconciliation(
         repo,
         transfer,
         nowIso,
-        behind === null ? { reason: "history_unavailable" } : behind
+        unresolvedHistoryVerdict(read.failures, finalized.absoluteSlot)
       );
+      continue;
     }
-    return;
+    await settleFromHistory(env, repo, transfer, read.kind === "found" ? read.status : null, {
+      finalized,
+      nowIso,
+    });
   }
+}
 
-  for (const [index, transfer] of candidates.entries()) {
-    await settleFromHistory(env, repo, transfer, history[index], { finalized, nowIso });
+function unresolvedHistoryVerdict(
+  failures: readonly EndpointHistoryFailure[],
+  minContextSlot: Slot
+): UnresolvedVerdict {
+  const lags = failures.flatMap((failure) =>
+    failure.reason === "node_behind_floor" ? [failure] : []
+  );
+  const [firstLag] = lags;
+  if (firstLag === undefined || lags.length < failures.length) {
+    return { reason: "history_unavailable" };
+  }
+  return {
+    reason: "node_behind_floor",
+    contextSlot: firstLag.contextSlot.toString(),
+    minContextSlot: minContextSlot.toString(),
+  };
+}
+
+function logUnavailableHistory(failures: readonly EndpointHistoryFailure[]): void {
+  for (const failure of failures) {
+    if (failure.reason !== "history_unavailable") continue;
+    getLogger().error(
+      {
+        error: failure.errorMessage,
+        environment: currentClusterScope().environment,
+      },
+      "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
+    );
   }
 }
 
 /**
  * Settles one row from its history status read at the finalized floor: a status applies as an
- * on-chain verdict; a null fails the row inside the history horizon and alerts past it.
- *
- * One floored null inside the horizon is terminal, an accepted risk: a snapshot-booted node, a
- * history-backend error Agave turns into null, or a pre-4.4 node answering from a minority fork
- * can still report a landed transaction absent. Confirming negative verdicts with a second
- * provider follows HOO-2338.
+ * on-chain verdict; a null from every endpoint fails the row inside the history horizon and alerts
+ * past it.
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
  * @param transfer - A signed row that started broadcast and expired.
- * @param status - Its status from a node at or past the floor, or null when that node has none.
+ * @param status - Its status from any endpoint, or null when every endpoint at the floor has none.
  * @param pass - The pass's proof and timestamp.
  * @param pass.finalized - The finalized height that proved the expiry and floored the read.
  * @param pass.nowIso - Timestamp applied to the written row.
@@ -924,35 +920,6 @@ async function settleFromHistory(
     finalized_block_height: finalized.blockHeight.toString(),
     min_context_slot: finalized.absoluteSlot.toString(),
   });
-}
-
-/**
- * The lag behind a refused floored read, when the refusal says the answering node had not reached
- * the floor: SDP's own `context.slot` check, or a served `-32016` once every pool endpoint refused.
- *
- * @param cause - What the floored read threw.
- * @param minContextSlot - The floor the read demanded.
- * @returns The answering node's slot and the floor, or null when the read failed for another reason.
- */
-function nodeBehindFloor(
-  cause: unknown,
-  minContextSlot: Slot
-): Extract<UnresolvedVerdict, { reason: "node_behind_floor" }> | null {
-  if (cause instanceof MinContextSlotNotReachedError) {
-    return {
-      reason: "node_behind_floor",
-      contextSlot: cause.contextSlot.toString(),
-      minContextSlot: cause.minContextSlot.toString(),
-    };
-  }
-  if (isSolanaError(cause, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
-    return {
-      reason: "node_behind_floor",
-      contextSlot: String(cause.context.contextSlot),
-      minContextSlot: minContextSlot.toString(),
-    };
-  }
-  return null;
 }
 
 /**
