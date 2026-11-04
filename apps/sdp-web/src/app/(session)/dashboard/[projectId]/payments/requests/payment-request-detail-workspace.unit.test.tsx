@@ -6,6 +6,7 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -186,22 +187,39 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
     expect(screen.queryByText(/\/pay\/tok_1/)).toBeNull();
   });
+
+  it("reads Copied for 1.4s once Copy link copies, and raises no toast", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const success = vi.spyOn(toast, "success");
+    const user = userEvent.setup();
+    renderDetail(false, "tok_1", paymentRequest);
+
+    await user.click(screen.getByRole("button", { name: "Copy link" }));
+
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/pay/tok_1`);
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(screen.getByText("Copied", { selector: "span[aria-live]" })).toBeTruthy();
+    expect(success).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_400);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy());
+  });
 });
 
 describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
-  const copiedLine =
-    "The link is on your clipboard. Send it to whoever pays you; this page reads Paid once they do.";
-  const notCopiedLine =
-    "The link was not copied. Copy it below and send it to whoever pays you; this page reads Paid once they do.";
+  const notCopiedLine = "Could not copy the payment link.";
+  const copyButton = (name: "Copy link" | "Copied") => screen.queryByRole("button", { name });
 
   beforeEach(() => forgetCreatedRequestLink());
 
-  it("says under the link that it is on the clipboard", () => {
+  it("reads Copied on Copy link for 1.4s when the link was copied", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     noteCreatedRequestLink("preq_1", true);
     renderDetail(false, "tok_1", paymentRequest);
 
-    expect(screen.getByText(copiedLine)).toBeTruthy();
+    expect(copyButton("Copied")).toBeTruthy();
     expect(screen.queryByText(notCopiedLine)).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_400);
+    await waitFor(() => expect(copyButton("Copy link")).toBeTruthy());
   });
 
   it("says plainly when the link was not copied", () => {
@@ -209,23 +227,23 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
     renderDetail(false, "tok_1", paymentRequest);
 
     expect(screen.getByText(notCopiedLine)).toBeTruthy();
-    expect(screen.queryByText(copiedLine)).toBeNull();
+    expect(copyButton("Copy link")).toBeTruthy();
   });
 
   it("says it on that request's first arrival only", () => {
     noteCreatedRequestLink("preq_2", true);
     renderDetail(false, "tok_1", paymentRequest);
-    expect(screen.queryByText(copiedLine)).toBeNull();
+    expect(copyButton("Copied")).toBeNull();
     cleanup();
 
     noteCreatedRequestLink("preq_1", true);
     renderDetail(false, "tok_1", paymentRequest);
-    expect(screen.getByText(copiedLine)).toBeTruthy();
+    expect(copyButton("Copied")).toBeTruthy();
     cleanup();
 
     // A later visit, a reload's render included, finds the note gone.
     renderDetail(false, "tok_1", paymentRequest);
-    expect(screen.queryByText(copiedLine)).toBeNull();
+    expect(copyButton("Copy link")).toBeTruthy();
   });
 
   it("drops the note when the request could not be read, so a retry says nothing late", () => {
@@ -238,13 +256,13 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
     cleanup();
 
     renderDetail(false, "tok_1", paymentRequest);
-    expect(screen.queryByText(copiedLine)).toBeNull();
+    expect(copyButton("Copy link")).toBeTruthy();
   });
 
-  it("takes the line away once the request can no longer be paid", () => {
-    noteCreatedRequestLink("preq_1", true);
+  it("takes the failed-copy line away once the request can no longer be paid", () => {
+    noteCreatedRequestLink("preq_1", false);
     const { rerender } = renderDetail(false, "tok_1", paymentRequest);
-    expect(screen.getByText(copiedLine)).toBeTruthy();
+    expect(screen.getByText(notCopiedLine)).toBeTruthy();
 
     // A cancel's refresh hands the page the closed request; the page itself stays mounted.
     rerender(
@@ -254,7 +272,7 @@ describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
         walletName={null}
       />
     );
-    expect(screen.queryByText(copiedLine)).toBeNull();
+    expect(screen.queryByText(notCopiedLine)).toBeNull();
   });
 
   it("marks the link it arrived with, and no link on a later visit", () => {

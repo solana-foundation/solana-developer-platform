@@ -1559,10 +1559,6 @@
     },
     "requestDetail": {
       "paymentLink": "Payment link",
-      "linkCopied": "Link copied",
-      "linkCopiedDescription": "The link for {amount} is on your clipboard.",
-      "linkOnClipboard": "The link is on your clipboard. Send it to whoever pays you; this page reads Paid once they do.",
-      "linkNotCopied": "The link was not copied. Copy it below and send it to whoever pays you; this page reads Paid once they do.",
       "share": "Share…",
       "shareTitle": "Payment request for {amount}",
       "downloadQrCode": "Download QR code",

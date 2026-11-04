@@ -72,10 +72,10 @@ A toast shown from a flow sits above its footer (`--app-toast-offset-bottom`);
 once the flow navigates away it drops to sonner's 24px corner, under the
 pointer that pressed the primary action and over the record's own actions,
 and sonner holds a hovered toast open (HOO-2615). The new-request page leaves
-`noteCreatedRequestLink` for the request's page, which says under the link
-whether it was copied. A clipboard write of text an answer brings, like that
-link, starts inside the press with `copyPendingText` (`src/lib`): Safari
-refuses a write that starts after an `await`.
+`noteCreatedRequestLink` for the request's page, whose Copy link reads Copied,
+or a line under the link says the copy failed. A clipboard write of text an
+answer brings, like that link, starts inside the press with `copyPendingText`
+(`src/lib`): Safari refuses a write that starts after an `await`.
 
 Run the unit suite on Node 24.22.1, the version CI pins. On Node 26 every test
 that touches `localStorage` or `sessionStorage` fails with "Cannot read
