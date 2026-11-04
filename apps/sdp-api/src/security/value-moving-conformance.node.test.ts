@@ -613,7 +613,8 @@ function discoverSigningSinks(): Record<string, string[]> {
         (match) => match[1] ?? match[2]
       );
       if (sinks.length > 0) {
-        inventory[path.relative(repositoryRoot, file)] = sinks;
+        // Posix-separated, so the inventory keys match on every platform.
+        inventory[path.relative(repositoryRoot, file).split(path.sep).join("/")] = sinks;
       }
     }
   }
