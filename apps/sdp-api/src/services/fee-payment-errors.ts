@@ -1,5 +1,11 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
-import type { Instruction } from "@solana/kit";
+import type {
+  AccountMeta,
+  Instruction,
+  InstructionWithAccounts,
+  InstructionWithData,
+  ReadonlyUint8Array,
+} from "@solana/kit";
 import {
   identifySubscriptionsInstruction,
   parseTransferFixedInstruction,
@@ -56,60 +62,59 @@ function simulatedProgramError(
   };
 }
 
-type InstructionParser = (instruction: Instruction) => { accounts: object };
+type ParsableInstruction = Instruction &
+  InstructionWithAccounts<readonly AccountMeta[]> &
+  InstructionWithData<ReadonlyUint8Array>;
+
+function declaredCount(parsed: { accounts: object }): number {
+  return Object.keys(parsed.accounts).length;
+}
 
 /**
- * The parser for each instruction that spends from a source it names, keyed by
- * program. A Token-2022 transfer hook runs only when the transfer carries its
- * extra accounts and may raise its own custom 0x1, so an instruction counts
- * only while it carries exactly the accounts its parser declares.
+ * How many accounts an instruction that spends from a source it names
+ * declares, or null for any other instruction.
  */
-function sourceTransferParser(instruction: Instruction): InstructionParser | null {
+function sourceTransferAccountCount(instruction: ParsableInstruction): number | null {
   const { data, programAddress } = instruction;
-  if (data === undefined || data.length === 0) return null;
-  // The identify helpers throw on a discriminator they do not know.
-  try {
-    if (programAddress === SYSTEM_PROGRAM_ADDRESS) {
-      return identifySystemInstruction(data) === SystemInstruction.TransferSol
-        ? (parseTransferSolInstruction as InstructionParser)
-        : null;
+  if (data.length === 0) return null;
+  if (programAddress === SYSTEM_PROGRAM_ADDRESS) {
+    return identifySystemInstruction(data) === SystemInstruction.TransferSol
+      ? declaredCount(parseTransferSolInstruction(instruction))
+      : null;
+  }
+  if (programAddress === TOKEN_PROGRAM_ADDRESS) {
+    switch (identifyTokenInstruction(data)) {
+      case TokenInstruction.Transfer:
+        return declaredCount(parseTransferInstruction(instruction));
+      case TokenInstruction.TransferChecked:
+        return declaredCount(parseTransferCheckedInstruction(instruction));
+      default:
+        return null;
     }
-    if (programAddress === TOKEN_PROGRAM_ADDRESS) {
-      switch (identifyTokenInstruction(data)) {
-        case TokenInstruction.Transfer:
-          return parseTransferInstruction as InstructionParser;
-        case TokenInstruction.TransferChecked:
-          return parseTransferCheckedInstruction as InstructionParser;
-        default:
-          return null;
-      }
+  }
+  if (programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
+    switch (identifyToken2022Instruction(data)) {
+      case Token2022Instruction.Transfer:
+        return declaredCount(parseToken2022TransferInstruction(instruction));
+      case Token2022Instruction.TransferChecked:
+        return declaredCount(parseToken2022TransferCheckedInstruction(instruction));
+      default:
+        return null;
     }
-    if (programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
-      switch (identifyToken2022Instruction(data)) {
-        case Token2022Instruction.Transfer:
-          return parseToken2022TransferInstruction as InstructionParser;
-        case Token2022Instruction.TransferChecked:
-          return parseToken2022TransferCheckedInstruction as InstructionParser;
-        default:
-          return null;
-      }
+  }
+  if (programAddress === SUBSCRIPTIONS_PROGRAM_ADDRESS) {
+    // A delegated pull: the program's own errors start at 100, so a custom
+    // 0x1 here comes from the token transfer it makes from the delegator.
+    switch (identifySubscriptionsInstruction(data)) {
+      case SubscriptionsInstruction.TransferFixed:
+        return declaredCount(parseTransferFixedInstruction(instruction));
+      case SubscriptionsInstruction.TransferRecurring:
+        return declaredCount(parseTransferRecurringInstruction(instruction));
+      case SubscriptionsInstruction.TransferSubscription:
+        return declaredCount(parseTransferSubscriptionInstruction(instruction));
+      default:
+        return null;
     }
-    if (programAddress === SUBSCRIPTIONS_PROGRAM_ADDRESS) {
-      // A delegated pull: the program's own errors start at 100, so a custom
-      // 0x1 here comes from the token transfer it makes from the delegator.
-      switch (identifySubscriptionsInstruction(data)) {
-        case SubscriptionsInstruction.TransferFixed:
-          return parseTransferFixedInstruction as InstructionParser;
-        case SubscriptionsInstruction.TransferRecurring:
-          return parseTransferRecurringInstruction as InstructionParser;
-        case SubscriptionsInstruction.TransferSubscription:
-          return parseTransferSubscriptionInstruction as InstructionParser;
-        default:
-          return null;
-      }
-    }
-  } catch {
-    return null;
   }
   return null;
 }
@@ -121,14 +126,17 @@ function sourceTransferParser(instruction: Instruction): InstructionParser | nul
  * custom error 0x1 is the source's own shortfall (System
  * `ResultWithNegativeLamports`, Token `InsufficientFunds`). The same code from
  * any other instruction, such as a destination token account the sponsor pays
- * rent for, or from a transfer hook, is not provably the caller's.
+ * rent for, or from a Token-2022 transfer hook, is not provably the caller's:
+ * a hook runs only when the transfer carries its extra accounts, so the
+ * instruction must carry exactly the accounts its parser declares.
  */
 function isSourceFundedTransfer(instruction: Instruction): boolean {
-  const parse = sourceTransferParser(instruction);
-  const accounts = instruction.accounts;
-  if (parse === null || accounts === undefined) return false;
+  const { accounts, data } = instruction;
+  if (accounts === undefined || data === undefined) return false;
+  // The identify and parse helpers throw on data they do not recognize.
   try {
-    return accounts.length === Object.keys(parse(instruction).accounts).length;
+    const declared = sourceTransferAccountCount({ ...instruction, accounts, data });
+    return declared !== null && accounts.length === declared;
   } catch {
     return false;
   }
