@@ -85,10 +85,16 @@ describe("API route ownership", () => {
           },
           env
         );
-        // A refusal, not another 403-shaped failure on the way (e.g. a handler error).
+        // The release channel's own refusal, not another 403 on the way (a module's feature
+        // flag or a handler error), so every left-out module answers alike (HOO-2620).
+        const { error } = (await response.json()) as {
+          error?: { code?: string; message?: string };
+        };
         const refused =
-          response.status === 403 && (await response.json()).error?.code === "FORBIDDEN";
-        if (!refused) served.push(`${method} ${path} -> ${response.status}`);
+          response.status === 403 &&
+          error?.code === "FORBIDDEN" &&
+          error.message?.endsWith("is not available in this release channel.") === true;
+        if (!refused) served.push(`${method} ${path} -> ${response.status} ${error?.message}`);
       }
       expect(served).toEqual([]);
     });
