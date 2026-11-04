@@ -9,6 +9,7 @@ import type {
   WalletSetupActionResult,
 } from "@/app/(session)/dashboard/[projectId]/custody/actions";
 import type { PrivyByokSubmitResult } from "@/app/(session)/dashboard/[projectId]/custody/byok-actions";
+import * as csrActions from "@/app/(session)/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -37,7 +38,6 @@ const mocks = vi.hoisted(() => ({
     })
   ),
   refreshWalletInventory: vi.fn(),
-  loadFireblocksCsr: vi.fn(async () => ({ status: "success" as const, csr: null })),
 }));
 
 /** What a refusal settles about the browser's key: the API answered, nothing replayed. */
@@ -63,11 +63,6 @@ vi.mock("@/app/(session)/dashboard/[projectId]/custody/byok-actions", () => ({
 }));
 vi.mock("@/app/(session)/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
   useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
-}));
-vi.mock("@/app/(session)/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
-  loadFireblocksCsrAction: mocks.loadFireblocksCsr,
-  generateFireblocksCsrAction: vi.fn(),
-  loadFireblocksVaultsAction: vi.fn(),
 }));
 
 const { WalletSetupFlow } = await import("./wallet-setup-flow");
@@ -190,6 +185,11 @@ function submitted(action: { mock: { calls: [FormData][] } }): FormData {
 
 beforeEach(() => {
   resetDashboardNavigation();
+  // Fireblocks' fields read the project's registration CSR on mount; none is open yet.
+  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
+    status: "success",
+    csr: null,
+  });
 });
 
 afterEach(() => {
@@ -690,7 +690,7 @@ describe("whose account", () => {
     for (let settle = 0; settle < 5; settle += 1) {
       await act(async () => {});
     }
-    expect(mocks.loadFireblocksCsr).toHaveBeenCalledTimes(1);
+    expect(csrActions.loadFireblocksCsrAction).toHaveBeenCalledTimes(1);
 
     // Nothing was typed and nothing was sent, so Cancel leaves at once.
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
