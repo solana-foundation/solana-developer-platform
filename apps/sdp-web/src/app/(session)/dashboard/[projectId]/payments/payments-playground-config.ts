@@ -373,3 +373,58 @@ export function buildPaymentsPlaygroundEndpointConfigs(
 
   return mergeOpenApiPlaygroundEndpoints("payments", curatedEndpoints);
 }
+
+const PAYMENT_REQUESTS_PATH = "/v1/payments/requests";
+
+function isPaymentRequestRoute({ path }: ApiPlaygroundEndpointConfig): boolean {
+  const base = path.split("?", 1)[0];
+  return base === PAYMENT_REQUESTS_PATH || base.startsWith(`${PAYMENT_REQUESTS_PATH}/`);
+}
+
+function playgroundOperationKey({ method, path }: ApiPlaygroundEndpointConfig): string {
+  return `${method} ${path.split("?", 1)[0]}`;
+}
+
+function withGroup(endpoints: ApiPlaygroundEndpointConfig[], group: string) {
+  return endpoints.map((endpoint) => ({ ...endpoint, group }));
+}
+
+/**
+ * The Payments playground's endpoints: payments, then contacts, then payment requests.
+ * `payments` carries the generated catalog's operations for the whole payments family,
+ * payment requests included; those move to the requests group, after its hand-written
+ * forms, so a form with wallet and token pickers wins over the generated entry for
+ * the same operation.
+ */
+export function mergePaymentsPlaygroundSections(
+  sections: {
+    payments: ApiPlaygroundEndpointConfig[];
+    contacts: ApiPlaygroundEndpointConfig[];
+    requests: ApiPlaygroundEndpointConfig[];
+  },
+  groups: { payments: string; contacts: string; requests: string }
+): ApiPlaygroundEndpointConfig[] {
+  const merged = [
+    ...withGroup(
+      sections.payments.filter((endpoint) => !isPaymentRequestRoute(endpoint)),
+      groups.payments
+    ),
+    ...withGroup(sections.contacts, groups.contacts),
+    ...withGroup(
+      [...sections.requests, ...sections.payments.filter(isPaymentRequestRoute)],
+      groups.requests
+    ),
+  ];
+  // Catalog entries can repeat across families; the first (curated) one wins.
+  const seenIds = new Set<string>();
+  const seenOperations = new Set<string>();
+  return merged.filter((endpoint) => {
+    const operation = playgroundOperationKey(endpoint);
+    if (seenIds.has(endpoint.id) || seenOperations.has(operation)) {
+      return false;
+    }
+    seenIds.add(endpoint.id);
+    seenOperations.add(operation);
+    return true;
+  });
+}

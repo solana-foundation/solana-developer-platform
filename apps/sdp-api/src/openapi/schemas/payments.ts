@@ -12,6 +12,7 @@ import {
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import {
   createPaymentRequestSchema as createPaymentRequestSchemaBase,
@@ -763,6 +764,8 @@ export const paymentRequestSchema = z
     description: "A payment request. Reads never carry its link token.",
   });
 
+const USDC_MAINNET_MINT = wellKnownMint("USDC", "mainnet-beta");
+
 export const createPaymentRequestRequestSchema = createPaymentRequestSchemaBase
   .extend({
     walletId: withOpenApi(createPaymentRequestSchemaBase.shape.walletId, {
@@ -770,9 +773,8 @@ export const createPaymentRequestRequestSchema = createPaymentRequestSchemaBase
       example: "privy_wallet_123",
     }),
     token: withOpenApi(createPaymentRequestSchemaBase.shape.token, {
-      description:
-        "Mint address of the token to request. Symbols are not accepted; for native SOL, pass `So11111111111111111111111111111111111111112`.",
-      example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      description: `Mint address of the token to request. Symbols are not accepted; for native SOL, pass \`${SOL_MINT}\`.`,
+      example: USDC_MAINNET_MINT,
     }),
     amount: withOpenApi(createPaymentRequestSchemaBase.shape.amount, {
       description:
@@ -789,7 +791,7 @@ export const createPaymentRequestRequestSchema = createPaymentRequestSchemaBase
     description: "Create payment request payload.",
     example: {
       walletId: "privy_wallet_123",
-      token: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      token: USDC_MAINNET_MINT,
       amount: "10.00",
       expiresAt: null,
     },
