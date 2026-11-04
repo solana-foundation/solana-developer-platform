@@ -41,7 +41,7 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
   }
   const initials = name.trim().slice(0, 2).toUpperCase() || "?";
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-semibold text-on-primary refresh:size-8 refresh:text-body refresh:font-medium">
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-semibold text-on-primary refresh:size-8 refresh:text-body refresh:font-medium">
       {initials}
     </span>
   );

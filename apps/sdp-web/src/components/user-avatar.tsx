@@ -23,7 +23,7 @@ export function UserAvatar({
   return (
     <span
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-on-primary refresh:size-8 refresh:text-meta refresh:font-medium",
+        "flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-on-primary refresh:size-8 refresh:text-meta refresh:font-medium",
         className
       )}
     >
