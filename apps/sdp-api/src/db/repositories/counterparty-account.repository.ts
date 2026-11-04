@@ -9,6 +9,22 @@ export function generateCounterpartyAccountId(): string {
   return `cpacct_${crypto.randomUUID()}`;
 }
 
+/** Unique over a counterparty's active crypto_wallet accounts by network and address (0212). */
+const ACTIVE_ADDRESS_INDEX = "counterparty_accounts_active_address_unique";
+
+/**
+ * Whether a write failed because the counterparty already has an active account
+ * with the same network and address (HOO-2618).
+ *
+ * @param error - The error a create or update threw.
+ * @returns True only for a unique violation on the active-address index.
+ */
+export function isDuplicateCounterpartyAccountAddress(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const pg = error as { code?: unknown; constraint?: unknown };
+  return pg.code === "23505" && pg.constraint === ACTIVE_ADDRESS_INDEX;
+}
+
 export interface CounterpartyAccountRow {
   id: string;
   organization_id: string;
