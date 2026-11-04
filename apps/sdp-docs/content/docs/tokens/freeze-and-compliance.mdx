@@ -85,7 +85,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 **Freeze:**
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze-account \
   -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -100,7 +100,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 **Unfreeze:**
 
 ```typescript title="unfreeze-account.ts"
-await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
+await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze-account", {
   method: "POST",
   headers: {
     Authorization: "Bearer sf_...",
@@ -182,7 +182,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 <Tab value="API">
 
 ```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize/execute \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \

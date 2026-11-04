@@ -68,7 +68,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     expect(created.data.token.status).toBe("pending");
 
     // Deploy the token
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -118,7 +118,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       expect(created.data.token.requiresAllowlist).toBe(true);
 
       // Deploy the token
-      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -165,7 +165,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
       expect(created.data.token.template).toBe("tokenized-security");
 
       // Deploy the token
-      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+      const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),
@@ -207,7 +207,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic Template D
     expect(created.data.token.template).toBe("custom");
 
     // Deploy the token
-    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy`, {
+    const deployRes = await request(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signingCustodyWalletId: custodyWalletId }),

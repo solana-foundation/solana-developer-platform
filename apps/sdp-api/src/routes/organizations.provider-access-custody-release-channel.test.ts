@@ -44,7 +44,7 @@ const configuredCustodyEnv = {
 
 async function custodyAccess() {
   const response = await app.request(
-    `/v1/organizations/${TEST_ORG.id}/provider-access`,
+    `/v1/organizations/${TEST_ORG.id}/provider-availability`,
     { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
     configuredCustodyEnv
   );
@@ -52,7 +52,7 @@ async function custodyAccess() {
   return providerAccessSchema.parse(await response.json()).data.providers.custody;
 }
 
-describe("GET /v1/organizations/:orgId/provider-access custody release channel", () => {
+describe("GET /v1/organizations/:orgId/provider-availability custody release channel", () => {
   installPaymentsRouteTestHooks();
   beforeEach(() => {
     excludedCustodyPairs.clear();

@@ -155,7 +155,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Transfer Batches 
       accountIds.push(account.data.account.id);
     }
 
-    const createRes = await request("/v1/payments/transfer-batches", {
+    const createRes = await request("/v1/payments/transfer-batches/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -135,7 +135,7 @@ function registerEarnDepositPreviewPath(
 ) {
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/vault-deposit-previews",
+    path: "/v1/earn/deposits/preview",
     tags: ["Earn"],
     summary: "Preview a direct vault deposit",
     operationId: "createEarnVaultDepositPreview",
@@ -169,12 +169,12 @@ function registerEarnVaultShareReconciliationPath(
 ) {
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/vault-share-reconciliation",
+    path: "/v1/earn/positions/provider-signed/share-reconciliation-report",
     tags: ["Earn"],
-    summary: "Reconcile custody vault shares against recorded positions",
+    summary: "Reconcile vault shares against recorded positions",
     operationId: "getEarnVaultShareReconciliation",
     description:
-      "Report-only comparison of each scoped custody wallet's on-chain share balances against " +
+      "Report-only comparison of each scoped connected wallet's on-chain share balances against " +
       "the recorded claim set, both directions: share balances of catalogued vaults with no " +
       "recorded position (for example, shares acquired by signing outside SDP), and recorded " +
       "open positions whose wallet holds none of their shares. Writes nothing. Takes the same " +
@@ -200,9 +200,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
   // the exact built message, records the movement, then broadcasts).
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/positions/summary",
+    path: "/v1/earn/positions/caller-signed/project-summary",
     tags: ["Earn"],
-    summary: "Get external-wallet position totals",
+    summary: "Get caller-signed project position totals",
     operationId: "getEarnExternalWalletPositionSummary",
     description:
       "Returns a complete live aggregate across the active partner project's end-user wallets, " +
@@ -215,7 +215,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     request: { headers: projectScopeHeaders, query: earnExternalWalletPositionSummaryQuerySchema },
     responses: {
       200: {
-        description: "Complete external-wallet position aggregate",
+        description: "Complete caller-signed project position aggregate",
         content: jsonContent(earnExternalWalletPositionSummaryResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
@@ -224,9 +224,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/positions",
+    path: "/v1/earn/positions/caller-signed",
     tags: ["Earn"],
-    summary: "List one external wallet's positions",
+    summary: "List one caller-signed wallet's positions",
     operationId: "listEarnExternalWalletPositions",
     description:
       "Returns one strict keyset page of live positions for an end-user wallet in the active " +
@@ -242,7 +242,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     },
     responses: {
       200: {
-        description: "External-wallet position page",
+        description: "Caller-signed position page",
         content: jsonContent(earnExternalWalletPositionsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
@@ -251,9 +251,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/movements",
+    path: "/v1/earn/movements/caller-signed",
     tags: ["Earn"],
-    summary: "List one external wallet's activity",
+    summary: "List one caller-signed wallet's activity",
     operationId: "listEarnExternalWalletMovements",
     description:
       "Returns one keyset page of the wallet's recorded deposits and withdrawals, newest " +
@@ -271,7 +271,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     },
     responses: {
       200: {
-        description: "External-wallet movement page",
+        description: "Caller-signed movement page",
         content: jsonContent(earnExternalWalletMovementsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
@@ -280,9 +280,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/movements/{movementId}",
+    path: "/v1/earn/movements/caller-signed/{movementId}",
     tags: ["Earn"],
-    summary: "Get one external-wallet movement",
+    summary: "Get one caller-signed movement",
     operationId: "getEarnExternalWalletMovement",
     description:
       "Polls one recorded movement to a terminal state — the read that settles a submit whose " +
@@ -307,9 +307,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/earnings",
+    path: "/v1/earn/earnings/caller-signed",
     tags: ["Earn"],
-    summary: "Get one external wallet's balance and earnings",
+    summary: "Get one caller-signed wallet's balance and earnings",
     operationId: "getEarnExternalWalletEarnings",
     description:
       "Returns live balance and total earned per deposit token for the required " +
@@ -329,7 +329,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     },
     responses: {
       200: {
-        description: "External-wallet earnings",
+        description: "Caller-signed wallet earnings",
         content: jsonContent(earnExternalWalletEarningsResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
@@ -338,12 +338,12 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/deposit-transactions",
+    path: "/v1/earn/deposits/build-unsigned-transaction",
     tags: ["Earn"],
-    summary: "Build an unsigned external-wallet deposit transaction",
+    summary: "Build an unsigned deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The " +
+      "Builds one unsigned vault deposit transaction for the wallet owner to sign. The " +
       "build takes the provider entitlement, persists a submit-capable build, and may name a " +
       "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
       "with its blockhash, and nothing moves during the build.",
@@ -366,9 +366,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/deposits",
+    path: "/v1/earn/deposits/submit-signed-transaction",
     tags: ["Earn"],
-    summary: "Submit a signed external-wallet deposit",
+    summary: "Submit a caller-signed deposit",
     operationId: "createEarnExternalWalletDeposit",
     description:
       "Verifies the signed bytes are exactly the built transaction and that every required " +
@@ -396,9 +396,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-previews",
+    path: "/v1/earn/withdrawals/caller-signed/preview",
     tags: ["Earn"],
-    summary: "Preview an external-wallet exit",
+    summary: "Preview a caller-signed withdrawal",
     operationId: "createEarnExternalWalletWithdrawalPreview",
     description:
       "Quotes what redeeming the shares would pay right now, from the vault's live " +
@@ -426,9 +426,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-transactions",
+    path: "/v1/earn/withdrawals/build-unsigned-transaction",
     tags: ["Earn"],
-    summary: "Build an unsigned external-wallet exit transaction",
+    summary: "Build an unsigned withdrawal transaction",
     operationId: "createEarnExternalWalletWithdrawalTransaction",
     description:
       "Builds one unsigned external-wallet exit for a tenant position and persists a " +
@@ -454,9 +454,9 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawals",
+    path: "/v1/earn/withdrawals/submit-signed-transaction",
     tags: ["Earn"],
-    summary: "Submit a signed external-wallet withdrawal",
+    summary: "Submit a caller-signed withdrawal",
     operationId: "createEarnExternalWalletWithdrawal",
     description:
       "The exit mirror of the deposit submit: signature verified over the exact built message, " +
@@ -489,9 +489,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 ) {
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-options",
+    path: "/v1/earn/withdrawals/caller-signed/options",
     tags: ["Earn"],
-    summary: "Discover external-wallet withdrawal routes",
+    summary: "Discover caller-signed withdrawal routes",
     operationId: "getEarnExternalWalletWithdrawalOptions",
     description:
       "Reads atomic, provider-order, solver-queue and operator-redemption routes independently from live provider state. " +
@@ -517,9 +517,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+    path: "/v1/earn/withdrawal-requests/caller-signed/preview",
     tags: ["Earn"],
-    summary: "Preview an asynchronous external-wallet withdrawal",
+    summary: "Preview an asynchronous caller-signed withdrawal",
     operationId: "createEarnExternalWalletQueuedWithdrawalPreview",
     description:
       "Quotes either a solver queue's discounted payout and timing or an operator redemption's " +
@@ -545,7 +545,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+    path: "/v1/earn/withdrawal-requests/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequestTransaction",
@@ -573,7 +573,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-requests",
+    path: "/v1/earn/withdrawal-requests/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed asynchronous-withdrawal request",
     operationId: "createEarnExternalWalletWithdrawalRequest",
@@ -597,9 +597,9 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/withdrawal-requests",
+    path: "/v1/earn/withdrawal-requests/caller-signed",
     tags: ["Earn"],
-    summary: "List an external wallet's asynchronous withdrawals",
+    summary: "List a caller-signed wallet's asynchronous withdrawals",
     operationId: "listEarnExternalWalletWithdrawalRequests",
     description:
       "Returns one strict keyset page for the required ownerAddress in the active project. " +
@@ -621,7 +621,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "get",
-    path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+    path: "/v1/earn/withdrawal-requests/caller-signed/{withdrawalRequestId}",
     tags: ["Earn"],
     summary: "Get one asynchronous-withdrawal request",
     operationId: "getEarnExternalWalletWithdrawalRequest",
@@ -646,7 +646,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+    path: "/v1/earn/withdrawal-requests/cancel/build-unsigned-transaction",
     tags: ["Earn"],
     summary: "Build an unsigned asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancelTransaction",
@@ -674,7 +674,7 @@ function registerEarnExternalWalletQueuedWithdrawalPaths(
 
   registry.registerPath({
     method: "post",
-    path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
+    path: "/v1/earn/withdrawal-requests/cancel/submit-signed-transaction",
     tags: ["Earn"],
     summary: "Submit a signed asynchronous-withdrawal cancellation",
     operationId: "createEarnExternalWalletWithdrawalRequestCancellation",

@@ -4,6 +4,6 @@ export async function GET(request: Request) {
   return proxyToSdpApi({
     request,
     traceSource: "route.dashboard.counterparty.metadata",
-    path: "/v1/counterparties/metadata",
+    path: "/v1/counterparties/field-options",
   });
 }

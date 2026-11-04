@@ -769,10 +769,13 @@ async function initializeOrCreateWallet(
   label: string
 ): Promise<string> {
   try {
-    const initialized = await api.post<InitializeWalletResponse>("/v1/wallets/initialize", {
-      provider,
-      walletLabel: label,
-    });
+    const initialized = await api.post<InitializeWalletResponse>(
+      "/v1/wallets/managed-signing/initialize-with-wallet",
+      {
+        provider,
+        walletLabel: label,
+      }
+    );
     return initialized.walletId;
   } catch (error) {
     if (

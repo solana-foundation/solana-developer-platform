@@ -103,7 +103,7 @@ async function deployFixtureToken(
   tokenId: string,
   signingCustodyWalletId: string
 ): Promise<Token> {
-  await api.post<TokenResponse>(`/v1/issuance/tokens/${tokenId}/deploy`, {
+  await api.post<TokenResponse>(`/v1/issuance/tokens/${tokenId}/deploy/execute`, {
     signingCustodyWalletId,
   });
 

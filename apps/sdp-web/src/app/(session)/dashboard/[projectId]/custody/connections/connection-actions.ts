@@ -210,7 +210,7 @@ export async function rollbackCredentialAction(
   try {
     const client = await createSdpApiClient();
     await client.fetch(
-      `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(credentialId)}/rollback`,
+      `/internal/dashboard/custody/provider-credentials/${encodeURIComponent(credentialId)}/rollback-rotation`,
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {
@@ -274,7 +274,7 @@ export async function cancelSetupAction(
   try {
     const client = await createSdpApiClient();
     await client.fetch(
-      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/cancel`,
+      `/internal/dashboard/custody/connections/${encodeURIComponent(connectionId)}/cancel-installation`,
       { method: "POST", body: JSON.stringify({}) }
     );
   } catch (error) {

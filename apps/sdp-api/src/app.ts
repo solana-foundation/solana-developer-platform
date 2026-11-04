@@ -524,7 +524,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/network", internalNetwork);
 
   // Admin routes (internal)
-  app.route("/admin/allowlist", allowlist);
+  app.route("/admin/onboarding-allowlist", allowlist);
 
   // Root redirect to health
   app.get("/", publicRoute("root: redirects to the health check"), (c) => c.redirect("/health"));

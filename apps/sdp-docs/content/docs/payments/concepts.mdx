@@ -13,7 +13,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-For SPL tokens, `POST /v1/payments/transfers` takes the on-chain mint address, not a symbol such as `USDC`. Use the literal `SOL` for native SOL.
+For SPL tokens, `POST /v1/payments/transfers/execute` takes the on-chain mint address, not a symbol such as `USDC`. Use the literal `SOL` for native SOL.
 
 The `token` filter on `GET /v1/payments/transfers` matches the stored `Transfer.token` exactly. API-created transfers store the mint you supplied (or `SOL`); indexed transfers may store a resolved symbol. Filter with the label returned in the response, or filter client-side. Balance responses attempt symbol resolution and return the symbol when known.
 
@@ -21,7 +21,7 @@ The `token` filter on `GET /v1/payments/transfers` matches the stored `Transfer.
 
 ## Transfer execution
 
-Outbound wallet transfers are server-executed through `POST /v1/payments/transfers`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
+Outbound wallet transfers are server-executed through `POST /v1/payments/transfers/execute`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
 
 The rest of this section assumes transfers are submitted by SDP from a custody wallet you control.
 

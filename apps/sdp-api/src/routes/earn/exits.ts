@@ -16,35 +16,41 @@ const EARN_MOUNT_PATH = "/v1/earn";
  * can hold its route's action to the movement's.
  */
 const EARN_POST_ROUTES: readonly { path: RegExp; movement: MovementOf<"earn"> | "read" }[] = [
-  { path: /^\/vault-deposits$/, movement: "earn.deposit" },
-  { path: /^\/external-wallet\/deposit-transactions$/, movement: "earn.deposit" },
-  { path: /^\/external-wallet\/deposits$/, movement: "earn.deposit" },
-  { path: /^\/external-wallet\/withdrawal-previews$/, movement: "read" },
-  { path: /^\/external-wallet\/withdrawal-transactions$/, movement: "earn.withdraw" },
-  { path: /^\/external-wallet\/withdrawal-options$/, movement: "read" },
-  { path: /^\/external-wallet\/queued-withdrawal-previews$/, movement: "read" },
+  { path: /^\/deposits\/execute$/, movement: "earn.deposit" },
+  { path: /^\/deposits\/build-unsigned-transaction$/, movement: "earn.deposit" },
+  { path: /^\/deposits\/submit-signed-transaction$/, movement: "earn.deposit" },
+  { path: /^\/withdrawals\/caller-signed\/preview$/, movement: "read" },
+  { path: /^\/withdrawals\/build-unsigned-transaction$/, movement: "earn.withdraw" },
+  { path: /^\/withdrawals\/caller-signed\/options$/, movement: "read" },
+  { path: /^\/withdrawal-requests\/caller-signed\/preview$/, movement: "read" },
   {
-    path: /^\/external-wallet\/withdrawal-request-transactions$/,
+    path: /^\/withdrawal-requests\/build-unsigned-transaction$/,
     movement: "earn.queued_withdraw_request",
   },
   {
-    path: /^\/external-wallet\/withdrawal-request-cancel-transactions$/,
+    path: /^\/withdrawal-requests\/cancel\/build-unsigned-transaction$/,
     movement: "earn.queued_withdraw_cancel",
   },
-  { path: /^\/external-wallet\/withdrawals$/, movement: "earn.withdraw" },
-  { path: /^\/external-wallet\/withdrawal-requests$/, movement: "earn.queued_withdraw_request" },
+  { path: /^\/withdrawals\/submit-signed-transaction$/, movement: "earn.withdraw" },
   {
-    path: /^\/external-wallet\/withdrawal-request-cancellations$/,
+    path: /^\/withdrawal-requests\/submit-signed-transaction$/,
+    movement: "earn.queued_withdraw_request",
+  },
+  {
+    path: /^\/withdrawal-requests\/cancel\/submit-signed-transaction$/,
     movement: "earn.queued_withdraw_cancel",
   },
-  { path: /^\/vault-withdrawals$/, movement: "earn.withdraw" },
-  { path: /^\/vault-withdrawal-previews$/, movement: "read" },
-  { path: /^\/vault-withdrawal-options$/, movement: "read" },
-  { path: /^\/vault-queued-withdrawal-previews$/, movement: "read" },
-  { path: /^\/vault-withdrawal-requests$/, movement: "earn.queued_withdraw_request" },
-  { path: /^\/vault-withdrawal-requests\/[^/]+\/cancel$/, movement: "earn.queued_withdraw_cancel" },
-  { path: /^\/programs\/[^/]+\/withdrawal-preview$/, movement: "read" },
-  { path: /^\/programs\/[^/]+\/withdrawals$/, movement: "earn.withdraw" },
+  { path: /^\/withdrawals\/execute$/, movement: "earn.withdraw" },
+  { path: /^\/withdrawals\/provider-signed\/preview$/, movement: "read" },
+  { path: /^\/withdrawals\/provider-signed\/options$/, movement: "read" },
+  { path: /^\/withdrawal-requests\/provider-signed\/preview$/, movement: "read" },
+  { path: /^\/withdrawal-requests\/execute$/, movement: "earn.queued_withdraw_request" },
+  {
+    path: /^\/withdrawal-requests\/[^/]+\/cancel\/execute$/,
+    movement: "earn.queued_withdraw_cancel",
+  },
+  { path: /^\/portfolio-accounts\/[^/]+\/withdrawals\/preview$/, movement: "read" },
+  { path: /^\/portfolio-accounts\/[^/]+\/withdrawals\/execute$/, movement: "earn.withdraw" },
 ];
 
 /**

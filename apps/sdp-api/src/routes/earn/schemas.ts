@@ -351,7 +351,7 @@ export const earnVaultDepositsQuerySchema = earnVaultMovementsQuerySchema;
  * Exit a non-custodial vault position, redeeming shares back to the custody
  * wallet that holds them.
  *
- * The caller names its own POSITION (from GET /v1/earn/vault-positions), never
+ * The caller names its own POSITION (from GET /v1/earn/positions/provider-signed), never
  * a catalogue strategy and never a raw vault address — the position row is the
  * source of truth for the instrument and the signing wallet, so an exit works
  * even after the vault is delisted or its provider un-offered (ADR 0002 exit

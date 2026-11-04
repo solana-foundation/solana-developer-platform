@@ -308,7 +308,7 @@ async function installationRequest(
   options: { connectionId: string; projectId: string }
 ): Promise<Response> {
   return app.request(
-    `/internal/dashboard/custody/connections/${options.connectionId}/${action}`,
+    `/internal/dashboard/custody/connections/${options.connectionId}/${action}-installation`,
     {
       method: "POST",
       headers: {
@@ -803,7 +803,7 @@ describe("exact Custody Connection installation routes", () => {
     const { app } = buildApp();
 
     const response = await app.request(
-      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete`,
+      `/internal/dashboard/custody/connections/${CONNECTION_ID}/complete-installation`,
       {
         method: "POST",
         headers: {
