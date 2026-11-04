@@ -35,6 +35,8 @@ vi.mock("sonner", () => ({
   },
 }));
 vi.mock("@clerk/nextjs", () => ({
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  useClerk: () => ({ setActive: async () => undefined }),
   useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
 }));
 

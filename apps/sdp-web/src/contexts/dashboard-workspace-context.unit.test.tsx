@@ -14,7 +14,11 @@ import {
   setDashboardUrl,
 } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
-import { DashboardWorkspaceProvider, useDashboardWorkspace } from "./dashboard-workspace-context";
+import {
+  DashboardWorkspaceProvider,
+  resetRequestedOrganizationForTests,
+  useDashboardWorkspace,
+} from "./dashboard-workspace-context";
 
 const clerk = vi.hoisted(() => {
   const auth: {
@@ -28,7 +32,8 @@ const clerk = vi.hoisted(() => {
     userId: "user_test",
     orgId: "org_test",
   };
-  return { auth };
+  const setActive = vi.fn(async (_params: { organization: string }) => undefined);
+  return { auth, setActive };
 });
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -41,7 +46,8 @@ vi.mock("@/lib/dashboard-url-state", () => ({
 }));
 
 function Probe() {
-  const { selectProject, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
+  const { selectProject, selectedProjectId, sdpEnvironment, switchOrganization } =
+    useDashboardWorkspace();
   return (
     <>
       <output aria-label="selected project">{selectedProjectId}</output>
@@ -51,6 +57,9 @@ function Probe() {
       </button>
       <button type="button" onClick={() => selectProject(PRODUCTION_PROJECT.id)}>
         Switch project
+      </button>
+      <button type="button" onClick={() => void switchOrganization("org_test_other")}>
+        Switch organization
       </button>
     </>
   );
@@ -111,6 +120,12 @@ function WorkspaceFixture({
 
 beforeEach(() => {
   vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => clerk.auth);
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: clerk.setActive,
+  }));
+  clerk.setActive.mockReset();
+  clerk.setActive.mockResolvedValue(undefined);
+  resetRequestedOrganizationForTests();
   cleanup();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
@@ -210,7 +225,68 @@ describe("DashboardWorkspaceProvider project selection", () => {
     expect(screen.getByLabelText("private data").textContent).toBe("new org data");
   });
 
-  it("lands on the bare dashboard when Clerk switches organization under the page", async () => {
+  it("lands on the bare dashboard after an organization switch this tab asked for", async () => {
+    const user = userEvent.setup();
+    const view = render(<WorkspaceFixture />);
+
+    await user.click(screen.getByRole("button", { name: "Switch organization" }));
+    expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test_other" }]]);
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test_other",
+    };
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
+    expect(clerk.setActive).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Refreshing scope")).toBeTruthy();
+  });
+
+  it("keeps landing on the bare dashboard while the server still renders the previous organization", async () => {
+    const user = userEvent.setup();
+    const first = render(<WorkspaceFixture />);
+    await user.click(screen.getByRole("button", { name: "Switch organization" }));
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test_other",
+    };
+    first.rerender(<WorkspaceFixture />);
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledTimes(1));
+
+    // The landing rendered org_test again (the cookie had not caught up): a new provider.
+    first.unmount();
+    render(<WorkspaceFixture />);
+
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledTimes(2));
+    expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test_other" }]]);
+  });
+
+  it("makes the page's organization active again when Clerk loads another one, staying on the URL", async () => {
+    const view = render(<WorkspaceFixture />);
+
+    // A reload: the server rendered org_test, Clerk's backend still names another.
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test_other",
+    };
+    view.rerender(<WorkspaceFixture />);
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(clerk.setActive).toHaveBeenCalled());
+    expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test" }]]);
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+    expect(screen.getByText("Refreshing scope")).toBeTruthy();
+  });
+
+  it("lands on the bare dashboard when the page's organization cannot be made active", async () => {
+    clerk.setActive.mockRejectedValue(new Error("refused"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const view = render(<WorkspaceFixture />);
 
     clerk.auth = {
@@ -222,6 +298,21 @@ describe("DashboardWorkspaceProvider project selection", () => {
     view.rerender(<WorkspaceFixture />);
 
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
-    expect(screen.getByText("Refreshing scope")).toBeTruthy();
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("lands on the bare dashboard when another person signs in", async () => {
+    const view = render(<WorkspaceFixture />);
+
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_other",
+      userId: "user_test_other",
+      orgId: "org_test",
+    };
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
+    expect(clerk.setActive).not.toHaveBeenCalled();
   });
 });

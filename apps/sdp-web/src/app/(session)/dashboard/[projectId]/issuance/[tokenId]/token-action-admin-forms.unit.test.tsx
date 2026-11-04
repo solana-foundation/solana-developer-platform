@@ -30,7 +30,11 @@ const entry: TokenAllowlistEntry = {
 };
 
 // Only framework/session and HTTP boundaries are mocked; SWR and fetchers stay real.
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+vi.mock("@clerk/nextjs", () => ({
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  useClerk: () => ({ setActive: async () => undefined }),
+  useAuth: () => ({ orgId: "org_test", userId: "user_test" }),
+}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const fetchMock = vi.fn<typeof fetch>();

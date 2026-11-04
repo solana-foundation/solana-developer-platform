@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/nextjs", () => ({
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  useClerk: () => ({ setActive: async () => undefined }),
   useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));

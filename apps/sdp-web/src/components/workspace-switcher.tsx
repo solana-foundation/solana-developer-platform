@@ -207,10 +207,10 @@ export function WorkspaceSwitcher({
 }) {
   const t = useTranslations();
   const { organization: activeOrg, isLoaded: isOrganizationLoaded } = useOrganization();
-  const { userMemberships, setActive, isLoaded } = useOrganizationList({
+  const { userMemberships, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
-  const { projects, selectedProjectId, selectProject, isProjectSwitching } =
+  const { projects, selectedProjectId, selectProject, switchOrganization, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
   const { copied, copy, value: copiedValue } = useCopy(1200);
@@ -221,16 +221,16 @@ export function WorkspaceSwitcher({
   const organizationName = activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization");
 
   /** Makes another organization active; picking the current one does nothing. */
-  const switchOrganization = (organizationId: string) => {
+  const pickOrganization = (organizationId: string) => {
     const isActive = organizationId === activeOrg?.id;
-    if (!isSwitching && !isActive && setActive) {
+    if (!isSwitching && !isActive) {
       setOrganizationSwitching(true);
       onOrganizationSwitchingChange?.(true);
       const finishSwitch = () => {
         setOrganizationSwitching(false);
         onOrganizationSwitchingChange?.(false);
       };
-      void setActive({ organization: organizationId }).then(finishSwitch, () => {
+      void switchOrganization(organizationId).then(finishSwitch, () => {
         toast.error(t("Shared.SharedComponents.changeOrganizationFailed"));
         finishSwitch();
       });
@@ -287,7 +287,7 @@ export function WorkspaceSwitcher({
             activeOrganizationId={activeOrg?.id}
             isLoaded={isLoaded}
             disabled={isSwitching}
-            onSwitch={switchOrganization}
+            onSwitch={pickOrganization}
           />
           {activeOrg ? (
             <ActiveOrganizationSection

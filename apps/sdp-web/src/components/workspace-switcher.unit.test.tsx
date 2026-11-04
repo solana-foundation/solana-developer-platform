@@ -11,7 +11,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 const mocks = {
-  setActive: vi.fn(),
+  switchOrganization: vi.fn(),
   toastError: vi.fn(),
   switching: vi.fn(),
 };
@@ -37,7 +37,6 @@ beforeEach(() => {
   vi.spyOn(toast, "error").mockImplementation(mocks.toastError);
   vi.mocked(vi.spyOn(clerk, "useOrganizationList"), { partial: true, deep: true }).mockReturnValue({
     isLoaded: true,
-    setActive: mocks.setActive,
     userMemberships: {
       data: ["Alpha", "Beta"].map((name, index) => ({
         organization: { id: index === 0 ? "org_a" : "org_b", name, imageUrl: "" },
@@ -48,9 +47,10 @@ beforeEach(() => {
     projects: [],
     selectedProjectId: "project_a",
     selectProject: vi.fn(),
+    switchOrganization: mocks.switchOrganization,
     isProjectSwitching: false,
   });
-  mocks.setActive.mockResolvedValue(undefined);
+  mocks.switchOrganization.mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
@@ -71,18 +71,18 @@ describe("workspace organization switching", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Alpha/ }));
-    expect(mocks.setActive).not.toHaveBeenCalled();
+    expect(mocks.switchOrganization).not.toHaveBeenCalled();
     expect(mocks.switching).not.toHaveBeenCalled();
   });
 
   it("shows a pending switch until Clerk has made the organization active", async () => {
     const pending = Promise.withResolvers<void>();
-    mocks.setActive.mockReturnValue(pending.promise);
+    mocks.switchOrganization.mockReturnValue(pending.promise);
     fixture();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: /Beta/ }));
-    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_b" });
+    expect(mocks.switchOrganization).toHaveBeenCalledWith("org_b");
     expect(screen.getByRole("button", { name: "Alpha" }).getAttribute("aria-busy")).toBe("true");
     expect(mocks.switching.mock.calls).toEqual([[true]]);
     pending.resolve();
@@ -90,7 +90,7 @@ describe("workspace organization switching", () => {
   });
 
   it("reports a refused switch and makes the current workspace usable again", async () => {
-    mocks.setActive.mockRejectedValue(new Error("Switch refused"));
+    mocks.switchOrganization.mockRejectedValue(new Error("Switch refused"));
     fixture();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Alpha" }));

@@ -15,6 +15,8 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { useBatchSendWizard } from "./use-batch-send-wizard";
 
 vi.mock("@clerk/nextjs", () => ({
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  useClerk: () => ({ setActive: async () => undefined }),
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
