@@ -155,7 +155,11 @@ describe("buildObservedTransfersForSignatures", () => {
         blockTime: 1700000001,
         accountKeys: [sponsor, WALLET_ADDRESS, recipient],
         instructions: [
-          parsedSystemTransfer({ source: WALLET_ADDRESS, destination: recipient, lamports: 10_000 }),
+          parsedSystemTransfer({
+            source: WALLET_ADDRESS,
+            destination: recipient,
+            lamports: 10_000,
+          }),
         ],
         innerInstructions: [],
         preTokenBalances: [],

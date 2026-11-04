@@ -152,6 +152,15 @@ import {
 } from "./observed-transfers";
 import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
 
+/**
+ * The fee a new transfer row records before broadcast: a sponsored send's 0, so a row the
+ * recovery job confirms keeps it too. A Fireblocks vault pays its own fee, recorded once
+ * Fireblocks reports it.
+ */
+function walletFeeAtCreation(isFireblocks: boolean): number | undefined {
+  return isFireblocks ? undefined : SPONSORED_WALLET_FEE_LAMPORTS;
+}
+
 async function createTransferRecord(
   c: AppContext,
   input: {
@@ -1221,9 +1230,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         initiatedByKeyId: scope.auth.id,
         idempotency,
         providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
-        // Known before broadcast, so a row the recovery job confirms keeps it too. Fireblocks
-        // vaults pay their own fee, recorded once Fireblocks reports it.
-        fee: fireblocks ? undefined : SPONSORED_WALLET_FEE_LAMPORTS,
+        fee: walletFeeAtCreation(fireblocks !== null),
       });
 
   if (replayed) {
