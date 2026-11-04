@@ -1,0 +1,62 @@
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { requestMemberRole } from "@/lib/sdp-api";
+import { LeaveOrganizationCard } from "./leave-organization-card";
+import { MainnetAccessSection } from "./mainnet-access-section";
+import { MembersSection } from "./members-section";
+import { OrganizationAccessSection } from "./organization-access-section";
+import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
+import { OrganizationDetailsSection } from "./organization-details-section";
+
+/** Anything that is not a positive integer falls back to the first page. */
+function resolveMembersPage(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+/**
+ * Organization settings: the organization's name and ID, the quick start for API key managers, and the members,
+ * mainnet access, API-key IP allowlist and email alert sections for organization admins.
+ *
+ * @param props - The route props.
+ * @param props.searchParams - The query, carrying the members page.
+ * @returns The rendered settings page.
+ */
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const membersPage = resolveMembersPage((await searchParams).membersPage);
+
+  const { orgId } = await auth();
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
+
+  return (
+    <div className="w-full flex flex-col gap-6">
+      <OrganizationDetailsSection />
+      {dashboardAccess.capabilities.canManageApiKeys ? (
+        <DashboardQuickStart variant="settings" />
+      ) : null}
+      {/* canManageOrgSettings resolves to org:write, which is what inviting a
+          member requires. */}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <MembersSection page={membersPage} />
+      ) : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? <MainnetAccessSection /> : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
+      {dashboardAccess.capabilities.canManageOrgSettings ? (
+        <OrganizationAlertEmailsSection />
+      ) : null}
+      {/* Admins cannot leave; another admin removes them. */}
+      {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
+    </div>
+  );
+}

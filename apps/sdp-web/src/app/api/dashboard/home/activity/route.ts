@@ -2,12 +2,12 @@ import {
   buildHomeActivityRows,
   computeTodaysVolume,
   fetchOrgIssuanceActivity,
-} from "@/app/dashboard/[projectId]/home-page.data";
+} from "@/app/(session)/dashboard/[projectId]/home-page.data";
 import {
   fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS,
-} from "@/app/dashboard/[projectId]/payments/payments-page.data";
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { dashboardJson } from "@/lib/dashboard-response";

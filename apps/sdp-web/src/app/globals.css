@@ -1,4 +1,4 @@
-/* Clerk's component styles go in the clerk layer (cssLayerName in clerk-client-provider), under
+/* Clerk's component styles go in the clerk layer (cssLayerName in app/(session)/layout.tsx), under
    utilities, so the appearance classes on the auth pages win over Clerk's own. */
 @layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
