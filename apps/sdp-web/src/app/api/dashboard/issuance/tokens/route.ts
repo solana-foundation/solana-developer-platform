@@ -82,9 +82,12 @@ export async function GET(request: Request) {
       error: null,
     } satisfies IssuanceTokensRouteResponse);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Request failed";
-    const status = error instanceof InvalidIssuanceSearchEncodingError ? 400 : 500;
-    trace.log({ ok: false, error: message, status });
-    return dashboardJson(emptyResponse(query.page, query.pageSize, message), { status });
+    const invalidSearch = error instanceof InvalidIssuanceSearchEncodingError;
+    const status = invalidSearch ? 400 : 500;
+    trace.log({ ok: false, error: error instanceof Error ? error.message : String(error), status });
+    return dashboardJson(
+      emptyResponse(query.page, query.pageSize, invalidSearch ? error.message : "Request failed"),
+      { status }
+    );
   }
 }

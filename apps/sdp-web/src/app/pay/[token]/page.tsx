@@ -91,8 +91,11 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   const response = await fetch(`${apiBaseUrl}/pay/${encodeURIComponent(token)}`, {
     cache: "no-store",
   });
-  if (!response.ok) {
+  if (response.status === 404) {
     notFound();
+  }
+  if (!response.ok) {
+    throw new Error(`Payment request read failed (${response.status})`);
   }
   const request = (await response.json()) as PayRequest;
 

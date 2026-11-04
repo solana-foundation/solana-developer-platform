@@ -38,9 +38,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       error: null,
     });
   } catch (error) {
-    return dashboardJson(
-      { labels: [], total: 0, error: error instanceof Error ? error.message : "Request failed" },
-      { status: 500 }
-    );
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      status: 500,
+    });
+    return dashboardJson({ labels: [], total: 0, error: "Request failed" }, { status: 500 });
   }
 }

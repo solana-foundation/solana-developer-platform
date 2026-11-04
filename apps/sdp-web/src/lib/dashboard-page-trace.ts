@@ -1,3 +1,4 @@
+import { unstable_rethrow } from "next/navigation";
 import { createTimedTrace } from "./request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "./sdp-api";
 
@@ -17,6 +18,7 @@ export async function withDashboardPageTrace<T>(
     );
     return await fn({ trace, apiClient });
   } catch (error) {
+    unstable_rethrow(error);
     trace.log({ ok: false, error: error instanceof Error ? error.message : "Unknown error" });
     throw error;
   }

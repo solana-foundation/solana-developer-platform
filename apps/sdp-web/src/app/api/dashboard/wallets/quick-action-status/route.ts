@@ -5,7 +5,12 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createOrgSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
+import {
+  createOrgSdpApiClient,
+  createSdpApiClient,
+  rejectUnscopedDashboardRequest,
+  unexpectedRouteFailure,
+} from "@/lib/sdp-api";
 
 interface OnboardingStatusResponse {
   linked: boolean;
@@ -36,9 +41,9 @@ function formatProviderHint(providerLabels: string[]): string {
 
 /**
  * Not a pure proxy: combines org-scoped onboarding status with project-scoped
- * wallet configs into a derived payload, so it must repeat proxyToSdpApi's
- * missing-project 400 itself — after the linked gate, because an unlinked org
- * legitimately has no project yet and must get the linked:false payload.
+ * wallet configs into a derived payload. The Project checks run after the
+ * linked gate, because an unlinked org has no Project yet and gets the
+ * linked:false payload.
  */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.wallets.quick_action_status", request);
@@ -65,6 +70,10 @@ export async function GET(request: Request) {
       return response;
     }
 
+    const rejection = await rejectUnscopedDashboardRequest(request, trace);
+    if (rejection) {
+      return rejection;
+    }
     const apiClient = await createSdpApiClient(
       trace.childContext("route.dashboard.wallets.quick_action_status.api")
     );
@@ -131,20 +140,6 @@ export async function GET(request: Request) {
     });
     return response;
   } catch (error) {
-    const response = dashboardJson(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
-      },
-      {
-        status: 500,
-        trace,
-      }
-    );
-    logRouteResult(trace, 500, {
-      error:
-        error instanceof Error ? error.message : "Failed to resolve wallet quick action status",
-    });
-    return response;
+    return unexpectedRouteFailure(trace, error, "Failed to resolve wallet quick action status");
   }
 }

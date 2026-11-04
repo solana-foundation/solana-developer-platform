@@ -11,13 +11,19 @@ import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  rejectUnscopedDashboardRequest,
+  type SdpApiClient,
+} from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 
 interface VisibilityResult {
   ok: boolean;
   status?: number;
   error?: string;
+  /** The thrown error's text, for the route log only. */
+  cause?: string;
   wallet?: WalletActivityIdentity;
 }
 
@@ -73,16 +79,18 @@ async function verifyWalletVisibility(
     return {
       ok: false,
       status: 503,
-      error:
-        error instanceof Error
-          ? error.message
-          : t("DashboardCustody.unableToVerifyWalletVisibility"),
+      error: t("DashboardCustody.unableToVerifyWalletVisibility"),
+      cause: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
 export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
   const trace = createTimedTrace("route.dashboard.wallets.activity", request);
+  const rejection = await rejectUnscopedDashboardRequest(request, trace);
+  if (rejection) {
+    return rejection;
+  }
   const t = await getTranslations();
   let resolvedWalletId = "";
 
@@ -126,7 +134,8 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
       logRouteResult(trace, status, {
         walletId: resolvedWalletId,
         activityRowCount: 0,
-        error: visibility.error ?? t("DashboardCustody.walletActivityRequestFailed"),
+        error:
+          visibility.cause ?? visibility.error ?? t("DashboardCustody.walletActivityRequestFailed"),
       });
       return response;
     }
@@ -169,12 +178,7 @@ export async function GET(request: Request, context: { params: Promise<{ walletI
   } catch (error) {
     const response = dashboardJson(
       {
-        error: {
-          message:
-            error instanceof Error
-              ? error.message
-              : t("DashboardCustody.walletActivityRequestFailed"),
-        },
+        error: { message: t("DashboardCustody.walletActivityRequestFailed") },
       },
       {
         status: 500,

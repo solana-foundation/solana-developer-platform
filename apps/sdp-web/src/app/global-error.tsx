@@ -24,13 +24,7 @@ function resolveClientLocale(): AppLocale {
   return isAppLocale(browserBaseLocale) ? browserBaseLocale : defaultLocale;
 }
 
-export default function GlobalError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export default function GlobalError({ error, retry }: { error: unknown; retry: () => void }) {
   const [eventId, setEventId] = useState<string | null>(null);
   const [locale, setLocale] = useState<AppLocale>(defaultLocale);
   // English paints first, exactly as before (locale state starts at the
@@ -65,7 +59,7 @@ export default function GlobalError({
         <main>
           <h1>{translate(messages, "Error.viewTitle")}</h1>
           <p>{translate(messages, "Error.viewDescription")}</p>
-          <button onClick={() => reset()} type="button">
+          <button onClick={() => retry()} type="button">
             {translate(messages, "Error.tryAgain")}
           </button>
           {eventId ? (

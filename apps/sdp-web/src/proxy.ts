@@ -16,9 +16,6 @@ export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   WORKSPACE_LOADING_PATH,
-  // This polling endpoint performs its own auth check and must return JSON 401,
-  // not redirect fetch() to the HTML sign-in page when the session expires.
-  "/api/workspace-status",
   "/pay/:token",
   "/",
   "/docs(.*)",
@@ -28,6 +25,8 @@ export const isPublicRoute = createRouteMatcher([
   "/opengraph-image",
   "/twitter-image",
 ]);
+
+const isApiRoute = createRouteMatcher(["/api(.*)"]);
 
 const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
 
@@ -107,7 +106,17 @@ export const proxy = clerkMiddleware(
       return crossSiteWrite;
     }
 
-    if (!isPublicRoute(req)) {
+    if (isApiRoute(req)) {
+      // A fetch() cannot follow a redirect to the sign-in page, so a signed-out
+      // API call is answered, not redirected. The handlers check auth again.
+      const { userId } = await auth();
+      if (userId === null) {
+        return NextResponse.json(
+          { error: { message: "Authentication required" } },
+          { status: 401 }
+        );
+      }
+    } else if (!isPublicRoute(req)) {
       await auth.protect({
         unauthenticatedUrl: getUnauthenticatedUrl(req),
       });

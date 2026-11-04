@@ -529,15 +529,9 @@ export async function proxyToSdpApi({
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    return proxyFailure(trace, 401, "Authentication required");
-  }
-  if (!orgId) {
-    return proxyFailure(trace, 403, "Active organization required");
-  }
-  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
-    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
+  const rejection = await rejectUnscopedDashboardRequest(request, trace);
+  if (rejection) {
+    return rejection;
   }
 
   try {
@@ -560,10 +554,43 @@ export async function proxyToSdpApi({
       }),
     });
   } catch (error) {
-    return proxyFailure(
-      trace,
-      500,
-      error instanceof Error ? error.message : "SDP API proxy request failed"
-    );
+    return unexpectedRouteFailure(trace, error, "SDP API proxy request failed");
   }
+}
+
+/**
+ * The checks a dashboard route handler runs before it builds a Project client:
+ * a signed-in user (401), an active organization (403) and the calling tab's
+ * `x-project-id` (400), each answered in the `{ error: { message } }` envelope.
+ *
+ * @returns The refusal to send, or null when the request may proceed.
+ */
+export async function rejectUnscopedDashboardRequest(
+  request: Request,
+  trace: ReturnType<typeof createTimedTrace>
+): Promise<NextResponse | null> {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    return proxyFailure(trace, 401, "Authentication required");
+  }
+  if (!orgId) {
+    return proxyFailure(trace, 403, "Active organization required");
+  }
+  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
+    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
+  }
+  return null;
+}
+
+/**
+ * A 500 for a throw the route did not expect: the error's own text goes to the
+ * route log only, and the browser gets `message`.
+ */
+export function unexpectedRouteFailure(
+  trace: ReturnType<typeof createTimedTrace>,
+  error: unknown,
+  message: string
+): NextResponse {
+  logRouteResult(trace, 500, { error: error instanceof Error ? error.message : String(error) });
+  return dashboardJson({ error: { message } }, { status: 500, trace });
 }

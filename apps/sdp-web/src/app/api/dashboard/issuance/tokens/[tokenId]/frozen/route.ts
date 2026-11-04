@@ -37,10 +37,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       total: typeof payload.meta?.total === "number" ? payload.meta.total : 0,
     });
   } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      status: 500,
+    });
     return dashboardJson(
       {
         data: [],
-        error: error instanceof Error ? error.message : "Request failed",
+        error: "Request failed",
         total: 0,
       },
       { status: 500 }

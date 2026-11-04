@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types/custody";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { Suspense } from "react";
 import {
   isKnownCustodyProvider,
@@ -137,6 +137,7 @@ export default async function CustodyPage() {
       </Suspense>
     );
   } catch (error) {
+    unstable_rethrow(error);
     trace.log({
       ok: false,
       error: error instanceof Error ? error.message : "Unknown error",

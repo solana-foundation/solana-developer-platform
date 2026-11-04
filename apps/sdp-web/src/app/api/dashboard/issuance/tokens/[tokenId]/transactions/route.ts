@@ -73,10 +73,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       pageSize,
     });
   } catch (error) {
+    trace.log({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      status: 500,
+    });
     return dashboardJson(
       {
         data: [],
-        error: error instanceof Error ? error.message : "Request failed",
+        error: "Request failed",
         total: 0,
         hasMore: false,
         page: 1,

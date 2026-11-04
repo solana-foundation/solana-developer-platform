@@ -1,14 +1,16 @@
 import { fetchDashboardPaymentTransfers } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { dashboardJson } from "@/lib/dashboard-response";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  proxyToSdpApi,
+  rejectUnscopedDashboardRequest,
+  unexpectedRouteFailure,
+} from "@/lib/sdp-api";
 
 /**
  * Not a pure proxy: without a direct filter this aggregates transfers via
- * fetchDashboardPaymentTransfers, so that branch builds its own client and
- * must repeat proxyToSdpApi's missing-project 400 up front — otherwise
- * createSdpApiClient's throw would surface as a 500.
+ * fetchDashboardPaymentTransfers, so that branch builds its own client.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -32,8 +34,9 @@ export async function GET(request: Request) {
 
   const trace = createTimedTrace("route.dashboard.payments.transfers.get", request);
 
-  if (request.headers.get(PROJECT_HEADER_NAME) === null) {
-    return proxyFailure(trace, 400, `${PROJECT_HEADER_NAME} header required`);
+  const rejection = await rejectUnscopedDashboardRequest(request, trace);
+  if (rejection) {
+    return rejection;
   }
 
   try {
@@ -63,19 +66,7 @@ export async function GET(request: Request) {
 
     return nextResponse;
   } catch (error) {
-    const response = dashboardJson(
-      {
-        error: error instanceof Error ? error.message : "Transfer list request failed",
-      },
-      {
-        status: 500,
-        trace,
-      }
-    );
-    logRouteResult(trace, 500, {
-      error: error instanceof Error ? error.message : "Transfer list request failed",
-    });
-    return response;
+    return unexpectedRouteFailure(trace, error, "Transfer list request failed");
   }
 }
 

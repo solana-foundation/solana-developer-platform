@@ -12,7 +12,11 @@ import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import {
+  createSdpApiClient,
+  rejectUnscopedDashboardRequest,
+  unexpectedRouteFailure,
+} from "@/lib/sdp-api";
 
 /** The newest transfers Home reads: the list shows them, and the volume knows they may stop short. */
 const HOME_TRANSFERS_WINDOW = 20;
@@ -27,6 +31,10 @@ const HOME_TRANSFERS_WINDOW = 20;
  */
 export async function GET(request: Request) {
   const trace = createTimedTrace("route.dashboard.home.activity", request);
+  const rejection = await rejectUnscopedDashboardRequest(request, trace);
+  if (rejection) {
+    return rejection;
+  }
   const [t, issuanceEnabled] = await Promise.all([getTranslations(), issuance()]);
 
   try {
@@ -110,22 +118,6 @@ export async function GET(request: Request) {
 
     return response;
   } catch (error) {
-    const response = dashboardJson(
-      {
-        error:
-          error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
-      },
-      {
-        status: 500,
-        trace,
-      }
-    );
-
-    logRouteResult(trace, 500, {
-      error:
-        error instanceof Error ? error.message : t("Shared.homeWorkspace.failedToLoadActivity"),
-    });
-
-    return response;
+    return unexpectedRouteFailure(trace, error, t("Shared.homeWorkspace.failedToLoadActivity"));
   }
 }

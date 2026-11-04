@@ -10,7 +10,8 @@ import {
 import { getDashboardFlags } from "@/flags/dashboard";
 import { toCsv } from "@/lib/csv";
 import { dashboardJson, dashboardResponseHeaders } from "@/lib/dashboard-response";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createTimedTrace } from "@/lib/request-tracing";
+import { createSdpApiClient, rejectUnscopedDashboardRequest } from "@/lib/sdp-api";
 
 const EXPORT_PAGE_SIZE = 100;
 const MAX_EXPORT_ROWS = 5_000;
@@ -68,6 +69,11 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * code `RATE_LIMITED`.
  */
 export async function GET(request: Request) {
+  const trace = createTimedTrace("route.dashboard.payments.transactions.export", request);
+  const rejection = await rejectUnscopedDashboardRequest(request, trace);
+  if (rejection) {
+    return rejection;
+  }
   const params = Object.fromEntries(new URL(request.url).searchParams);
   // A module the channel hides is dropped like the list drops it, so such a link exports All
   // rather than failing; the API never returns that module's rows either way.
@@ -77,7 +83,9 @@ export async function GET(request: Request) {
     cursors: [],
     pageSize: undefined,
   };
-  const apiClient = await createSdpApiClient();
+  const apiClient = await createSdpApiClient(
+    trace.childContext("route.dashboard.payments.transactions.export.api")
+  );
   const rows: UnifiedTransaction[] = [];
   let cursor: string | undefined;
   let waitedMs = 0;
