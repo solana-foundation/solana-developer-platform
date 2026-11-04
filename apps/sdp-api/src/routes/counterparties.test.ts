@@ -27,6 +27,7 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { seedRateLimit } from "@/test/mocks/kv";
 
 const TEST_PROJECT_ID = "prj_counterparties_test";
 const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
@@ -774,6 +775,61 @@ describe("Counterparties Routes", () => {
           status: "unsupported",
           reason: "Stripe supports on-ramp only.",
         });
+      });
+    });
+
+    describe("metered quota", () => {
+      installStripeTestEnv();
+
+      const submitRequirements = (counterpartyId: string) =>
+        app.request(
+          `/v1/counterparties/${counterpartyId}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ provider: "stripe", direction: "offramp" }),
+          },
+          env
+        );
+
+      it("429s a requirements submission once the actor's metered quota is exhausted", async () => {
+        const cp = (await (await createCounterparty({ externalId: "quota_actor" })).json()).data
+          .counterparty;
+        await seedRateLimit(
+          env,
+          `metered:ramp-requirements:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+          30
+        );
+
+        const res = await submitRequirements(cp.id);
+
+        expect(res.status).toBe(429);
+        expect((await res.json()).error.code).toBe("RATE_LIMITED");
+      });
+
+      it("429s a requirements submission once the org-wide metered quota is exhausted", async () => {
+        const cp = (await (await createCounterparty({ externalId: "quota_org" })).json()).data
+          .counterparty;
+        await seedRateLimit(env, `metered:ramp-requirements:org:${TEST_ORG.id}`, 120);
+
+        const res = await submitRequirements(cp.id);
+
+        expect(res.status).toBe(429);
+        expect((await res.json()).error.code).toBe("RATE_LIMITED");
+      });
+
+      it("admits a submission below the quota", async () => {
+        const cp = (await (await createCounterparty({ externalId: "quota_below" })).json()).data
+          .counterparty;
+        await seedRateLimit(
+          env,
+          `metered:ramp-requirements:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+          28
+        );
+
+        const res = await submitRequirements(cp.id);
+
+        expect(res.status).toBe(200);
       });
     });
   });
