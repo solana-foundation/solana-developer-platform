@@ -5,10 +5,11 @@ import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { Modal } from "@sdp/ui/modal";
+import { playMark } from "@sdp/ui/motion";
 import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
@@ -33,6 +34,7 @@ import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   cancelPaymentRequest,
@@ -61,29 +63,53 @@ function requestWhy(
     : t("DashboardPayments.requestDetail.why.expired");
 }
 
+/** The page's origin never changes while it is open, so there is nothing to subscribe to. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function readOrigin(): string {
+  return window.location.origin;
+}
+
+/** The server render's origin: none, so it never guesses one the browser would contradict. */
+function noOrigin(): string {
+  return "";
+}
+
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
  * the link beside it, and the copy, share and QR download under the link. A demo request lives
  * in this browser only, so it shows no code or link that would open a page that cannot find it,
- * and its actions say so instead of handing out a link nobody can open.
+ * and its actions say so instead of handing out a link nobody can open. Opened by the
+ * new-request page, the link is marked and a line under it says whether it was copied, while
+ * the request can still be paid.
  */
 function RequestPaymentLink({
   request,
   publicToken,
   symbol,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string;
   symbol: string;
+  linkCopiedOnCreate: boolean | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const demo = usePaymentsDemo();
-  // The link is on this origin; read after mount so the server render does not guess it.
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  // The link is on this origin. The server render does not guess it, so a page it rendered gets
+  // the link once hydrated; a page opened in the browser has it from its first frame, so the
+  // link and its mark never arrive a frame apart.
+  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, noOrigin);
   const payLink = origin ? `${origin}/pay/${publicToken}` : "";
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
+  const linkRef = useRef<HTMLSpanElement>(null);
+  // Before paint, so the mark never shows a frame of the bare link first.
+  useLayoutEffect(() => {
+    if (linkCopiedOnCreate !== null && linkRef.current !== null) playMark(linkRef.current);
+  }, [linkCopiedOnCreate]);
 
   const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
 
@@ -148,10 +174,23 @@ function RequestPaymentLink({
         {demo ? (
           <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
         ) : (
-          <span className="min-w-0 truncate font-mono text-body text-primary">
+          // Padded out to the mark's box and pulled back by as much, so the text stays put.
+          <span
+            ref={linkRef}
+            className="-mx-3 -my-1.5 min-w-0 truncate rounded-sm px-3 py-1.5 font-mono text-body text-primary"
+          >
             {payLink || null}
           </span>
         )}
+        {linkCopiedOnCreate !== null && request.status === "awaiting_payment" ? (
+          <p className="mt-2.5 max-w-md text-body text-secondary">
+            {t(
+              linkCopiedOnCreate
+                ? "DashboardPayments.requestDetail.linkOnClipboard"
+                : "DashboardPayments.requestDetail.linkNotCopied"
+            )}
+          </p>
+        ) : null}
         {/* 16px to the design's 30px buttons, 8px apart; the copy is filled while the request
             can still be paid. */}
         <div className="mt-2.5 flex flex-wrap items-center gap-2 [&_button]:[--button-height-md:1.875rem]">
@@ -339,6 +378,12 @@ export function PaymentRequestDetailWorkspace({
 }: PaymentRequestDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  // The new-request page's note is read once, on arrival, and dropped, so a reload or a later
+  // visit says nothing about a copy made earlier.
+  const [linkCopiedOnCreate] = useState(() =>
+    request === null ? null : createdRequestLinkCopied(request.id)
+  );
+  useEffect(forgetCreatedRequestLink, []);
 
   if (!request) {
     return (
@@ -352,7 +397,12 @@ export function PaymentRequestDetailWorkspace({
     );
   }
   return (
-    <PaymentRequestRecord request={request} publicToken={publicToken} walletName={walletName} />
+    <PaymentRequestRecord
+      request={request}
+      publicToken={publicToken}
+      walletName={walletName}
+      linkCopiedOnCreate={linkCopiedOnCreate}
+    />
   );
 }
 
@@ -361,10 +411,13 @@ function PaymentRequestRecord({
   request: served,
   publicToken,
   walletName,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string | null;
   walletName: string | null;
+  /** Whether the new-request page that opened this page copied the link; null otherwise. */
+  linkCopiedOnCreate: boolean | null;
 }) {
   const request = useWatchedPaymentRequest(served);
   const t = useTranslations();
@@ -415,7 +468,12 @@ function PaymentRequestRecord({
           {/* The pay link is a bearer credential: only a member who may manage payment
               requests receives its token (APE-849). */}
           {publicToken ? (
-            <RequestPaymentLink request={request} publicToken={publicToken} symbol={symbol} />
+            <RequestPaymentLink
+              request={request}
+              publicToken={publicToken}
+              symbol={symbol}
+              linkCopiedOnCreate={linkCopiedOnCreate}
+            />
           ) : null}
         </section>
 

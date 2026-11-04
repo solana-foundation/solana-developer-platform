@@ -7,13 +7,15 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { stubMatchMedia } from "@/test/media-queries";
+import { forgetCreatedRequestLink, noteCreatedRequestLink } from "./created-request-link";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
 import * as requestsData from "./payment-requests-page.data";
 
@@ -172,7 +174,7 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
   it("shows no QR code or link for a demo request, only why there is none", async () => {
     renderDetail(true, "tok_1", paymentRequest);
 
-    // The link is read after mount; once the actions enable, it would be drawn.
+    // Once the actions enable, the link would be drawn.
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Copy link" })).toHaveProperty("disabled", false)
     );
@@ -183,6 +185,97 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
     expect(screen.queryByText(/\/pay\/tok_1/)).toBeNull();
+  });
+});
+
+describe("PaymentRequestDetailWorkspace opened by the new-request page", () => {
+  const copiedLine =
+    "The link is on your clipboard. Send it to whoever pays you; this page reads Paid once they do.";
+  const notCopiedLine =
+    "The link was not copied. Copy it below and send it to whoever pays you; this page reads Paid once they do.";
+
+  beforeEach(() => forgetCreatedRequestLink());
+
+  it("says under the link that it is on the clipboard", () => {
+    noteCreatedRequestLink("preq_1", true);
+    renderDetail(false, "tok_1", paymentRequest);
+
+    expect(screen.getByText(copiedLine)).toBeTruthy();
+    expect(screen.queryByText(notCopiedLine)).toBeNull();
+  });
+
+  it("says plainly when the link was not copied", () => {
+    noteCreatedRequestLink("preq_1", false);
+    renderDetail(false, "tok_1", paymentRequest);
+
+    expect(screen.getByText(notCopiedLine)).toBeTruthy();
+    expect(screen.queryByText(copiedLine)).toBeNull();
+  });
+
+  it("says it on that request's first arrival only", () => {
+    noteCreatedRequestLink("preq_2", true);
+    renderDetail(false, "tok_1", paymentRequest);
+    expect(screen.queryByText(copiedLine)).toBeNull();
+    cleanup();
+
+    noteCreatedRequestLink("preq_1", true);
+    renderDetail(false, "tok_1", paymentRequest);
+    expect(screen.getByText(copiedLine)).toBeTruthy();
+    cleanup();
+
+    // A later visit, a reload's render included, finds the note gone.
+    renderDetail(false, "tok_1", paymentRequest);
+    expect(screen.queryByText(copiedLine)).toBeNull();
+  });
+
+  it("drops the note when the request could not be read, so a retry says nothing late", () => {
+    noteCreatedRequestLink("preq_1", true);
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <PaymentRequestDetailWorkspace request={null} publicToken={null} walletName={null} />
+      </I18nProvider>
+    );
+    cleanup();
+
+    renderDetail(false, "tok_1", paymentRequest);
+    expect(screen.queryByText(copiedLine)).toBeNull();
+  });
+
+  it("takes the line away once the request can no longer be paid", () => {
+    noteCreatedRequestLink("preq_1", true);
+    const { rerender } = renderDetail(false, "tok_1", paymentRequest);
+    expect(screen.getByText(copiedLine)).toBeTruthy();
+
+    // A cancel's refresh hands the page the closed request; the page itself stays mounted.
+    rerender(
+      <PaymentRequestDetailWorkspace
+        request={{ ...paymentRequest, status: "canceled" }}
+        publicToken="tok_1"
+        walletName={null}
+      />
+    );
+    expect(screen.queryByText(copiedLine)).toBeNull();
+  });
+
+  it("marks the link it arrived with, and no link on a later visit", () => {
+    stubMatchMedia();
+    const animate = vi.fn<HTMLElement["animate"]>();
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    try {
+      noteCreatedRequestLink("preq_1", true);
+      renderDetail(false, "tok_1", paymentRequest);
+      expect(animate).toHaveBeenCalledTimes(1);
+      expect(animate.mock.contexts[0]).toBe(
+        screen.getByText(`${window.location.origin}/pay/tok_1`)
+      );
+      cleanup();
+
+      renderDetail(false, "tok_1", paymentRequest);
+      expect(animate).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "animate");
+      vi.unstubAllGlobals();
+    }
   });
 });
 

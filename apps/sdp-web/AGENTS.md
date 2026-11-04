@@ -67,6 +67,16 @@ step fades in through `useStepFade` (`src/lib`), which `WizardFrame` applies
 for every flow it frames; both it and `Modal`'s entrance come from
 `@sdp/ui/motion` and stay off under reduced motion.
 
+A flow that lands on a record says how it went on that record, not in a toast.
+A toast shown from a flow sits above its footer (`--app-toast-offset-bottom`);
+once the flow navigates away it drops to sonner's 24px corner, under the
+pointer that pressed the primary action and over the record's own actions,
+and sonner holds a hovered toast open (HOO-2615). The new-request page leaves
+`noteCreatedRequestLink` for the request's page, which says under the link
+whether it was copied. A clipboard write of text an answer brings, like that
+link, starts inside the press with `copyPendingText` (`src/lib`): Safari
+refuses a write that starts after an `await`.
+
 Run the unit suite on Node 24.22.1, the version CI pins. On Node 26 every test
 that touches `localStorage` or `sessionStorage` fails with "Cannot read
 properties of undefined (reading 'clear')", although `engines` allows it.
