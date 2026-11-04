@@ -6,6 +6,7 @@ import {
 } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createApp } from "@/app";
 import { routeOwnerOf as ownerOf, ROUTE_OWNERS } from "@/routes/route-modules";
 import { env as baseEnv } from "@/test/helpers/env";
@@ -21,6 +22,11 @@ function registeredRoutes() {
   }
   return { app, routes: [...routes.values()] };
 }
+
+/** The error envelope a refused request answers with. */
+const refusalBodySchema = z.object({
+  error: z.object({ code: z.string(), message: z.string() }),
+});
 
 /** `ALL` endpoints answer any method; GET stands in for them. */
 function probeMethod(method: string): string {
@@ -87,13 +93,12 @@ describe("API route ownership", () => {
         );
         // The release channel's own refusal, not another 403 on the way (a module's feature
         // flag or a handler error), so every left-out module answers alike (HOO-2620).
-        const { error } = (await response.json()) as {
-          error?: { code?: string; message?: string };
-        };
+        const parsed = refusalBodySchema.safeParse(await response.json());
+        const error = parsed.success ? parsed.data.error : undefined;
         const refused =
           response.status === 403 &&
           error?.code === "FORBIDDEN" &&
-          error.message?.endsWith("is not available in this release channel.") === true;
+          error.message.endsWith("is not available in this release channel.");
         if (!refused) served.push(`${method} ${path} -> ${response.status} ${error?.message}`);
       }
       expect(served).toEqual([]);

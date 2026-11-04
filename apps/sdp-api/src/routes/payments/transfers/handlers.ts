@@ -178,6 +178,8 @@ async function createTransferRecord(
      */
     idempotency: { key: string; fingerprint: string } | null;
     providerData?: Record<string, unknown>;
+    /** The network fee the source wallet will pay, when known before broadcast. */
+    fee?: number | null;
   }
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotency?.key ?? null;
@@ -209,6 +211,7 @@ async function createTransferRecord(
       serializedTx: input.serializedTx ?? null,
       signature: null,
       slot: null,
+      fee: input.fee ?? null,
       initiatedByKeyId: input.initiatedByKeyId ?? null,
       idempotencyKey,
       idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
@@ -1218,6 +1221,9 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         initiatedByKeyId: scope.auth.id,
         idempotency,
         providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
+        // Known before broadcast, so a row the recovery job confirms keeps it too. Fireblocks
+        // vaults pay their own fee, recorded once Fireblocks reports it.
+        fee: fireblocks ? undefined : SPONSORED_WALLET_FEE_LAMPORTS,
       });
 
   if (replayed) {

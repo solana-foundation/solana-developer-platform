@@ -141,6 +141,35 @@ describe("buildObservedTransfersForSignatures", () => {
     ]);
   });
 
+  it("records no fee for a source whose transaction a sponsor paid for", async () => {
+    // A sponsored send: the sponsor is the fee payer (first key), the wallet only signs its
+    // transfer, so the wallet's row says it paid nothing (HOO-2614).
+    const sponsor = syntheticAddress(9);
+    const recipient = syntheticAddress(8);
+    const observed = signatureHistoryEntry(0, "confirmed");
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: observed.signature,
+        slot: 43,
+        blockTime: 1700000001,
+        accountKeys: [sponsor, WALLET_ADDRESS, recipient],
+        instructions: [
+          parsedSystemTransfer({ source: WALLET_ADDRESS, destination: recipient, lamports: 10_000 }),
+        ],
+        innerInstructions: [],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      })
+    );
+
+    const rows = await buildOnSandbox([observed]);
+
+    expect(rows.map((row) => ({ direction: row.direction, fee: row.fee }))).toEqual([
+      { direction: "outbound", fee: 0 },
+    ]);
+  });
+
   it("includes an inbound v1 transfer in the observed list", async () => {
     const observed = signatureHistoryEntry(0, "finalized");
     rpc.answer(
