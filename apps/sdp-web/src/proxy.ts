@@ -26,7 +26,7 @@ export const isPublicRoute = createRouteMatcher([
   "/twitter-image",
 ]);
 
-const isApiRoute = createRouteMatcher(["/api(.*)"]);
+const isApiRoute = createRouteMatcher(["/api/(.*)"]);
 
 const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/playground(.*)"]);
 
