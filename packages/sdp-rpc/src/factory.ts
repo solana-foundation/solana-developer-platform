@@ -5,6 +5,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types/well-known-tokens";
 import {
+  type Commitment,
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   getAbortablePromise,
@@ -12,6 +13,8 @@ import {
   isJsonRpcPayload,
   isSolanaError,
   type RpcTransport,
+  type Signature,
+  type Slot,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
@@ -23,7 +26,12 @@ import {
 } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
-import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import {
+  DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+} from "./solana";
 import {
   emitRpcTelemetry,
   markRpcAttemptDeadline,
@@ -739,6 +747,79 @@ export function createClusterHistoryRpc(): SolanaRpc {
       : endpointUrls,
     managedPools
   );
+}
+
+/** One signature's history status across every endpoint of the scope's managed pool. */
+export type EveryEndpointSignatureStatus =
+  /** At least one endpoint has a status for it; other endpoints' failures do not matter. */
+  | { kind: "found"; status: SignatureStatusInfo }
+  /** Every endpoint answered at the floor, and none has a status for it. */
+  | { kind: "absent" }
+  /** No endpoint has a status for it and at least one could not answer at the floor. */
+  | { kind: "unresolved"; failures: unknown[] };
+
+const CONFIRMATION_RANK = {
+  processed: 1,
+  confirmed: 2,
+  finalized: 3,
+} as const satisfies Record<Commitment, number>;
+
+/**
+ * Signature statuses from transaction history on every endpoint of the scope's managed pool, each
+ * read floored at `minContextSlot` against the `commitment` bank. The pool takes the first
+ * endpoint's answer, and one endpoint's history can miss a landed transaction (a snapshot-booted
+ * node, a history-backend error Agave serves as null), so only a null from every endpoint is
+ * `absent`. Each endpoint is its own one-endpoint pool, sharing the managed pool's genesis proofs
+ * and key-refusal memo but never its failover order.
+ *
+ * @param signatures - The signatures to look up, at most `getSignatureStatuses`' batch limit.
+ * @param floor - The slot every endpoint must have reached, and the bank it is checked against.
+ * @returns Each signature's status across the pool, in order.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
+ */
+export async function getSignatureStatusesFromEveryEndpoint(
+  signatures: Signature[],
+  floor: Readonly<{ minContextSlot: Slot; commitment: Commitment }>
+): Promise<EveryEndpointSignatureStatus[]> {
+  const { cluster } = currentClusterScope();
+  const endpointReads = await Promise.allSettled(
+    managedEndpointUrls(cluster).map((endpointUrl) =>
+      getSignatureStatuses(pooledClusterRpc(cluster, [endpointUrl], managedPools), signatures, {
+        searchTransactionHistory: true,
+        minContextSlot: floor.minContextSlot,
+        commitment: floor.commitment,
+      })
+    )
+  );
+  const answers = endpointReads.flatMap((read) =>
+    read.status === "fulfilled" ? [read.value] : []
+  );
+  const failures = endpointReads.flatMap((read) =>
+    read.status === "rejected" ? [read.reason] : []
+  );
+  return signatures.map((_signature, index): EveryEndpointSignatureStatus => {
+    const found = mostConfirmedStatus(answers.map((statuses) => statuses[index]));
+    if (found !== null) return { kind: "found", status: found };
+    return failures.length === 0 ? { kind: "absent" } : { kind: "unresolved", failures };
+  });
+}
+
+function mostConfirmedStatus(
+  statuses: ReadonlyArray<SignatureStatusInfo | null>
+): SignatureStatusInfo | null {
+  let mostConfirmed: SignatureStatusInfo | null = null;
+  for (const status of statuses) {
+    if (status === null) continue;
+    if (mostConfirmed === null || confirmationRank(status) > confirmationRank(mostConfirmed)) {
+      mostConfirmed = status;
+    }
+  }
+  return mostConfirmed;
+}
+
+function confirmationRank(status: SignatureStatusInfo): number {
+  return status.confirmationStatus === null ? 0 : CONFIRMATION_RANK[status.confirmationStatus];
 }
 
 /**
