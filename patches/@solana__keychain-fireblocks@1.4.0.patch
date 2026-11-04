@@ -35,7 +35,7 @@ index fa09e5208bbd32731b2c126984502384972be629..ad0c10a6c24fbc1f8acb49e63ae6de34
  export interface SignedMessage {
      signature: SignatureData;
 diff --git a/src/fireblocks-signer.ts b/src/fireblocks-signer.ts
-index 954141f32f931784479868f10dc1d0e2d058bdb2..a9969507a58c416ba5af5afd3b92ad8ade70f0f8 100644
+index 954141f32f931784479868f10dc1d0e2d058bdb2..582edf0bd3fe22119ab69fd3f0febf5ae4f3e411 100644
 --- a/src/fireblocks-signer.ts
 +++ b/src/fireblocks-signer.ts
 @@ -47,6 +47,11 @@ const DEFAULT_ASSET_ID = 'SOL';
@@ -43,7 +43,7 @@ index 954141f32f931784479868f10dc1d0e2d058bdb2..a9969507a58c416ba5af5afd3b92ad8a
  const DEFAULT_MAX_POLL_ATTEMPTS = 60;
  
 +/** Keep a terminal transaction's documented sub-status code, never arbitrary provider text. */
-+function terminalSubStatus(subStatus: unknown): string | undefined {
++function terminalSubStatus(subStatus: string | undefined): string | undefined {
 +    return typeof subStatus === 'string' && /^[A-Z0-9_]{1,100}$/.test(subStatus) ? subStatus : undefined;
 +}
 +

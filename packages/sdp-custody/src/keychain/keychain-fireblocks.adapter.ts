@@ -67,11 +67,11 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
     const created = this.createInitializedSigner(vaultAccountId)
       .then(refusingPolicyBlocks)
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (this.signerByVaultAccountId.get(vaultAccountId) === created) {
           this.signerByVaultAccountId.delete(vaultAccountId);
         }
-        throw error;
+        throw cause;
       });
     this.signerByVaultAccountId.set(vaultAccountId, created);
     return created;
@@ -124,19 +124,19 @@ function refusingPolicyBlocks(signer: FireblocksSigner): SolanaSigner {
  * polling inside keychain, and every other terminal status is the provider's
  * own failure.
  *
- * @param error - What the Fireblocks signing call rejected with.
+ * @param cause - What the Fireblocks signing call rejected with.
  * @returns Never; it always throws.
  */
-function rethrowFireblocksSigningError(error: unknown): never {
-  if (error instanceof SignerError && error.code === SignerErrorCode.SIGNING_FAILED) {
-    const context = fireblocksTerminalContextSchema.safeParse(error.context);
+function rethrowFireblocksSigningError(cause: unknown): never {
+  if (cause instanceof SignerError && cause.code === SignerErrorCode.SIGNING_FAILED) {
+    const context = fireblocksTerminalContextSchema.safeParse(cause.context);
     if (context.success && isFireblocksPolicyRefusal(context.data)) {
       throw new SigningError(
         "Fireblocks blocked the signing request by policy",
         "POLICY_REFUSED",
-        error
+        cause
       );
     }
   }
-  throw error;
+  throw cause;
 }

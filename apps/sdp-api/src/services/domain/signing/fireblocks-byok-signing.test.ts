@@ -33,12 +33,12 @@ const env = {
   FIREBLOCKS_API_SECRET: "deployment-secret",
 };
 
-const CREDENTIAL = {
+const CREDENTIAL: Parameters<typeof createFireblocksAdapterFromCredential>[1] = {
   apiKey: "tenant-key",
   apiSecretPem,
   assetId: "SOL_TEST",
   walletId: "fb_42",
-} as const;
+};
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -106,7 +106,7 @@ describe("Fireblocks BYOK transaction proposals", () => {
 
 describe("Fireblocks BYOK policy refusals (HOO-2478)", () => {
   /** Signs through the shared custody signer while Fireblocks answers the proposal with `poll`. */
-  async function signAgainstPoll(poll: Record<string, unknown>) {
+  async function signAgainstPoll(poll: { status: string; subStatus?: string; note?: string }) {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
       .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
@@ -134,7 +134,7 @@ describe("Fireblocks BYOK policy refusals (HOO-2478)", () => {
       status: "BLOCKED",
       subStatus: "BLOCKED_BY_POLICY",
       note: "private provider text",
-    }).catch((error: unknown) => error);
+    }).catch((cause: unknown) => cause);
 
     expect(refusal).toBeInstanceOf(AppError);
     expect(refusal).toMatchObject({

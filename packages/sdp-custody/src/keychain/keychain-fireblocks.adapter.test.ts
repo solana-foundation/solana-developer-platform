@@ -59,14 +59,19 @@ function signTestMessage(signer: SolanaSigner) {
   return signer.signMessages([createSignableMessage("Fireblocks policy check")]);
 }
 
+/** A Fireblocks status read, including malformed sub-statuses the patch must drop. */
+interface FireblocksPoll {
+  status: string;
+  subStatus?: string | { code: string };
+  note?: string;
+  errorDescription?: string;
+}
+
 /**
  * Signs once against Fireblocks accepting the RAW proposal and answering its
  * first status read with `poll`.
  */
-async function signAgainstPoll(
-  poll: Record<string, unknown>,
-  sign: (signer: SolanaSigner) => Promise<unknown>
-) {
+async function signAgainstPoll(poll: FireblocksPoll, sign: typeof signTestTransaction) {
   vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
     .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
@@ -162,7 +167,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
     }
   );
 
-  it.each<[string, { status: string; subStatus?: string }]>([
+  it.each<[string, FireblocksPoll]>([
     ["BLOCKED without a sub-status", { status: "BLOCKED" }],
     ["FAILED with a policy sub-status", { status: "FAILED", subStatus: "BLOCKED_BY_POLICY" }],
     ["REJECTED", { status: "REJECTED", subStatus: "AUTO_FREEZE" }],
@@ -179,7 +184,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
     });
   });
 
-  it.each([
+  it.each<[string, FireblocksPoll["subStatus"]]>([
     ["lowercase", "blocked_by_policy"],
     ["trailing newline", "BLOCKED_BY_POLICY\n"],
     ["oversized", `BLOCKED_BY_POLICY${"_".repeat(100)}`],
@@ -225,7 +230,7 @@ describe("fireblocks adapter policy refusals (HOO-2478)", () => {
     const refusal = await signAgainstPoll(
       { ...POLICY_BLOCK, note: "response-secret-value", errorDescription: "private rule text" },
       signTestMessage
-    ).catch((error: unknown) => error);
+    ).catch((cause: unknown) => cause);
 
     expect(refusal).toBeInstanceOf(SigningError);
     const serialized = JSON.stringify(refusal);

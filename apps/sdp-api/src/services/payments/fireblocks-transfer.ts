@@ -120,7 +120,7 @@ function providerFailure(result: FireblocksTransferResult): string {
  */
 function failureRecord(result: FireblocksTransferResult): {
   error: string;
-  providerData: Record<string, unknown>;
+  providerData: { executionFailure?: { code: "CUSTODY_POLICY_REFUSED" } };
 } {
   if (isFireblocksPolicyRefusal(result)) {
     return {
