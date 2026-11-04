@@ -3,7 +3,6 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type ByokCustodyProvider,
-  type CustodyMode,
   type CustodyWalletPurpose,
   isByokCustodyProvider,
 } from "@sdp/types/custody";
@@ -12,12 +11,15 @@ import { cn } from "@sdp/ui/cn";
 import { InfoHint } from "@sdp/ui/info-hint";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
+import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   type ComponentProps,
   type FormEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -52,10 +54,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
-import type {
-  AvailableCustodyModes,
-  ProjectCustodyAvailability,
-} from "@/lib/provider-availability";
+import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -63,45 +62,105 @@ import { useStepFade } from "@/lib/use-step-fade";
 
 const DETAILS_FORM_ID = "wallet-details-form";
 const FOOTER_HINT_ID = "wallet-setup-footer-hint";
-const WALLET_TARGET_FIELD = "walletTarget";
-const MANAGED_WALLET_TARGET = "managed";
 const ENVIRONMENT_LABEL_KEYS = {
   sandbox: "DashboardCustody.sandbox",
   production: "DashboardCustody.production",
 } as const satisfies Record<SdpEnvironment, MessageKey>;
-const CUSTODY_MODE_CHOICES = {
-  managed: {
-    titleKey: "DashboardCustody.walletSetupModeManagedTitle",
-    descriptionKey: "DashboardCustody.walletSetupModeManagedDescription",
-  },
-  byok: {
-    titleKey: "DashboardCustody.walletSetupModeByokTitle",
-    descriptionKey: "DashboardCustody.walletSetupModeByokDescription",
-  },
-} as const satisfies Record<CustodyMode, { titleKey: MessageKey; descriptionKey: MessageKey }>;
+/** The questions and the wallet's details share one title size, as the design sets them. */
+const SECTION_TITLE_CLASS = "text-subheading font-medium text-primary";
+
+/** The provider list's one-line summaries, shorter than the integrations catalog's. */
+const PROVIDER_SUMMARY_KEYS = {
+  local: "DashboardCustody.walletSetupProviderSummaries.local",
+  fireblocks: "DashboardCustody.walletSetupProviderSummaries.fireblocks",
+  privy: "DashboardCustody.walletSetupProviderSummaries.privy",
+  coinbase_cdp: "DashboardCustody.walletSetupProviderSummaries.coinbaseCdp",
+  para: "DashboardCustody.walletSetupProviderSummaries.para",
+  turnkey: "DashboardCustody.walletSetupProviderSummaries.turnkey",
+  dfns: "DashboardCustody.walletSetupProviderSummaries.dfns",
+  ibm_haven: "DashboardCustody.walletSetupProviderSummaries.ibmHaven",
+  anchorage: "DashboardCustody.walletSetupProviderSummaries.anchorage",
+  utila: "DashboardCustody.walletSetupProviderSummaries.utila",
+} as const satisfies Record<KnownCustodyProvider, MessageKey>;
+
+/** How a project connects its own account of a provider, in that provider's words. */
+const OWN_ACCOUNT_DESCRIPTION_KEYS = {
+  privy: "DashboardCustody.walletSetupModeByokPrivyDescription",
+  fireblocks: "DashboardCustody.walletSetupModeByokDescription",
+} as const satisfies Record<ByokCustodyProvider, MessageKey>;
 
 /**
- * The purposes the create endpoint accepts, in the order the picker lists them. The picker
- * offers only those whose module runs here (`isWalletPurposeOffered`).
+ * What a provider's account at SDP gives its wallets. Privy's takes no wallet policy, so its
+ * wallets sign whatever the API asks and the screen says so; Fireblocks' may hold one, so it
+ * claims nothing.
+ */
+const MANAGED_ACCOUNT_COPY = {
+  privy: {
+    descriptionKey: "DashboardCustody.walletSetupModeManagedPolicyFreeDescription",
+    policyFree: true,
+  },
+  fireblocks: {
+    descriptionKey: "DashboardCustody.walletSetupModeManagedDescription",
+    policyFree: false,
+  },
+} as const satisfies Record<
+  ByokCustodyProvider,
+  { descriptionKey: MessageKey; policyFree: boolean }
+>;
+
+const TRANSFER_PURPOSE = { value: "transfer", labelKey: "DashboardCustody.transfers" } as const;
+
+/**
+ * The purposes the create endpoint accepts, in the order the design lists them: Payments', then
+ * Issuance's, then transfers. The picker offers only those whose module runs here
+ * (`isWalletPurposeOffered`) and starts on transfers.
  */
 const WALLET_PURPOSES = [
-  { value: "transfer", labelKey: "DashboardCustody.transfers" },
+  { value: "fee_payer", labelKey: "DashboardCustody.feePayer" },
   { value: "mint_authority", labelKey: "DashboardCustody.mintAuthority" },
   { value: "freeze_authority", labelKey: "DashboardCustody.freezeAuthority" },
-  { value: "fee_payer", labelKey: "DashboardCustody.feePayer" },
+  TRANSFER_PURPOSE,
 ] as const satisfies readonly { value: CustodyWalletPurpose; labelKey: MessageKey }[];
 
 type WalletPurposeOption = (typeof WALLET_PURPOSES)[number];
 
-/**
- * A provider's first wallet is always a transfer wallet, so the summary names it and nothing
- * asks. After it the purpose is a choice: transfer and fee payer are core, so at least two are
- * always offered.
- */
-const FIRST_WALLET_PURPOSE = WALLET_PURPOSES[0];
-
 /** Data attributes the flow's tests and the e2e suite key off. */
 type DataAttributes = { [attribute: `data-${string}`]: string };
+
+/**
+ * Where the new wallet's keys live: SDP's account of the provider (Managed), a new account of
+ * the project's own (a BYOK setup), or a connection the project already holds.
+ */
+type AccountChoice =
+  | { kind: "managed" }
+  | { kind: "own" }
+  | { kind: "connection"; connection: CustodyConnectionListItem };
+
+function isSameAccount(a: AccountChoice, b: AccountChoice): boolean {
+  if (a.kind === "connection" && b.kind === "connection") {
+    return a.connection.id === b.connection.id;
+  }
+  return a.kind === b.kind;
+}
+
+/** The radio value an answer submits under, unique across the list. */
+function accountValue(account: AccountChoice): string {
+  return account.kind === "connection" ? `connection:${account.connection.id}` : account.kind;
+}
+
+/** What Cancel's question says: whether a request went out that may have made the wallet. */
+type LeavePrompt = "unsent" | "sent";
+
+const LEAVE_PROMPT_COPY = {
+  unsent: {
+    titleKey: "DashboardCustody.walletSetupLeaveTitle",
+    descriptionKey: "DashboardCustody.walletSetupLeaveDescription",
+  },
+  sent: {
+    titleKey: "DashboardCustody.walletSetupLeaveAfterSendTitle",
+    descriptionKey: "DashboardCustody.walletSetupLeaveAfterSendDescription",
+  },
+} as const satisfies Record<LeavePrompt, { titleKey: MessageKey; descriptionKey: MessageKey }>;
 
 // Keep Enter available to controls that own it (newlines, option selection,
 // navigation, and action buttons), and off the choice lists: picking an answer
@@ -151,44 +210,9 @@ interface WalletSetupFlowProps {
   connections: CustodyConnectionListItem[];
 }
 
-/**
- * The mode a provider that is not set up yet gets set up in: its only mode, or the user's
- * choice when it offers more than one.
- *
- * @param input - What the selected provider offers and what the user chose.
- * @returns The setup mode, or `null` while the user still has to choose.
- */
-function resolveSetupMode(input: {
-  modes: AvailableCustodyModes;
-  chosenMode: CustodyMode | null;
-}): CustodyMode | null {
-  const [firstMode, ...otherModes] = input.modes;
-  return otherModes.length === 0 ? firstMode : input.chosenMode;
-}
-
 /** Only an active connection holds verified credentials, so only it can take a wallet. */
 function isSelectableConnection(connection: CustodyConnectionListItem): boolean {
   return connection.status === "active";
-}
-
-/**
- * Moves the picker's choice onto the field the create action reads: a connection id as
- * `connectionId`, and Managed as no connection at all, so the action names the provider's
- * Managed config.
- *
- * @param formData - The submitted details form, edited in place.
- * @returns False when the user has not picked where the wallet lives.
- */
-function applyWalletTarget(formData: FormData): boolean {
-  const walletTarget = formData.get(WALLET_TARGET_FIELD);
-  formData.delete(WALLET_TARGET_FIELD);
-  if (typeof walletTarget !== "string" || walletTarget === "") {
-    return false;
-  }
-  if (walletTarget !== MANAGED_WALLET_TARGET) {
-    formData.set("connectionId", walletTarget);
-  }
-  return true;
 }
 
 /** A field label with its info hint, as the design sets every question. */
@@ -202,9 +226,9 @@ function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string;
 }
 
 /**
- * One answer in a choice list: a radio row with its title, a line of description and the
- * ring. Rows are locked while a setup request is in flight: switching the answer would unmount
- * the credential form that holds the request's only way to recover.
+ * One answer in a choice list: a radio row with its title, an optional line of description and
+ * the ring. Rows are locked while a setup request is in flight: switching the answer would
+ * unmount the credential form that holds the request's only way to recover.
  */
 function ChoiceRow({
   attributes,
@@ -222,7 +246,7 @@ function ChoiceRow({
 }: {
   attributes: DataAttributes;
   checked: boolean;
-  description: string;
+  description?: string;
   disabled: boolean;
   first: boolean;
   id: string;
@@ -237,7 +261,7 @@ function ChoiceRow({
   return (
     <label
       className={cn(
-        "flex items-center gap-3 px-4 py-3",
+        "flex items-center gap-3 px-4 py-4",
         !first && "border-t border-border-subtle",
         disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
       )}
@@ -251,14 +275,16 @@ function ChoiceRow({
         disabled={disabled}
         onChange={onSelect}
         className="peer sr-only"
-        aria-describedby={descriptionId}
+        aria-describedby={description ? descriptionId : undefined}
       />
       {leading}
       <span className="min-w-0 flex-1">
         <span className="block text-nav leading-4.5 text-primary">{title}</span>
-        <span id={descriptionId} className="block text-body leading-4.5 text-secondary">
-          {description}
-        </span>
+        {description ? (
+          <span id={descriptionId} className="block text-body leading-4.5 text-secondary">
+            {description}
+          </span>
+        ) : null}
       </span>
       {trailing}
       {/* The visible radio: a ring, filled to a thick ink ring when chosen. */}
@@ -288,10 +314,10 @@ function ChoiceList({
 }) {
   return (
     <fieldset>
-      <legend className="text-nav font-medium text-primary">{legend}</legend>
+      <legend className={SECTION_TITLE_CLASS}>{legend}</legend>
       {description ? <p className="mt-1 text-body text-secondary">{description}</p> : null}
       <div
-        className="mt-3 overflow-hidden rounded-card border border-border-default bg-surface-tile"
+        className="mt-4 overflow-hidden rounded-card border border-border-default bg-surface-tile"
         {...listAttributes}
       >
         {children}
@@ -300,7 +326,7 @@ function ChoiceList({
   );
 }
 
-/** The usable providers, connected first; asked only when there is more than one. */
+/** The usable providers, by name; asked only when there is more than one. */
 function ProviderChoice({
   choices,
   disabled,
@@ -325,7 +351,7 @@ function ProviderChoice({
           key={provider.entry.id}
           attributes={{ "data-wallet-provider": provider.entry.id }}
           checked={selectedProvider === provider.entry.id}
-          description={t(provider.entry.descriptionKey)}
+          description={t(PROVIDER_SUMMARY_KEYS[provider.entry.id])}
           disabled={disabled}
           first={index === 0}
           id={`wallet-provider-${provider.entry.id}`}
@@ -337,13 +363,6 @@ function ProviderChoice({
           name="provider"
           onSelect={() => onSelect(provider.entry.id)}
           title={provider.entry.label}
-          trailing={
-            provider.status === "active" ? (
-              <span className="shrink-0 text-body text-tertiary">
-                {t("DashboardCustody.active")}
-              </span>
-            ) : null
-          }
           value={provider.entry.id}
         />
       ))}
@@ -351,45 +370,219 @@ function ProviderChoice({
   );
 }
 
+/** What a connection that cannot take a wallet yet needs, and the link that gets it done. */
+function connectionNotice(
+  connection: CustodyConnectionListItem,
+  providerLabel: string,
+  t: ReturnType<typeof useTranslations>
+): { note: string; action: string } {
+  if (connection.status !== "failed") {
+    return {
+      note: t("DashboardCustody.walletSetupConnectionUnavailablePending"),
+      action: t("DashboardCustody.walletSetupConnectionCheckAgain"),
+    };
+  }
+  if (connection.lastCheck?.failureCode === "invalid_credentials") {
+    return {
+      note: t("DashboardCustody.walletSetupConnectionRejected", { provider: providerLabel }),
+      action: t("DashboardCustody.walletSetupConnectionReplaceCredentials"),
+    };
+  }
+  return {
+    note: t("DashboardCustody.walletSetupConnectionUnavailableFailed"),
+    action: t("DashboardCustody.walletSetupConnectionOpen"),
+  };
+}
+
 /**
- * Asks whose account holds the keys, for a provider the project may set up either way: SDP's
- * account (Managed) or the project's own (BYOK). Nothing is preselected.
+ * A connection that cannot take a wallet yet, in the account list: what it needs, and a link to
+ * its page, where it is fixed. The link is locked while a setup request is in flight, like every
+ * answer above it: leaving would drop the request's saved retry.
  */
-function CustodyModeChoice({
+function ConnectionNoticeRow({
+  connection,
   disabled,
-  mode,
-  modes,
-  onModeChange,
+  first,
   providerLabel,
   t,
 }: {
+  connection: CustodyConnectionListItem;
   disabled: boolean;
-  mode: CustodyMode | null;
-  modes: AvailableCustodyModes;
-  onModeChange: (mode: CustodyMode) => void;
+  first: boolean;
   providerLabel: string;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const href = useProjectHref();
+  const { note, action } = connectionNotice(connection, providerLabel, t);
+  const actionClassName = "shrink-0 text-body underline underline-offset-4";
+  return (
+    <div
+      className={cn("flex items-center gap-3 px-4 py-4", !first && "border-t border-border-subtle")}
+      data-wallet-account={connection.id}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-nav leading-4.5 text-primary">{connection.label}</span>
+        <span className="block text-body leading-4.5 text-secondary">{note}</span>
+      </span>
+      {disabled ? (
+        // Locked, it is no way out at all: plain text, out of the tab order and the link list.
+        <span className={cn(actionClassName, "cursor-not-allowed text-tertiary")}>{action}</span>
+      ) : (
+        <Link
+          href={href(
+            `/dashboard/integrations/${connection.provider}/connections/${encodeURIComponent(connection.id)}`
+          )}
+          className={cn(actionClassName, "text-secondary hover:text-primary")}
+        >
+          {action}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+type AccountRow =
+  | {
+      kind: "choice";
+      choice: AccountChoice;
+      description?: string;
+      title: string;
+    }
+  | { kind: "notice"; connection: CustodyConnectionListItem };
+
+/**
+ * The account list's rows, in the design's order: SDP's account where it is offered, each
+ * connection the project holds, then a new account of its own.
+ */
+function accountRows(input: {
+  options: AccountOptions;
+  provider: ByokCustodyProvider;
+  providerLabel: string;
+  t: ReturnType<typeof useTranslations>;
+}): AccountRow[] {
+  const { options, provider, providerLabel, t } = input;
+  const managed: AccountRow[] = options.offersManaged
+    ? [
+        {
+          kind: "choice",
+          choice: { kind: "managed" },
+          title: t("DashboardCustody.walletSetupModeManagedTitle", { provider: providerLabel }),
+          description: t(MANAGED_ACCOUNT_COPY[provider].descriptionKey),
+        },
+      ]
+    : [];
+  const connections = options.connections.map(
+    (connection): AccountRow =>
+      isSelectableConnection(connection)
+        ? { kind: "choice", choice: { kind: "connection", connection }, title: connection.label }
+        : { kind: "notice", connection }
+  );
+  const own: AccountRow =
+    options.connections.length > 0
+      ? {
+          kind: "choice",
+          choice: { kind: "own" },
+          title: t("DashboardCustody.walletSetupAccountConnectAnother", {
+            provider: providerLabel,
+          }),
+        }
+      : {
+          kind: "choice",
+          choice: { kind: "own" },
+          title: t("DashboardCustody.walletSetupModeByokTitle", { provider: providerLabel }),
+          description: t(OWN_ACCOUNT_DESCRIPTION_KEYS[provider]),
+        };
+  return [...managed, ...connections, own];
+}
+
+/**
+ * Asks whose account holds the keys, for a provider the project can connect its own account
+ * for: SDP's account where it is offered, each connection the project holds, and a new account
+ * of its own. Nothing is preselected unless only one answer can be picked; with only one and no
+ * connection to show, there is no list, just the line under the question.
+ *
+ * A connection that cannot take a wallet stays on the list with what it needs, rather than being
+ * filtered out: a user who came here to add a wallet to it needs to see that it is there but
+ * not ready yet, not to find it missing.
+ */
+function AccountQuestion({
+  account,
+  disabled,
+  environment,
+  onSelect,
+  options,
+  provider,
+  t,
+}: {
+  account: AccountChoice | null;
+  disabled: boolean;
+  environment: SdpEnvironment;
+  onSelect: (account: AccountChoice) => void;
+  options: AccountOptions;
+  provider: ByokCustodyProvider;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const providerLabel = getCustodyProviderEntry(provider).label;
+  const legend = t("DashboardCustody.walletSetupModeQuestion", { provider: providerLabel });
+  if (!options.listsAccounts) {
+    return (
+      <section aria-labelledby="wallet-account-question">
+        <h3 id="wallet-account-question" className={SECTION_TITLE_CLASS}>
+          {legend}
+        </h3>
+        {environment === "production" && account?.kind === "own" ? (
+          <p className="mt-1 text-body text-secondary">
+            {t("DashboardCustody.walletSetupAccountOwnOnlyProduction")}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <ChoiceList
-      legend={t("DashboardCustody.walletSetupModeQuestion", { provider: providerLabel })}
-      listAttributes={{ "data-wallet-mode-list": "" }}
+      legend={legend}
+      description={t(
+        environment === "production"
+          ? "DashboardCustody.walletSetupAccountDescriptionProduction"
+          : "DashboardCustody.walletSetupAccountDescription"
+      )}
+      listAttributes={{ "data-wallet-account-list": "" }}
     >
-      {modes.map((option, index) => (
-        <ChoiceRow
-          key={option}
-          attributes={{ "data-wallet-mode": option }}
-          checked={mode === option}
-          description={t(CUSTODY_MODE_CHOICES[option].descriptionKey)}
-          disabled={disabled}
-          first={index === 0}
-          id={`wallet-mode-${option}`}
-          name="custodyMode"
-          onSelect={() => onModeChange(option)}
-          title={t(CUSTODY_MODE_CHOICES[option].titleKey, { provider: providerLabel })}
-          value={option}
-        />
-      ))}
+      {accountRows({ options, provider, providerLabel, t }).map((row, index) => {
+        if (row.kind === "notice") {
+          return (
+            <ConnectionNoticeRow
+              key={row.connection.id}
+              connection={row.connection}
+              disabled={disabled}
+              first={index === 0}
+              providerLabel={providerLabel}
+              t={t}
+            />
+          );
+        }
+        const value = accountValue(row.choice);
+        const choice = row.choice;
+        return (
+          <ChoiceRow
+            key={value}
+            attributes={{
+              "data-wallet-account":
+                choice.kind === "connection" ? choice.connection.id : choice.kind,
+            }}
+            checked={account !== null && isSameAccount(account, choice)}
+            description={row.description}
+            disabled={disabled}
+            first={index === 0}
+            id={`wallet-account-${value.replace(":", "-")}`}
+            name="walletAccount"
+            onSelect={() => onSelect(choice)}
+            title={row.title}
+            value={value}
+          />
+        );
+      })}
     </ChoiceList>
   );
 }
@@ -402,22 +595,20 @@ function WalletLabelField({
   disabled,
   name,
   onChange,
+  placeholder,
   t,
   value,
 }: {
   disabled: boolean;
   name: "label" | "walletLabel";
   onChange: (value: string) => void;
+  placeholder: string;
   t: ReturnType<typeof useTranslations>;
   value: string;
 }) {
   return (
     <div className="space-y-2">
-      <FieldLabel
-        htmlFor="wallet-label"
-        label={t("DashboardCustody.walletLabel")}
-        hint={t("DashboardCustody.walletLabelHint")}
-      />
+      <Label htmlFor="wallet-label">{t("DashboardCustody.walletLabel")}</Label>
       <Input
         id="wallet-label"
         form={DETAILS_FORM_ID}
@@ -425,7 +616,7 @@ function WalletLabelField({
         size="xl"
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
-        placeholder={t("DashboardCustody.newDesign.walletLabelPlaceholder")}
+        placeholder={placeholder}
         maxLength={100}
         required
         disabled={disabled}
@@ -435,106 +626,40 @@ function WalletLabelField({
 }
 
 /**
- * Picks the provider account a new wallet is created in: the provider's Managed config, when
- * the project has one, or one of its connections.
- *
- * Nothing is preselected. There is no default custody, so the user names the account every
- * time, even when only one is selectable.
- *
- * Unusable connections stay on the list, disabled and annotated, rather than
- * being filtered out: a user who came here to add a wallet to the connection
- * they just set up needs to see that it is there but not ready yet, not to
- * find it missing.
- */
-function WalletConnectionField({
-  connections,
-  hasManagedConfig,
-  t,
-}: {
-  connections: CustodyConnectionListItem[];
-  hasManagedConfig: boolean;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const annotate = (connection: CustodyConnectionListItem): string | null => {
-    if (isSelectableConnection(connection)) {
-      return null;
-    }
-    return connection.status === "failed"
-      ? t("DashboardCustody.walletSetupConnectionUnavailableFailed")
-      : t("DashboardCustody.walletSetupConnectionUnavailablePending");
-  };
-
-  return (
-    <div className="space-y-2">
-      <FieldLabel
-        label={t("DashboardCustody.walletSetupConnection")}
-        hint={t("DashboardCustody.walletSetupConnectionHint")}
-      />
-      <Select
-        name={WALLET_TARGET_FIELD}
-        ariaLabel={t("DashboardCustody.walletSetupConnection")}
-        placeholder={t("DashboardCustody.walletSetupConnectionPlaceholder")}
-        size="xl"
-      >
-        {hasManagedConfig ? (
-          <SelectItem value={MANAGED_WALLET_TARGET}>
-            {t("DashboardCustody.walletSetupConnectionManaged")}
-          </SelectItem>
-        ) : null}
-        {connections.map((connection) => {
-          const annotation = annotate(connection);
-          return (
-            <SelectItem
-              key={connection.id}
-              value={connection.id}
-              disabled={!isSelectableConnection(connection)}
-            >
-              {annotation ? `${connection.label} · ${annotation}` : connection.label}
-            </SelectItem>
-          );
-        })}
-      </Select>
-    </div>
-  );
-}
-
-/**
- * The form a Managed setup or another wallet submits: the provider, the purpose when there is
- * one to choose, and the account when there is one to choose. The label joins it from outside
- * (`WalletLabelField`).
+ * The form a Managed setup or another wallet submits: the provider, the connection it goes into
+ * when there is one, and the purpose when there is one to choose. The label joins it from
+ * outside (`WalletLabelField`).
  */
 function WalletDetailsForm({
   choosePurpose,
-  connectionOptions,
-  hasManagedConfig,
+  connectionId,
   onSubmit,
   providerId,
+  purposeHint,
   purposes,
-  showConnectionPicker,
   t,
 }: {
   choosePurpose: boolean;
-  connectionOptions: CustodyConnectionListItem[];
-  hasManagedConfig: boolean;
+  connectionId: string | null;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   providerId: KnownCustodyProvider;
+  purposeHint: string;
   purposes: readonly WalletPurposeOption[];
-  showConnectionPicker: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
     <form id={DETAILS_FORM_ID} onSubmit={onSubmit} className="space-y-6">
       <input type="hidden" name="provider" value={providerId} />
+      {connectionId === null ? null : (
+        <input type="hidden" name="connectionId" value={connectionId} />
+      )}
       {choosePurpose ? (
         <div className="space-y-2">
-          <FieldLabel
-            label={t("DashboardCustody.purpose")}
-            hint={t("DashboardCustody.walletPurposeHint")}
-          />
+          <FieldLabel label={t("DashboardCustody.purpose")} hint={purposeHint} />
           <Select
             name="purpose"
             ariaLabel={t("DashboardCustody.purpose")}
-            defaultValue="transfer"
+            defaultValue={TRANSFER_PURPOSE.value}
             size="xl"
           >
             {purposes.map((purpose) => (
@@ -545,24 +670,52 @@ function WalletDetailsForm({
           </Select>
         </div>
       ) : null}
-      {showConnectionPicker ? (
-        <WalletConnectionField
-          connections={connectionOptions}
-          hasManagedConfig={hasManagedConfig}
-          t={t}
-        />
-      ) : null}
     </form>
   );
 }
 
-/** What the wallet is created with: the provider, a purpose that is not a choice, where it lives. */
+/** One line of the summary: what it names, with a hint when the name needs one, and its value. */
+function CreatedWithRow({
+  hint,
+  label,
+  muted = false,
+  value,
+}: {
+  hint?: string;
+  label: string;
+  muted?: boolean;
+  value: string;
+}) {
+  return (
+    <div className="flex h-12 items-center gap-4 border-b border-border-subtle last:border-b-0">
+      <dt className="flex w-36 shrink-0 items-center gap-1.5 text-body text-secondary">
+        {label}
+        {hint ? <InfoHint text={hint} /> : null}
+      </dt>
+      <dd
+        className={cn(
+          "min-w-0 flex-1 truncate text-body",
+          muted ? "text-tertiary" : "text-primary"
+        )}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * What the wallet is created with: the provider once one is chosen, the account it goes into,
+ * a purpose that is not a choice, and where it lives.
+ */
 function CreatedWithSummary({
+  connection,
   environment,
   fixedPurposeLabel,
   providerLabel,
   t,
 }: {
+  connection: { value: string; muted: boolean; hint: string } | null;
   environment: SdpEnvironment;
   fixedPurposeLabel: string | null;
   providerLabel: string | null;
@@ -576,8 +729,6 @@ function CreatedWithSummary({
   const environmentLabel = `${t(ENVIRONMENT_LABEL_KEYS[environment])} · ${
     cluster === "mainnet-beta" ? "mainnet" : cluster
   }`;
-  const rowClassName =
-    "flex h-12 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0";
 
   return (
     <section aria-labelledby="wallet-created-with">
@@ -585,32 +736,30 @@ function CreatedWithSummary({
         {t("DashboardCustody.walletSetupCreatedWith")}
       </h3>
       <dl className="mt-2">
-        <div className={rowClassName}>
-          <dt className="text-body text-secondary">{t("DashboardCustody.walletSetupProvider")}</dt>
-          <dd className={cn("text-body", providerLabel ? "text-primary" : "text-tertiary")}>
-            {providerLabel ?? t("DashboardCustody.walletSetupProviderNotChosen")}
-          </dd>
-        </div>
-        {fixedPurposeLabel ? (
-          <div className={rowClassName}>
-            <dt className="text-body text-secondary">{t("DashboardCustody.purpose")}</dt>
-            <dd className="text-body text-primary">{fixedPurposeLabel}</dd>
-          </div>
+        {providerLabel ? (
+          <CreatedWithRow label={t("DashboardCustody.walletSetupProvider")} value={providerLabel} />
         ) : null}
-        <div className={rowClassName}>
-          <dt className="flex items-center gap-1.5 text-body text-secondary">
-            {t("DashboardCustody.project")}
-            <InfoHint text={t("DashboardCustody.walletSetupProjectHint")} />
-          </dt>
-          <dd className="min-w-0 truncate text-body text-primary">{projectName}</dd>
-        </div>
-        <div className={rowClassName}>
-          <dt className="flex items-center gap-1.5 text-body text-secondary">
-            {t("DashboardCustody.environment")}
-            <InfoHint text={t("DashboardCustody.walletSetupEnvironmentHint")} />
-          </dt>
-          <dd className="text-body text-primary">{environmentLabel}</dd>
-        </div>
+        {connection ? (
+          <CreatedWithRow
+            label={t("DashboardCustody.walletSetupConnection")}
+            hint={connection.hint}
+            muted={connection.muted}
+            value={connection.value}
+          />
+        ) : null}
+        {fixedPurposeLabel ? (
+          <CreatedWithRow label={t("DashboardCustody.purpose")} value={fixedPurposeLabel} />
+        ) : null}
+        <CreatedWithRow
+          label={t("DashboardCustody.project")}
+          hint={t("DashboardCustody.walletSetupProjectHint")}
+          value={projectName}
+        />
+        <CreatedWithRow
+          label={t("DashboardCustody.environment")}
+          hint={t("DashboardCustody.walletSetupEnvironmentHint")}
+          value={environmentLabel}
+        />
       </dl>
     </section>
   );
@@ -656,6 +805,92 @@ function SetupFooter({
 }
 
 /**
+ * Asks before Cancel throws away what was typed. Until a request goes out no wallet exists; once
+ * one has, the wallet may, so the question sends the user to check Wallets instead.
+ */
+function LeaveSetupDialog({
+  onKeepGoing,
+  onLeave,
+  open,
+  prompt,
+  t,
+}: {
+  onKeepGoing: () => void;
+  onLeave: () => void;
+  open: boolean;
+  prompt: LeavePrompt;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const copy = LEAVE_PROMPT_COPY[prompt];
+  return (
+    <Modal isOpen={open} onClose={onKeepGoing} ariaLabel={t(copy.titleKey)} size="sm">
+      <div className="space-y-6 p-6">
+        <div className="space-y-2">
+          <p className="text-subheading font-medium text-primary">{t(copy.titleKey)}</p>
+          <p className="text-body text-secondary">{t(copy.descriptionKey)}</p>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <Button type="button" variant="secondary" onClick={onKeepGoing}>
+            {t("DashboardCustody.walletSetupLeaveKeepGoing")}
+          </Button>
+          <Button type="button" variant="destructive" onClick={onLeave}>
+            {t("DashboardCustody.walletSetupLeaveConfirm")}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Cancel's guard: it leaves at once when nothing was put on the screen, and asks first when
+ * something was. What the user typed into the credential form and whether a request went out
+ * are only read when Cancel is pressed, so they live in refs. Their setters keep one identity
+ * for the flow's life: they reach the credential form, whose effects depend on what it is given.
+ *
+ * @param onLeave - Leaves the flow for the wallet list.
+ * @returns The dialog's state and the handlers that feed it.
+ */
+function useLeaveGuard(onLeave: () => void) {
+  const [dialog, setDialog] = useState<{ open: boolean; prompt: LeavePrompt }>({
+    open: false,
+    prompt: "unsent",
+  });
+  const credentialsTouchedRef = useRef(false);
+  const requestSentRef = useRef(false);
+  const markCredentialsTouched = useCallback(() => {
+    credentialsTouchedRef.current = true;
+  }, []);
+  const clearCredentialsTouched = useCallback(() => {
+    credentialsTouchedRef.current = false;
+  }, []);
+  const markRequestSent = useCallback(() => {
+    requestSentRef.current = true;
+  }, []);
+  return {
+    dialog,
+    markCredentialsTouched,
+    clearCredentialsTouched,
+    markRequestSent,
+    /** Cancel: `hasInput` is what the flow's own state shows was put on the screen. */
+    requestLeave: (hasInput: boolean) => {
+      if (requestSentRef.current) {
+        setDialog({ open: true, prompt: "sent" });
+      } else if (hasInput || credentialsTouchedRef.current) {
+        setDialog({ open: true, prompt: "unsent" });
+      } else {
+        onLeave();
+      }
+    },
+    keepGoing: () => setDialog((current) => ({ ...current, open: false })),
+    confirmLeave: () => {
+      setDialog((current) => ({ ...current, open: false }));
+      onLeave();
+    },
+  };
+}
+
+/**
  * The provider the flow opens on: the requested one when the project can use it, else the
  * only one there is. With several and no request, the user picks.
  */
@@ -672,60 +907,97 @@ function resolveInitialProvider(input: {
   return onlyProvider !== undefined && others.length === 0 ? onlyProvider.entry.id : null;
 }
 
-interface SetupOptions {
-  /** The BYOK provider whose credential form the flow shows, or `null` when it shows none. */
-  byokSetupProvider: ByokCustodyProvider | null;
-  connectionOptions: CustodyConnectionListItem[];
+interface AccountOptions {
+  /**
+   * The provider whose account the screen asks about: one the project can connect its own
+   * account for. `null` asks nothing, and the wallet goes into SDP's account.
+   */
+  accountProvider: ByokCustodyProvider | null;
+  /** The provider's connections the list names: every one but a deactivated one. */
+  connections: CustodyConnectionListItem[];
   hasManagedConfig: boolean;
-  isConnected: boolean;
-  setupMode: CustodyMode | null;
-  /** The modes the user picks between, or `null` when the flow picks the mode itself. */
-  modeChoices: AvailableCustodyModes | null;
+  offersManaged: boolean;
+  /** The question lists its answers: more than one can be picked, or a connection needs care. */
+  listsAccounts: boolean;
+  /** The answer in effect: the user's while it is still offered, else the only one there is. */
+  account: AccountChoice | null;
+}
+
+const NO_ACCOUNT_OPTIONS: AccountOptions = {
+  accountProvider: null,
+  connections: [],
+  hasManagedConfig: false,
+  offersManaged: false,
+  listsAccounts: false,
+  account: null,
+};
+
+/**
+ * The answer in effect among what can be picked: the user's, while the provider still offers it,
+ * or the only answer there is. The offered row is returned rather than the stored answer, so a
+ * connection carries the list's current data.
+ */
+function effectiveAccount(
+  chosen: AccountChoice | null,
+  selectable: AccountChoice[]
+): AccountChoice | null {
+  const offered =
+    chosen === null ? undefined : selectable.find((option) => isSameAccount(option, chosen));
+  if (offered !== undefined) {
+    return offered;
+  }
+  const [onlyAccount, ...otherAccounts] = selectable;
+  return onlyAccount !== undefined && otherAccounts.length === 0 ? onlyAccount : null;
 }
 
 /**
- * What the flow offers for the selected provider, from its modes, its Managed config and the
- * project's connections. Managed is offered only where the modes include `managed`; connections
- * are BYOK custody, so a provider whose modes leave out `byok` offers none.
+ * Which accounts the selected provider's wallet can go into, from its modes, its Managed config
+ * and the project's connections. Managed is offered only where the modes include `managed`;
+ * connections are BYOK custody, so a provider whose modes leave out `byok` offers none and asks
+ * nothing: its wallet goes into SDP's account.
  *
  * Switching provider must not carry the previous provider's connections along, so the list is
- * narrowed here rather than trusted as delivered. The availability status comes from Managed
- * configs; a BYOK-only project has none, so an active connection also shows the provider is
- * installed. Without either, the flow sets the provider up first.
+ * narrowed here rather than trusted as delivered, and an answer counts only while this provider
+ * still offers it.
  */
-function resolveSetupOptions(input: {
+function resolveAccountOptions(input: {
   selectedAvailability: CustodyProviderAvailability | null;
   connections: CustodyConnectionListItem[];
-  chosenMode: CustodyMode | null;
-}): SetupOptions {
-  const { selectedAvailability, connections, chosenMode } = input;
+  chosenAccount: AccountChoice | null;
+}): AccountOptions {
+  const { selectedAvailability, chosenAccount } = input;
   if (selectedAvailability === null) {
-    return {
-      byokSetupProvider: null,
-      connectionOptions: [],
-      hasManagedConfig: false,
-      isConnected: false,
-      setupMode: null,
-      modeChoices: null,
-    };
+    return NO_ACCOUNT_OPTIONS;
   }
-  const offersManaged = selectedAvailability.modes.includes("managed");
-  const offersByok = selectedAvailability.modes.includes("byok");
-  const connectionOptions = offersByok
-    ? connections.filter((connection) => connection.provider === selectedAvailability.entry.id)
-    : [];
-  const hasManagedConfig = offersManaged && selectedAvailability.status === "active";
-  const isConnected = hasManagedConfig || connectionOptions.some(isSelectableConnection);
-  const setupMode = resolveSetupMode({ modes: selectedAvailability.modes, chosenMode });
   const providerId = selectedAvailability.entry.id;
+  const offersManaged = selectedAvailability.modes.includes("managed");
+  const accountProvider =
+    selectedAvailability.modes.includes("byok") && isByokCustodyProvider(providerId)
+      ? providerId
+      : null;
+  const connections =
+    accountProvider === null
+      ? []
+      : input.connections.filter(
+          (connection) =>
+            connection.provider === accountProvider && connection.status !== "deactivated"
+        );
+  const selectable: AccountChoice[] = [
+    ...(offersManaged ? [{ kind: "managed" } as const] : []),
+    ...connections
+      .filter(isSelectableConnection)
+      .map((connection) => ({ kind: "connection", connection }) as const),
+    ...(accountProvider === null ? [] : [{ kind: "own" } as const]),
+  ];
   return {
-    byokSetupProvider:
-      !isConnected && setupMode === "byok" && isByokCustodyProvider(providerId) ? providerId : null,
-    connectionOptions,
-    hasManagedConfig,
-    isConnected,
-    setupMode,
-    modeChoices: !isConnected && offersManaged && offersByok ? selectedAvailability.modes : null,
+    accountProvider,
+    connections,
+    hasManagedConfig: offersManaged && selectedAvailability.status === "active",
+    offersManaged,
+    listsAccounts:
+      selectable.length > 1 ||
+      connections.some((connection) => !isSelectableConnection(connection)),
+    account: effectiveAccount(chosenAccount, selectable),
   };
 }
 
@@ -734,26 +1006,35 @@ function resolveSetupOptions(input: {
  * what confirming does once nothing is.
  */
 function setupHint(input: {
-  awaitingModeChoice: boolean;
-  canProvisionWallet: boolean;
-  isByokDetails: boolean;
-  labelMissing: boolean;
+  model: WalletSetupModel;
   providerLabel: string | null;
   t: ReturnType<typeof useTranslations>;
 }): string {
-  const { awaitingModeChoice, canProvisionWallet, isByokDetails, labelMissing, providerLabel, t } =
-    input;
+  const { model, providerLabel, t } = input;
   if (providerLabel === null) {
     return t("DashboardCustody.chooseEnabledProvider");
   }
-  if (awaitingModeChoice) {
+  if (model.awaitingAccountChoice) {
     return t("DashboardCustody.walletSetupModeRequired", { provider: providerLabel });
   }
-  if (!(isByokDetails || canProvisionWallet)) {
+  if (!(model.isByokDetails || model.canProvisionWallet)) {
     return t("DashboardCustody.connectedProviderDescription", { provider: providerLabel });
   }
-  if (labelMissing) {
+  if (model.labelMissing) {
     return t("DashboardCustody.walletSetupLabelRequired");
+  }
+  if (model.isByokDetails) {
+    return t("DashboardCustody.walletSetupByokHint", { provider: providerLabel });
+  }
+  // Only where the screen asked whose account, and only for an account at SDP known to take no
+  // wallet policy.
+  const { accountProvider, account } = model.options;
+  if (
+    accountProvider !== null &&
+    account?.kind === "managed" &&
+    MANAGED_ACCOUNT_COPY[accountProvider].policyFree
+  ) {
+    return t("DashboardCustody.walletSetupManagedHint", { provider: providerLabel });
   }
   return t("DashboardCustody.walletSetupConfirmHint", { provider: providerLabel });
 }
@@ -799,22 +1080,22 @@ function useEnterSubmitsForm() {
 }
 
 /**
- * Submits the details form: checks it, names where the wallet lives, runs the create or initialize
- * action, and on success marks the quick-start step and hands the new wallet to `onCreated`.
- * A refusal lands in `setErrorMessage`.
+ * Submits the details form: checks it, runs the create or initialize action, and on success
+ * marks the quick-start step and hands the new wallet to `onCreated`. `onSend` hears the moment
+ * a request goes out; a refusal lands in `setErrorMessage`.
  */
 function useCreateWallet({
   canSubmit,
   formAction,
   onCreated,
+  onSend,
   setErrorMessage,
-  showConnectionPicker,
 }: {
   canSubmit: boolean;
   formAction: typeof createCustodySetupWalletAction | typeof initializeCustodySetupAction;
   onCreated: (walletId: string) => void;
+  onSend: () => void;
   setErrorMessage: (message: string | null) => void;
-  showConnectionPicker: boolean;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -830,11 +1111,6 @@ function useCreateWallet({
     }
 
     const formData = new FormData(form);
-    if (showConnectionPicker && !applyWalletTarget(formData)) {
-      setErrorMessage(t("DashboardCustody.walletSetupConnectionRequired"));
-      return;
-    }
-
     submissionInFlightRef.current = true;
     setErrorMessage(null);
     // One key per submitted setup: the same details keep it across retries.
@@ -847,6 +1123,7 @@ function useCreateWallet({
     ]);
     const key = setupKey.keyFor(input);
     formData.set("idempotencyKey", key);
+    onSend();
 
     startTransition(async () => {
       try {
@@ -899,18 +1176,25 @@ function useCreateWallet({
   return { createWallet, isPending };
 }
 
-interface WalletSetupModel extends SetupOptions {
-  awaitingModeChoice: boolean;
+interface WalletSetupModel {
+  options: AccountOptions;
+  awaitingAccountChoice: boolean;
+  /** The BYOK provider whose credential form the flow shows, or `null` when it shows none. */
+  byokSetupProvider: ByokCustodyProvider | null;
   canProvisionWallet: boolean;
-  /** Another wallet picks its purpose; a first wallet's is fixed. */
-  choosePurpose: boolean;
-  /** The purpose the summary names because it is not a choice; `null` while it is. */
+  /**
+   * The wallet goes into an account the project already has, a connection or the Managed
+   * config: the create action runs and the purpose is a choice. A first wallet's is fixed.
+   */
+  createsInExistingAccount: boolean;
+  /** The provider the details form submits for; `null` while BYOK or the account is open. */
+  detailsProvider: CustodyProviderCatalogEntry | null;
+  /** The purpose the summary names because it is not a choice; `null` while it is or is unknown. */
   fixedPurpose: WalletPurposeOption | null;
   isByokDetails: boolean;
   labelMissing: boolean;
   providerEntry: CustodyProviderCatalogEntry | null;
   purposes: readonly WalletPurposeOption[];
-  showConnectionPicker: boolean;
   showLabelField: boolean;
 }
 
@@ -920,7 +1204,7 @@ interface WalletSetupModel extends SetupOptions {
  */
 function resolveWalletSetupModel(input: {
   availability: CustodyProviderAvailability[];
-  chosenMode: CustodyMode | null;
+  chosenAccount: AccountChoice | null;
   connections: CustodyConnectionListItem[];
   flags: WalletPurposeFlags;
   selectedProvider: KnownCustodyProvider | null;
@@ -928,34 +1212,39 @@ function resolveWalletSetupModel(input: {
 }): WalletSetupModel {
   const selectedAvailability =
     input.availability.find((provider) => provider.entry.id === input.selectedProvider) ?? null;
-  const options = resolveSetupOptions({
+  const options = resolveAccountOptions({
     selectedAvailability,
     connections: input.connections,
-    chosenMode: input.chosenMode,
+    chosenAccount: input.chosenAccount,
   });
   const providerEntry = selectedAvailability === null ? null : selectedAvailability.entry;
-  const purposes = WALLET_PURPOSES.filter((purpose) =>
-    isWalletPurposeOffered(purpose.value, input.flags)
-  );
+  const { account } = options;
+  const createsInExistingAccount =
+    account !== null &&
+    (account.kind === "connection" || (account.kind === "managed" && options.hasManagedConfig));
+  const setsUpManaged = account?.kind === "managed" && !options.hasManagedConfig;
+  const byokSetupProvider = account?.kind === "own" ? options.accountProvider : null;
   // Fireblocks names no wallet at setup: its vault accounts arrive with their own names.
-  const showLabelField = options.byokSetupProvider !== "fireblocks";
+  const showLabelField = byokSetupProvider !== "fireblocks";
+  const awaitingAccountChoice = providerEntry !== null && account === null;
   const canProvisionWallet =
     providerEntry !== null &&
-    (options.isConnected
-      ? providerEntry.supportsAdditionalWallets
-      : options.setupMode === "managed");
+    (createsInExistingAccount ? providerEntry.supportsAdditionalWallets : setsUpManaged);
   return {
-    ...options,
-    awaitingModeChoice: options.modeChoices !== null && options.setupMode === null,
+    options,
+    awaitingAccountChoice,
+    byokSetupProvider,
     canProvisionWallet,
-    choosePurpose: options.isConnected,
-    fixedPurpose: providerEntry === null || options.isConnected ? null : FIRST_WALLET_PURPOSE,
-    isByokDetails: options.byokSetupProvider !== null,
+    createsInExistingAccount,
+    // The details form waits for a provider and its account; BYOK has its own form.
+    detailsProvider: byokSetupProvider === null && !awaitingAccountChoice ? providerEntry : null,
+    fixedPurpose: setsUpManaged || byokSetupProvider !== null ? TRANSFER_PURPOSE : null,
+    isByokDetails: byokSetupProvider !== null,
     labelMissing: showLabelField && input.walletLabel.trim().length === 0,
     providerEntry,
-    purposes,
-    showConnectionPicker:
-      options.isConnected && options.connectionOptions.some(isSelectableConnection),
+    purposes: WALLET_PURPOSES.filter((purpose) =>
+      isWalletPurposeOffered(purpose.value, input.flags)
+    ),
     showLabelField,
   };
 }
@@ -986,7 +1275,7 @@ function SetupPrimary({
         loading={byokPending}
         aria-describedby={FOOTER_HINT_ID}
       >
-        {t("DashboardCustody.byokConnect")}
+        {t("DashboardCustody.walletSetupConnectAndCreate")}
       </Button>
     );
   }
@@ -1004,25 +1293,212 @@ function SetupPrimary({
   );
 }
 
+/**
+ * The footer for the answers on screen: the hint and the primary they call for, or neither
+ * while a recovery panel, which carries its own way forward, replaces the credential form.
+ */
+function WalletSetupFooter({
+  byok,
+  cancelDisabled,
+  hasProviders,
+  isPending,
+  model,
+  onCancel,
+  showCancel,
+  t,
+}: {
+  byok: { fireblocksReady: boolean; inRecovery: boolean; pending: boolean };
+  cancelDisabled: boolean;
+  hasProviders: boolean;
+  isPending: boolean;
+  model: WalletSetupModel;
+  onCancel: () => void;
+  showCancel: boolean;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const showPrimary = hasProviders && !(model.isByokDetails && byok.inRecovery);
+  const providerLabel = model.providerEntry === null ? null : model.providerEntry.label;
+  return (
+    <SetupFooter
+      cancelDisabled={cancelDisabled}
+      hint={showPrimary ? setupHint({ model, providerLabel, t }) : null}
+      onCancel={onCancel}
+      primary={
+        showPrimary ? (
+          <SetupPrimary
+            byokPending={byok.pending}
+            canConnect={
+              (model.byokSetupProvider !== "fireblocks" || byok.fireblocksReady) &&
+              !model.labelMissing
+            }
+            canCreate={model.canProvisionWallet && !model.labelMissing}
+            isByokDetails={model.isByokDetails}
+            isPending={isPending}
+            t={t}
+          />
+        ) : null
+      }
+      showCancel={showCancel}
+      t={t}
+    />
+  );
+}
+
 type CredentialFormHandlers = Pick<
   ComponentProps<typeof ByokCredentialForm>,
   "onPendingChange" | "onReadyChange" | "onRecoveryChange" | "onRecoveryLockChange"
 >;
 
+/** What the summary's Connection line says for the answer in effect, or `null` before one. */
+function resolveConnectionSummary(input: {
+  model: WalletSetupModel;
+  t: ReturnType<typeof useTranslations>;
+}): { value: string; muted: boolean; hint: string } | null {
+  const { model, t } = input;
+  const { account, accountProvider } = model.options;
+  if (accountProvider === null || account === null) {
+    return null;
+  }
+  const provider = getCustodyProviderEntry(accountProvider).label;
+  const hint = t("DashboardCustody.walletSetupConnectionHint", { provider });
+  switch (account.kind) {
+    case "managed":
+      return {
+        value: t("DashboardCustody.walletSetupModeManagedTitle", { provider }),
+        muted: false,
+        hint,
+      };
+    case "own":
+      return {
+        value: t("DashboardCustody.walletSetupConnectionYourOwn", { provider }),
+        muted: true,
+        hint,
+      };
+    case "connection":
+      return { value: account.connection.label, muted: false, hint };
+    default: {
+      const unhandledAccount: never = account;
+      throw new Error(`Unhandled wallet account: ${JSON.stringify(unhandledAccount)}`);
+    }
+  }
+}
+
+/** The credential form a new account of the project's own needs, right under the question. */
+function CredentialSection({
+  answerKey,
+  credentialFormHandlers,
+  onConnected,
+  onCredentialsTouched,
+  provider,
+}: {
+  answerKey: string;
+  credentialFormHandlers: CredentialFormHandlers;
+  onConnected: (provider: ByokCustodyProvider) => void;
+  onCredentialsTouched: () => void;
+  provider: ByokCustodyProvider;
+}) {
+  // What the answers reveal fades in, rather than appearing at full strength.
+  const revealRef = useStepFade<HTMLDivElement>(answerKey);
+  return (
+    // Typing here is input Cancel would throw away, so the flow hears of it.
+    <div ref={revealRef} onInput={onCredentialsTouched}>
+      <ByokCredentialForm
+        // A failed check's connection belongs to its provider: another starts fresh.
+        key={provider}
+        {...credentialFormHandlers}
+        provider={provider}
+        formId={DETAILS_FORM_ID}
+        hostsWalletLabel
+        showSubmitButton={false}
+        onSuccess={() => onConnected(provider)}
+      />
+    </div>
+  );
+}
+
 /**
- * The screen under the title: the provider and custody questions when they are open, the label,
- * the form the answers call for, what the wallet is created with, and a refusal.
+ * The wallet's own details: its label from the start, then the details form once the answers
+ * call for one (with the purpose when there is one to choose).
+ */
+function WalletDetailsSection({
+  answerKey,
+  disabled,
+  flags,
+  model,
+  onDetailsSubmit,
+  onWalletLabelChange,
+  t,
+  walletLabel,
+}: {
+  answerKey: string;
+  disabled: boolean;
+  flags: WalletPurposeFlags;
+  model: WalletSetupModel;
+  onDetailsSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onWalletLabelChange: (value: string) => void;
+  t: ReturnType<typeof useTranslations>;
+  walletLabel: string;
+}) {
+  const revealRef = useStepFade<HTMLDivElement>(answerKey);
+  const { account } = model.options;
+  const { detailsProvider } = model;
+  return (
+    <section aria-labelledby="wallet-details-title" className="space-y-6">
+      <h3 id="wallet-details-title" className={SECTION_TITLE_CLASS}>
+        {t("DashboardCustody.walletSetupDetailsTitle")}
+      </h3>
+      <WalletLabelField
+        disabled={disabled}
+        name={model.createsInExistingAccount ? "label" : "walletLabel"}
+        onChange={onWalletLabelChange}
+        placeholder={t(
+          model.providerEntry?.id === "privy"
+            ? "DashboardCustody.walletSetupLabelPlaceholderTreasury"
+            : "DashboardCustody.newDesign.walletLabelPlaceholder"
+        )}
+        t={t}
+        value={walletLabel}
+      />
+      {/* One form owns DETAILS_FORM_ID at a time: the credential form or the details. */}
+      {detailsProvider === null ? null : (
+        <div ref={revealRef}>
+          <WalletDetailsForm
+            // A chosen account belongs to its provider: another starts with none chosen.
+            key={detailsProvider.id}
+            choosePurpose={model.createsInExistingAccount}
+            connectionId={account?.kind === "connection" ? account.connection.id : null}
+            onSubmit={onDetailsSubmit}
+            providerId={detailsProvider.id}
+            purposeHint={t(
+              flags.issuance
+                ? "DashboardCustody.walletPurposeHintWithIssuance"
+                : "DashboardCustody.walletPurposeHint"
+            )}
+            purposes={model.purposes}
+            t={t}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The screen under the title: the provider question and whose account when they are open, the
+ * credential form a new account of the project's own needs, the wallet's details, what it is
+ * created with, and a refusal.
  */
 function WalletSetupBody({
   answersLocked,
-  chosenMode,
   credentialFormHandlers,
   environment,
   errorMessage,
+  flags,
   model,
+  onAccountChange,
   onConnected,
+  onCredentialsTouched,
   onDetailsSubmit,
-  onModeChange,
   onProviderChange,
   onWalletLabelChange,
   providerChoices,
@@ -1031,15 +1507,16 @@ function WalletSetupBody({
   walletLabel,
 }: {
   answersLocked: boolean;
-  chosenMode: CustodyMode | null;
   credentialFormHandlers: CredentialFormHandlers;
   environment: SdpEnvironment;
   errorMessage: string | null;
+  flags: WalletPurposeFlags;
   model: WalletSetupModel;
+  onAccountChange: (account: AccountChoice) => void;
   /** A BYOK setup settled: the credentials check passed and the provider is connected. */
   onConnected: (provider: ByokCustodyProvider) => void;
+  onCredentialsTouched: () => void;
   onDetailsSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onModeChange: (mode: CustodyMode) => void;
   onProviderChange: (provider: KnownCustodyProvider) => void;
   onWalletLabelChange: (value: string) => void;
   providerChoices: CustodyProviderAvailability[];
@@ -1047,18 +1524,10 @@ function WalletSetupBody({
   t: ReturnType<typeof useTranslations>;
   walletLabel: string;
 }) {
-  const providerLabel = model.providerEntry === null ? null : model.providerEntry.label;
-  // What the answers reveal below them fades in, rather than appearing at full strength.
-  const revealRef = useStepFade<HTMLDivElement>(
-    `${selectedProvider ?? ""}:${model.setupMode ?? ""}`
-  );
-  const byokProvider = model.byokSetupProvider;
-  // The details form waits for a provider and its custody answer; BYOK has its own form.
-  const detailsProvider =
-    byokProvider === null && !model.awaitingModeChoice ? model.providerEntry : null;
-
+  const { account, accountProvider } = model.options;
+  const answerKey = `${selectedProvider ?? ""}:${account === null ? "" : accountValue(account)}`;
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       {providerChoices.length > 1 ? (
         <ProviderChoice
           choices={providerChoices}
@@ -1068,60 +1537,43 @@ function WalletSetupBody({
           t={t}
         />
       ) : null}
-      {model.modeChoices !== null && providerLabel !== null ? (
-        <CustodyModeChoice
+      {accountProvider === null ? null : (
+        <AccountQuestion
+          account={account}
           disabled={answersLocked}
-          mode={chosenMode}
-          modes={model.modeChoices}
-          onModeChange={onModeChange}
-          providerLabel={providerLabel}
+          environment={environment}
+          onSelect={onAccountChange}
+          options={model.options}
+          provider={accountProvider}
           t={t}
         />
+      )}
+      {model.byokSetupProvider === null ? null : (
+        <CredentialSection
+          answerKey={answerKey}
+          credentialFormHandlers={credentialFormHandlers}
+          onConnected={onConnected}
+          onCredentialsTouched={onCredentialsTouched}
+          provider={model.byokSetupProvider}
+        />
+      )}
+      {model.showLabelField ? (
+        <WalletDetailsSection
+          answerKey={answerKey}
+          disabled={answersLocked}
+          flags={flags}
+          model={model}
+          onDetailsSubmit={onDetailsSubmit}
+          onWalletLabelChange={onWalletLabelChange}
+          t={t}
+          walletLabel={walletLabel}
+        />
       ) : null}
-      <div className="space-y-6">
-        {model.showLabelField ? (
-          <WalletLabelField
-            disabled={answersLocked}
-            name={model.isConnected ? "label" : "walletLabel"}
-            onChange={onWalletLabelChange}
-            t={t}
-            value={walletLabel}
-          />
-        ) : null}
-        {/* One form owns DETAILS_FORM_ID at a time: the credential form or the details. */}
-        <div ref={revealRef}>
-          {byokProvider !== null ? (
-            <ByokCredentialForm
-              // A failed check's connection belongs to its provider: another starts fresh.
-              key={byokProvider}
-              {...credentialFormHandlers}
-              provider={byokProvider}
-              formId={DETAILS_FORM_ID}
-              hostsWalletLabel
-              showSubmitButton={false}
-              onSuccess={() => onConnected(byokProvider)}
-            />
-          ) : null}
-          {detailsProvider !== null ? (
-            <WalletDetailsForm
-              // A chosen account belongs to its provider: another starts with none chosen.
-              key={detailsProvider.id}
-              connectionOptions={model.connectionOptions}
-              hasManagedConfig={model.hasManagedConfig}
-              onSubmit={onDetailsSubmit}
-              providerId={detailsProvider.id}
-              choosePurpose={model.choosePurpose}
-              purposes={model.purposes}
-              showConnectionPicker={model.showConnectionPicker}
-              t={t}
-            />
-          ) : null}
-        </div>
-      </div>
       <CreatedWithSummary
+        connection={resolveConnectionSummary({ model, t })}
         environment={environment}
         fixedPurposeLabel={model.fixedPurpose ? t(model.fixedPurpose.labelKey) : null}
-        providerLabel={providerLabel}
+        providerLabel={model.providerEntry === null ? null : model.providerEntry.label}
         t={t}
       />
       {errorMessage ? (
@@ -1131,6 +1583,21 @@ function WalletSetupBody({
       ) : null}
     </div>
   );
+}
+
+/** The toast a finished BYOK setup shows: the new wallet by its label, else the provider. */
+function connectedToastMessage(input: {
+  provider: ByokCustodyProvider;
+  showLabelField: boolean;
+  t: ReturnType<typeof useTranslations>;
+  walletLabel: string;
+}): string {
+  const label = input.walletLabel.trim();
+  return input.showLabelField && label
+    ? input.t("DashboardCustody.walletCreatedToast", { label })
+    : input.t("DashboardCustody.walletSetupConnectedToast", {
+        provider: getCustodyProviderEntry(input.provider).label,
+      });
 }
 
 export function WalletSetupFlow({
@@ -1149,19 +1616,17 @@ export function WalletSetupFlow({
     [connectedProviders, custodyAvailability]
   );
   // The list holds only the providers the project can use (an unavailable one is hidden, not
-  // shown disabled). Connected providers lead; the catalog's order holds within each group.
+  // shown disabled), by name.
   const providerChoices = useMemo(
-    () =>
-      [...availability].sort(
-        (a, b) => Number(b.status === "active") - Number(a.status === "active")
-      ),
+    () => [...availability].sort((a, b) => a.entry.label.localeCompare(b.entry.label)),
     [availability]
   );
-  const [selectedProvider, setSelectedProvider] = useState<KnownCustodyProvider | null>(() =>
+  const [openingProvider] = useState<KnownCustodyProvider | null>(() =>
     resolveInitialProvider({ availability, initialProvider })
   );
+  const [selectedProvider, setSelectedProvider] = useState(openingProvider);
   const [walletLabel, setWalletLabel] = useState("");
-  const [chosenMode, setChosenMode] = useState<CustodyMode | null>(null);
+  const [chosenAccount, setChosenAccount] = useState<AccountChoice | null>(null);
   // While a BYOK submission is in an unknown state, changing an answer would
   // unmount the frozen payload and key that are the only path to recovery.
   const [byokRecoveryLocked, setByokRecoveryLocked] = useState(false);
@@ -1170,40 +1635,41 @@ export function WalletSetupFlow({
   const [byokInRecovery, setByokInRecovery] = useState(false);
   const [fireblocksReady, setFireblocksReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const leaveGuard = useLeaveGuard(() => router.push(href("/dashboard/wallets")));
+  const { markRequestSent } = leaveGuard;
+  // The credential form raises its recovery lock the moment a credential submission leaves, so
+  // the lock's rise is the BYOK sign that a request went out. Its pending signal is not: the
+  // Fireblocks fields raise that for their CSR read too. Stable, like every handler the form
+  // gets, since its effects depend on them.
+  const handleRecoveryLockChange = useCallback(
+    (locked: boolean) => {
+      setByokRecoveryLocked(locked);
+      if (locked) {
+        markRequestSent();
+      }
+    },
+    [markRequestSent]
+  );
   const model = resolveWalletSetupModel({
     availability,
-    chosenMode,
+    chosenAccount,
     connections,
     flags,
     selectedProvider,
     walletLabel,
   });
-  const providerLabel = model.providerEntry === null ? null : model.providerEntry.label;
-
-  const handleCreated = (walletId: string) => {
-    toast.success(t("DashboardCustody.walletCreatedToast", { label: walletLabel.trim() }));
-    router.push(href(`/dashboard/wallets/${encodeURIComponent(walletId)}`));
-  };
-
-  // The credential form settles without a wallet id, so a BYOK setup lands on the list.
-  const handleConnected = (provider: ByokCustodyProvider) => {
-    const label = walletLabel.trim();
-    toast.success(
-      model.showLabelField && label
-        ? t("DashboardCustody.walletCreatedToast", { label })
-        : t("DashboardCustody.walletSetupConnectedToast", {
-            provider: getCustodyProviderEntry(provider).label,
-          })
-    );
-    router.push(href("/dashboard/wallets"));
-  };
 
   const { createWallet, isPending } = useCreateWallet({
     canSubmit: model.canProvisionWallet,
-    formAction: model.isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction,
-    onCreated: handleCreated,
+    formAction: model.createsInExistingAccount
+      ? createCustodySetupWalletAction
+      : initializeCustodySetupAction,
+    onCreated: (walletId) => {
+      toast.success(t("DashboardCustody.walletCreatedToast", { label: walletLabel.trim() }));
+      router.push(href(`/dashboard/wallets/${encodeURIComponent(walletId)}`));
+    },
+    onSend: markRequestSent,
     setErrorMessage,
-    showConnectionPicker: model.showConnectionPicker,
   });
   // Every setup request, Managed or BYOK, holds the answers above: a BYOK request settling
   // after its form unmounted could lock recovery with no form left to recover from.
@@ -1216,12 +1682,13 @@ export function WalletSetupFlow({
   const resetAnswerState = () => {
     setByokInRecovery(false);
     setFireblocksReady(false);
+    leaveGuard.clearCredentialsTouched();
     setErrorMessage(null);
   };
-
+  // Only what the user put on the screen counts: the provider the flow opened on does not.
+  const hasInput =
+    walletLabel.trim() !== "" || chosenAccount !== null || selectedProvider !== openingProvider;
   const hasProviders = availability.length > 0;
-  // A recovery panel carries its own way forward.
-  const showPrimary = hasProviders && !(model.isByokDetails && byokInRecovery);
   const title = t("Shared.dashboardShell.createWallet");
 
   return (
@@ -1232,36 +1699,17 @@ export function WalletSetupFlow({
         hideProgress
         progressLabel={title}
         footer={
-          <SetupFooter
+          <WalletSetupFooter
+            byok={{
+              fireblocksReady,
+              inRecovery: byokInRecovery,
+              pending: byokRequestPending,
+            }}
             cancelDisabled={setupRequestInFlight}
-            hint={
-              showPrimary
-                ? setupHint({
-                    awaitingModeChoice: model.awaitingModeChoice,
-                    canProvisionWallet: model.canProvisionWallet,
-                    isByokDetails: model.isByokDetails,
-                    labelMissing: model.labelMissing,
-                    providerLabel,
-                    t,
-                  })
-                : null
-            }
-            onCancel={() => router.push(href("/dashboard/wallets"))}
-            primary={
-              showPrimary ? (
-                <SetupPrimary
-                  byokPending={byokRequestPending}
-                  canConnect={
-                    (model.byokSetupProvider !== "fireblocks" || fireblocksReady) &&
-                    !model.labelMissing
-                  }
-                  canCreate={model.canProvisionWallet && !model.labelMissing}
-                  isByokDetails={model.isByokDetails}
-                  isPending={isPending}
-                  t={t}
-                />
-              ) : null
-            }
+            hasProviders={hasProviders}
+            isPending={isPending}
+            model={model}
+            onCancel={() => leaveGuard.requestLeave(hasInput)}
             showCancel={!byokRecoveryLocked}
             t={t}
           />
@@ -1270,28 +1718,40 @@ export function WalletSetupFlow({
         {hasProviders ? (
           <WalletSetupBody
             answersLocked={setupRequestInFlight || byokRecoveryLocked}
-            chosenMode={chosenMode}
             credentialFormHandlers={{
               onPendingChange: setByokRequestPending,
               onReadyChange: setFireblocksReady,
               onRecoveryChange: setByokInRecovery,
-              onRecoveryLockChange: setByokRecoveryLocked,
+              onRecoveryLockChange: handleRecoveryLockChange,
             }}
             environment={environment}
             errorMessage={errorMessage}
+            flags={flags}
             model={model}
-            onConnected={handleConnected}
+            onAccountChange={(account) => {
+              setChosenAccount(account);
+              resetAnswerState();
+            }}
+            onConnected={(provider) => {
+              toast.success(
+                connectedToastMessage({
+                  provider,
+                  showLabelField: model.showLabelField,
+                  t,
+                  walletLabel,
+                })
+              );
+              // The credential form settles without a wallet id, so a BYOK setup lands on the list.
+              router.push(href("/dashboard/wallets"));
+            }}
+            onCredentialsTouched={leaveGuard.markCredentialsTouched}
             onDetailsSubmit={(event) => {
               event.preventDefault();
               createWallet(event.currentTarget);
             }}
-            onModeChange={(mode) => {
-              setChosenMode(mode);
-              resetAnswerState();
-            }}
             onProviderChange={(provider) => {
               setSelectedProvider(provider);
-              setChosenMode(null);
+              setChosenAccount(null);
               resetAnswerState();
             }}
             onWalletLabelChange={setWalletLabel}
@@ -1306,6 +1766,13 @@ export function WalletSetupFlow({
           </p>
         )}
       </WizardFrame>
+      <LeaveSetupDialog
+        open={leaveGuard.dialog.open}
+        prompt={leaveGuard.dialog.prompt}
+        onKeepGoing={leaveGuard.keepGoing}
+        onLeave={leaveGuard.confirmLeave}
+        t={t}
+      />
     </div>
   );
 }
