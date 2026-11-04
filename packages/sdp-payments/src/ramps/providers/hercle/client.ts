@@ -255,7 +255,6 @@ async function hercleRequest<TSchema extends z.ZodType>(
   return readHercleAnswer(await providerFetch("hercle", url, init), schema);
 }
 
-/** A decimal amount Hercle answers with. */
 const hercleAmountSchema = z.string().regex(/^\d+(\.\d+)?$/);
 
 const hercleEstimateSchema = z.object({
@@ -491,7 +490,8 @@ async function answerSuspendedHercleBusiness(
  * A refusal for want of verification does not name the verdict, so the verdict is read again.
  * That refusal also shows the account is not suspended, because Hercle reports a suspension first.
  *
- * @returns Why the link could not be corrected, for the refusal's diagnostics; the next refusal or requirements read corrects it.
+ * @returns Why the link could not be corrected, for the refusal's diagnostics.
+ * The next refusal or requirements read corrects it.
  */
 async function recordHercleOrderRefusal(
   ctx: RampRuntimeContext,

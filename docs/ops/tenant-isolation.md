@@ -68,13 +68,8 @@ SDP opens one Hercle account per counterparty, so a Hercle account id links exac
 A Hercle settlement matches the transfer's `provider_reference`, Hercle's order id, which SDP stored on the transfer at quote time.
 Hercle's verification webhook names the business by its Hercle account id, and SDP resolves the tenant from it: `findCustomerLinkByProviderReference` answers only when exactly one active link of an active counterparty holds the id, and the event is refused unless that link's project runs in the webhook endpoint's environment.
 
-The customer-link uniqueness applies only to the integrations whose
-customers SDP created one-per-counterparty. MoonPay settlements are matched by
-the transfer's `provider_reference` and record the customer link as a
-byproduct, and one MoonPay account legitimately links to many
-counterparties (the buyer owns the MoonPay account and can be a
-counterparty of several organizations), so MoonPay links are many-to-one
-by design and never constrained.
+The customer-link uniqueness applies only to the integrations whose customers SDP created one-per-counterparty.
+MoonPay settlements are matched by the transfer's `provider_reference` and record the customer link as a byproduct, and one MoonPay account legitimately links to many counterparties (the buyer owns the MoonPay account and can be a counterparty of several organizations), so MoonPay links are many-to-one by design and never constrained.
 
 ### If migration 0080 refuses to apply
 

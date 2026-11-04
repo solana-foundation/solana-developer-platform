@@ -327,7 +327,6 @@ export type ValidateCounterpartyOptions =
  * Nothing in it is PII.
  */
 export interface RampCustomerLink {
-  /** The provider's id for the customer. */
   providerCustomerReference: string;
   /** The provider's lifecycle status for the customer, verbatim; null until it reports one. */
   providerStatus: string | null;
@@ -342,7 +341,10 @@ export interface RampCustomerStatusObservation {
   providerStatus: string | null;
   /** When the provider reported it: the event's own time, or when SDP sent the read that returned it. */
   observedAt: string;
-  /** Whether it replaces a status observed at the same instant. A status that holds quotes back does, so a tie never lets a quote run. */
+  /**
+   * Whether it replaces a status observed at the same instant.
+   * A status that holds quotes back does, so a tie never lets a quote run.
+   */
   winsTie: boolean;
   /** Recorded statuses the report cannot see, which it leaves in place. */
   preserves: readonly string[];

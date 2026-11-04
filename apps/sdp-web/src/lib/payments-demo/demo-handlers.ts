@@ -392,7 +392,6 @@ interface QuoteContext {
   transferId: string;
 }
 
-/** What an on-ramp quote also needs: the fiat the customer sends. */
 interface OnrampQuoteContext extends QuoteContext {
   fiatCurrency: string;
   fiatAmount: string;

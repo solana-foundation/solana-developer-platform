@@ -53,12 +53,11 @@ async function verifyHmacSha256(
 /**
  * Verifies an ECDSA P-256/SHA-256 webhook signature against the provider's signed payload.
  *
- * @param publicKeyPem - The provider's webhook public key, SPKI PEM. Literal "\\n" sequences become
- * newlines first, since a PEM kept in one environment variable is often stored that way.
+ * @param publicKeyPem - The provider's webhook public key, SPKI PEM. Literal "\\n" sequences become newlines first.
+ * A PEM kept in one environment variable is often stored that way.
  * @param signedPayload - Exact string the provider signed.
  * @param signatureBytes - Decoded DER signature bytes from the provider header.
- * @returns Whether the signature matches the payload for the public key; false for a signature
- * that is not DER at all.
+ * @returns Whether the signature matches the payload for the public key; false for a signature that is not DER.
  */
 function verifyEcdsaP256Sha256(
   publicKeyPem: string,

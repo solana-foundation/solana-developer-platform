@@ -192,7 +192,8 @@ export function hercleCounterpartyRequirements(
 
 /**
  * The answer for a business whose financial operations Hercle has suspended.
- * Hercle refuses its orders until it lifts the suspension. A requirements read after that answers with Hercle's verdict again.
+ * Hercle refuses its orders until it lifts the suspension.
+ * A requirements read after that answers with Hercle's verdict again.
  */
 export function hercleSuspendedRequirements(direction: RampDirection): CounterpartyRequirements {
   return unsupportedCounterparty(

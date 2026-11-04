@@ -51,8 +51,8 @@ export type ManagedRampKeyName = {
 export type ManagedRampKeysEnv = Readonly<Partial<Pick<Env, ManagedRampKeyName>>>;
 
 /**
- * The env var SDP keeps `provider`'s `role` key for `mode` under:
- * `<PROVIDER>_<MODE>_<ROLE>`, with the public key and the webhook key under the provider's own terms.
+ * The env var SDP keeps `provider`'s `role` key for `mode` under: `<PROVIDER>_<MODE>_<ROLE>`.
+ * The public key and the webhook key take the provider's own terms.
  *
  * @param provider - The ramp provider.
  * @param mode - The mode the key serves.
@@ -65,8 +65,8 @@ export function managedRampKeyName(
   role: ManagedRampKeyRole
 ): ManagedRampKeyName {
   const term = managedRampKeyTerm(provider, role);
-  // SAFETY: provider and mode are the lowercase literals the template type upper-cases, and
-  // term is one of that provider's key terms, so the result is a ManagedRampKeyName.
+  // SAFETY: provider and mode are the lowercase literals the template type upper-cases.
+  // `term` is one of that provider's key terms, so the result is a ManagedRampKeyName.
   return `${provider.toUpperCase()}_${mode.toUpperCase()}_${term}` as ManagedRampKeyName;
 }
 

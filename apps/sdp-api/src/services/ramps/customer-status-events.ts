@@ -8,7 +8,8 @@ import type { Env } from "@/types/env";
 
 /**
  * Records a provider's verified event about one of its customers on the customer link that names it.
- * The event carries no tenant: the link it names decides the tenant, and the link's project must run in the endpoint's environment.
+ * The event carries no tenant, so the link it names decides the tenant.
+ * The link's project must run in the endpoint's environment.
  * The link keeps the newest report, so a duplicate or an older event changes nothing and is `ignored`.
  * An account SDP holds no active link for, such as an archived counterparty's, is `ignored` too, since nothing waits on it.
  *

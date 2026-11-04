@@ -422,7 +422,7 @@ describe("Hercle settlement webhooks", () => {
     const getTransaction = vi.fn<RampChainReader["getTransaction"]>();
     const getSignatureStatuses = vi.fn<RampChainReader["getSignatureStatuses"]>();
     const chain: RampChainReader = { getTransaction, getSignatureStatuses };
-    /** Five minutes after the transfer was created. */
+    /** Five minutes after the transfer was created, so the delivery never predates it. */
     const LANDED_AT = BigInt(Date.parse(TRANSFER_CREATED_AT) / 1000 + 300);
     const DELIVERED_BASE_UNITS = "99020000";
 

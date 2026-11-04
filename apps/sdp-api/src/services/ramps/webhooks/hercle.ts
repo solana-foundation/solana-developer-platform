@@ -39,9 +39,8 @@ const hercleVerificationEnvelopeSchema = z.object({
 });
 
 /**
- * The `data` of a settlement event.
+ * The `data` of a settlement event, read as the order `hercleOrderStatusSchema` describes.
  * The order id rides as `reference`, the id SDP bound the transfer to at quote time.
- * Its `receivedAmount` is the order's fiat, not the crypto delivered, so it is not read.
  */
 const hercleSettlementDataSchema = z.object({
   reference: z.string().trim().min(1),
@@ -57,7 +56,8 @@ const hercleSettlementEnvelopeSchema = z.object({ data: z.unknown().optional() }
  * Hercle signs webhooks with ECDSA P-256 over `${X-Timestamp}.${rawBody}`: a base64 DER signature in X-Signature.
  * SDP verifies it with Hercle's public key.
  * Settlement events move a transfer, matched by its order id.
- * Verification events record the business's verdict on the customer link that names its account, so a revoked business stops showing ready and stops quoting.
+ * Verification events record the business's verdict on the customer link that names its account.
+ * A revoked business then stops showing ready and stops quoting.
  */
 export const hercleWebhook = {
   provider: "hercle" as const,

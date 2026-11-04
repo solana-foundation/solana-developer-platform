@@ -18,7 +18,8 @@ export const HERCLE_APPROVED_VERIFICATION_STATUS = "approved" satisfies HercleVe
 
 /**
  * The status SDP records for a business whose financial operations Hercle has suspended.
- * Hercle refuses its orders with `ACCOUNT_SUSPENDED` whatever its verdict, and its account read reports `financialStatus: "Suspended"`.
+ * Hercle refuses its orders with `ACCOUNT_SUSPENDED` whatever its verdict.
+ * Its account read reports `financialStatus: "Suspended"`.
  * Hercle sends no event for it, so SDP learns it from a refused order and sees it lifted only by reading the account.
  */
 export const HERCLE_SUSPENDED_ACCOUNT_STATUS = "suspended";

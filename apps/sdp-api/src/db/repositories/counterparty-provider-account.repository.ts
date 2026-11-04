@@ -57,7 +57,6 @@ export interface GetCounterpartyProviderAccountInput {
 }
 
 export interface RecordCustomerLinkStatusInput extends GetCounterpartyProviderAccountInput {
-  /** The provider's report of the customer's status, with when it reported it. */
   observation: RampCustomerStatusObservation;
 }
 
