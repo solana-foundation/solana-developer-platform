@@ -245,7 +245,16 @@ keep Swagger UI for their own release channel.
   dashboard playground sections from it into
   `packages/sdp-api-catalog/src/generated/playground-catalog.json`. That smaller
   artifact is the dashboard proxy's allowlist, so the move adds no callable
-  routes. It also drives `Run in dashboard` on operation pages
+  routes. It includes `channelOverrides` for forms whose fields or examples
+  differ from experimental, derived from each channel's public document.
+  Generated forms use that projection; curated transfer status options follow
+  the offered ramp providers. Do not prune a status globally: payment requests
+  independently own names such as `awaiting_payment` and `canceled`.
+  Shared OpenAPI properties declare `MODULE_GATE` when a module owns the whole
+  field; `pruneUnpublishedValues` removes it and its required entry on excluded
+  channels. `TRANSFER_STATUS_GATE` scopes transfer status filtering to that
+  schema. Keep ownership on the source schema, not in the docs generator.
+  It also drives `Run in dashboard` on operation pages
   (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
   The link carries the generated endpoint ID through sign-in and project
   selection and opens a new tab; the dashboard resolves it to a curated form
