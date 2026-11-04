@@ -1,7 +1,20 @@
 import { generateKeyPairSync } from "node:crypto";
-import { createSignableMessage, generateKeyPairSigner } from "@solana/kit";
+import { SignerError, SignerErrorCode, type SolanaSigner } from "@solana/keychain-core";
+import {
+  address,
+  assertIsTransactionWithinSizeLimit,
+  blockhash,
+  compileTransaction,
+  createSignableMessage,
+  createTransactionMessage,
+  generateKeyPairSigner,
+  pipe,
+  setTransactionMessageFeePayer,
+  setTransactionMessageLifetimeUsingBlockhash,
+} from "@solana/kit";
 import type { MockInstance } from "vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SigningError } from "#/signing";
 import { KeychainFireblocksAdapter } from "./keychain-fireblocks.adapter";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -11,6 +24,9 @@ const CONFIG = {
   vaultAccountId: "default-vault",
 };
 const WALLET_ADDRESS = "11111111111111111111111111111111";
+const CONSOLE_METHODS = ["debug", "log", "info", "warn", "error"] as const;
+/** Fireblocks' documented answer for a transaction a policy rule blocked. */
+const POLICY_BLOCK = { status: "BLOCKED", subStatus: "BLOCKED_BY_POLICY" };
 
 /** Every argument every console sink received, as one searchable string. */
 function collectLogLines(...sinks: MockInstance[]): string {
@@ -18,6 +34,45 @@ function collectLogLines(...sinks: MockInstance[]): string {
     .flatMap((sink) => sink.mock.calls)
     .map((call) => call.map((argument) => JSON.stringify(argument)).join(" "))
     .join("\n");
+}
+
+function signTestTransaction(signer: SolanaSigner) {
+  const transaction = compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(address(WALLET_ADDRESS), message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          {
+            blockhash: blockhash("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"),
+            lastValidBlockHeight: 1000n,
+          },
+          message
+        )
+    )
+  );
+  assertIsTransactionWithinSizeLimit(transaction);
+  return signer.signTransactions([transaction]);
+}
+
+function signTestMessage(signer: SolanaSigner) {
+  return signer.signMessages([createSignableMessage("Fireblocks policy check")]);
+}
+
+/**
+ * Signs once against Fireblocks accepting the RAW proposal and answering its
+ * first status read with `poll`.
+ */
+async function signAgainstPoll(
+  poll: Record<string, unknown>,
+  sign: (signer: SolanaSigner) => Promise<unknown>
+) {
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ addresses: [{ address: WALLET_ADDRESS }] }))
+    .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
+    .mockResolvedValueOnce(Response.json({ id: "tx-1", ...poll }));
+  const adapter = new KeychainFireblocksAdapter(CONFIG);
+  return sign(await adapter.getTransactionSigner("fb_vault-1"));
 }
 
 afterEach(() => {
@@ -46,8 +101,9 @@ describe("fireblocks adapter", () => {
   });
 
   it("keeps real Fireblocks request and response bodies off every console sink", async () => {
-    const methods = ["debug", "log", "info", "warn", "error"] as const;
-    const sinks = methods.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    const sinks = CONSOLE_METHODS.map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {})
+    );
     const wallet = await generateKeyPairSigner();
     const message = createSignableMessage("secret-signing-payload");
     const [expectedSignatures] = await wallet.signMessages([message]);
@@ -83,5 +139,100 @@ describe("fireblocks adapter", () => {
     expect(logged).not.toContain("response-secret-value");
     expect(logged).not.toContain(signatureHex);
     expect(logged).not.toContain("fireblocks is unavailable");
+  });
+});
+
+describe("fireblocks adapter policy refusals (HOO-2478)", () => {
+  it.each([
+    ["signTransactions", signTestTransaction],
+    ["signMessages", signTestMessage],
+  ] as const)(
+    "refuses a Fireblocks policy block from %s as POLICY_REFUSED, keeping keychain's error as its cause",
+    async (_method, sign) => {
+      const signing = signAgainstPoll(POLICY_BLOCK, sign);
+
+      await expect(signing).rejects.toBeInstanceOf(SigningError);
+      await expect(signing).rejects.toMatchObject({
+        code: "POLICY_REFUSED",
+        cause: {
+          code: SignerErrorCode.SIGNING_FAILED,
+          context: { status: "BLOCKED", subStatus: "BLOCKED_BY_POLICY" },
+        },
+      });
+    }
+  );
+
+  it.each<[string, { status: string; subStatus?: string }]>([
+    ["BLOCKED without a sub-status", { status: "BLOCKED" }],
+    ["FAILED with a policy sub-status", { status: "FAILED", subStatus: "BLOCKED_BY_POLICY" }],
+    ["REJECTED", { status: "REJECTED", subStatus: "AUTO_FREEZE" }],
+    ["CANCELLED", { status: "CANCELLED", subStatus: "REJECTED_BY_USER" }],
+    ["FAILED", { status: "FAILED", subStatus: "INSUFFICIENT_FUNDS" }],
+  ])("keeps %s the provider's own failure", async (_case, poll) => {
+    const signing = signAgainstPoll(poll, signTestTransaction);
+
+    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toThrow(`Transaction failed with status: ${poll.status}`);
+    await expect(signing).rejects.toMatchObject({
+      code: SignerErrorCode.SIGNING_FAILED,
+      context: { status: poll.status, subStatus: poll.subStatus },
+    });
+  });
+
+  it.each([
+    ["lowercase", "blocked_by_policy"],
+    ["trailing newline", "BLOCKED_BY_POLICY\n"],
+    ["oversized", `BLOCKED_BY_POLICY${"_".repeat(100)}`],
+    ["free-text", "Blocked by rule 7: private provider text"],
+    ["nested", { code: "BLOCKED_BY_POLICY" }],
+  ])("neither infers a refusal from nor keeps a %s sub-status", async (_case, subStatus) => {
+    const signing = signAgainstPoll({ status: "BLOCKED", subStatus }, signTestTransaction);
+
+    await expect(signing).rejects.toBeInstanceOf(SignerError);
+    await expect(signing).rejects.toSatisfy(
+      (error: SignerError) => error.context?.subStatus === undefined
+    );
+  });
+
+  it("keeps polling a pending approval and returns the signature Fireblocks approves", async () => {
+    const wallet = await generateKeyPairSigner();
+    const message = createSignableMessage("approval-pending-payload");
+    const [expectedSignatures] = await wallet.signMessages([message]);
+    const signatureHex = Buffer.from(expectedSignatures[wallet.address]).toString("hex");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: wallet.address }] }))
+      .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(Response.json({ id: "tx-1", status: "PENDING_AUTHORIZATION" }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "tx-1",
+          status: "COMPLETED",
+          signedMessages: [{ signature: { fullSig: signatureHex } }],
+        })
+      );
+    const adapter = new KeychainFireblocksAdapter({ ...CONFIG, pollIntervalMs: 1 });
+    const signer = await adapter.getTransactionSigner();
+
+    await expect(signer.signMessages([message])).resolves.toEqual([expectedSignatures]);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the rest of a refused transaction's body off the error and every console sink", async () => {
+    const sinks = CONSOLE_METHODS.map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {})
+    );
+    const refusal = await signAgainstPoll(
+      { ...POLICY_BLOCK, note: "response-secret-value", errorDescription: "private rule text" },
+      signTestMessage
+    ).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(SigningError);
+    const serialized = JSON.stringify(refusal);
+    expect(serialized).toContain("BLOCKED_BY_POLICY");
+    for (const secret of ["response-secret-value", "private rule text"]) {
+      expect(serialized).not.toContain(secret);
+      expect(collectLogLines(...sinks)).not.toContain(secret);
+    }
   });
 });

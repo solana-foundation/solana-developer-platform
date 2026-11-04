@@ -8,12 +8,16 @@ import {
 import type { CustodyProvisioningRuntime } from "@sdp/custody/provisioning/runtime";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts, parseDecimalAmount } from "@sdp/solana/amount";
-import { fireblocksPaymentStatus, isFireblocksPaymentMint } from "@sdp/types/fireblocks";
+import {
+  fireblocksPaymentStatus,
+  isFireblocksPaymentMint,
+  isFireblocksPolicyRefusal,
+} from "@sdp/types/fireblocks";
 import { assertIsSignature } from "@solana/kit";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { AppError, badRequest, conflict } from "@/lib/errors";
+import { AppError, badRequest, conflict, custodyPolicyRefusalMessage } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import { describeError } from "@/runtime/money-path-events";
@@ -109,6 +113,24 @@ function providerFailure(result: FireblocksTransferResult): string {
   return `Fireblocks ${result.status}${subStatus}.${next}`;
 }
 
+/**
+ * What a failed native transfer records. A confirmed policy block keeps the custody policy
+ * refusal's message and code, so the row, the dashboard and a replay of its key read like a
+ * refused signature (HOO-2478); any other failure keeps Fireblocks' status.
+ */
+function failureRecord(result: FireblocksTransferResult): {
+  error: string;
+  providerData: Record<string, unknown>;
+} {
+  if (isFireblocksPolicyRefusal(result)) {
+    return {
+      error: custodyPolicyRefusalMessage("fireblocks"),
+      providerData: { executionFailure: { code: "CUSTODY_POLICY_REFUSED" } },
+    };
+  }
+  return { error: providerFailure(result), providerData: {} };
+}
+
 async function persistResult(
   repo: PaymentsRepository,
   row: PaymentTransferRow,
@@ -165,6 +187,7 @@ async function persistResult(
     }
   }
   const status = fireblocksPaymentStatus(result.status, completed);
+  const failure = status === "failed" ? failureRecord(result) : null;
   return (
     (await repo.updateTransfer({
       transferId: row.id,
@@ -179,8 +202,9 @@ async function persistResult(
         fireblocksStatus: result.status,
         fireblocksSubStatus:
           result.subStatus && /^[A-Z0-9_]{1,100}$/.test(result.subStatus) ? result.subStatus : null,
+        ...failure?.providerData,
       },
-      error: status === "failed" ? providerFailure(result) : null,
+      error: failure?.error ?? null,
       updatedAt: new Date().toISOString(),
     })) ?? (await currentRow(repo, row))
   );

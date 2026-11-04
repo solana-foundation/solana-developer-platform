@@ -1,18 +1,20 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { isFullSigningPort } from "@sdp/custody/signing";
-import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import {
   address,
   blockhash,
   compileTransaction,
   createTransactionMessage,
   getBase58Decoder,
+  isTransactionPartialSigner,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/errors";
 import { env as testEnv } from "@/test/helpers/env";
+import { admittedSigner } from "./admitted-signer";
 import { createFireblocksAdapterFromCredential } from "./provider-adapter-factory";
 
 const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -31,24 +33,35 @@ const env = {
   FIREBLOCKS_API_SECRET: "deployment-secret",
 };
 
+const CREDENTIAL = {
+  apiKey: "tenant-key",
+  apiSecretPem,
+  assetId: "SOL_TEST",
+  walletId: "fb_42",
+} as const;
+
 afterEach(() => vi.restoreAllMocks());
+
+function testTransaction() {
+  return compileTransaction(
+    pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(publicKey, message),
+      (message) =>
+        setTransactionMessageLifetimeUsingBlockhash(
+          {
+            blockhash: blockhash("11111111111111111111111111111111"),
+            lastValidBlockHeight: 100n,
+          },
+          message
+        )
+    )
+  );
+}
 
 describe("Fireblocks BYOK transaction proposals", () => {
   it("uses solana-keychain RAW signing, waits for approval, verifies the signature and never broadcasts", async () => {
-    const transaction = compileTransaction(
-      pipe(
-        createTransactionMessage({ version: 0 }),
-        (message) => setTransactionMessageFeePayer(publicKey, message),
-        (message) =>
-          setTransactionMessageLifetimeUsingBlockhash(
-            {
-              blockhash: blockhash("11111111111111111111111111111111"),
-              lastValidBlockHeight: 100n,
-            },
-            message
-          )
-      )
-    );
+    const transaction = testTransaction();
     const signature = sign(null, Buffer.from(transaction.messageBytes), ed25519.privateKey);
     const fetch = vi
       .spyOn(globalThis, "fetch")
@@ -62,15 +75,10 @@ describe("Fireblocks BYOK transaction proposals", () => {
           signedMessages: [{ signature: { fullSig: signature.toString("hex") } }],
         })
       );
-    const adapter = createFireblocksAdapterFromCredential(env, {
-      apiKey: "tenant-key",
-      apiSecretPem,
-      assetId: "SOL_TEST",
-      walletId: "fb_42",
-    });
+    const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
     if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
     const signer = await adapter.getTransactionSigner("fb_42", publicKey);
-    expect(signer).toBeInstanceOf(FireblocksSigner);
+    expect(signer).not.toHaveProperty("signAndSendTransactions");
     if (!("signTransactions" in signer)) throw new Error("Expected partial signer");
     const signatures = await signer.signTransactions([transaction]);
     expect(Buffer.from(signatures[0]?.[publicKey] ?? [])).toEqual(signature);
@@ -93,5 +101,60 @@ describe("Fireblocks BYOK transaction proposals", () => {
     }
     expect(await adapter.getTransactionSigner("fb_42", publicKey)).toBe(signer);
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("Fireblocks BYOK policy refusals (HOO-2478)", () => {
+  /** Signs through the shared custody signer while Fireblocks answers the proposal with `poll`. */
+  async function signAgainstPoll(poll: Record<string, unknown>) {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ addresses: [{ address: publicKey }] }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1", status: "SUBMITTED" }))
+      .mockResolvedValueOnce(Response.json({ id: "proposal-1", ...poll }));
+    const adapter = createFireblocksAdapterFromCredential(env, CREDENTIAL);
+    if (!isFullSigningPort(adapter)) throw new Error("Expected signing adapter");
+    const signer = admittedSigner(
+      await adapter.getTransactionSigner("fb_42", publicKey),
+      async () => ({ admitted: true }),
+      {
+        movement: "payments.transfer",
+        organizationId: "org_fireblocks_refusal",
+        projectId: "prj_fireblocks_refusal",
+        custodyWalletId: "cwlt_fireblocks_refusal",
+        provider: "fireblocks",
+        credential: null,
+      }
+    );
+    if (!isTransactionPartialSigner(signer)) throw new Error("Expected partial signer");
+    return signer.signTransactions([testTransaction()]);
+  }
+
+  it("answers a policy block as CUSTODY_POLICY_REFUSED without the provider's wording", async () => {
+    const refusal = await signAgainstPoll({
+      status: "BLOCKED",
+      subStatus: "BLOCKED_BY_POLICY",
+      note: "private provider text",
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(AppError);
+    expect(refusal).toMatchObject({
+      code: "CUSTODY_POLICY_REFUSED",
+      statusCode: 422,
+      message:
+        "Fireblocks blocked signing due to a wallet policy. Review the policy in Fireblocks or adjust the request.",
+      cause: { code: "POLICY_REFUSED" },
+    });
+    if (!(refusal instanceof AppError)) throw new Error("Expected an AppError");
+    expect(JSON.stringify(refusal.toResponse())).not.toContain("private provider text");
+  });
+
+  it.each([
+    ["BLOCKED without a sub-status", { status: "BLOCKED" }],
+    ["REJECTED", { status: "REJECTED", subStatus: "AUTO_FREEZE" }],
+  ])("leaves %s to the provider's own failure", async (_case, poll) => {
+    const signing = signAgainstPoll(poll);
+
+    await expect(signing).rejects.not.toBeInstanceOf(AppError);
+    await expect(signing).rejects.toThrow(`Transaction failed with status: ${poll.status}`);
   });
 });

@@ -2227,7 +2227,7 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
 
-A recorded failure (such as `400 TRANSACTION_FAILED`) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
+A recorded failure (such as `400 TRANSACTION_FAILED`, or `422 CUSTODY_POLICY_REFUSED` when the wallet's policy at its custody provider refused to sign) replays the same error; use a new key to try again. Replays are snapshots, so read the transfer with `GET` for its current status. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
 
 Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
 
@@ -5455,7 +5455,7 @@ A failed request returns an error status and this body. The health checks are th
 | `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
 | `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
 | `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
-| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the signing provider refused the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
 | `502` | Solana RPC answered, but with an error SDP could not use. | `SOLANA_RPC_ERROR` |
@@ -5466,6 +5466,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 ## Retrying
 
 - `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
+- `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider; review the policy there or change the request before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix; quote `meta.requestId` when you report one.
@@ -20500,7 +20501,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfers`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.
+Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfers.execute` action.
 
