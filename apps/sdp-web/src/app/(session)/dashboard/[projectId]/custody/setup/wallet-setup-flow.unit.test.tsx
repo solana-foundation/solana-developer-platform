@@ -281,6 +281,36 @@ describe("one screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Leave" }));
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
+
+  it("asks before Cancel when only credentials were typed", () => {
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: PRODUCTION_AVAILABILITY,
+      environment: "production",
+      initialProvider: "privy",
+    });
+    fireEvent.input(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Leave without creating the wallet?" })).toBeTruthy();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
+  // Greptile (#2741): after a lost answer the dialog said no wallet was made, though the
+  // request may have created one.
+  it("says the wallet may exist when Cancel follows a request that went out", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    typeLabel("Unsure");
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave wallet setup?" });
+    expect(within(dialog).getByText(/may have created the wallet/)).toBeTruthy();
+    expect(within(dialog).queryByText(/No wallet has been made/)).toBeNull();
+  });
 });
 
 describe("details", () => {
@@ -727,6 +757,47 @@ describe("whose account", () => {
     );
     expect(within(failed).getByText("Privy rejected its keys")).toBeTruthy();
     expect(within(failed).getByRole("link", { name: "Replace credentials" })).toBeTruthy();
+  });
+
+  // Greptile (#2741): the repair link stayed live during a credential check, so leaving through
+  // it dropped the request's saved retry.
+  it("locks a connection's repair link while a credential check is in flight", async () => {
+    let settle: (result: PrivyByokSubmitResult) => void = () => undefined;
+    mocks.submitCredential.mockImplementationOnce(
+      () =>
+        new Promise<PrivyByokSubmitResult>((resolve) => {
+          settle = resolve;
+        })
+    );
+    renderFlow({
+      initialProvider: "privy",
+      connectedProviders: ["privy"],
+      connections: [connection({ id: "conn-pending", label: "Ops app", status: "pending" })],
+    });
+    typeLabel("Ops");
+    fireEvent.click(radio(/^Connect another Privy account/));
+    fillPrivyCredentials();
+    const row = asElement(
+      document.querySelector('[data-wallet-account="conn-pending"]'),
+      HTMLElement
+    );
+    expect(
+      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+    expect(within(row).queryByRole("link", { name: "Check again" })).toBeNull();
+    expect(within(row).getByText("Check again")).toBeTruthy();
+
+    // Settled, so no transition stays pending for the tests after this one.
+    await act(async () => {
+      settle({ status: "failed", message: "Those credentials did not verify." });
+    });
+    expect(
+      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
+    ).toBeTruthy();
   });
 
   // A BYOK-only project has no Managed config, so nothing is connected; the active connection
