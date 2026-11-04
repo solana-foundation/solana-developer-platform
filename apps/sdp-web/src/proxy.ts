@@ -156,6 +156,14 @@ export const proxy = clerkMiddleware(
       response.cookies.set(name, "", { path: "/", maxAge: 0 });
     }
 
+    if (
+      (req.nextUrl.pathname === SIGN_IN_PATH ||
+        req.nextUrl.pathname.startsWith(`${SIGN_IN_PATH}/`)) &&
+      !(await auth()).userId
+    ) {
+      response.cookies.set(PROJECT_COOKIE_NAME, "", { ...PROJECT_COOKIE_OPTIONS, maxAge: 0 });
+    }
+
     // Last-used hint for the bare `/dashboard` landing only; nothing renders or
     // sends requests from it, and it is validated against the Project list when read.
     if (projectId !== null) {

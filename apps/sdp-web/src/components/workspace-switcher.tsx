@@ -11,9 +11,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TooltipProvider } from "@sdp/ui/tooltip";
 import { CheckIcon, ChevronsUpDownIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
@@ -204,7 +206,7 @@ export function WorkspaceSwitcher({
   onOrganizationSwitchingChange?: (isSwitching: boolean) => void;
 }) {
   const t = useTranslations();
-  const { organization: activeOrg } = useOrganization();
+  const { organization: activeOrg, isLoaded: isOrganizationLoaded } = useOrganization();
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
@@ -221,16 +223,38 @@ export function WorkspaceSwitcher({
   /** Makes another organization active; picking the current one does nothing. */
   const switchOrganization = (organizationId: string) => {
     const isActive = organizationId === activeOrg?.id;
-    if (!isActive && setActive) {
+    if (!isSwitching && !isActive && setActive) {
       setOrganizationSwitching(true);
       onOrganizationSwitchingChange?.(true);
       const finishSwitch = () => {
         setOrganizationSwitching(false);
         onOrganizationSwitchingChange?.(false);
       };
-      void setActive({ organization: organizationId }).then(finishSwitch, finishSwitch);
+      void setActive({ organization: organizationId }).then(finishSwitch, () => {
+        toast.error(t("Shared.SharedComponents.changeOrganizationFailed"));
+        finishSwitch();
+      });
     }
   };
+
+  if (!isOrganizationLoaded) {
+    return (
+      <div
+        role="status"
+        aria-label={t("Shared.SharedComponents.loading")}
+        aria-busy="true"
+        className={cn("flex h-10 items-center", collapsed ? "w-10 justify-center" : "gap-3 px-2")}
+      >
+        <SkeletonBlock className="size-8 shrink-0 rounded-md" />
+        {collapsed ? null : (
+          <div className="flex flex-1 flex-col gap-1.5">
+            <SkeletonBlock className="h-3.5 w-24 rounded" />
+            <SkeletonBlock className="h-3 w-32 rounded" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <DropdownMenu modal={false}>
