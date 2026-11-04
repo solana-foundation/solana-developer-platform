@@ -2092,21 +2092,23 @@ describe("payment transfer batches", () => {
           signAsFeePayer,
         })
       );
-      const simulationSpy = vi.spyOn(solanaRpc, "simulateTransaction").mockResolvedValue({
-        success: false,
-        logs: ["Program 11111111111111111111111111111111 failed: custom program error: 0x1"],
-        unitsConsumed: null,
-        error: JSON.stringify({ InstructionError: [0, { Custom: 1 }] }),
+      // Answered at the JSON-RPC layer so the real helper serializes the verdict
+      // (its bigints become strings: {"InstructionError":["0",{"Custom":"1"}]}).
+      rpc.answer("simulateTransaction", {
+        context: { slot: 1 },
+        value: {
+          err: { InstructionError: [0, { Custom: 1 }] },
+          logs: ["Program 11111111111111111111111111111111 failed: custom program error: 0x1"],
+          accounts: null,
+          unitsConsumed: 150,
+          returnData: null,
+        },
       });
 
-      try {
-        const body = await postShortfallBatch(true);
+      const body = await postShortfallBatch(true);
 
-        expect(signAsFeePayer).not.toHaveBeenCalled();
-        expectShortfallRecorded(body);
-      } finally {
-        simulationSpy.mockRestore();
-      }
+      expect(signAsFeePayer).not.toHaveBeenCalled();
+      expectShortfallRecorded(body);
     });
   });
 

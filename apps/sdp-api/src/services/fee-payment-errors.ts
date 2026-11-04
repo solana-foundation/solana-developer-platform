@@ -117,11 +117,15 @@ export function callerInsufficientFundsError(
 }
 
 /** A `TransactionError` naming an instruction that failed with a custom program error. */
+/**
+ * `simulateTransaction` serializes the RPC's bigints as decimal strings, so
+ * `[0n, { Custom: 1n }]` arrives as `["0", { "Custom": "1" }]`; accept either form.
+ */
+const integerSchema = z
+  .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
+  .transform(Number);
 const simulatedCustomInstructionErrorSchema = z.object({
-  InstructionError: z.tuple([
-    z.number().int().nonnegative(),
-    z.object({ Custom: z.number().int() }),
-  ]),
+  InstructionError: z.tuple([integerSchema, z.object({ Custom: integerSchema })]),
 });
 
 /**
