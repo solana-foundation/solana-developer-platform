@@ -976,7 +976,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:
-      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
+      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer: a later request, or one sent at the same time, answers `409`. Only a simulation the provider refused outright can be sent again. After any other failure the provider may still have delivered the crypto, so quote again if the transfer never settles.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

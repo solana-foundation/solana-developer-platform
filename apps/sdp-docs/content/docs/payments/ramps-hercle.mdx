@@ -47,3 +47,5 @@ Hercle's refusals of the business answer `409 CONFLICT`: not verified, suspended
 Hercle reports the order's progress by webhook, and SDP also asks Hercle for the order when a webhook is missed. A settled order names the transaction that delivered the crypto and moves the transfer to `settling`. It completes once SDP finds that delivery on chain. When Hercle fails or expires the order, the transfer's `error` gives the reason, such as a wire from another account or a funding window that closed before the wire arrived.
 
 In a Sandbox project, `POST /v1/payments/ramps/sandbox/simulate` has Hercle settle the order as its bank would, from the moment it is quoted, and answers `204`. The transfer then moves through the same webhook and status pull as a real wire.
+
+Hercle sends the order's devnet crypto when it settles the simulation, so SDP simulates a transfer once. A second request answers `409 CONFLICT`, including one sent at the same time. Only a simulation Hercle refused outright can be sent again: after any other failure Hercle may still have sent the crypto, so quote again if the transfer never settles.

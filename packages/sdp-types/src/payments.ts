@@ -239,6 +239,7 @@ export const FUNDABLE_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
 /**
  * Whether a ramp transfer in each status still waits for its pay-in, so funding instructions still apply.
  * A `settling` transfer is still fundable but no longer waits: the provider already holds the money.
+ * A sandbox pay-in simulation may start only from a status that still waits.
  */
 export const RAMP_TRANSFER_STATUS_AWAITING_PAY_IN = {
   pending: true,
@@ -257,6 +258,11 @@ export const RAMP_TRANSFER_STATUS_AWAITING_PAY_IN = {
 export function isAwaitingPayInRampTransferStatus(status: PaymentTransferStatus): boolean {
   return RAMP_TRANSFER_STATUS_AWAITING_PAY_IN[status];
 }
+
+/** The statuses that still wait for their pay-in, for a status-guarded claim such as the sandbox simulation's. */
+export const AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => RAMP_TRANSFER_STATUS_AWAITING_PAY_IN[status]
+);
 
 /** One legal ramp transfer status change: where it may start, where it lands, and the ramp types it applies to. */
 export interface RampTransferTransition {

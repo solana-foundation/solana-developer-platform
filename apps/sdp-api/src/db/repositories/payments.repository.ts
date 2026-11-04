@@ -243,6 +243,26 @@ export interface PaymentsRepository {
   }): Promise<PaymentTransferRow | null>;
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
+   * Claims a sandbox on-ramp's one pay-in simulation by stamping `provider_data.sandboxSettlementRequestedAt`.
+   * One statement checks and stamps, so of two concurrent claims one gets the row and the other null.
+   * It is also null once a pay-in is reported, or when the row no longer holds `providerReference`.
+   */
+  claimRampSandboxSettlement(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    providerReference: string;
+    requestedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /** Undoes the claim stamped at `requestedAt`, for a simulation the provider definitely refused. */
+  releaseRampSandboxSettlement(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    requestedAt: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
    * Claims an awaiting off-ramp row for its crypto deposit transaction through
    * the `offramp_deposit_claimed` transition. The update succeeds only while
    * the row still matches its deposit instruction and every on-chain

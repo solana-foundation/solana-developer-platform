@@ -1,6 +1,11 @@
 import { RAMP_PROVIDER_CLIENTS, resolveRampProviderClient } from "@sdp/payments/ramps";
+import { isDefinitiveProviderRejection } from "@sdp/payments/ramps/fetch";
 import type { RampProvider } from "@sdp/payments/ramps/types";
-import { isCancelableRampTransferStatus, isRampTransferType } from "@sdp/types/payments";
+import {
+  isCancelableRampTransferStatus,
+  isRampTransferType,
+  isAwaitingPayInRampTransferStatus,
+} from "@sdp/types/payments";
 import { isRetiredRampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
@@ -136,7 +141,7 @@ export async function simulateSandboxTransfer(
   }
   // A bank-funded order waits for its wire from the moment it opens, with no separate "awaiting payment" moment.
   // Its transfer can therefore still be `pending` here.
-  if (transfer.status !== "pending" && transfer.status !== "awaiting_payment") {
+  if (!isAwaitingPayInRampTransferStatus(transfer.status)) {
     throw conflict(`Transfer is not awaiting payment (status: ${transfer.status}).`);
   }
   if (transfer.custody_wallet_id === null) {
@@ -150,8 +155,39 @@ export async function simulateSandboxTransfer(
   if (client.simulateSandboxSettlement === undefined || transfer.provider_reference === null) {
     throw badRequest(`Sandbox simulation is not available for provider: ${client.id}.`);
   }
-  // The provider reports the simulated outcome as it would a real one.
-  // The transfer settles through its webhook and status pull, not here.
-  await client.simulateSandboxSettlement(rampRuntime(c, client.id), transfer.provider_reference);
+  const runtime = rampRuntime(c, client.id);
+  const scopeKey = {
+    transferId: transfer.id,
+    organizationId: scope.auth.organizationId,
+    projectId,
+  };
+  // A simulated pay-in delivers the order's crypto, and SDP does not count on the provider to deliver it only once.
+  // The claim lets one request reach the provider, however many arrive at once.
+  const requestedAt = new Date().toISOString();
+  const claimed = await repository.claimRampSandboxSettlement({
+    ...scopeKey,
+    providerReference: transfer.provider_reference,
+    requestedAt,
+  });
+  if (!claimed) {
+    throw conflict(
+      "This transfer's pay-in was already simulated, or it is no longer awaiting payment."
+    );
+  }
+  try {
+    // The provider reports the simulated outcome as it would a real one.
+    // The transfer settles through its webhook and status pull, not here.
+    await client.simulateSandboxSettlement(runtime, transfer.provider_reference);
+  } catch (error) {
+    // Only a refusal proves nothing was delivered; any other failure keeps the claim.
+    if (isDefinitiveProviderRejection(error)) {
+      await repository.releaseRampSandboxSettlement({
+        ...scopeKey,
+        requestedAt,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    throw error;
+  }
   return noContent(c);
 }

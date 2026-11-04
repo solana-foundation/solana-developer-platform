@@ -1632,6 +1632,77 @@ describe("Payments routes — ramps", () => {
       expect(requests).toHaveLength(1);
     });
 
+    /** Answers every later Hercle call with `status` and `body`, recording it in `requests`. */
+    function answerHercle(requests: Request[], status: number, body: Record<string, unknown>) {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+    }
+
+    it("simulates a transfer's pay-in once, refusing a second request before Hercle", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+
+      const first = await simulateHercleTransfer(transferId);
+      const second = await simulateHercleTransfer(transferId);
+
+      expect(first.status).toBe(204);
+      expect(second.status).toBe(409);
+      expect(((await second.json()) as { error: { message: string } }).error.message).toContain(
+        "already simulated"
+      );
+      expect(requests).toHaveLength(2);
+    });
+
+    it("lets one of two concurrent requests reach Hercle", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+
+      const statuses = await Promise.all([
+        simulateHercleTransfer(transferId),
+        simulateHercleTransfer(transferId),
+      ]).then((responses) => responses.map((response) => response.status).sort());
+
+      expect(statuses).toEqual([204, 409]);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(1);
+    });
+
+    it("lets a simulation Hercle refused outright run again", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      answerHercle(requests, 404, { code: "ORDER_NOT_FOUND", message: "Order not found" });
+
+      const refused = await simulateHercleTransfer(transferId);
+      const retried = await simulateHercleTransfer(transferId);
+
+      expect(refused.status).toBe(400);
+      expect(retried.status).toBe(400);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(2);
+    });
+
+    it("keeps the claim when Hercle's failure leaves the delivery unknown", async () => {
+      const requests: Request[] = [];
+      const transferId = await quoteHercleOrder(requests);
+      answerHercle(requests, 502, { code: "DELIVERY_FAILED", message: "retry the settlement" });
+
+      const failed = await simulateHercleTransfer(transferId);
+      const retried = await simulateHercleTransfer(transferId);
+
+      expect(failed.status).toBe(503);
+      expect(retried.status).toBe(409);
+      expect(
+        requests.filter((request) => request.url.endsWith("/simulate-settlement"))
+      ).toHaveLength(1);
+    });
+
     it("refuses a business with no Hercle account before calling Hercle", async () => {
       const counterpartyId = await seedCounterparty({ entityType: "business" });
       const fetchSpy = vi.spyOn(globalThis, "fetch");

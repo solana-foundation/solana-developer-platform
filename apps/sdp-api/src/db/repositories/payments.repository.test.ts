@@ -390,6 +390,83 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     expect(await readStatus("xfr_guard_ok")).toBe("canceled");
   });
 
+  describe("sandbox pay-in simulation claim", () => {
+    const ORDER_ID = "ord_simulation_claim";
+
+    async function seedOnramp(suffix: string, status: "pending" | "settling" = "pending") {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix }),
+        sourceAddress: null,
+        type: "onramp",
+        direction: "inbound",
+        status,
+        provider: "hercle",
+        providerReference: `${ORDER_ID}_${suffix}`,
+        deliveryMode: "manual_instructions",
+      });
+      if (transfer === null) {
+        throw new Error("the on-ramp fixture was not created");
+      }
+      return transfer;
+    }
+
+    function claim(transferId: string, providerReference: string, requestedAt: string) {
+      return repo.claimRampSandboxSettlement({
+        transferId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        providerReference,
+        requestedAt,
+      });
+    }
+
+    it("lets exactly one of many concurrent claims through", async () => {
+      const transfer = await seedOnramp("sim-race");
+      const reference = `${ORDER_ID}_sim-race`;
+
+      const claims = await Promise.all(
+        Array.from({ length: 8 }, (_, index) =>
+          claim(transfer.id, reference, `2026-11-04T10:00:0${index}.000Z`)
+        )
+      );
+
+      const winners = claims.filter((row) => row !== null);
+      expect(winners).toHaveLength(1);
+      expect(winners[0]?.provider_data).toHaveProperty("sandboxSettlementRequestedAt");
+    });
+
+    it("refuses a row with a pay-in reported or another provider reference", async () => {
+      const settling = await seedOnramp("sim-settling", "settling");
+      const pending = await seedOnramp("sim-reference");
+
+      expect(await claim(settling.id, `${ORDER_ID}_sim-settling`, new Date().toISOString())).toBe(
+        null
+      );
+      expect(await claim(pending.id, "ord_another_order", new Date().toISOString())).toBe(null);
+    });
+
+    it("releases only the claim it names, after which a new claim succeeds", async () => {
+      const transfer = await seedOnramp("sim-release");
+      const reference = `${ORDER_ID}_sim-release`;
+      const requestedAt = "2026-11-04T10:00:00.000Z";
+      expect(await claim(transfer.id, reference, requestedAt)).not.toBe(null);
+      const release = (at: string) =>
+        repo.releaseRampSandboxSettlement({
+          transferId: transfer.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          requestedAt: at,
+          updatedAt: new Date().toISOString(),
+        });
+
+      expect(await release("2026-11-04T10:00:01.000Z")).toBe(null);
+      const released = await release(requestedAt);
+
+      expect(released?.provider_data).not.toHaveProperty("sandboxSettlementRequestedAt");
+      expect(await claim(transfer.id, reference, "2026-11-04T10:00:02.000Z")).not.toBe(null);
+    });
+  });
+
   it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
     const depositAddress = "DepositAddress111";
     const transfer = await repo.createTransfer({
