@@ -1212,6 +1212,57 @@
           }
         },
         {
+          "name": "List payment requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/requests",
+            "description": "Lists the caller's project's payment requests, newest first. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. Records never carry `publicToken`."
+          }
+        },
+        {
+          "name": "Create payment request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/requests",
+            "description": "Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link. Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"10.00\",\n  \"expiresAt\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get payment request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/requests/{{paymentRequestId}}",
+            "description": "Retrieves one payment request in the caller's project; another project's request returns 404. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`."
+          }
+        },
+        {
+          "name": "Get payment request link",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/requests/{{paymentRequestId}}/link",
+            "description": "Returns the token behind a payment request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status."
+          }
+        },
+        {
           "name": "Cancel payment request",
           "request": {
             "method": "POST",

@@ -5,6 +5,7 @@ import { errorResponseSchema } from "@/openapi/schemas/base";
 
 import {
   createOnrampQuoteRequestSchema,
+  createPaymentRequestRequestSchema,
   createRecurringPaymentRequestSchema,
   createSubscriptionPlanRequestSchema,
   createSubscriptionRequestSchema,
@@ -12,6 +13,7 @@ import {
   createTransferRequestSchema,
   estimateTransferBatchRequestSchema,
   paymentListRecurringPaymentsQuerySchema,
+  paymentListRequestsQuerySchema,
   paymentListSubscriptionCollectionAttemptsQuerySchema,
   paymentListSubscriptionPlansQuerySchema,
   paymentListSubscriptionsQuerySchema,
@@ -43,12 +45,15 @@ import {
   projectScopeWithDeclaredIdempotencyHeaders,
 } from "./helpers";
 import {
+  createdPaymentRequestResponse,
   offrampCurrenciesResponse,
   onrampCurrenciesResponse,
   onrampQuoteResponse,
   paymentRecurringPaymentCollectionResponse,
   paymentRecurringPaymentListResponse,
   paymentRecurringPaymentResponse,
+  paymentRequestLinkResponse,
+  paymentRequestListResponse,
   paymentRequestResponse,
   paymentSubscriptionCollectionAttemptListResponse,
   paymentSubscriptionListResponse,
@@ -456,6 +461,101 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(paymentRecurringPaymentResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/requests",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Create payment request",
+    operationId: "createPaymentRequest",
+    description:
+      "Creates a payment request: an amount of one token for a payer to send to a custody wallet in the caller's project, through the request's hosted payment link. Requires `payment_requests.manage`. `walletId` is the provider wallet ID (`walletId` from `GET /v1/wallets`), not the SDP Wallet ID transfers take; an unknown wallet, or one outside the project, returns 404. `amount` is a decimal string with at most the mint's decimals, so `0.05` and `0.050` are the same request; more decimals return 400. A native SOL request is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` when the wallet has no account and the amount is below the rent-exempt minimum. The response is the only one besides `GET /v1/payments/requests/{paymentRequestId}/link` that carries `publicToken`. Accepts an Idempotency-Key: a retry with the same key and request returns the original payment request instead of creating a second one.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: keyAcceptedHeaders,
+      body: {
+        required: true,
+        content: jsonContent(createPaymentRequestRequestSchema),
+      },
+    },
+    responses: {
+      201: {
+        description: "Payment request created",
+        content: jsonContent(createdPaymentRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "List payment requests",
+    operationId: "listPaymentRequests",
+    description:
+      "Lists the caller's project's payment requests, newest first. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. Records never carry `publicToken`.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      query: paymentListRequestsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request list",
+        content: jsonContent(paymentRequestListResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests/{paymentRequestId}",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Get payment request",
+    operationId: "getPaymentRequest",
+    description:
+      "Retrieves one payment request in the caller's project; another project's request returns 404. Requires `payment_requests.read`. An open request past its `expiresAt` reads as `expired`. The record never carries `publicToken`; use `GET /v1/payments/requests/{paymentRequestId}/link`.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRequestIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request",
+        content: jsonContent(paymentRequestResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "get",
+    path: "/v1/payments/requests/{paymentRequestId}/link",
+    tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
+    summary: "Get payment request link",
+    operationId: "getPaymentRequestLink",
+    description:
+      "Returns the token behind a payment request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so this route requires `payment_requests.manage`, not `payment_requests.read`. Another project's request returns 404. The token is returned whatever the request's status.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: projectScopeHeaders,
+      params: paymentRequestIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Payment request link token",
+        content: jsonContent(paymentRequestLinkResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

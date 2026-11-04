@@ -12,9 +12,14 @@ import {
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { MODULE_GATE, TRANSFER_STATUS_GATE } from "@/openapi/release-channel-values";
-import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
+import {
+  createPaymentRequestSchema as createPaymentRequestSchemaBase,
+  listPaymentRequestsQuerySchema as listPaymentRequestsQuerySchemaBase,
+  paymentRequestParamsSchema as paymentRequestParamsSchemaBase,
+} from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -775,6 +780,79 @@ export const paymentRequestSchema = z
   .openapi({
     description: "A payment request. Reads never carry its link token.",
   });
+
+const USDC_MAINNET_MINT = wellKnownMint("USDC", "mainnet-beta");
+
+export const createPaymentRequestRequestSchema = createPaymentRequestSchemaBase
+  .extend({
+    walletId: withOpenApi(createPaymentRequestSchemaBase.shape.walletId, {
+      description: `Receiving custody wallet in the caller's project. Provider wallet ID: ${WALLET_ID_INPUT_NOTE} An SDP Wallet ID (\`cwlt_...\`) returns 404.`,
+      example: "privy_wallet_123",
+    }),
+    token: withOpenApi(createPaymentRequestSchemaBase.shape.token, {
+      description: `Mint address of the token to request. Symbols are not accepted; for native SOL, pass \`${SOL_MINT}\`.`,
+      example: USDC_MAINNET_MINT,
+    }),
+    amount: withOpenApi(createPaymentRequestSchemaBase.shape.amount, {
+      description:
+        "Amount to request in UI units, as a decimal string greater than zero with no more decimal places than the mint has.",
+      example: "10.00",
+    }),
+    expiresAt: withOpenApi(createPaymentRequestSchemaBase.shape.expiresAt, {
+      description:
+        "When the request stops accepting payment, as an ISO 8601 timestamp. Null or omitted: it never expires.",
+      example: "2026-12-01T00:00:00.000Z",
+    }),
+  })
+  .openapi({
+    description: "Create payment request payload.",
+    example: {
+      walletId: "privy_wallet_123",
+      token: USDC_MAINNET_MINT,
+      amount: "10.00",
+      expiresAt: null,
+    },
+  });
+
+export const paymentListRequestsQuerySchema = listPaymentRequestsQuerySchemaBase
+  .extend({
+    page: withOpenApi(listPaymentRequestsQuerySchemaBase.shape.page, {
+      description: "Page number, starting at 1.",
+      example: 1,
+    }),
+    pageSize: withOpenApi(listPaymentRequestsQuerySchemaBase.shape.pageSize, {
+      description: "Results per page, 1 to 100.",
+      example: 20,
+    }),
+    status: paymentRequestStatusSchema.optional(),
+  })
+  .openapi({ description: "Payment request list filters." });
+
+const paymentRequestPublicTokenSchema = z.string().openapi({
+  description:
+    "Token behind the request's hosted payment link, `/pay/{publicToken}`. Anyone holding it can build the request's fee-sponsored payment transaction, so share it only with the payer. Reads never return it; get it again with `GET /v1/payments/requests/{paymentRequestId}/link`.",
+  example: "example-public-token",
+});
+
+export const createdPaymentRequestSchema = paymentRequestSchema
+  .extend({ publicToken: paymentRequestPublicTokenSchema })
+  .openapi({ description: "A new payment request, with its link token." });
+
+export const paymentRequestLinkSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
+    publicToken: paymentRequestPublicTokenSchema,
+  })
+  .openapi({ description: "A payment request's link token." });
+
+export const paymentRequestListResponseSchema = z
+  .object({
+    paymentRequests: z.array(paymentRequestSchema),
+    total: z.number().int(),
+    page: z.number().int(),
+    pageSize: z.number().int(),
+  })
+  .openapi({ description: "Payment request list response payload." });
 
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({
