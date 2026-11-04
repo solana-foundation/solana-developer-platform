@@ -87,6 +87,9 @@ import {
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
+  createdPaymentRequestSchema,
+  paymentRequestLinkSchema,
+  paymentRequestListResponseSchema,
   paymentRequestSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionListResponseSchema,
@@ -291,6 +294,9 @@ export const transferBatchEstimateResponse = successResponseSchema(
   transferBatchEstimateResponseSchema
 );
 export const paymentRequestResponse = successResponseSchema(paymentRequestSchema);
+export const createdPaymentRequestResponse = successResponseSchema(createdPaymentRequestSchema);
+export const paymentRequestLinkResponse = successResponseSchema(paymentRequestLinkSchema);
+export const paymentRequestListResponse = successResponseSchema(paymentRequestListResponseSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );

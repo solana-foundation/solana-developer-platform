@@ -926,7 +926,6 @@ function operationFor(document: ReturnType<typeof createOpenApiDocument>, route:
 describe("OpenAPI Idempotency-Key headers", () => {
   // Declared routes with no public operation yet; adding one is deliberate.
   const UNDOCUMENTED: readonly string[] = [
-    "POST /v1/payments/requests",
     // Dashboard-only CSR registration must not be promoted to a public API.
     ...INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
   ];
