@@ -103,7 +103,7 @@ export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedI
           {/* biome-ignore lint/a11y/noStaticElementInteractions: the input inside is the control; this only forwards focus */}
           {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users land on the input directly */}
           <div
-            className="flex min-h-24 w-full cursor-text flex-wrap content-start items-center gap-1.5 rounded-xl border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-3 py-2.5 transition-[box-shadow,border-color] hover:bg-[var(--input-bg-hover)] focus-within:border-[var(--input-border-focus)] focus-within:shadow-[0_0_0_2px_var(--input-focus-ring)]"
+            className="flex min-h-24 w-full cursor-text flex-wrap content-start items-center gap-1.5 rounded-[var(--corner-control)] border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-3 py-2.5 transition-[box-shadow,border-color] hover:bg-[var(--input-bg-hover)] focus-within:border-[var(--input-border-focus)] focus-within:shadow-[0_0_0_2px_var(--input-focus-ring)]"
             onClick={() => inputRef.current?.focus()}
           >
             {entries.map((entry) => {
@@ -112,7 +112,7 @@ export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedI
                 <span
                   key={entry}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded-md py-0.5 ps-2 pe-1 text-meta font-medium tabular-nums",
+                    "inline-flex items-center gap-1 rounded-[var(--corner-control-inner)] py-0.5 ps-2 pe-1 text-meta font-medium tabular-nums",
                     isValid ? "bg-fill-strong text-primary" : "bg-error/12 text-error"
                   )}
                 >
