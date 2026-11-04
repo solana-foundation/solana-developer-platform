@@ -15,6 +15,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { API_KEYS_PAGE_PATH } from "@/app/dashboard/[projectId]/api-keys/api-key-flash";
+import { RecordFacts } from "@/app/dashboard/[projectId]/payments/payments-record";
 import {
   changeMemberRole,
   listMemberApiKeys,
@@ -209,8 +210,8 @@ function MemberApiKeys({ apiKeys, label }: { apiKeys: MemberApiKey[]; label: str
           <li key={apiKey.id} className="flex items-center gap-3 px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="truncate text-primary">{apiKey.name}</p>
-              <p className="truncate text-tertiary text-xs">
-                {apiKey.keyPrefix}… · {apiKey.projectName}
+              <p className="text-tertiary text-xs">
+                <RecordFacts facts={[`${apiKey.keyPrefix}…`, apiKey.projectName]} />
               </p>
             </div>
             <EntityLink

@@ -122,9 +122,18 @@ const STATUS_LABEL_KEYS = {
 } as const satisfies Record<MainnetAccess["state"], MessageKey>;
 
 function statusHelp(access: MainnetAccess, t: Translate): string {
-  if (access.state === "approved") return t("Shared.mainnetAccess.approvedBody");
-  if (access.state === "pending") return t("Shared.mainnetAccess.pendingBody");
-  return access.available
-    ? t("Shared.mainnetAccess.description")
-    : t("Shared.mainnetAccess.unavailableBody");
+  switch (access.state) {
+    case "approved":
+      return t("Shared.mainnetAccess.approvedBody");
+    case "pending":
+      return t("Shared.mainnetAccess.pendingBody");
+    case "not_requested":
+      return access.available
+        ? t("Shared.mainnetAccess.description")
+        : t("Shared.mainnetAccess.unavailableBody");
+    default: {
+      const exhaustive: never = access.state;
+      throw new Error(`Unhandled mainnet access state: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }

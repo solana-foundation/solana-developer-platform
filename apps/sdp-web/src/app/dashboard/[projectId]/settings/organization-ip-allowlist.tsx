@@ -103,7 +103,7 @@ export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedI
           {/* biome-ignore lint/a11y/noStaticElementInteractions: the input inside is the control; this only forwards focus */}
           {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users land on the input directly */}
           <div
-            className="flex min-h-24 w-full cursor-text flex-wrap content-start items-center gap-1.5 rounded-xl border border-border-default bg-surface px-3 py-2.5 transition-colors focus-within:border-border-strong"
+            className="flex min-h-24 w-full cursor-text flex-wrap content-start items-center gap-1.5 rounded-xl border border-[var(--input-border-idle)] bg-[var(--input-bg-idle)] px-3 py-2.5 transition-[box-shadow,border-color] hover:bg-[var(--input-bg-hover)] focus-within:border-[var(--input-border-focus)] focus-within:shadow-[0_0_0_2px_var(--input-focus-ring)]"
             onClick={() => inputRef.current?.focus()}
           >
             {entries.map((entry) => {
@@ -150,6 +150,14 @@ export function OrganizationIpAllowlist({ initialAllowedIps }: { initialAllowedI
                 setDraft(typed.slice(lastSeparator + 1));
               }}
               onKeyDown={onKeyDown}
+              // A single-line input drops a pasted list's newlines before onChange sees it.
+              onPaste={(event) => {
+                event.preventDefault();
+                const input = event.currentTarget;
+                const pasted = `${draft.slice(0, input.selectionStart ?? draft.length)} ${event.clipboardData.getData("text")} ${draft.slice(input.selectionEnd ?? draft.length)}`;
+                replaceEntries(withEntries(entries, pasted));
+                setDraft("");
+              }}
               onBlur={commitDraft}
               placeholder={entries.length === 0 ? "203.0.113.10, 198.51.100.0/24" : undefined}
               aria-describedby={HELPER_ID}
