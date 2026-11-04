@@ -2,11 +2,12 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type {
-  PaymentOnrampQuoteRequest,
-  PaymentRampQuote,
-  PaymentTransferStatus,
-  PaymentTransferSummary,
+import {
+  isAwaitingPayInRampTransferStatus,
+  type PaymentOnrampQuoteRequest,
+  type PaymentRampQuote,
+  type PaymentTransferStatus,
+  type PaymentTransferSummary,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
@@ -91,8 +92,9 @@ interface SimulationContext {
 
 /** A bank-instruction order waits for its wire from the moment it opens, so its transfer can still be `pending`. */
 function awaitsPayment(quote: PaymentRampQuote, status: PaymentTransferStatus): boolean {
-  if (status === "awaiting_payment") return true;
-  return quote.deliveryMode === "manual_instructions" && status === "pending";
+  return quote.deliveryMode === "manual_instructions"
+    ? isAwaitingPayInRampTransferStatus(status)
+    : status === "awaiting_payment";
 }
 
 /**

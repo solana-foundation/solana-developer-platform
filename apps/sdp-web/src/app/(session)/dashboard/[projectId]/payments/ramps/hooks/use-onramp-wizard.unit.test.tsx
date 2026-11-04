@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import type {
+  PaymentRampQuote,
+  PaymentsDashboardWallet,
+  PaymentTransferStatus,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { RenderHookResult } from "@testing-library/react";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OnrampStepContent } from "@/app/(session)/dashboard/[projectId]/payments/ramps/components/onramp-step-content";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -426,6 +432,66 @@ describe("useOnrampWizard — sandbox settlement on request", () => {
     });
     expect(simulateCalls()).toHaveLength(0);
   });
+});
+
+describe("useOnrampWizard — a Hercle deposit's provider step", () => {
+  const HERCLE_READY = { provider: "hercle", direction: "onramp", status: "ready" };
+  const IBAN = "CH9300762011623852957";
+  const HERCLE_QUOTE = {
+    id: "ord_hercle",
+    provider: "hercle",
+    status: "pending",
+    deliveryMode: "manual_instructions",
+    paymentInstructions: [
+      {
+        provider: "hercle",
+        kind: "fiat_funding",
+        fiatCurrency: "USD",
+        bankAccount: { iban: IBAN, paymentReference: "HRC-ORD-1", payerAccountHolder: "Acme AG" },
+        instructionsNotes: "Wire 100.00 USD from a bank account held by Acme AG.",
+      },
+    ],
+  } as const satisfies PaymentRampQuote;
+  const DELIVERY =
+    "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
+
+  async function renderProviderStep(transfer: PaymentTransferSummary): Promise<void> {
+    currentRequirements = HERCLE_READY;
+    currentQuote = HERCLE_QUOTE;
+    currentTransfer = transfer;
+    const rendered = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["hercle"] }),
+      { wrapper }
+    );
+    await driveToTransferStatus(rendered, "hercle");
+    render(<OnrampStepContent wizard={rendered.result.current} />, { wrapper });
+  }
+
+  it.each(["pending", "awaiting_payment"] satisfies PaymentTransferStatus[])(
+    "shows the wire instructions while SDP awaits the wire (%s)",
+    async (status) => {
+      await renderProviderStep(transferFixture(status, { provider: "hercle" }));
+
+      expect(screen.getByText("Waiting for funding")).toBeTruthy();
+      expect(screen.getByText(IBAN)).toBeTruthy();
+    }
+  );
+
+  it.each([
+    { status: "settling", signature: DELIVERY, shows: "Confirming delivery" },
+    { status: "completed", signature: DELIVERY, shows: "Onchain transaction" },
+    { status: "failed", signature: null, shows: "Deposit failed" },
+    { status: "expired", signature: null, shows: "Quote expired" },
+  ] satisfies { status: PaymentTransferStatus; signature: string | null; shows: string }[])(
+    "replaces the wire instructions once the transfer is $status",
+    async ({ status, signature, shows }) => {
+      await renderProviderStep(transferFixture(status, { provider: "hercle", signature }));
+
+      expect(screen.getByText(shows)).toBeTruthy();
+      expect(screen.queryByText("Waiting for funding")).toBeNull();
+      expect(screen.queryByText(IBAN)).toBeNull();
+    }
+  );
 });
 
 describe("useOnrampWizard — demo funding simulation", () => {

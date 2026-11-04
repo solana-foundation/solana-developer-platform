@@ -1,6 +1,6 @@
 "use client";
 
-import { isFundableRampTransferStatus } from "@sdp/types/payments";
+import { isAwaitingPayInRampTransferStatus } from "@sdp/types/payments";
 import type { OnrampWizard } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -118,8 +118,8 @@ function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
 }
 
 /**
- * A quote paid by bank transfer. The instructions apply while the transfer can still be funded.
- * Once the money has moved, or the transfer has ended, its status takes their place.
+ * A quote paid by bank transfer. The instructions apply while SDP awaits the wire.
+ * Once the provider holds the money, or the transfer has ended, its status takes their place.
  */
 function ManualInstructionsStep({
   wizard,
@@ -129,7 +129,7 @@ function ManualInstructionsStep({
   quote: ManualInstructionsQuoteRecord;
 }) {
   const { fields, selectedRampPair, transferStatus } = wizard;
-  if (transferStatus !== undefined && !isFundableRampTransferStatus(transferStatus.status)) {
+  if (transferStatus !== undefined && !isAwaitingPayInRampTransferStatus(transferStatus.status)) {
     return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
   }
   return (
