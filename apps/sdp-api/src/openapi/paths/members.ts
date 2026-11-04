@@ -75,7 +75,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Invite member",
     operationId: "inviteMember",
     description:
-      "Invites an address to the organization at the given role. The invitation, and Clerk's emailed link, expire after 7 days. An address can hold one pending invitation per organization: a second one is refused (409) before any email is sent. An address whose earlier invitation expired or was revoked can be invited again. Until a member signs in on an invitation, sign-in refuses them with 401; when their newest invitation has expired, the refusal carries `details.reason: \"invitation_expired\"`.",
+      'Invites an address to the organization at the given role. The invitation, and Clerk\'s emailed link, expire after 7 days. An address can hold one pending invitation per organization: a second one is refused (409) before any email is sent. An address whose earlier invitation expired or was revoked can be invited again. Until a member signs in on an invitation, sign-in refuses them with 401; when their newest invitation has expired, the refusal carries `details.reason: "invitation_expired"`.',
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: keyAcceptedStoredHeaders,
