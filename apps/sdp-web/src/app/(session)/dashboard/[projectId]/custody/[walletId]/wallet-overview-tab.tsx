@@ -4,6 +4,7 @@ import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
+import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import { Suspense, use } from "react";
 import { useWalletActions } from "@/app/(session)/dashboard/[projectId]/custody/use-wallet-actions";
@@ -27,8 +28,8 @@ import {
 import { UnpricedHoldingsHint } from "@/app/(session)/dashboard/[projectId]/payments/unpriced-holdings-hint";
 import {
   RecordBlock,
-  RecordColumns,
-  RecordRow,
+  RecordFact,
+  RecordFactGrid,
   RecordStack,
   StateBand,
 } from "@/components/refresh-record";
@@ -68,13 +69,19 @@ function PartSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Whether the wallet can sign, as the design heads every wallet's page. */
+/**
+ * Whether the wallet can sign, as the design heads every wallet's page; a wallet created in a
+ * connection names the connection it signs through.
+ */
 function WalletStateBand({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const { flags } = useDashboardWorkspace();
   return wallet.isRuntimeExecutionAllowed ? (
     <StateBand tone="ok" state={t("DashboardCustody.walletStateActive")}>
       {t(walletSignersKey(flags))}
+      {wallet.connection
+        ? ` ${t("DashboardCustody.walletSignsThroughConnection", { connection: wallet.connection.label })}`
+        : null}
     </StateBand>
   ) : (
     <StateBand tone="warn" state={t("DashboardCustody.restricted")}>
@@ -122,64 +129,78 @@ function BalanceBlock({
       >
         <BalanceFigure balancesPromise={balancesPromise} />
       </Suspense>
+      {/* The design's facts under the figure: three to a row, four when a connection joins
+          them, two on a phone, where Created moves to the end. */}
       <div className="mt-4">
-        <RecordColumns>
-          <dl>
-            <RecordRow label={t("DashboardCustody.provider")}>{wallet.providerName}</RecordRow>
-            <RecordRow
-              label={t("DashboardCustody.purpose")}
-              hint={t(
-                flags.issuance
-                  ? "DashboardCustody.walletPurposeInfo"
-                  : "DashboardCustody.walletPurposeInfoPayments"
-              )}
+        <RecordFactGrid columns={wallet.connection ? 4 : 3}>
+          <RecordFact label={t("DashboardCustody.provider")}>
+            <span className="truncate">{wallet.providerName}</span>
+          </RecordFact>
+          {wallet.connection ? (
+            <RecordFact
+              label={t("DashboardCustody.connection")}
+              hint={t("DashboardCustody.walletConnectionInfo", { provider: wallet.providerName })}
             >
-              {wallet.purposeLabel ?? (
-                <span className="text-tertiary">{t("DashboardCustody.unknown")}</span>
-              )}
-            </RecordRow>
-            <RecordRow label={t("DashboardCustody.created")}>
-              {formatDate(wallet.createdAt, locale) ?? "—"}
-            </RecordRow>
-          </dl>
-          <dl>
-            <RecordRow label={t("DashboardCustody.address")}>
-              <span className="truncate tabular-nums" title={wallet.publicKey}>
-                {truncateMiddle(wallet.publicKey, 5, 6)}
-              </span>
-              <WalletMetadataCopyButton
-                value={wallet.publicKey}
-                label={t("DashboardCustody.walletAddress")}
-              />
-            </RecordRow>
-            <RecordRow
-              label={t("DashboardCustody.walletId")}
-              hint={t("DashboardCustody.walletIdInfo")}
-            >
-              <span className="truncate tabular-nums" title={wallet.walletId}>
-                {truncateMiddle(wallet.walletId, 9, 6)}
-              </span>
-              <WalletMetadataCopyButton
-                value={wallet.walletId}
-                label={t("DashboardCustody.walletId")}
-              />
-            </RecordRow>
-            {wallet.connection ? (
-              <RecordRow label={t("DashboardCustody.connection")}>
-                {wallet.connection.href ? (
-                  <Link href={wallet.connection.href} className="truncate hover:underline">
-                    {wallet.connection.label}
-                  </Link>
-                ) : (
+              {wallet.connection.href ? (
+                <Link
+                  href={wallet.connection.href}
+                  className="inline-flex min-w-0 items-center gap-1 underline decoration-border-strong underline-offset-4 hover:decoration-current"
+                >
                   <span className="truncate">{wallet.connection.label}</span>
-                )}
-              </RecordRow>
-            ) : null}
-          </dl>
-        </RecordColumns>
+                  <ArrowUpRightIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                </Link>
+              ) : (
+                <span className="truncate">{wallet.connection.label}</span>
+              )}
+            </RecordFact>
+          ) : null}
+          <RecordFact
+            label={t("DashboardCustody.purpose")}
+            hint={t(
+              flags.issuance
+                ? "DashboardCustody.walletPurposeInfo"
+                : "DashboardCustody.walletPurposeInfoPayments"
+            )}
+          >
+            {wallet.purposeLabel ? (
+              <span className="truncate">{wallet.purposeLabel}</span>
+            ) : (
+              <span className="text-tertiary">{t("DashboardCustody.unknown")}</span>
+            )}
+          </RecordFact>
+          <RecordFact label={t("DashboardCustody.created")} last>
+            {formatDate(wallet.createdAt, locale) ?? "—"}
+          </RecordFact>
+          <RecordFact label={t("DashboardCustody.address")}>
+            <span className="truncate tabular-nums" title={wallet.publicKey}>
+              {truncateMiddle(wallet.publicKey, 5, 6)}
+            </span>
+            <WalletMetadataCopyButton
+              value={wallet.publicKey}
+              label={t("DashboardCustody.walletAddress")}
+            />
+          </RecordFact>
+          <RecordFact
+            label={t("DashboardCustody.walletId")}
+            hint={t("DashboardCustody.walletIdInfo")}
+          >
+            <span className="truncate tabular-nums" title={wallet.walletId}>
+              {truncateMiddle(wallet.walletId, 9, 6)}
+            </span>
+            <WalletMetadataCopyButton
+              value={wallet.walletId}
+              label={t("DashboardCustody.walletId")}
+            />
+          </RecordFact>
+        </RecordFactGrid>
       </div>
     </RecordBlock>
   );
+}
+
+/** A mint is shown under its token when it is an address; a native balance may carry none. */
+function isMintAddress(mint: string | undefined): mint is string {
+  return typeof mint === "string" && mint.trim().length >= 32;
 }
 
 function TokensTable({
@@ -232,20 +253,39 @@ function TokensTable({
             return (
               <TableRow key={`${balance.mint}-${balance.token}`}>
                 <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <span className="flex min-w-0 items-center gap-2 font-medium text-primary">
+                  <span className="flex min-w-0 items-center gap-2">
                     <TokenMark mint={balance.mint} symbol={balance.token} size="sm" />
-                    {issuanceEnabled && issuedToken ? (
-                      <Link
-                        href={projectHref(`/dashboard/issuance/${issuedToken.id}`)}
-                        className="truncate hover:underline"
-                      >
-                        {name}
-                      </Link>
-                    ) : (
-                      <span className="truncate" title={balance.mint}>
-                        {name}
-                      </span>
-                    )}
+                    {/* The name over its mint, which copies from a 42rem container. */}
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      {issuanceEnabled && issuedToken ? (
+                        <Link
+                          href={projectHref(`/dashboard/issuance/${issuedToken.id}`)}
+                          className="inline-flex min-w-0 items-center gap-1 font-medium text-primary hover:underline"
+                        >
+                          <span className="truncate">{name}</span>
+                          <ArrowUpRightIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                        </Link>
+                      ) : (
+                        <span className="truncate font-medium text-primary" title={balance.mint}>
+                          {name}
+                        </span>
+                      )}
+                      {isMintAddress(balance.mint) ? (
+                        <span
+                          className="flex min-w-0 items-center gap-1 text-meta text-tertiary tabular-nums"
+                          title={balance.mint}
+                          data-wallet-token-mint
+                        >
+                          <span className="truncate">{truncateMiddle(balance.mint, 4, 4)}</span>
+                          <span className="hidden @2xl:contents">
+                            <WalletMetadataCopyButton
+                              value={balance.mint}
+                              label={t("DashboardCustody.walletTokenMint", { token: name })}
+                            />
+                          </span>
+                        </span>
+                      ) : null}
+                    </span>
                   </span>
                 </TableCell>
                 <TableCell

@@ -308,7 +308,8 @@ describe("counterparty provider accounts table", () => {
       payouts: [{ ...payout("tx_old", "12"), createdAt: "2025-06-01T00:00:00.000Z" }],
     });
     const text = container.textContent ?? "";
-    expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.neverPaid");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.nothingPaidYet");
     expect(text).toContain("DashboardPayments.counterparty.detail.paidSummary 12.00 USDC");
   });
 
@@ -325,7 +326,8 @@ describe("counterparty provider accounts table", () => {
   it("says the payment history was not loaded when the transfers read failed", async () => {
     await renderAccounts([], { transfersFailed: true, payoutsFailed: true });
     const text = container.textContent ?? "";
-    expect(text).not.toContain("DashboardPayments.counterparty.detail.notPaidYet");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.neverPaid");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.nothingPaidYet");
     expect(text).not.toContain("DashboardPayments.counterparty.detail.noPayments");
     expect(text.split("DashboardPayments.counterparty.detail.paymentsNotLoaded")).toHaveLength(3);
     expect(text).toContain("DashboardPayments.counterparty.detail.paymentsLoadFailed");

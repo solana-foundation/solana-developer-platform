@@ -103,6 +103,12 @@ vi.mock("./use-wallet-activity", async () => {
 
 const { WalletDetailView } = await import("./wallet-detail-view");
 
+/** The activity table, once the streamed balances and the feed have rendered it. */
+async function waitForActivityTable(): Promise<Element> {
+  await screen.findAllByText(/xfr_/);
+  return document.querySelector("[data-wallet-activity-table]") as Element;
+}
+
 const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
   walletId: "wallet_one",
   custodyWalletId: "cwlt_one",
@@ -194,11 +200,21 @@ describe("Overview", () => {
       await screen.findByText("$4,000.00", { selector: "[data-wallet-balance]" })
     ).toBeTruthy();
     expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText("Payments can sign with this wallet.")).toBeTruthy();
     expect(screen.getByText("Fireblocks")).toBeTruthy();
     expect(screen.getByText("Transfers")).toBeTruthy();
+    // The facts under the balance, label over value, in the design's order.
+    expect(
+      [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
+    ).toEqual(["Provider", "Purpose", "Created", "Address", "Wallet ID"]);
 
     const tokens = document.querySelector("[data-wallet-tokens]") as HTMLElement;
     expect(within(tokens).getByText("USDC")).toBeTruthy();
+    // The mint under its token, with a copy of the whole.
+    expect(
+      within(tokens).getByText("EPjF...Dt1v").closest("[data-wallet-token-mint]")
+    ).toBeTruthy();
+    expect(within(tokens).getByRole("button", { name: "Copy usdc mint" })).toBeTruthy();
 
     const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
@@ -207,6 +223,64 @@ describe("Overview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View all activity" }));
     expect(mocks.replaceSearchParams).toHaveBeenCalledWith({ tab: "activity" });
+  });
+
+  it("puts the connection beside the provider and names it in the band", async () => {
+    await act(async () => {
+      renderView({
+        wallet: {
+          ...wallet,
+          provider: "privy",
+          providerName: "Privy",
+          connection: { label: "Treasury app", href: "/dashboard/prj/integrations/privy/c" },
+        },
+      });
+    });
+    expect(
+      await screen.findByText("Payments can sign with this wallet. It signs through Treasury app.")
+    ).toBeTruthy();
+    expect(
+      [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
+    ).toEqual(["Provider", "Connection", "Purpose", "Created", "Address", "Wallet ID"]);
+    expect(screen.getByRole("link", { name: "Treasury app" }).getAttribute("href")).toBe(
+      "/dashboard/prj/integrations/privy/c"
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "The Privy account this wallet was created in. It signs only through this connection.",
+      })
+    ).toBeTruthy();
+  });
+
+  it("opens a row to its signature, the address on the other side and the explorer", async () => {
+    const [first, second] = mocks.activity.activityRows as Record<string, unknown>[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: [{ ...first, signature: "5VERYlongSignature1111111111111111abcdefgh" }, second],
+    };
+    await act(async () => {
+      renderView();
+    });
+    const activity = (await waitForActivityTable()) as HTMLElement;
+    const [openFirst, openSecond] = within(activity).getAllByRole("button", { name: "Details" });
+    expect(openFirst?.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(openFirst as HTMLElement);
+    expect(openFirst?.getAttribute("aria-expanded")).toBe("true");
+    const details = document.querySelector("[data-wallet-activity-details]") as HTMLElement;
+    expect(within(details).getByText("5VERYlon...abcdefgh")).toBeTruthy();
+    expect(within(details).getByText("Counterparty address")).toBeTruthy();
+    expect(within(details).getByRole("button", { name: "Copy signature" })).toBeTruthy();
+    expect(
+      within(details).getByRole("link", { name: "View on explorer" }).getAttribute("href")
+    ).toContain("5VERYlongSignature1111111111111111abcdefgh");
+
+    // One row open at a time; a row with no signature yet says so and offers no explorer.
+    fireEvent.click(openSecond as HTMLElement);
+    expect(openFirst?.getAttribute("aria-expanded")).toBe("false");
+    const pending = document.querySelector("[data-wallet-activity-details]") as HTMLElement;
+    expect(within(pending).getByText("None yet")).toBeTruthy();
+    expect(within(pending).queryByRole("link", { name: "View on explorer" })).toBeNull();
   });
 
   it("keeps the recent rows when a refresh fails, and says the activity is unavailable", async () => {
@@ -242,6 +316,13 @@ describe("Activity", () => {
     expect(screen.getAllByText(/xfr_/)).toHaveLength(1);
     expect(document.querySelector("[data-wallet-activity-capped]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Load older activity" })).toBeNull();
+    // The wallet's ledger is one press away whether or not older rows remain: in the toolbar,
+    // and under the list on a phone.
+    for (const link of screen.getAllByRole("link", { name: "Open in Transactions" })) {
+      expect(link.getAttribute("href")).toBe(
+        "/dashboard/prj_test_sandbox/payments/transactions?custodyWalletId=cwlt_one"
+      );
+    }
   });
 
   it("keeps the loaded rows when a refresh fails, and says the activity is unavailable", async () => {
@@ -273,9 +354,7 @@ describe("Activity", () => {
         /Search and filters cover the latest 20 transactions loaded here\. The full history is in Transactions\./
       )
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open Transactions" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/payments/transactions?custodyWalletId=cwlt_one"
-    );
+    expect(screen.getAllByRole("link", { name: "Open in Transactions" })).toHaveLength(2);
     expect(mocks.activityLimits.at(-1)).toBe(20);
 
     await act(async () => {
@@ -351,6 +430,30 @@ describe("Settings", () => {
     expect(
       (screen.getByRole("button", { name: "Prove ownership" }) as HTMLButtonElement).disabled
     ).toBe(false);
+  });
+
+  it("keeps a label, holds purpose and creation as fixed, and reads Never before a proof", async () => {
+    mocks.tab = "settings";
+    await act(async () => {
+      renderView();
+    });
+    const field = (await screen.findByLabelText("Wallet label")) as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(save.disabled).toBe(true);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(
+      screen.getByText(
+        "Give the wallet a label. Without one it reads as Untitled wallet everywhere it appears."
+      )
+    ).toBeTruthy();
+
+    const fixed = screen.getByRole("heading", { name: "Fixed at creation" }).closest("section");
+    expect(
+      [...(fixed as HTMLElement).querySelectorAll("dt")].map((label) => label.textContent)
+    ).toEqual(["Purpose", "Created"]);
+    expect(screen.getByText("Last proof")).toBeTruthy();
+    expect(screen.getByText("Never")).toBeTruthy();
   });
 
   it("explains why a restricted wallet cannot prove ownership", async () => {

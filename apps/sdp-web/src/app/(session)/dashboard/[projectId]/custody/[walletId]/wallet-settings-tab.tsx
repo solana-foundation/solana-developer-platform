@@ -15,7 +15,7 @@ import {
   formatDate,
   formatDateTime,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
-import { RecordBlock, RecordRow, RecordStack } from "@/components/refresh-record";
+import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
@@ -33,10 +33,12 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   const [pending, startTransition] = useTransition();
   const actionKey = useActionIdempotencyKey(custodyQueryKeys.isWalletInventoryKey);
   const changed = draft.trim() !== saved.trim();
+  // A wallet keeps a label: without one it reads as "Untitled wallet" everywhere it appears.
+  const named = draft.trim().length > 0;
 
   function save(event: FormEvent) {
     event.preventDefault();
-    if (!changed || pending) return;
+    if (!changed || !named || pending) return;
     const toastId = toast.loading(t("DashboardCustody.updatingWalletLabel"), {
       position: "bottom-right",
     });
@@ -68,8 +70,8 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   if (!wallet.canManageCustody) {
     return (
       <RecordBlock title={t("DashboardCustody.walletLabel")}>
-        <dl>
-          <RecordRow label={t("DashboardCustody.walletLabel")}>{wallet.name}</RecordRow>
+        <dl className="max-w-[660px]">
+          <RecordLine label={t("DashboardCustody.walletLabel")}>{wallet.name}</RecordLine>
         </dl>
       </RecordBlock>
     );
@@ -87,8 +89,15 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
             autoComplete="off"
             onChange={(event) => setDraft(event.currentTarget.value)}
             placeholder={t("DashboardCustody.untitledWallet")}
+            aria-invalid={named ? undefined : true}
+            aria-describedby={named ? undefined : "wallet-settings-label-required"}
             size="xl"
           />
+          {named ? null : (
+            <p id="wallet-settings-label-required" className="text-meta text-error">
+              {t("DashboardCustody.walletLabelRequired")}
+            </p>
+          )}
           <p className="text-meta text-tertiary">
             {t(
               flags.issuance
@@ -98,7 +107,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="sm" disabled={!changed} loading={pending}>
+          <Button type="submit" size="sm" disabled={!changed || !named} loading={pending}>
             {t("DashboardCustody.walletSaveChanges")}
           </Button>
           {changed ? (
@@ -141,28 +150,33 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
   return (
     <RecordBlock title={t("DashboardCustody.walletOwnership")}>
       <div className="flex max-w-[660px] flex-col gap-4">
-        {lastProof ? (
-          <dl>
-            <RecordRow label={t("DashboardCustody.walletLastProof")}>
-              {t("DashboardCustody.walletProofPassed", {
+        {/* The last proof always has a row, "Never" until one passes; what the check does is
+            its (i). */}
+        <dl>
+          <RecordLine
+            label={t("DashboardCustody.walletLastProof")}
+            hint={t("DashboardCustody.walletProveBody")}
+          >
+            {lastProof ? (
+              t("DashboardCustody.walletProofPassed", {
                 time: formatDateTime(lastProof.at, locale) ?? "",
-              })}
-            </RecordRow>
-            <RecordRow label={t("DashboardCustody.signature")}>
-              <span className="truncate tabular-nums" title={lastProof.signature}>
+              })
+            ) : (
+              <span className="text-tertiary">{t("DashboardCustody.walletProofNever")}</span>
+            )}
+          </RecordLine>
+          {lastProof ? (
+            <RecordLine label={t("DashboardCustody.signature")}>
+              <span className="min-w-0 truncate" title={lastProof.signature}>
                 {truncateMiddle(lastProof.signature, 6, 6)}
               </span>
               <WalletMetadataCopyButton
                 value={lastProof.signature}
                 label={t("DashboardCustody.signature")}
               />
-            </RecordRow>
-          </dl>
-        ) : (
-          <p className="max-w-[40em] text-body text-secondary">
-            {t("DashboardCustody.walletProveBody")}
-          </p>
-        )}
+            </RecordLine>
+          ) : null}
+        </dl>
         <div className="flex flex-col items-start gap-2">
           <Button
             type="button"
@@ -186,7 +200,10 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
   );
 }
 
-/** What can change about the wallet (its label), what cannot, and proving the keys still sign. */
+/**
+ * What can change about the wallet (its label), what cannot (its purpose and creation; the
+ * provider heads its overview), and proving the keys still sign.
+ */
 export function WalletSettingsTab({ wallet }: { wallet: WalletPageView }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -195,21 +212,20 @@ export function WalletSettingsTab({ wallet }: { wallet: WalletPageView }) {
       <LabelBlock wallet={wallet} />
       <RecordBlock title={t("DashboardCustody.walletFixedAtCreation")}>
         <dl className="max-w-[660px]">
-          <RecordRow
+          <RecordLine
             label={t("DashboardCustody.purpose")}
             hint={t("DashboardCustody.walletPurposeFixedInfo")}
           >
             {wallet.purposeLabel ?? (
               <span className="text-tertiary">{t("DashboardCustody.unknown")}</span>
             )}
-          </RecordRow>
-          <RecordRow
+          </RecordLine>
+          <RecordLine
             label={t("DashboardCustody.created")}
             hint={t("DashboardCustody.walletCreatedFixedInfo")}
           >
             {formatDate(wallet.createdAt, locale) ?? "—"}
-          </RecordRow>
-          <RecordRow label={t("DashboardCustody.provider")}>{wallet.providerName}</RecordRow>
+          </RecordLine>
         </dl>
       </RecordBlock>
       <OwnershipBlock wallet={wallet} />
