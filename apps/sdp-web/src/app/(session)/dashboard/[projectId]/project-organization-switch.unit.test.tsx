@@ -130,6 +130,35 @@ describe("ProjectOrganizationSwitch", () => {
     ]);
   });
 
+  it("ignores a lookup the server superseded by rendering for another organization", async () => {
+    clerk.memberships = ["org_test", "org_first", "org_second"];
+    const lookups: ((index: number | null) => void)[] = [];
+    vi.mocked(actions.findProjectOrganization).mockImplementation(
+      () => new Promise((resolve) => lookups.push(resolve))
+    );
+    const nextFallbackHref = `/dashboard/prj_first_sandbox/api-keys`;
+
+    const view = renderSwitch();
+    await waitFor(() => expect(lookups).toHaveLength(1));
+    view.rerender(
+      <ProjectOrganizationSwitch
+        projectId={OTHER_ORGANIZATION_PROJECT.id}
+        sessionOrganizationId="org_first"
+        fallbackHref={nextFallbackHref}
+        flags={dashboardFlagsAt("stable")}
+      />
+    );
+    await waitFor(() => expect(lookups).toHaveLength(2));
+    lookups[0]?.(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
+    expect(clerk.setActive).not.toHaveBeenCalled();
+    lookups[1]?.(null);
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalled());
+    expect(dashboardRouter.replace.mock.calls).toEqual([[nextFallbackHref]]);
+  });
+
   it("goes to the fallback when no other organization lists the project", async () => {
     clerk.memberships = ["org_test", "org_first"];
 

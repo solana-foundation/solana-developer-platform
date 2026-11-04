@@ -59,6 +59,9 @@ export function ProjectOrganizationSwitch({
       return;
     }
     startedAttemptRef.current = attempt;
+    // A lookup the server superseded (it rendered for another organization) or
+    // that outlived the switch acts on nothing.
+    const isCurrent = () => mountedRef.current && startedAttemptRef.current === attempt;
     const organizationIds = (user?.organizationMemberships ?? [])
       .map((membership) => membership.organization.id)
       .filter((organizationId) => organizationId !== sessionOrganizationId);
@@ -77,13 +80,13 @@ export function ProjectOrganizationSwitch({
           candidates.map((candidate) => candidate.token)
         );
         const match = index === null ? undefined : candidates[index];
-        if (match !== undefined && mountedRef.current) {
+        if (match !== undefined && isCurrent()) {
           // Clerk refreshes the route once the organization is active.
           await setActive({ organization: match.organizationId });
           return;
         }
       }
-      if (mountedRef.current) {
+      if (isCurrent()) {
         // react-doctor-disable-next-line nextjs-no-client-side-redirect -- only the browser can mint other organizations' tokens, and the tab shows a loading frame until it goes
         router.replace(fallbackHref);
       }
@@ -93,7 +96,7 @@ export function ProjectOrganizationSwitch({
     // rather than leaving the tab on a loading frame.
     switchToProjectOrganization().catch((error: unknown) => {
       console.error("Could not find the organization of the requested project", error);
-      if (mountedRef.current) {
+      if (isCurrent()) {
         // react-doctor-disable-next-line nextjs-no-client-side-redirect -- only the browser can mint other organizations' tokens, and the tab shows a loading frame until it goes
         router.replace(fallbackHref);
       }
