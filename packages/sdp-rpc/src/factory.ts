@@ -821,7 +821,11 @@ function endpointHistoryFailure(cause: unknown): EndpointHistoryFailure {
   }
   return cause instanceof Error
     ? { reason: "history_unavailable", errorName: cause.name, errorMessage: cause.message }
-    : { reason: "history_unavailable", errorName: typeof cause, errorMessage: String(cause) };
+    : {
+        reason: "history_unavailable",
+        errorName: "NonErrorRejection",
+        errorMessage: String(cause),
+      };
 }
 
 function mostConfirmedStatus(
