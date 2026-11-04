@@ -2,7 +2,6 @@
 
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -10,6 +9,7 @@ import type {
   WalletSetupActionResult,
 } from "@/app/(session)/dashboard/[projectId]/custody/actions";
 import type { PrivyByokSubmitResult } from "@/app/(session)/dashboard/[projectId]/custody/byok-actions";
+import * as csrActions from "@/app/(session)/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -143,12 +143,32 @@ function asElement<T extends Element>(element: Element | null, type: { new (): T
   return element;
 }
 
+function connection(overrides: Partial<ConnectionItem> = {}): ConnectionItem {
+  return {
+    id: "conn-active",
+    provider: "privy",
+    label: "Production signing",
+    status: "active",
+    isRuntimeExecutionAllowed: true,
+    createdAt: "2026-08-10T09:00:00.000Z",
+    activatedAt: "2026-08-10T09:05:00.000Z",
+    lastCheck: null,
+    pendingWalletLabel: null,
+    ...overrides,
+  };
+}
+
 const createButton = () =>
   asElement(screen.getByRole("button", { name: /^Create wallet/ }), HTMLButtonElement);
-const connectButton = () => screen.getByRole("button", { name: /^Connect and verify/ });
+const connectButton = () => screen.getByRole("button", { name: /^Connect and create wallet/ });
 const footerHint = () => document.getElementById("wallet-setup-footer-hint")?.textContent;
 const labelInput = () => asElement(screen.getByLabelText("Wallet label"), HTMLInputElement);
 const typeLabel = (value: string) => fireEvent.change(labelInput(), { target: { value } });
+const radio = (name: RegExp) => asElement(screen.getByRole("radio", { name }), HTMLInputElement);
+const managedAnswer = () => radio(/^SDP's Privy account/);
+const ownAnswer = () => radio(/^Your own Privy account/);
+const accountList = () => document.querySelector("[data-wallet-account-list]");
+const createdWith = () => screen.getByRole("region", { name: "Created with" });
 const fillPrivyCredentials = () => {
   fireEvent.change(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
   fireEvent.change(screen.getByLabelText("Privy app secret"), { target: { value: "secret_1" } });
@@ -165,6 +185,11 @@ function submitted(action: { mock: { calls: [FormData][] } }): FormData {
 
 beforeEach(() => {
   resetDashboardNavigation();
+  // Fireblocks' fields read the project's registration CSR on mount; none is open yet.
+  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
+    status: "success",
+    csr: null,
+  });
 });
 
 afterEach(() => {
@@ -174,7 +199,7 @@ afterEach(() => {
 });
 
 describe("one screen", () => {
-  it("asks for the provider only when there is a choice, connected providers first", () => {
+  it("asks for the provider only when there is a choice, by name, with its short summary", () => {
     renderFlow({ connectedProviders: ["dfns"] });
 
     expect(screen.getByRole("heading", { name: "Create wallet" })).toBeTruthy();
@@ -183,39 +208,40 @@ describe("one screen", () => {
     const names = [...list.querySelectorAll("[data-wallet-provider]")].map((row) =>
       row.getAttribute("data-wallet-provider")
     );
-    expect(names[0]).toBe("dfns");
-    expect(new Set(names)).toEqual(new Set(["turnkey", "dfns", "privy"]));
-    expect(within(list).getAllByText("Active")).toHaveLength(1);
+    expect(names).toEqual(["dfns", "privy", "turnkey"]);
+    // A set-up provider is not marked: picking it shows what it offers.
+    expect(within(list).queryByText("Active")).toBeNull();
+    expect(within(list).getByText("MPC wallets, signed through its API.")).toBeTruthy();
     // The label is asked from the start, so choosing a provider never pops it in.
     expect(labelInput()).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
   });
 
   it("opens on the only provider the project can use, with nothing to pick", () => {
     renderFlow({ custodyAvailability: PRODUCTION_AVAILABILITY, environment: "production" });
 
     expect(document.querySelector("[data-wallet-provider-list]")).toBeNull();
-    const createdWith = screen.getByRole("region", { name: "Created with" });
-    expect(within(createdWith).getByText("Privy")).toBeTruthy();
+    expect(within(createdWith()).getByText("Privy")).toBeTruthy();
   });
 
   it("names what is still missing beside the disabled Create wallet", () => {
     renderFlow();
     expect(createButton().disabled).toBe(true);
     expect(createButton().getAttribute("aria-describedby")).toBe("wallet-setup-footer-hint");
-    expect(footerHint()).toBe("Choose an enabled provider to continue.");
+    expect(footerHint()).toBe("Pick a provider first.");
 
-    fireEvent.click(screen.getByRole("radio", { name: /Turnkey/ }));
-    expect(footerHint()).toBe("Name the wallet to continue.");
+    fireEvent.click(radio(/Turnkey/));
+    expect(footerHint()).toBe("Name the wallet first.");
     expect(createButton().disabled).toBe(true);
 
     typeLabel("Settlement wallet");
-    expect(footerHint()).toBe("Turnkey creates the keys when you confirm.");
+    expect(footerHint()).toBe("Turnkey makes the keys in under a minute.");
     expect(createButton().disabled).toBe(false);
   });
 
   it("keeps Enter on a choice from creating anything, and creates once from the label", async () => {
     renderFlow();
-    const turnkey = screen.getByRole("radio", { name: /Turnkey/ });
+    const turnkey = radio(/Turnkey/);
     fireEvent.click(turnkey);
     typeLabel("Ops");
 
@@ -239,23 +265,92 @@ describe("one screen", () => {
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
   });
 
-  it("leaves for the project's wallet list from Cancel", () => {
+  it("leaves for the project's wallet list from Cancel when nothing was typed", () => {
     renderFlow();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
+
+  it("asks before Cancel throws away what was typed", () => {
+    renderFlow({ initialProvider: "turnkey" });
+    typeLabel("Ops");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave without creating the wallet?" });
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep going" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(labelInput().value).toBe("Ops");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Leave" }));
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
+  it("asks before Cancel when only credentials were typed", () => {
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: PRODUCTION_AVAILABILITY,
+      environment: "production",
+      initialProvider: "privy",
+    });
+    fireEvent.input(screen.getByLabelText("Privy app ID"), { target: { value: "app_1" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Leave without creating the wallet?" })).toBeTruthy();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
+  // Greptile (#2741): after a lost answer the dialog said no wallet was made, though the
+  // request may have created one.
+  it("says the wallet may exist when Cancel follows a request that went out", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    typeLabel("Unsure");
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const dialog = screen.getByRole("dialog", { name: "Leave wallet setup?" });
+    expect(within(dialog).getByText(/may have created the wallet/)).toBeTruthy();
+    expect(within(dialog).queryByText(/No wallet has been made/)).toBeNull();
+  });
+
+  it("says the wallet may exist once a credential submission went out", async () => {
+    mocks.submitCredential.mockResolvedValueOnce({
+      status: "failed",
+      message: "Those credentials did not verify.",
+      connectionId: "conn_failed",
+    });
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+    typeLabel("Ops");
+    fireEvent.click(ownAnswer());
+    fillPrivyCredentials();
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Leave wallet setup?" })).toBeTruthy();
+  });
 });
 
 describe("details", () => {
-  it("states what the wallet is created with", () => {
-    renderFlow({ initialProvider: "turnkey" });
+  it("states what the wallet is created with, naming the provider once it is chosen", () => {
+    renderFlow();
+    expect(within(createdWith()).queryByText("Provider")).toBeNull();
 
-    const createdWith = screen.getByRole("region", { name: "Created with" });
-    expect(within(createdWith).getByText("Turnkey")).toBeTruthy();
-    expect(within(createdWith).getByText("Default Sandbox Project")).toBeTruthy();
-    expect(within(createdWith).getByText("Sandbox · devnet")).toBeTruthy();
+    fireEvent.click(radio(/Turnkey/));
+    const summary = createdWith();
+    expect(within(summary).getByText("Turnkey")).toBeTruthy();
+    expect(within(summary).getByText("Default Sandbox Project")).toBeTruthy();
+    expect(within(summary).getByText("Sandbox · devnet")).toBeTruthy();
+    // A Managed-only provider has no account to name.
+    expect(within(summary).queryByText("Connection")).toBeNull();
     // The provider is chosen on this screen, so the summary has no way back to it.
-    expect(within(createdWith).queryByRole("button", { name: "Change" })).toBeNull();
+    expect(within(summary).queryByRole("button", { name: "Change" })).toBeNull();
   });
 
   it("creates another wallet with its label and purpose, then opens it with a toast", async () => {
@@ -267,6 +362,7 @@ describe("details", () => {
 
     const formData = submitted(mocks.createWallet);
     expect(formData.get("provider")).toBe("turnkey");
+    expect(formData.get("connectionId")).toBeNull();
     expect(formData.get("label")).toBe("Settlement wallet");
     expect(formData.get("purpose")).toBe("transfer");
     expect(toastSuccess).toHaveBeenCalledWith("Settlement wallet created");
@@ -280,8 +376,7 @@ describe("details", () => {
   it("fixes a first wallet as a transfer wallet in the summary, with no picker", async () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
     expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
-    const createdWith = screen.getByRole("region", { name: "Created with" });
-    expect(within(createdWith).getByText("Transfers")).toBeTruthy();
+    expect(within(createdWith()).getByText("Transfers")).toBeTruthy();
 
     typeLabel("Treasury");
     await act(async () => {
@@ -407,30 +502,32 @@ describe("details", () => {
   });
 });
 
-describe("custody modes", () => {
-  const managedAnswer = () =>
-    asElement(screen.getByRole("radio", { name: /SDP's Privy account/ }), HTMLInputElement);
-  const ownAnswer = () =>
-    asElement(screen.getByRole("radio", { name: /Your own Privy account/ }), HTMLInputElement);
-
+describe("whose account", () => {
   it("asks whose account holds the keys, and creates nothing until it is answered", () => {
     renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
 
     expect(screen.getByRole("group", { name: "Whose Privy account holds the keys?" })).toBeTruthy();
+    expect(screen.getByText("It cannot be changed after the wallet exists.")).toBeTruthy();
+    expect(
+      screen.getByText("For trying SDP out. No wallet policy, and SDP holds the credentials.")
+    ).toBeTruthy();
+    expect(screen.getByText("Connect it with its App ID and secret.")).toBeTruthy();
     expect(managedAnswer().checked).toBe(false);
     expect(ownAnswer().checked).toBe(false);
     expect(document.getElementById("wallet-details-form")).toBeNull();
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
     typeLabel("Treasury");
-    expect(footerHint()).toBe("Choose whose Privy account holds the keys.");
+    expect(footerHint()).toBe("Pick whose Privy account holds the keys.");
     expect(createButton().disabled).toBe(true);
   });
 
-  it("sets SDP's account up with the label typed before the answer", async () => {
+  it("sets SDP's account up with the label typed before the answer, naming it in the summary", async () => {
     renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
     typeLabel("Treasury");
     fireEvent.click(managedAnswer());
 
+    expect(within(createdWith()).getByText("SDP's Privy account")).toBeTruthy();
+    expect(footerHint()).toBe("No wallet policy in SDP's Privy account.");
     expect(createButton().disabled).toBe(false);
     await act(async () => {
       fireEvent.click(createButton());
@@ -438,7 +535,7 @@ describe("custody modes", () => {
     expect(submitted(mocks.initialize).get("walletLabel")).toBe("Treasury");
   });
 
-  it("swaps in the credential form for the project's own account, keeping the label", async () => {
+  it("puts the credential form under the question for the project's own account, keeping the label", async () => {
     renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
     typeLabel("Ops");
     fireEvent.click(ownAnswer());
@@ -448,11 +545,18 @@ describe("custody modes", () => {
       HTMLFormElement
     );
     expect(credentialForm.id).toBe("wallet-details-form");
+    // The credentials come first, then the wallet's details.
+    const detailsTitle = screen.getByRole("heading", { name: "Wallet details" });
+    expect(
+      credentialForm.compareDocumentPosition(detailsTitle) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     // The flow's own label stands in for the form's, and submits with it.
     expect(screen.queryByLabelText("Initial wallet label")).toBeNull();
     expect(labelInput().value).toBe("Ops");
     expect(new FormData(credentialForm).get("walletLabel")).toBe("Ops");
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
+    expect(within(createdWith()).getByText("The Privy account you connect")).toBeTruthy();
+    expect(footerHint()).toBe("SDP checks the credentials with Privy, then creates the wallet.");
 
     fillPrivyCredentials();
     await act(async () => {
@@ -473,7 +577,7 @@ describe("custody modes", () => {
         })
     );
     renderFlow({ connectedProviders: [], custodyAvailability: SANDBOX_AVAILABILITY });
-    fireEvent.click(screen.getByRole("radio", { name: /Privy/ }));
+    fireEvent.click(radio(/Privy/));
     typeLabel("Ops");
     fireEvent.click(ownAnswer());
     fillPrivyCredentials();
@@ -483,9 +587,7 @@ describe("custody modes", () => {
     });
     // Switching either answer would unmount the form that holds the request's recovery.
     expect(managedAnswer().disabled).toBe(true);
-    expect(
-      asElement(screen.getByRole("radio", { name: /Turnkey/ }), HTMLInputElement).disabled
-    ).toBe(true);
+    expect(radio(/Turnkey/).disabled).toBe(true);
     expect(labelInput().disabled).toBe(true);
 
     // Settled, so no transition stays pending for the tests after this one.
@@ -497,7 +599,7 @@ describe("custody modes", () => {
 
   // Greptile (#2727): a refusal's panel hides the footer's primary, and the primary stayed
   // hidden after a changed answer mounted a fresh form.
-  it("brings Connect and verify back when an answer changes after a refused check", async () => {
+  it("brings Connect and create wallet back when an answer changes after a refused check", async () => {
     mocks.submitCredential.mockResolvedValueOnce({
       status: "refused",
       message: "Privy refused these credentials.",
@@ -512,7 +614,7 @@ describe("custody modes", () => {
     });
     // The refusal's panel carries its own way forward, so the footer's goes.
     expect(document.querySelector("[data-privy-byok-refused]")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Connect and verify/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Connect and create wallet/ })).toBeNull();
 
     fireEvent.click(managedAnswer());
     fireEvent.click(ownAnswer());
@@ -533,15 +635,15 @@ describe("custody modes", () => {
       custodyAvailability: PRODUCTION_BYOK_PAIR_AVAILABILITY,
       environment: "production",
     });
-    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
+    fireEvent.click(radio(/^Privy/));
     typeLabel("Ops");
     fillPrivyCredentials();
     await act(async () => {
       fireEvent.click(connectButton());
     });
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Fireblocks/ }));
-    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
+    fireEvent.click(radio(/^Fireblocks/));
+    fireEvent.click(radio(/^Privy/));
     fillPrivyCredentials();
     await act(async () => {
       fireEvent.click(connectButton());
@@ -551,82 +653,207 @@ describe("custody modes", () => {
     ).toEqual([null, null]);
   });
 
-  it("sends a provider offered only as BYOK straight to its credential form", () => {
+  it("asks nothing to pick when the project's own account is the only answer", () => {
     renderFlow({
       connectedProviders: [],
       custodyAvailability: PRODUCTION_AVAILABILITY,
       environment: "production",
       initialProvider: "privy",
     });
+    expect(
+      screen.getByRole("heading", { name: "Whose Privy account holds the keys?" })
+    ).toBeTruthy();
+    expect(screen.getByText("Production uses your own. Connect it below.")).toBeTruthy();
+    expect(accountList()).toBeNull();
     expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
-    expect(document.querySelector("[data-wallet-mode-list]")).toBeNull();
-    expect(screen.getByRole("button", { name: /^Connect and verify/ })).toBeTruthy();
+    expect(connectButton()).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
   });
 
-  it("sets a Managed-only provider up with the wallet details", () => {
+  // Windscar (#2741): an inline pending handler changed identity every render, so Fireblocks'
+  // CSR read restarted each time it reported, and its pending edge counted as a sent request.
+  it("reads the Fireblocks CSR once, and the read sends no wallet request", async () => {
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: availableCustodyProviders(
+        projectProviderAvailability({
+          project: PRODUCTION_PROJECT,
+          custody: [{ provider: "fireblocks", modes: ["byok"] }],
+          compliance: [],
+          ramps: [],
+          earn: [],
+        })
+      ),
+      environment: "production",
+      initialProvider: "fireblocks",
+    });
+    for (let settle = 0; settle < 5; settle += 1) {
+      await act(async () => {});
+    }
+    expect(csrActions.loadFireblocksCsrAction).toHaveBeenCalledTimes(1);
+
+    // Nothing was typed and nothing was sent, so Cancel leaves at once.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
+  it("sets a Managed-only provider up with the wallet details and no account question", () => {
     renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
-    expect(document.querySelector("[data-wallet-mode-list]")).toBeNull();
+    expect(screen.queryByText("Whose Turnkey account holds the keys?")).toBeNull();
+    expect(accountList()).toBeNull();
     expect(document.getElementById("wallet-details-form")).toBeTruthy();
   });
-});
 
-describe("connection picker", () => {
-  function connection(overrides: Partial<ConnectionItem> = {}): ConnectionItem {
-    return {
-      id: "conn-active",
-      provider: "privy",
-      label: "Production signing",
-      status: "active",
-      isRuntimeExecutionAllowed: true,
-      createdAt: "2026-08-10T09:00:00.000Z",
-      activatedAt: "2026-08-10T09:05:00.000Z",
-      lastCheck: null,
-      pendingWalletLabel: null,
-      ...overrides,
-    };
-  }
-
-  const pickerField = () => document.querySelector('input[name="walletTarget"]');
-
-  it("offers the connection once the project has a usable one, with nothing preselected", () => {
+  it("lists the provider's connections beside SDP's account, with nothing preselected", () => {
     renderFlow({
       initialProvider: "privy",
       connectedProviders: ["privy"],
       connections: [connection()],
     });
-    expect(screen.getByText("Account")).toBeTruthy();
-    expect(asElement(pickerField(), HTMLInputElement).value).toBe("");
+    const list = asElement(accountList(), HTMLElement);
+    expect(
+      [...list.querySelectorAll("[data-wallet-account]")].map((row) =>
+        row.getAttribute("data-wallet-account")
+      )
+    ).toEqual(["managed", "conn-active", "own"]);
+    expect(radio(/^Connect another Privy account/)).toBeTruthy();
+    for (const answer of within(list).getAllByRole("radio")) {
+      expect(asElement(answer, HTMLInputElement).checked).toBe(false);
+    }
+    expect(footerHint()).toBe("Pick whose Privy account holds the keys.");
+    expect(document.getElementById("wallet-details-form")).toBeNull();
   });
 
-  it("asks where the wallet lives instead of picking a default, and sends nothing until it does", async () => {
+  it("creates the wallet in the connection picked, with its purpose", async () => {
     renderFlow({
       initialProvider: "privy",
       connectedProviders: ["privy"],
       connections: [connection()],
     });
+    fireEvent.click(radio(/^Production signing/));
+    typeLabel("Ops");
+    expect(within(createdWith()).getByText("Production signing")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Purpose" })).toBeTruthy();
+    expect(footerHint()).toBe("Privy makes the keys in under a minute.");
+
+    await act(async () => {
+      fireEvent.click(createButton());
+    });
+    const formData = submitted(mocks.createWallet);
+    expect(formData.get("connectionId")).toBe("conn-active");
+    expect(formData.get("label")).toBe("Ops");
+    expect(formData.get("purpose")).toBe("transfer");
+  });
+
+  it("creates the wallet in SDP's set-up account when that is picked", async () => {
+    renderFlow({
+      initialProvider: "privy",
+      connectedProviders: ["privy"],
+      connections: [connection()],
+    });
+    fireEvent.click(managedAnswer());
     typeLabel("Ops");
     await act(async () => {
       fireEvent.click(createButton());
     });
-    expect(screen.getByRole("alert").textContent).toBe(
-      "Choose the account the wallet is created in."
-    );
-    expect(mocks.createWallet).not.toHaveBeenCalled();
+    const formData = submitted(mocks.createWallet);
+    expect(formData.get("provider")).toBe("privy");
+    expect(formData.get("connectionId")).toBeNull();
+    expect(mocks.initialize).not.toHaveBeenCalled();
   });
 
-  it("stays out of the way when nothing is selectable", () => {
+  it("connects another account of the project's own from the list", () => {
     renderFlow({
       initialProvider: "privy",
       connectedProviders: ["privy"],
-      connections: [connection({ status: "pending" })],
+      connections: [connection()],
     });
-    expect(pickerField()).toBeNull();
-    expect(document.getElementById("wallet-details-form")).toBeTruthy();
+    fireEvent.click(radio(/^Connect another Privy account/));
+    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(connectButton()).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Purpose" })).toBeNull();
+  });
+
+  it("keeps a connection that cannot take a wallet on the list, with a link to fix it", () => {
+    renderFlow({
+      initialProvider: "privy",
+      connectedProviders: ["privy"],
+      connections: [
+        connection({ id: "conn-pending", label: "Ops app", status: "pending" }),
+        connection({
+          id: "conn-failed",
+          label: "Staging app",
+          status: "failed",
+          lastCheck: { status: "failed", at: null, failureCode: "invalid_credentials" },
+        }),
+        connection({ id: "conn-gone", label: "Old app", status: "deactivated" }),
+      ],
+    });
+    const list = asElement(accountList(), HTMLElement);
+    expect(within(list).queryByText("Old app")).toBeNull();
+    // Only SDP's account and a new one can take the wallet.
+    expect(within(list).getAllByRole("radio")).toHaveLength(2);
+
+    const pending = asElement(
+      list.querySelector('[data-wallet-account="conn-pending"]'),
+      HTMLElement
+    );
+    expect(within(pending).getByText("Setup not finished")).toBeTruthy();
+    expect(within(pending).getByRole("link", { name: "Check again" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/integrations/privy/connections/conn-pending"
+    );
+    const failed = asElement(
+      list.querySelector('[data-wallet-account="conn-failed"]'),
+      HTMLElement
+    );
+    expect(within(failed).getByText("Privy rejected its keys")).toBeTruthy();
+    expect(within(failed).getByRole("link", { name: "Replace credentials" })).toBeTruthy();
+  });
+
+  // Greptile (#2741): the repair link stayed live during a credential check, so leaving through
+  // it dropped the request's saved retry.
+  it("locks a connection's repair link while a credential check is in flight", async () => {
+    let settle: (result: PrivyByokSubmitResult) => void = () => undefined;
+    mocks.submitCredential.mockImplementationOnce(
+      () =>
+        new Promise<PrivyByokSubmitResult>((resolve) => {
+          settle = resolve;
+        })
+    );
+    renderFlow({
+      initialProvider: "privy",
+      connectedProviders: ["privy"],
+      connections: [connection({ id: "conn-pending", label: "Ops app", status: "pending" })],
+    });
+    typeLabel("Ops");
+    fireEvent.click(radio(/^Connect another Privy account/));
+    fillPrivyCredentials();
+    const row = asElement(
+      document.querySelector('[data-wallet-account="conn-pending"]'),
+      HTMLElement
+    );
+    expect(
+      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+    expect(within(row).queryByRole("link", { name: "Check again" })).toBeNull();
+    expect(within(row).getByText("Check again")).toBeTruthy();
+
+    // Settled, so no transition stays pending for the tests after this one.
+    await act(async () => {
+      settle({ status: "failed", message: "Those credentials did not verify." });
+    });
+    expect(
+      within(row).getByRole("link", { name: "Check again" }).getAttribute("href")
+    ).toBeTruthy();
   });
 
   // A BYOK-only project has no Managed config, so nothing is connected; the active connection
-  // alone must mark the provider installed.
+  // alone must offer the wallet a place to go.
   it("offers an active connection when the provider has no Managed config", () => {
     renderFlow({
       initialProvider: "privy",
@@ -635,14 +862,17 @@ describe("connection picker", () => {
       environment: "production",
       connections: [connection()],
     });
-    expect(pickerField()).toBeTruthy();
+    expect(
+      screen.getByText("Production uses your own, fixed once the wallet exists.")
+    ).toBeTruthy();
+    expect(radio(/^Production signing/)).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /^SDP's Privy account/ })).toBeNull();
     expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
   });
 
-  // Greptile (#2727): the Account picker outlived a provider switch. An option both providers
-  // offer ("Managed by SDP") stayed chosen, so the new provider's wallet skipped the question.
-  it("asks for the account again when the provider changes", async () => {
-    const user = userEvent.setup();
+  // Greptile (#2727): the account outlived a provider switch. An answer both providers offer
+  // (SDP's account) stayed chosen, so the new provider's wallet skipped the question.
+  it("asks for the account again when the provider changes", () => {
     renderFlow({
       connectedProviders: ["privy", "fireblocks"],
       custodyAvailability: availableCustodyProviders(
@@ -662,21 +892,21 @@ describe("connection picker", () => {
         connection({ id: "conn-fireblocks", provider: "fireblocks", label: "Fireblocks vaults" }),
       ],
     });
-    fireEvent.click(screen.getByRole("radio", { name: /^Privy/ }));
-    await user.click(screen.getByRole("combobox", { name: "Account" }));
-    await user.click(await screen.findByRole("option", { name: "Managed by SDP" }));
-    expect(asElement(pickerField(), HTMLInputElement).value).toBe("managed");
+    fireEvent.click(radio(/^Privy/));
+    fireEvent.click(managedAnswer());
+    expect(managedAnswer().checked).toBe(true);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Fireblocks/ }));
-    expect(asElement(pickerField(), HTMLInputElement).value).toBe("");
+    fireEvent.click(radio(/^Fireblocks/));
+    expect(radio(/^SDP's Fireblocks account/).checked).toBe(false);
+    expect(screen.queryByText("Privy signing")).toBeNull();
     typeLabel("Ops");
-    await act(async () => {
-      fireEvent.click(createButton());
-    });
-    expect(screen.getByRole("alert").textContent).toBe(
-      "Choose the account the wallet is created in."
-    );
-    expect(mocks.createWallet).not.toHaveBeenCalled();
+    expect(footerHint()).toBe("Pick whose Fireblocks account holds the keys.");
+    expect(createButton().disabled).toBe(true);
+
+    // Only Privy's account at SDP is known to take no wallet policy, so Fireblocks' claims none.
+    expect(screen.getByText("For trying SDP out. SDP holds the credentials.")).toBeTruthy();
+    fireEvent.click(radio(/^SDP's Fireblocks account/));
+    expect(footerHint()).toBe("Fireblocks makes the keys in under a minute.");
   });
 
   // Connections belong to one provider; switching provider must not carry them over.
@@ -686,6 +916,7 @@ describe("connection picker", () => {
       initialProvider: "turnkey",
       connections: [connection()],
     });
-    expect(pickerField()).toBeNull();
+    expect(accountList()).toBeNull();
+    expect(screen.queryByText("Production signing")).toBeNull();
   });
 });

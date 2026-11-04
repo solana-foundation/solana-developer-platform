@@ -34,14 +34,16 @@ already selected and the question is not shown.
 
 ### 3. Set up the provider
 
-If the provider can run on either account, the page asks whose account holds
-the keys. For Privy, choose **SDP's Privy account** to use SDP's, with nothing
-to set up, or **Your own Privy account** to connect yours. Production requires
-your own account; see [Go to mainnet](/docs/guides/go-to-mainnet).
+If you can connect your own account for the provider, the page asks whose
+account holds the keys. For Privy, choose **SDP's Privy account** to try SDP
+out, with no wallet policy and nothing to set up, or **Your own Privy account**
+to connect yours. Nothing is preselected. Production requires your own account;
+see [Go to mainnet](/docs/guides/go-to-mainnet).
 
-With your own account, enter a **Wallet label**, a **Credential label**, your
-**Privy app ID** and your **Privy app secret**. Click **Connect and verify** to
-connect the account and create its first wallet.
+With your own account, enter a **Credential label**, your **Privy app ID** and
+your **Privy app secret**, then a **Wallet label** under **Wallet details**.
+Click **Connect and create wallet** to connect the account and create its first
+wallet.
 
 ![Privy provider setup with example credentials and a masked secret](/images/go-to-mainnet/04-connect-privy.png)
 
@@ -57,16 +59,18 @@ The first wallet is a transfer wallet.
 
 ### 4. Create additional wallets
 
-Click **Create wallet** again, select the provider if asked, and enter a
-**Wallet label**. Choose a **Purpose** if more than one is offered. If the
-provider has active connections, choose the **Account** the wallet will belong
-to. Nothing is preselected. Click **Create wallet**.
+Click **Create wallet** again and select the provider if asked. Where the page
+asks whose account holds the keys, it lists SDP's account where it is offered,
+each of your connections and one to connect another; nothing is preselected. A connection
+that is not ready shows what it needs, with a link to fix it. Enter a **Wallet
+label**, choose a **Purpose** if more than one is offered, and click **Create
+wallet**.
 
 ### 5. View your wallet
 
 Once the wallet is created, its page opens with its address and balance. A
-wallet created with **Connect and verify** appears on **Wallets** instead; open
-it to see its details.
+wallet created with **Connect and create wallet** appears on **Wallets**
+instead; open it to see its details.
 
 </Tab>
 <Tab value="API">

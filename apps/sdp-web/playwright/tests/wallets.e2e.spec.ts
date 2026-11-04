@@ -400,7 +400,9 @@ test.describe
         contentType: "image/png",
       });
 
+      // Something was typed, so Cancel asks before throwing it away.
       await cancelButton.click();
+      await page.getByRole("button", { name: "Leave", exact: true }).click();
       await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"));
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup?provider=privy");
@@ -488,7 +490,8 @@ test.describe
         }
       });
 
-      // Choosing is not confirming: Enter on a provider leaves the page as it is.
+      // Choosing is not confirming: Enter on a provider, or on whose account, leaves the page
+      // as it is.
       const choosePrivyWithEnter = async () => {
         const privyProvider = page.getByRole("radio", { name: /^Privy/ });
         await privyProvider.focus();
@@ -496,6 +499,11 @@ test.describe
         await expect(privyProvider).toBeChecked();
         await page.keyboard.press("Enter");
         await expect(page.getByLabel("Wallet label")).toBeVisible();
+        const managedAnswer = page.getByRole("radio", { name: /^SDP's Privy account/ });
+        await managedAnswer.focus();
+        await page.keyboard.press("Space");
+        await expect(managedAnswer).toBeChecked();
+        await page.keyboard.press("Enter");
         expect(serverActionRequestCount).toBe(0);
       };
 
