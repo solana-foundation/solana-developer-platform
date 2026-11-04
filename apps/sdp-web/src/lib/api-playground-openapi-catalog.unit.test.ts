@@ -191,7 +191,7 @@ describe("API playground allowlist", () => {
   it("refuses what the catalog does not publish on the channel", () => {
     expect(findPublishedPlaygroundOperation("GET", "/v1/api-keys", "experimental")).toBeUndefined();
     expect(
-      findPublishedPlaygroundOperation("POST", "/v1/payments/requests", "experimental")
+      findPublishedPlaygroundOperation("POST", "/v1/places/autocomplete", "experimental")
     ).toBeUndefined();
     expect(
       findPublishedPlaygroundOperation("GET", "/v1/payments/transfers/", "experimental")
