@@ -5,6 +5,7 @@ import type {
   CounterpartyAccountSummary,
   PaymentsDashboardWallet,
   PaymentTransferBatchEstimateWarning,
+  PaymentTransferBatchRequest,
 } from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
@@ -39,6 +40,8 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  isTransferBatchSendOutcomeUnknown,
+  nameTransferBatchRequest,
   retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
@@ -353,6 +356,11 @@ export function useBatchSendWizard({
   const [submitting, setSubmitting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
+  // The batch as sent when its answer left the outcome unknown. Until the API
+  // answers for it, the wizard only sends these same bytes again, under the
+  // same key and payout run, so an edit can never start a second run.
+  const [unconfirmedSend, setUnconfirmedSend] = useState<PaymentTransferBatchRequest | null>(null);
+  const recovering = unconfirmedSend !== null;
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -557,21 +565,24 @@ export function useBatchSendWizard({
   // and named no recipient create would refuse.
   const estimateSettled = estimate !== undefined || estimateError !== undefined;
   const canSend =
-    canProceed &&
-    (currentStepId !== "REVIEW" ||
-      batchResult !== null ||
-      (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null));
+    recovering ||
+    (canProceed &&
+      (currentStepId !== "REVIEW" ||
+        batchResult !== null ||
+        (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null)));
 
   const submitBatch = async () => {
     setSubmitting(true);
     const toastId = toast.loading(t("DashboardPayments.batchSend.submitting"), {
       position: "bottom-right",
     });
+    const sent = unconfirmedSend ?? nameTransferBatchRequest(request);
     try {
       // Durable per tab: a retry of this exact batch (double press, timeout,
       // reload) carries the SAME key, so the API replays the recorded batch
       // instead of moving the money again.
-      const result = await sendTransferBatchUnderKey(request, t);
+      const result = await sendTransferBatchUnderKey(sent, t);
+      setUnconfirmedSend(null);
       setBatchResult(result);
       const status = result.batch.status;
       if (status === "confirmed") {
@@ -601,6 +612,16 @@ export function useBatchSendWizard({
         });
       }
     } catch (error) {
+      // The batch may be paying: hold it, and say so in the review.
+      if (isTransferBatchSendOutcomeUnknown(error)) {
+        setUnconfirmedSend(sent);
+        toast.error(t("DashboardPayments.batchSend.outcomeUnknown"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.outcomeUnknownToast"),
+          position: "bottom-right",
+        });
+        return;
+      }
       // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
       if (
         error instanceof TransferBatchRequestError &&
@@ -690,15 +711,15 @@ export function useBatchSendWizard({
   };
 
   const handleSecondary = () => {
-    if (submitting || batchResult) {
+    if (submitting || batchResult || recovering) {
       return;
     }
     onExit();
   };
 
-  // Back from review to the rows; nothing has been sent yet.
+  // Back from review to the rows, only while nothing may have been sent.
   const handleBack = () => {
-    if (submitting || batchResult) {
+    if (submitting || batchResult || recovering) {
       return;
     }
     setStepIndex((current) => Math.max(0, current - 1));
@@ -748,6 +769,8 @@ export function useBatchSendWizard({
     sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
+    recovering,
+    transactionsHref: href("/dashboard/payments/transactions"),
     batchResult: currentBatch,
     failedRecipientCount,
     retrying,

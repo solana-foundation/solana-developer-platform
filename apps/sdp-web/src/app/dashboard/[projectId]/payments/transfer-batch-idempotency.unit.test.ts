@@ -3,12 +3,14 @@ import type { PaymentTransferBatchRequest, PaymentTransferBatchStatus } from "@s
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
-import type { Translate } from "./payments-workspace.data";
+import { TransferBatchRequestError, type Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
   claimDefaultTransferBatchReference,
   claimTransferBatchIdempotencyKey,
   defaultTransferBatchReference,
+  isTransferBatchSendOutcomeUnknown,
+  nameTransferBatchRequest,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
   retryTransferBatchUnderKey,
@@ -619,5 +621,41 @@ describe("claimDefaultTransferBatchReference", () => {
     await sendTransferBatchUnderKey(batchRequest({ externalId: "payroll-2026-05" }), t);
 
     expect(sentReferences(fetchMock)).toEqual(["payroll-2026-05"]);
+  });
+});
+
+describe("isTransferBatchSendOutcomeUnknown", () => {
+  const refusal = (status: number, code: string | null = null, replayed = false) =>
+    new TransferBatchRequestError("refused", status, replayed, code);
+
+  it("holds a send that may have recorded the batch", () => {
+    expect(isTransferBatchSendOutcomeUnknown(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(502))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "IDEMPOTENCY_KEY_IN_FLIGHT"))).toBe(true);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN"))).toBe(
+      true
+    );
+    expect(isTransferBatchSendOutcomeUnknown(refusal(422, "IDEMPOTENCY_KEY_REUSED"))).toBe(true);
+  });
+
+  it("frees a send refused before anything was written", () => {
+    expect(isTransferBatchSendOutcomeUnknown(refusal(400, "VALIDATION_ERROR"))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(403, "FORBIDDEN"))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(409, "TRANSFER_BATCH_RUN_EXISTS"))).toBe(
+      false
+    );
+    expect(isTransferBatchSendOutcomeUnknown(refusal(428))).toBe(false);
+    expect(isTransferBatchSendOutcomeUnknown(refusal(429))).toBe(false);
+  });
+});
+
+describe("nameTransferBatchRequest", () => {
+  it("names a blank Reference once and leaves a named batch as it is", () => {
+    const named = nameTransferBatchRequest(batchRequest());
+    expect(named.externalId).toMatch(/^batch-/);
+    expect(nameTransferBatchRequest(named)).toEqual(named);
+    expect(nameTransferBatchRequest(batchRequest({ externalId: "run_1" })).externalId).toBe(
+      "run_1"
+    );
   });
 });

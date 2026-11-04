@@ -200,7 +200,8 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Archive counterparty",
     operationId: "archiveCounterparty",
-    description: "Archives a counterparty. Archived counterparties are hidden from default lists.",
+    description:
+      "Archives a counterparty and its active accounts and provider links atomically. Archived counterparties are hidden from default lists. New transfers and batches cannot use those accounts. Recurring payments pause before their next new collection; work already in flight keeps its recovery path.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

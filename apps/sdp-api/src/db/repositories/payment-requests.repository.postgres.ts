@@ -325,13 +325,14 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     async getSponsoredTransactionClaim(requestId) {
       const row = await db
         .prepare(
-          `SELECT sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
+          `SELECT status, sponsored_tx_account, sponsored_tx_unsigned, sponsored_tx_signed,
                   sponsored_tx_last_valid_block_height
              FROM payment_requests
             WHERE id = ?`
         )
         .bind(requestId)
         .first<{
+          status: PaymentRequestStatus;
           sponsored_tx_account: string | null;
           sponsored_tx_unsigned: string | null;
           sponsored_tx_signed: string | null;
@@ -344,6 +345,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         throw internalError("payment_requests sponsored claim row is missing claim fields");
       }
       return {
+        requestStatus: row.status,
         account: row.sponsored_tx_account,
         unsignedTransaction: row.sponsored_tx_unsigned,
         signedTransaction: row.sponsored_tx_signed,
@@ -354,9 +356,11 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     async storeSponsoredTransactionSignature(params) {
       const changed = await db
         .prepare(
+          // A request that settled or closed while the sponsor signed keeps no signed claim to serve.
           `UPDATE payment_requests
              SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
            WHERE id = ?
+             AND status = 'awaiting_payment'
              AND sponsored_tx_account = ?
              AND sponsored_tx_unsigned = ?
              AND sponsored_tx_signed IS NULL`

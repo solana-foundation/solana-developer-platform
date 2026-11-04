@@ -50,6 +50,7 @@ import type {
 import {
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,
+  createSystemTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
@@ -156,7 +157,8 @@ function partitionByValidStoredSignature<T extends PaymentTransferRow>(transfers
  * concurrent run that already settled the chunk makes this a no-op, so a
  * delayed observation can never regress a newer terminal status. Other
  * transfers settle through a processing-guarded update with the same
- * no-op-on-conflict semantics.
+ * no-op-on-conflict semantics; one whose request left its audit intent open
+ * commits that intent's outcome with the update.
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
@@ -198,7 +200,60 @@ async function updateTerminalTransfer(
       return { entry: settled ? chunkAuditOutcome(transfer, input) : null, result: settled };
     });
   }
-  return (await repo.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+  const auditIntentId = transfer.audit_intent_id;
+  if (auditIntentId === null) {
+    return (await repo.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+  }
+  // A request whose submission was ambiguous left its intent open; the settle
+  // closes it in the same transaction, so a ledger failure leaves the row
+  // processing for the next run (HOO-2556). Clearing the row's open intent is
+  // the claim: a request that closed it first leaves nothing to append.
+  return createSystemAuditService(env).logSystemWithin(async (tx) => {
+    const payments = createSystemTransactionalPaymentsRepository(tx);
+    const settled =
+      (await payments.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
+    const claimed =
+      settled &&
+      (await payments.closeTransferAuditIntent({
+        transferId: transfer.id,
+        organizationId: transfer.organization_id,
+        projectId: transfer.project_id,
+        auditIntentId,
+      }));
+    return {
+      entry: claimed ? transferAuditOutcome(transfer, auditIntentId, input) : null,
+      result: settled,
+    };
+  });
+}
+
+/**
+ * The audit outcome that closes the intent the sending request recorded on the
+ * row, with the chain verdict the job observed.
+ */
+function transferAuditOutcome(
+  transfer: PaymentTransferRow,
+  auditIntentId: string,
+  input: { status: TransferChainVerdictStatus; slot?: number | null; error?: string | null }
+): AuditLogEntry {
+  const metadata: Record<string, unknown> = {
+    status: input.status,
+    signature: transfer.signature,
+    slot: input.slot === undefined || input.slot === null ? null : String(input.slot),
+  };
+  if (input.status === "failed") metadata.error = input.error;
+  return criticalOutcomeEntry(
+    {
+      id: auditIntentId,
+      entry: {
+        organizationId: transfer.organization_id,
+        action: "transfer",
+        resourceType: "payment_transfer",
+        resourceId: transfer.id,
+      },
+    },
+    { status: input.status === "failed" ? "failure" : "success", metadata }
+  );
 }
 
 /**

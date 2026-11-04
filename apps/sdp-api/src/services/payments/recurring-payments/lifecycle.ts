@@ -56,6 +56,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
+import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -1058,6 +1059,13 @@ export async function resumeRecurringPayment(input: {
     throw conflict("Recurring payment is missing subscription records");
   }
 
+  await resolveSolanaCounterpartyAccount({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    counterpartyId: recurringPayment.counterparty_id,
+    counterpartyAccountId: recurringPayment.counterparty_account_id,
+  });
   await assertRecurringPaymentTerms({
     token: recurringPayment.token,
     amount: recurringPayment.amount,
