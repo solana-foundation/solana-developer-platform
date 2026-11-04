@@ -1311,14 +1311,16 @@ describe("payment transfer batches", () => {
 
     const transferRows = await getDb(env)
       .prepare(
-        `SELECT type, status, signature
+        `SELECT type, status, signature, fee
            FROM payment_transfers
           WHERE type = 'transfer_batch'
           ORDER BY signature ASC`
       )
-      .all<{ type: string; status: string; signature: string | null }>();
+      .all<{ type: string; status: string; signature: string | null; fee: number | null }>();
     expect(transferRows.results).toHaveLength(2);
     expect(transferRows.results.every((transfer) => transfer.status === "processing")).toBe(true);
+    // Each chunk is sponsored, so its source wallet paid no network fee (HOO-2614).
+    expect(transferRows.results.map((transfer) => transfer.fee)).toEqual([0, 0]);
 
     getSignatureStatusesMock.mockResolvedValueOnce([
       {

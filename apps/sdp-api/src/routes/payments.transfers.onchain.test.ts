@@ -248,6 +248,8 @@ describe("Payments routes — on-chain transfers", () => {
     expect(body.data.transfer.status).toBe("finalized");
     expect(body.data.transfer.id).toMatch(/^xfr_/);
     expect(body.data.transfer.signature).toBeTruthy();
+    // The sponsor paid the network fee, so the source wallet paid none (HOO-2614).
+    expect(body.data.transfer.fee).toBe(0);
     expect(confirmTransactionMock).toHaveBeenCalledWith(
       expect.anything(),
       body.data.transfer.signature,
@@ -258,6 +260,7 @@ describe("Payments routes — on-chain transfers", () => {
     expect(row.status).toBe("finalized");
     expect(row.signature).toBeTruthy();
     expect(row.confirmed_at).not.toBeNull();
+    expect(row.fee).toBe(0);
   });
 
   it("ties the transfer to the contact whose account it names", async () => {

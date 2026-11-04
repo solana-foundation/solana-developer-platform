@@ -20650,9 +20650,9 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -20987,7 +20987,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfers",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -21226,9 +21226,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       When SDP confirmed the transfer on chain.
 
-    - **`fee`** · `integer | null` · required · example `5000`
+    - **`fee`** · `integer | null` · required · example `0`
 
-      Transaction fee in lamports.
+      Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
     - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -21542,7 +21542,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfers",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -21724,9 +21724,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -22020,7 +22020,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfers/xfr_example",
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"
@@ -22686,9 +22686,9 @@ Create a custody-executed outbound transfer batch.
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -23088,7 +23088,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -23633,9 +23633,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -23976,7 +23976,7 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches/xbatch_ex
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -24268,9 +24268,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -24597,7 +24597,7 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
         "slot": 123456,
         "blockTime": "2025-01-01T00:00:00.000Z",
         "confirmedAt": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
+        "fee": 0,
         "error": "Signature failed",
         "initiatedBy": {
           "type": "api_key"
@@ -27119,9 +27119,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         When SDP confirmed the transfer on chain.
 
-      - **`fee`** · `integer | null` · required · example `5000`
+      - **`fee`** · `integer | null` · required · example `0`
 
-        Transaction fee in lamports.
+        Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.
 
       - **`error`** · `string | null` · required · example `Signature failed`
 
@@ -27481,7 +27481,7 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "slot": 123456,
       "blockTime": "2025-01-01T00:00:00.000Z",
       "confirmedAt": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
+      "fee": 0,
       "error": "Signature failed",
       "initiatedBy": {
         "type": "api_key"

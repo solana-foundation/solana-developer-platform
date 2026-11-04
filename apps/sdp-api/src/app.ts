@@ -422,10 +422,16 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   v1.route("/onboarding", onboarding);
   v1.route("/payments", payments);
   v1.route("/transactions", transactions);
+  // A module outside the release channel answers with the shared refusal before its
+  // own feature gate, which then speaks only for a deployment that turned the flag off.
+  v1.use("/earn/*", requireModule("earn"));
   v1.route("/earn", earn);
+  v1.use("/dvp/*", requireModule("dvp"));
   v1.route("/dvp", dvp);
   v1.route("/places", places);
+  v1.use("/private-channels/*", requireModule("private_channels"));
   v1.route("/private-channels", privateChannels);
+  v1.use("/helius-rings/*", requireModule("helius_rings"));
   v1.route("/helius-rings", heliusRings);
   v1.use("/compliance/*", requireModule("compliance"));
   v1.route("/compliance", compliance);
@@ -449,6 +455,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/wallets", internalWallets);
   app.use("/internal/dashboard/fireblocks/*", requireModule("custody"));
   app.route("/internal/dashboard/fireblocks", internalFireblocks);
+  app.use("/internal/dashboard/helius-rings/*", requireModule("helius_rings"));
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 
