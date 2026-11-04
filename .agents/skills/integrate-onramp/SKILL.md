@@ -18,7 +18,7 @@ Read the current `RampOnrampQuoteInput` from `packages/sdp-payments/src/ramps/ty
 
 `PaymentRampQuote` is a closed union discriminated by both `provider` and `deliveryMode` in `packages/sdp-types/src/payments.ts`. Add the provider-specific quote arm, and add a `PaymentRampInstruction` arm for new manual instruction fields:
 
-- `deliveryMode: "manual_instructions"` — bank/wire or on-chain funding details. No provider uses it today (`PaymentRampInstruction` is `never`), so the first one adds its quote arm and instruction arm.
+- `deliveryMode: "manual_instructions"` — bank/wire or on-chain funding details. `hercle` is the reference: its quote arm carries `HercleFiatFundingInstruction`, today the only `PaymentRampInstruction` arm.
 - `deliveryMode: "hosted"` — return a `hostedUrl` the client renders (widget/redirect).
 - `deliveryMode: "session_widget"` — return the session fields required by an embedded SDK/frame.
 

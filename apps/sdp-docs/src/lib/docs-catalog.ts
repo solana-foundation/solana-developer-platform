@@ -129,7 +129,8 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     offramp: "✗",
     sandbox: "✓ (sandbox only)",
     deliveryMode: "manual_instructions",
-    bestFor: "Business on-ramps by bank wire: EUR, USD and GBP into USDC, USDT and SOL.",
+    bestFor:
+      "Business on-ramps by bank wire: EUR, USD and GBP into USDC and SOL (USDT on mainnet only).",
     notes: "Swiss and EEA businesses only, after Hercle's business verification.",
   },
 ];

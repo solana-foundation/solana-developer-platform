@@ -71,7 +71,7 @@ Simplest first — pick the closest and mirror its decision function:
 
 - Always `readyCounterparty(...)` — no KYC gating.
 - `collect` KYC fields, `ready` once the provider verifies the customer.
-- Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by webhook events.
+- Provider-hosted onboarding (ToS/verification URLs) advanced to `ready` by the provider's verdict, which `hercle` reads in `requirements.describe` and another provider may push by webhook events.
 
 ## The advance / submit flow
 
@@ -80,7 +80,7 @@ Both requirement routes must admit the provider before its client can run:
 - `GET /v1/counterparties/:counterpartyId/requirements`: update the direction-specific provider lists in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 - `POST /v1/counterparties/:counterpartyId/requirements`: add a provider arm to `submitCounterpartyRequirementsSchema` in `apps/sdp-api/src/routes/counterparties/schemas.ts`.
 
-A provider with no onboarding answers both routes from `validateCounterparty`. A provider that onboards its customers implements the optional `requirements` member (ADR 0008; `hercle` is the reference): the GET calls `requirements.describe`, the POST calls `requirements.submit` with the submitted `collectedData`, and both run on a `RampCustomerLinkStore` (`apps/sdp-api/src/services/ramps/customer-link-store.ts`) that keeps the provider's customer as the counterparty's `customer_link` row. The member validates the collected fields (`parseCollectedFields`), makes the provider calls with them, and records only the provider's customer id and its verbatim status (`provider_status`). `requirements.isCustomerReady` is the quote gate: `resolveRampQuoteRequest` refuses a quote with `counterpartyNotProvisioned` until it accepts the link.
+A provider with no onboarding answers both routes from `validateCounterparty`. A provider that onboards its customers implements the optional `requirements` member (ADR 0008; `hercle` is the reference): the GET calls `requirements.describe`, and both run on a `RampCustomerLinkStore` (`apps/sdp-api/src/services/ramps/customer-link-store.ts`) that keeps the provider's customer as the counterparty's `customer_link` row. The POST calls `requirements.submit` from a provider branch in `submitCounterpartyRequirements` (`apps/sdp-api/src/routes/counterparties/handlers.ts`), because only the provider's schema arm carries `collectedData`; add both. The member validates the collected fields (`parseCollectedFields`), makes the provider calls with them, and records only the provider's customer id and its verbatim status (`provider_status`). The GET runs under a read grant (`counterparties.read`), so `describe` only reads at the provider; anything the provider must start begins in `submit`. `requirements.isCustomerReady` is the quote gate: `resolveRampQuoteRequest` refuses a quote with `counterpartyNotProvisioned` until it accepts the link. The gate reads only the stored status, so `describe` and `submit` record every verdict change with `recordStatus`.
 
 **Hard rule: collected KYC is never persisted.** `collectedData` (SSN, IBAN, CDD, tax id) flows into the provider API call only. What lands in the account row is metadata — provider references, status, corridor, rail. Raw secrets are transient.
 

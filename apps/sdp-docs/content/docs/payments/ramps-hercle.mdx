@@ -6,7 +6,7 @@ description: Configure Hercle as an SDP ramp provider — credentials, business 
 
 Hercle is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "hercle"`.
 
-A Sandbox project uses the `HERCLE_SANDBOX_*` keys and a Production project the `HERCLE_PRODUCTION_*` keys. Hercle runs in a mode only while all three of its keys are set and fit that mode; otherwise it answers `PROVIDER_NOT_CONFIGURED`. Hercle is offered in sandbox only for now: its bank settlement is still simulated, so a production project does not see it.
+A Sandbox project uses the `HERCLE_SANDBOX_*` keys and a Production project the `HERCLE_PRODUCTION_*` keys. Hercle runs in a mode only while all three of its keys are set and fit that mode; otherwise it answers `PROVIDER_NOT_CONFIGURED`. Hercle is offered in sandbox only for now: its bank settlement is still simulated, so a production project does not see it, and a request that names it answers `403 FORBIDDEN` (`provider_not_offered`).
 
 ## Configuration
 
@@ -14,30 +14,36 @@ A Sandbox project uses the `HERCLE_SANDBOX_*` keys and a Production project the 
 | --- | --- | --- |
 | `HERCLE_SANDBOX_CLIENT_ID` | conditional | Sandbox client id (`hpk_test_…`). Every request carries it with an HMAC-SHA256 signature over the timestamp, method, path and body. A live client id is refused before any request. |
 | `HERCLE_SANDBOX_SECRET_KEY` | conditional | Sandbox signing secret for that client id. |
-| `HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY` | conditional | Hercle's ECDSA P-256 public key (SPKI PEM) for the endpoint Hercle calls at `/webhooks/payments/ramps/sandbox/hercle`. It verifies `X-Signature` over `X-Timestamp.rawBody`. |
+| `HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY` | conditional | Hercle's ECDSA P-256 public key (SPKI PEM) for the endpoint Hercle calls at `/webhooks/payments/ramps/sandbox/hercle`. It verifies `X-Signature` over `X-Timestamp.rawBody`, and refuses a timestamp more than five minutes off. |
 | `HERCLE_PRODUCTION_CLIENT_ID` | conditional | Production client id (`hpk_live_…`). A sandbox client id is refused before any request. |
 | `HERCLE_PRODUCTION_SECRET_KEY` | conditional | Production signing secret. |
 | `HERCLE_PRODUCTION_WEBHOOK_PUBLIC_KEY` | conditional | Public key for the endpoint Hercle calls at `/webhooks/payments/ramps/production/hercle`. |
 
 ## Business onboarding
 
-Hercle serves business counterparties registered in Switzerland or the EEA. Each business becomes its own Hercle account, which SDP opens and verifies on the business's behalf; every order then acts for that account. The counterparty is Hercle's customer, and the project's custody wallet is only the crypto side of the ramp.
+Hercle serves business counterparties registered in Switzerland or the EEA; an individual counterparty gets `unsupported`. Each business becomes its own Hercle account, which SDP opens and verifies on the business's behalf; every order then acts for that account. The counterparty is Hercle's customer, and the project's custody wallet is only the crypto side of the ramp.
 
-1. `GET /v1/counterparties/{counterpartyId}/requirements` answers `collect` with the registered company name, company registration number, country of registration, registered address, and the business's acceptance of Hercle's Terms & Conditions and Privacy Policy (`consent` fields, accepted with the literal `true`).
+1. `GET /v1/counterparties/{counterpartyId}/requirements` answers `collect` with the registered company name, company registration number, country of registration, registered address, and the business's acceptance of Hercle's Terms & Conditions and Privacy Policy (`consent` fields, accepted with the string `"true"`).
 2. Submitting those fields opens the Hercle account and starts its verification. The answer is `customer_verification_required` with a hosted `verificationUrl`, minted for that answer and never stored.
-3. While Hercle reviews the business the answer is `customer_verifying`, and `customer_verification_failed` if Hercle declines it. Read the requirements again to follow it: each read asks Hercle for its current verdict and never starts anything. If a submission opened the account but stopped before its verification started, the read answers `collect` again, and the next submission starts it.
-4. Once Hercle approves the business the answer is `ready`, and quotes run. A quote for a business Hercle has not approved is refused with `409 CONFLICT` before Hercle is called.
+3. While Hercle reviews the business the answer is `customer_verifying`, and `customer_verification_failed` if Hercle declines it. Read the requirements again to follow it: until Hercle approves the business, each read asks Hercle for its current verdict, records it, and never starts anything. If a submission opened the account but stopped before its verification started, the read answers `collect` again, and the next submission starts it.
+4. The answer is `ready` once Hercle reports the business `approved`, the verdict under which Hercle accepts its orders. A quote reads the verdict SDP recorded and does not ask Hercle: until a requirements read or submission has answered `ready`, a quote is refused with `409 CONFLICT` before Hercle is called.
 
-The registered company name is the name Hercle's bank expects on the wire, so give the legal name, not the counterparty's display name.
+SDP keeps the approval once it has recorded it, and later reads answer `ready` without asking Hercle again. If Hercle later suspends the business, its requirements still answer `ready`, and Hercle refuses its quotes with `409 CONFLICT`.
+
+The registered company name is the name Hercle's bank expects on the wire, so give the legal name, not the counterparty's display name. Once Hercle has opened the account, a later submission never changes its details. SDP keys the account and its verification on the counterparty, so a retried submission resumes them instead of opening a second account.
 
 SDP stores the Hercle account id and its verification status, never the collected details.
 
 ## Quotes and settlement
 
-Hercle is on-ramp only: EUR, USD and GBP into `usdc.solana`, `usdt.solana` and `sol.solana`. A quote is a Hercle order with `deliveryMode: "manual_instructions"`. Its `fiat_funding` instruction names the business's own account at Hercle's bank, the payment reference the wire must carry, and `payerAccountHolder`, the business itself. The bank returns a wire from any other account, and the order fails. `expiresAt` is when the order's funding window closes.
+Hercle is on-ramp only: EUR, USD and GBP into `usdc.solana`, `usdt.solana` and `sol.solana`. A Sandbox project runs on devnet, which has no USDT, so a quote for `usdt.solana` is refused there with `400 BAD_REQUEST` before Hercle is called. While Hercle is offered in sandbox only, that leaves `usdc.solana` and `sol.solana`.
+
+A quote is a Hercle order with `deliveryMode: "manual_instructions"`. Its `fiat_funding` instruction names the business's own account at Hercle's bank, the payment reference the wire must carry, and `payerAccountHolder`, the business itself. The bank returns a wire from any other account, and the order fails. `expiresAt` is when the order's funding window closes. An order without the account, the reference or the payer answers `502 PROVIDER_RESPONSE_INVALID`, since nobody could fund it.
+
+Every quote opens its own Hercle order, keyed on the transfer SDP creates for it, so a quote sent twice opens two orders. Fund only the order whose instructions you show; an order nobody funds expires.
 
 Hercle's refusals of the business answer `409 CONFLICT`: not verified, suspended, or its bank account still opening. A currency pair Hercle does not offer answers `400 BAD_REQUEST`.
 
-Hercle reports the order's progress by webhook, and SDP also asks Hercle for the order when a webhook is missed. A settled order names the transaction that delivered the crypto and moves the transfer to `settling`. It completes once SDP finds that delivery on chain.
+Hercle reports the order's progress by webhook, and SDP also asks Hercle for the order when a webhook is missed. A settled order names the transaction that delivered the crypto and moves the transfer to `settling`. It completes once SDP finds that delivery on chain. When Hercle fails or expires the order, the transfer's `error` gives the reason, such as a wire from another account or a funding window that closed before the wire arrived.
 
-In a Sandbox project, `POST /v1/payments/ramps/sandbox/simulate` has Hercle settle the order as its bank would, from the moment it is quoted. The transfer then moves through the same webhook and status pull as a real wire. A Sandbox project runs on devnet, which has no USDT, so `usdt.solana` is refused there with `400` before Hercle is called.
+In a Sandbox project, `POST /v1/payments/ramps/sandbox/simulate` has Hercle settle the order as its bank would, from the moment it is quoted, and answers `204`. The transfer then moves through the same webhook and status pull as a real wire.
