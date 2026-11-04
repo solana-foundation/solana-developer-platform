@@ -1,5 +1,18 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  createSourceFile,
+  type Expression,
+  forEachChild,
+  isArrowFunction,
+  isBlock,
+  isCallExpression,
+  isConditionalExpression,
+  isIdentifier,
+  isParenthesizedExpression,
+  type Node,
+  ScriptTarget,
+} from "typescript";
 import { describe, expect, it } from "vitest";
 
 const routesRoot = path.resolve(import.meta.dirname);
@@ -172,8 +185,61 @@ function stripImports(source: string): string {
   return source.replace(/^import[\s\S]*?from\s+"[^"]+";\n/gm, "");
 }
 
+/** Recognizes direct schemas and the schemas returned by a request-scoped selector. */
+function containsValidator(chain: string, validator: string): boolean {
+  const schema = /^validateBody\((\w+)$/.exec(validator)?.[1];
+  if (schema === undefined) return chain.includes(validator);
+
+  function returnsSchema(expression: Expression): boolean {
+    if (isParenthesizedExpression(expression)) return returnsSchema(expression.expression);
+    if (isConditionalExpression(expression)) {
+      return returnsSchema(expression.whenTrue) || returnsSchema(expression.whenFalse);
+    }
+    return isIdentifier(expression) && expression.text === schema;
+  }
+
+  let found = false;
+  function visit(node: Node): void {
+    if (
+      isCallExpression(node) &&
+      isIdentifier(node.expression) &&
+      node.expression.text === "validateBody"
+    ) {
+      const argument = node.arguments[0];
+      if (argument !== undefined) {
+        if (isArrowFunction(argument)) {
+          found ||= !isBlock(argument.body) && returnsSchema(argument.body);
+        } else {
+          found ||= returnsSchema(argument);
+        }
+      }
+    }
+    forEachChild(node, visit);
+  }
+  // A registration chain starts at `.post(` and stops before its handler.
+  visit(createSourceFile("route.ts", `route${chain}handler);`, ScriptTarget.Latest));
+  return found;
+}
+
 describe("validated handler wiring", () => {
   const handlers = collectValidatedHandlers();
+
+  it("recognizes both schemas returned by a request-scoped body selector", () => {
+    const chain =
+      '.post("/", validateBody((c) => isModuleInChannel(c, "ramps") ? createTransferSchema : walletTransferSchema), ';
+    expect(containsValidator(chain, "validateBody(createTransferSchema")).toBe(true);
+    expect(containsValidator(chain, "validateBody(walletTransferSchema")).toBe(true);
+    expect(containsValidator(chain, "validateBody(otherSchema")).toBe(false);
+  });
+
+  it.each([
+    '.post("/", validateBody(otherSchema), use(sampleSchema), ',
+    '.post("/", validateBody(sampleSchemaFactory), ',
+    '.post("/", validateBody(() => sampleSchema ? firstSchema : secondSchema), ',
+    '.post("/", validateQuery(sampleSchema), ',
+  ])("does not mistake an unrelated schema reference for body validation", (chain) => {
+    expect(containsValidator(chain, "validateBody(sampleSchema")).toBe(false);
+  });
 
   it("finds the validated handler inventory", () => {
     expect(handlers.length).toBeGreaterThan(60);
@@ -192,7 +258,10 @@ describe("validated handler wiring", () => {
     expect(chains.length, `${handler} must appear in a route registration`).toBeGreaterThan(0);
     for (const chain of chains) {
       for (const validator of validators) {
-        expect(chain, `${handler} chain must contain ${validator}`).toContain(validator);
+        expect(
+          containsValidator(chain, validator),
+          `${handler} chain must contain ${validator}`
+        ).toBe(true);
       }
     }
   });
@@ -216,7 +285,7 @@ describe("validated handler wiring", () => {
     expect(handler?.line).toBe(4);
     expect(handler?.validators.length).toBeGreaterThan(0);
     for (const validator of handler?.validators ?? []) {
-      expect(handler?.chain).toContain(validator);
+      expect(containsValidator(handler?.chain ?? "", validator)).toBe(true);
     }
   });
 
@@ -225,7 +294,10 @@ describe("validated handler wiring", () => {
     ({ file, line, validators, chain }) => {
       expect(chain, `${file}:${line} must sit inside a route registration`).not.toBeNull();
       for (const validator of validators) {
-        expect(chain, `${file}:${line} chain must contain ${validator}`).toContain(validator);
+        expect(
+          containsValidator(chain ?? "", validator),
+          `${file}:${line} chain must contain ${validator}`
+        ).toBe(true);
       }
     }
   );
