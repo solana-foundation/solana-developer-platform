@@ -143,7 +143,7 @@ const requirementConsentFieldSchema = z.object({
   required: z.boolean(),
   documentUrl: withOpenApi(z.string(), {
     description:
-      "The provider document the counterparty accepts. Submit the literal `true` to accept.",
+      'The provider document the counterparty accepts. Submit the string `"true"` as the field\'s `collectedData` value to accept; a JSON boolean is refused. An optional consent also takes `"false"` or `""`.',
   }),
   documentLabel: z.string().optional(),
 });

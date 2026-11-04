@@ -245,7 +245,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                               "type": "string",
                             },
                             "documentUrl": {
-                              "description": "The provider document the counterparty accepts. Submit the literal \`true\` to accept.",
+                              "description": "The provider document the counterparty accepts. Submit the string \`"true"\` as the field's \`collectedData\` value to accept; a JSON boolean is refused. An optional consent also takes \`"false"\` or \`""\`.",
                               "type": "string",
                             },
                             "key": {
