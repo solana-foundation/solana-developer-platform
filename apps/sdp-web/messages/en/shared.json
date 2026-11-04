@@ -27,7 +27,7 @@
       "pending": "not done yet"
     },
     "custodyTitle": "Create a wallet",
-    "custodyDoneDescription": "Your first wallet is ready.",
+    "custodyDoneDescription": "This project has a wallet.",
     "custodyDoneMeta": "Created",
     "custodySkippedDescription": "Skipped {when}. You can create one anytime.",
     "custodySkippedMeta": "Skipped · {when}",

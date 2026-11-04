@@ -37,7 +37,7 @@ const { DashboardQuickStart } = await import("./dashboard-quick-start");
 
 const SKIPPED_AN_HOUR_AGO = new Date(NOW - 3_600_000).toISOString();
 const PENDING_STATUS: QuickStartStatus = {
-  custodyProvider: null,
+  hasWallet: false,
   apiKeyCount: 0,
   lastCallAt: null,
 };
@@ -104,14 +104,14 @@ describe("Overview quick start", () => {
   });
 
   it("waits for a call once a key exists", () => {
-    setup({ status: { custodyProvider: null, apiKeyCount: 2, lastCallAt: null } });
+    setup({ status: { hasWallet: false, apiKeyCount: 2, lastCallAt: null } });
     renderQuickStart("overview");
     expect(screen.getByText("Waiting for a call")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View API keys" })).toBeTruthy();
   });
 
   it("points a created wallet at the wallet list", () => {
-    setup({ status: { custodyProvider: "privy", apiKeyCount: 0, lastCallAt: null } });
+    setup({ status: { hasWallet: true, apiKeyCount: 0, lastCallAt: null } });
     renderQuickStart("overview");
     expect(screen.getByText("Created")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View wallets" }).getAttribute("href")).toBe(
@@ -130,7 +130,7 @@ describe("Overview quick start", () => {
 
   it("renders nothing once the guide is not visible", () => {
     setup({
-      status: { custodyProvider: "privy", apiKeyCount: 1, lastCallAt: "2026-09-25T10:00:00Z" },
+      status: { hasWallet: true, apiKeyCount: 1, lastCallAt: "2026-09-25T10:00:00Z" },
     });
     const { container } = renderQuickStart("overview");
     expect(container.innerHTML).toBe("");
