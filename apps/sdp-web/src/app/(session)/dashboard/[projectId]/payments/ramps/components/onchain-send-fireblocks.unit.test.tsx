@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
@@ -14,11 +15,16 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
-vi.mock("@clerk/nextjs", () => ({
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    orgId: "org_test",
+    userId: "user_test",
+  }));
   // The workspace provider reads setActive to keep Clerk on the page's organization.
-  useClerk: () => ({ setActive: async () => undefined }),
-  useAuth: () => ({ orgId: "org_test", userId: "user_test" }),
-}));
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const account: CounterpartyAccount = {

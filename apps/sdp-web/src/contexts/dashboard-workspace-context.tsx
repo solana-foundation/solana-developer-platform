@@ -24,6 +24,11 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
+import {
+  clearOrganizationSwitch,
+  requestedOrganizationSwitch,
+  requestOrganizationSwitch,
+} from "@/lib/requested-organization-switch";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
@@ -48,16 +53,6 @@ type DashboardWorkspaceContextValue = {
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
-
-// The organization this tab asked Clerk for through `switchOrganization`, kept
-// for the tab rather than one provider: until the server renders it the provider
-// remounts per server scope, and only this switch may move the tab off its URL.
-let requestedOrganizationId: string | null = null;
-
-/** Test-only: forget a requested switch so specs are order-independent. */
-export function resetRequestedOrganizationForTests(): void {
-  requestedOrganizationId = null;
-}
 
 const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue | undefined>(
   undefined
@@ -158,11 +153,11 @@ export function DashboardWorkspaceProvider({
 
   const switchOrganization = useCallback(
     async (organizationId: string) => {
-      requestedOrganizationId = organizationId;
+      requestOrganizationSwitch(organizationId);
       try {
         await setActive({ organization: organizationId });
       } catch (error) {
-        requestedOrganizationId = null;
+        clearOrganizationSwitch();
         throw error;
       }
     },
@@ -176,11 +171,14 @@ export function DashboardWorkspaceProvider({
       return;
     }
     if (dashboardScopeIsFresh) {
-      if (requestedOrganizationId === serverDashboardCacheScope.orgId) {
-        requestedOrganizationId = null;
+      // Clerk and the server agree again: a later mismatch is a new one.
+      alignedOrganizationIdRef.current = null;
+      if (requestedOrganizationSwitch() === serverDashboardCacheScope.orgId) {
+        clearOrganizationSwitch();
       }
       return;
     }
+    const requestedOrganizationId = requestedOrganizationSwitch();
     const isOwnSwitch =
       requestedOrganizationId !== null && liveDashboardCacheScope.orgId === requestedOrganizationId;
     if (

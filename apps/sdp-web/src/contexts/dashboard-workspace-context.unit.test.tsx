@@ -8,17 +8,14 @@ import useSWR from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import type { DashboardCacheScope } from "@/lib/dashboard-cache-scope";
+import { clearOrganizationSwitch } from "@/lib/requested-organization-switch";
 import {
   dashboardRouter,
   resetDashboardNavigation,
   setDashboardUrl,
 } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
-import {
-  DashboardWorkspaceProvider,
-  resetRequestedOrganizationForTests,
-  useDashboardWorkspace,
-} from "./dashboard-workspace-context";
+import { DashboardWorkspaceProvider, useDashboardWorkspace } from "./dashboard-workspace-context";
 
 const clerk = vi.hoisted(() => {
   const auth: {
@@ -125,7 +122,7 @@ beforeEach(() => {
   }));
   clerk.setActive.mockReset();
   clerk.setActive.mockResolvedValue(undefined);
-  resetRequestedOrganizationForTests();
+  clearOrganizationSwitch();
   cleanup();
   resetDashboardNavigation();
   setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/issuance`, {});
@@ -282,6 +279,42 @@ describe("DashboardWorkspaceProvider project selection", () => {
     expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test" }]]);
     expect(dashboardRouter.replace).not.toHaveBeenCalled();
     expect(screen.getByText("Refreshing scope")).toBeTruthy();
+  });
+
+  it("aligns Clerk again on a later mismatch after one recovered", async () => {
+    const view = render(<WorkspaceFixture />);
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test_other",
+    };
+    view.rerender(<WorkspaceFixture />);
+    await waitFor(() => expect(clerk.setActive).toHaveBeenCalledTimes(1));
+
+    // Clerk made the page's organization active, then reported another one again.
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test",
+    };
+    view.rerender(<WorkspaceFixture />);
+    await waitFor(() => expect(screen.getByLabelText("selected project")).toBeTruthy());
+    clerk.auth = {
+      isLoaded: true,
+      sessionId: "session_test",
+      userId: "user_test",
+      orgId: "org_test_other",
+    };
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(clerk.setActive).toHaveBeenCalledTimes(2));
+    expect(clerk.setActive.mock.calls).toEqual([
+      [{ organization: "org_test" }],
+      [{ organization: "org_test" }],
+    ]);
+    expect(dashboardRouter.replace).not.toHaveBeenCalled();
   });
 
   it("lands on the bare dashboard when the page's organization cannot be made active", async () => {
