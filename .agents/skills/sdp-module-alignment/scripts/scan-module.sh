@@ -33,7 +33,7 @@ cd "$ROOT" || exit 1
 
 API=apps/sdp-api/src
 WEB=apps/sdp-web/src
-DASH="$WEB/app/dashboard/[projectId]"
+DASH="$WEB/app/(session)/dashboard/[projectId]"
 SNAKE="${MODULE//-/_}"
 UPPER="${SNAKE^^}"
 # Pure bash: BSD sed has no \U, so a sed conversion breaks on macOS.

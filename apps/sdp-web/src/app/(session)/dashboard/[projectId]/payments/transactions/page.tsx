@@ -1,0 +1,72 @@
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { fetchCounterparties } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
+import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
+import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
+import { parseTransactionFilters } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
+import { getDashboardFlags } from "@/flags/dashboard";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
+import { createTimedTrace } from "@/lib/request-tracing";
+import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { enabledPaymentTransactionKinds, enabledTransactionModules } from "./transaction-modules";
+import { fetchTransactionsPage } from "./transactions-page.data";
+import { TransactionsWorkspace } from "./transactions-workspace";
+
+interface TransactionsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+// The filter menu offers, and the Contact column names, the first page of contacts at the
+// API's maximum page size; a contact beyond it still filters by id from a deep link.
+const CONTACT_OPTION_LIMIT = 100;
+
+export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
+  const { userId, orgId } = await auth();
+  if (!userId) redirect(await getAuthEntryPath());
+  if (!orgId) redirect("/dashboard");
+
+  const params = await searchParams;
+  const openId = params[PAYMENT_TRANSACTION_OPEN_PARAM];
+  if (typeof openId === "string" && openId !== "") {
+    // The ledger's old deep link to one transaction; it has its own page now.
+    redirect(await requestProjectHref(transactionHref(openId)));
+  }
+  const flags = await getDashboardFlags();
+  const modules = enabledTransactionModules(flags);
+  const filters = parseTransactionFilters(params, modules);
+  const trace = createTimedTrace("dashboard.payments.transactions.page");
+  const apiClient = await trace.step("create_sdp_api_client", () =>
+    createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))
+  );
+  const [result, issuedTokensByMint, wallets, counterparties] = await Promise.all([
+    trace.step("fetch_transactions_page", () => fetchTransactionsPage(apiClient, filters)),
+    trace.step("fetch_issued_tokens", () =>
+      fetchIssuedTokensByMintWhenIssuanceEnabled(apiClient.request)
+    ),
+    trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request, { view: "summary" })),
+    trace.step("fetch_counterparties", () =>
+      fetchCounterparties(apiClient.request, { page: 1, pageSize: CONTACT_OPTION_LIMIT })
+    ),
+  ]);
+  trace.log({ ok: true, resultCount: result.transactions.length });
+
+  return (
+    <TransactionsWorkspace
+      initialFilters={filters}
+      modules={modules}
+      paymentKinds={enabledPaymentTransactionKinds(flags)}
+      initialResult={result}
+      issuedTokensByMint={issuedTokensByMint}
+      wallets={(wallets.data ?? []).map((wallet) => ({
+        id: wallet.id,
+        label: wallet.label,
+        publicKey: wallet.publicKey,
+      }))}
+      counterparties={counterparties.data.map((counterparty) => ({
+        id: counterparty.id,
+        name: counterparty.displayName,
+      }))}
+    />
+  );
+}
