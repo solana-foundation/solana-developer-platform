@@ -35,8 +35,8 @@ export function createRampCustomerLinkStore(
         await accounts.upsertProviderAccount({ ...scope, providerCustomerReference })
       );
     },
-    async recordStatus(providerStatus) {
-      if (!(await accounts.recordCustomerLinkStatus({ ...scope, providerStatus }))) {
+    async recordStatus(observation) {
+      if ((await accounts.recordCustomerLinkStatus({ ...scope, observation })) === "missing") {
         throw internalError("The customer link a provider status was recorded on is gone.");
       }
     },

@@ -1,8 +1,9 @@
+import { hercleVerificationStatusEvent } from "@sdp/payments/ramps/providers/hercle/customer-status-mapping";
 import {
   type HercleOrderStatus,
   hercleOrderSettlementEvent,
 } from "@sdp/payments/ramps/providers/hercle/order-status-mapping";
-import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
+import type { RampCustomerStatusEvent, RampSettlementEvent } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { RampWebhookProcessResult } from "@sdp/types/payments";
 import { z } from "zod";
@@ -10,14 +11,32 @@ import { badRequest, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
+import { applyRampCustomerStatusEvent } from "@/services/ramps/customer-status-events";
 import { managedRampWebhookSecret } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 import type { RampWebhookValidationContext, WebhookProcessor } from "./processor";
 
 const HERCLE_SETTLEMENT_EVENT = "ramp.settlement.status_changed";
+const HERCLE_VERIFICATION_EVENT = "customer.verification.status_changed";
+
+/** What a Hercle webhook tells SDP: an order's settlement, or a business's verdict. */
+export type HercleWebhookEvent = RampSettlementEvent | RampCustomerStatusEvent;
 
 /** Every Hercle webhook: `{ event, timestamp, data }`, the event named before anything is read. */
 const hercleEnvelopeSchema = z.object({ event: z.string().trim().min(1) });
+
+/**
+ * A verification event: the account Hercle opened for the business, and its verdict.
+ * The envelope's `timestamp` (Unix seconds, inside the signed body) is the only ordering field Hercle sends.
+ * `status` stays an open string so a verdict Hercle ships later maps to an ignore event.
+ */
+const hercleVerificationEnvelopeSchema = z.object({
+  timestamp: z.number().int().positive(),
+  data: z.object({
+    accountId: z.string().trim().min(1),
+    status: z.string().trim().min(1),
+  }),
+});
 
 /**
  * The `data` of a settlement event.
@@ -36,8 +55,9 @@ const hercleSettlementEnvelopeSchema = z.object({ data: z.unknown().optional() }
 
 /**
  * Hercle signs webhooks with ECDSA P-256 over `${X-Timestamp}.${rawBody}`: a base64 DER signature in X-Signature.
- * SDP verifies it with Hercle's public key. Only settlement events move a transfer.
- * Verification events are not read: every requirements read asks Hercle for the verdict.
+ * SDP verifies it with Hercle's public key.
+ * Settlement events move a transfer, matched by its order id.
+ * Verification events record the business's verdict on the customer link that names its account, so a revoked business stops showing ready and stops quoting.
  */
 export const hercleWebhook = {
   provider: "hercle" as const,
@@ -78,7 +98,7 @@ export const hercleWebhook = {
     return rawBody;
   },
 
-  parse(rawBody: string, _environment?: SdpEnvironment): RampSettlementEvent {
+  parse(rawBody: string, _environment?: SdpEnvironment): HercleWebhookEvent {
     let decoded: unknown;
     try {
       decoded = JSON.parse(rawBody);
@@ -90,6 +110,19 @@ export const hercleWebhook = {
       throw badRequest("Hercle webhook is missing its event name", { provider: this.provider });
     }
     const { event } = envelope.data;
+    if (event === HERCLE_VERIFICATION_EVENT) {
+      const verification = hercleVerificationEnvelopeSchema.safeParse(decoded);
+      if (!verification.success) {
+        throw badRequest(`Hercle "${event}" webhook carries a malformed verification`, {
+          provider: this.provider,
+          errors: verification.error.issues,
+        });
+      }
+      return hercleVerificationStatusEvent({
+        ...verification.data.data,
+        timestamp: verification.data.timestamp,
+      });
+    }
     if (event !== HERCLE_SETTLEMENT_EVENT) {
       return { provider: this.provider, kind: "ignore", reason: `unsupported_event:${event}` };
     }
@@ -121,12 +154,15 @@ export const hercleWebhook = {
   async process(
     env: Env,
     environment: SdpEnvironment,
-    event: RampSettlementEvent
+    event: HercleWebhookEvent
   ): Promise<RampWebhookProcessResult> {
     if (event.kind === "ignore") {
       getLogger().info(`[hercle webhook] ignored event: ${event.reason}`);
       return { outcome: "ignored" };
     }
+    if (event.kind === "customer_status") {
+      return applyRampCustomerStatusEvent(env, environment, event);
+    }
     return applyRampSettlementEvent(env, environment, event);
   },
-} satisfies WebhookProcessor<RampSettlementEvent>;
+} satisfies WebhookProcessor<HercleWebhookEvent>;

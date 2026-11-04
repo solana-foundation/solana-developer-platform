@@ -39,6 +39,11 @@
       "import": "./src/ramps/fetch.ts",
       "default": "./src/ramps/fetch.ts"
     },
+    "./ramps/providers/hercle/customer-status-mapping": {
+      "types": "./src/ramps/providers/hercle/customer-status-mapping.ts",
+      "import": "./src/ramps/providers/hercle/customer-status-mapping.ts",
+      "default": "./src/ramps/providers/hercle/customer-status-mapping.ts"
+    },
     "./ramps/providers/hercle/order-status-mapping": {
       "types": "./src/ramps/providers/hercle/order-status-mapping.ts",
       "import": "./src/ramps/providers/hercle/order-status-mapping.ts",

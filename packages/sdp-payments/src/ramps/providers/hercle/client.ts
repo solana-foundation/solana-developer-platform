@@ -29,6 +29,7 @@ import type {
   ProviderDeclaredRailSupport,
   ProviderRailSupportDistillation,
   RampCustomerLink,
+  RampCustomerLinkStore,
   RampDiscoveryContext,
   RampEstimateOnrampInput,
   RampKeyFormats,
@@ -43,15 +44,21 @@ import type {
   ValidateCounterpartyOptions,
 } from "#/ramps/types";
 import {
-  HERCLE_APPROVED_VERIFICATION_STATUS,
   HERCLE_FIELD_KEYS,
-  HERCLE_VERIFICATION_STATUSES,
   hercleCounterpartyRequirements,
   hercleJurisdictionForCountry,
   hercleOnboardingDecision,
   hercleOnboardingFields,
+  hercleSuspendedRequirements,
   hercleVerificationRequirements,
 } from "./counterparty";
+import {
+  HERCLE_APPROVED_VERIFICATION_STATUS,
+  HERCLE_SUSPENDED_ACCOUNT_STATUS,
+  HERCLE_VERIFICATION_STATUSES,
+  hercleSuspensionObservation,
+  hercleVerdictObservation,
+} from "./customer-status-mapping";
 import { hercleOrderSettlementEvent, hercleOrderStatusSchema } from "./order-status-mapping";
 
 /** The partner surface of Hercle's public API in each mode. */
@@ -216,19 +223,25 @@ function hercleRefusalCode(answer: ProviderResponse): string | undefined {
   return refusal.success ? refusal.data.code : undefined;
 }
 
-/** Reads a Hercle answer as `readProviderJson` does, first naming a refusal that is about the business. */
+/**
+ * Reads a Hercle answer as `readProviderJson` does, first naming a refusal that is about the business.
+ *
+ * @param diagnostics - What the API logs with a refusal of the business, and never returns.
+ */
 function readHercleAnswer<TSchema extends z.ZodType>(
   answer: ProviderResponse,
-  schema: TSchema
+  schema: TSchema,
+  diagnostics?: Record<string, unknown>
 ): z.output<TSchema> {
   const code = hercleRefusalCode(answer);
   if (code !== undefined && isHercleBusinessRefusal(code)) {
     const refusal = HERCLE_BUSINESS_REFUSALS[code];
-    throw new SdpPaymentsError(refusal.code, refusal.message, {
-      provider: "hercle",
-      providerStatus: answer.response.status,
-      outcome: "rejected",
-    });
+    throw new SdpPaymentsError(
+      refusal.code,
+      refusal.message,
+      { provider: "hercle", providerStatus: answer.response.status, outcome: "rejected" },
+      diagnostics
+    );
   }
   return readProviderJson("hercle", answer, schema);
 }
@@ -288,6 +301,17 @@ const hercleAccountByReferenceSchema = z.object({
   externalReference: z.string(),
 });
 
+/**
+ * The part of `GET /partner/v1/accounts/{id}` that shows a suspension.
+ * Hercle's order gate reads a suspension from `financialStatus` alone, compared without regard to case.
+ */
+const hercleAccountStandingSchema = z.object({
+  accountId: z.string().trim().min(1),
+  financialStatus: z.string().nullish(),
+});
+
+const HERCLE_SUSPENDED_FINANCIAL_STATUS = "suspended";
+
 /** The conflicts Hercle answers when it already holds an account under SDP's idempotency key or the business's reference. */
 const HERCLE_ACCOUNT_EXISTS_CODES: ReadonlySet<string> = new Set([
   "IDEMPOTENCY_KEY_REUSED",
@@ -340,6 +364,11 @@ function trustedHercleVerification(verification: HercleVerification): HercleVeri
   return verification;
 }
 
+/** When SDP sends a read, which orders Hercle's answer against Hercle's events and SDP's other reads. */
+function hercleAskedAt(): string {
+  return new Date().toISOString();
+}
+
 /**
  * Starts the linked business's verification.
  * Hercle replays the start it already holds under the same key, so a retried submission resumes the same verification.
@@ -347,14 +376,14 @@ function trustedHercleVerification(verification: HercleVerification): HercleVeri
 async function startHercleVerification(
   ctx: RampRuntimeContext,
   counterparty: Counterparty,
-  link: RampCustomerLink
+  accountId: string
 ): Promise<HercleVerification> {
   return trustedHercleVerification(
     await hercleRequest(
       ctx,
       {
         method: "POST",
-        pathWithQuery: hercleAccountPath(link.providerCustomerReference, "verifications"),
+        pathWithQuery: hercleAccountPath(accountId, "verifications"),
         body: {},
         idempotencyKey: hercleVerificationIdempotencyKey(counterparty),
       },
@@ -369,11 +398,11 @@ async function startHercleVerification(
  */
 async function readStartedHercleVerification(
   ctx: RampRuntimeContext,
-  link: RampCustomerLink
+  accountId: string
 ): Promise<HercleVerification | null> {
   const { url, init } = await signedHercleInit(ctx, {
     method: "GET",
-    pathWithQuery: hercleAccountPath(link.providerCustomerReference, "verification"),
+    pathWithQuery: hercleAccountPath(accountId, "verification"),
   });
   const answer = await providerFetch("hercle", url, init);
   if (
@@ -385,16 +414,115 @@ async function readStartedHercleVerification(
   return trustedHercleVerification(readHercleAnswer(answer, hercleVerificationSchema));
 }
 
-/** Records a changed verdict on the link, which the quote gate reads, and answers for it. */
+/**
+ * Whether Hercle has suspended the business's financial operations, read from its account.
+ *
+ * @throws SdpPaymentsError PROVIDER_RESPONSE_INVALID when Hercle answers with another account.
+ */
+async function isHercleAccountSuspended(
+  ctx: RampRuntimeContext,
+  accountId: string
+): Promise<boolean> {
+  const account = await hercleRequest(
+    ctx,
+    { method: "GET", pathWithQuery: `/partner/v1/accounts/${encodeURIComponent(accountId)}` },
+    hercleAccountStandingSchema
+  );
+  if (account.accountId !== accountId) {
+    throw new SdpPaymentsError("PROVIDER_RESPONSE_INVALID", "hercle returned another account", {
+      provider: "hercle",
+      outcome: "unknown",
+    });
+  }
+  return account.financialStatus?.toLowerCase() === HERCLE_SUSPENDED_FINANCIAL_STATUS;
+}
+
+/**
+ * Records Hercle's verdict on the link, which the quote gate reads, and answers for it.
+ * Every read is recorded, so it also outdates any older Hercle event still waiting to be applied.
+ */
 async function answerHercleVerification(
   input: RampRequirementsInput,
-  link: RampCustomerLink,
-  verification: HercleVerification
+  verification: HercleVerification,
+  observedAt: string,
+  accountActive: boolean
 ): Promise<CounterpartyRequirements> {
-  if (verification.status !== link.providerStatus) {
-    await input.customerLink.recordStatus(verification.status);
-  }
+  await input.customerLink.recordStatus(
+    hercleVerdictObservation(verification.status, observedAt, accountActive)
+  );
   return hercleVerificationRequirements(verification, input.direction);
+}
+
+/**
+ * The answer for a business SDP last saw suspended.
+ * Only Hercle's account read shows a suspension, so it comes first.
+ * Once Hercle has lifted the suspension, the verdict read after it replaces the suspension on the link.
+ *
+ * @param startIfNone - Whether to start the verification when Hercle holds none, as a submission does.
+ */
+async function answerSuspendedHercleBusiness(
+  ctx: RampRuntimeContext,
+  input: RampRequirementsInput,
+  link: RampCustomerLink,
+  startIfNone: boolean
+): Promise<CounterpartyRequirements> {
+  const accountId = link.providerCustomerReference;
+  const accountObservedAt = hercleAskedAt();
+  if (await isHercleAccountSuspended(ctx, accountId)) {
+    await input.customerLink.recordStatus(hercleSuspensionObservation(accountObservedAt));
+    return hercleSuspendedRequirements(input.direction);
+  }
+  const observedAt = hercleAskedAt();
+  const read = await readStartedHercleVerification(ctx, accountId);
+  const verification =
+    read === null && startIfNone
+      ? await startHercleVerification(ctx, input.counterparty, accountId)
+      : read;
+  if (verification === null) {
+    await input.customerLink.recordStatus(hercleVerdictObservation(null, observedAt, true));
+    return hercleOnboardingDecision(input.counterparty, input.direction, false);
+  }
+  return answerHercleVerification(input, verification, observedAt, true);
+}
+
+/**
+ * Records on the link what Hercle's refusal of an order shows about the business.
+ * A suspension is the refusal's own news.
+ * A refusal for want of verification does not name the verdict, so the verdict is read again.
+ * That refusal also shows the account is not suspended, because Hercle reports a suspension first.
+ *
+ * @returns Why the link could not be corrected, for the refusal's diagnostics; the next refusal or requirements read corrects it.
+ */
+async function recordHercleOrderRefusal(
+  ctx: RampRuntimeContext,
+  customerLink: RampCustomerLinkStore,
+  accountId: string,
+  refusalCode: string | undefined,
+  orderObservedAt: string
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    switch (refusalCode) {
+      case "ACCOUNT_SUSPENDED":
+        await customerLink.recordStatus(hercleSuspensionObservation(orderObservedAt));
+        return undefined;
+      case "ACCOUNT_NOT_VERIFIED": {
+        const observedAt = hercleAskedAt();
+        const verification = await readStartedHercleVerification(ctx, accountId);
+        await customerLink.recordStatus(
+          hercleVerdictObservation(
+            verification === null ? null : verification.status,
+            observedAt,
+            true
+          )
+        );
+        return undefined;
+      }
+      default:
+        return undefined;
+    }
+  } catch (cause) {
+    return { customerLinkRecheckFailed: cause instanceof Error ? cause.message : String(cause) };
+  }
 }
 
 /**
@@ -505,13 +633,17 @@ const HERCLE_REQUIREMENTS: RampProviderRequirements = {
     if (link.providerStatus === HERCLE_APPROVED_VERIFICATION_STATUS) {
       return decision;
     }
-    const verification = await readStartedHercleVerification(ctx, link);
+    if (link.providerStatus === HERCLE_SUSPENDED_ACCOUNT_STATUS) {
+      return answerSuspendedHercleBusiness(ctx, input, link, false);
+    }
+    const observedAt = hercleAskedAt();
+    const verification = await readStartedHercleVerification(ctx, link.providerCustomerReference);
     if (verification === null) {
       // The submission that opened the account stopped before its verification started.
       // Asking for the fields again lets the next submission start it.
       return hercleOnboardingDecision(input.counterparty, input.direction, false);
     }
-    return answerHercleVerification(input, link, verification);
+    return answerHercleVerification(input, verification, observedAt, false);
   },
 
   async submit(ctx, input) {
@@ -528,14 +660,19 @@ const HERCLE_REQUIREMENTS: RampProviderRequirements = {
     if (link.providerStatus === HERCLE_APPROVED_VERIFICATION_STATUS) {
       return hercleVerificationRequirements({ status: link.providerStatus }, input.direction);
     }
+    if (link.providerStatus === HERCLE_SUSPENDED_ACCOUNT_STATUS) {
+      return answerSuspendedHercleBusiness(ctx, input, link, true);
+    }
     // A link with no recorded verdict starts verification, which replays an earlier start.
     // One with a verdict reads it, and starts verification only if Hercle holds none.
+    const accountId = link.providerCustomerReference;
+    const observedAt = hercleAskedAt();
     const verification =
       link.providerStatus === null
-        ? await startHercleVerification(ctx, input.counterparty, link)
-        : ((await readStartedHercleVerification(ctx, link)) ??
-          (await startHercleVerification(ctx, input.counterparty, link)));
-    return answerHercleVerification(input, link, verification);
+        ? await startHercleVerification(ctx, input.counterparty, accountId)
+        : ((await readStartedHercleVerification(ctx, accountId)) ??
+          (await startHercleVerification(ctx, input.counterparty, accountId)));
+    return answerHercleVerification(input, verification, observedAt, false);
   },
 
   isCustomerReady(link) {
@@ -615,6 +752,7 @@ export class HercleRampClient implements RampProvider {
   /**
    * The quote is the order: Hercle answers with the bank account and reference the business wires to.
    * It is keyed on SDP's transfer id, so two orders for the same amount never collapse into one.
+   * A refusal of the business corrects the link the quote gate read, so a revocation SDP missed stops the next quote.
    */
   async createOnrampQuote(
     ctx: RampRuntimeContext,
@@ -628,22 +766,31 @@ export class HercleRampClient implements RampProvider {
         provider: this.id,
       });
     }
-    const order = await hercleRequest(
-      ctx,
-      {
-        method: "POST",
-        pathWithQuery: "/partner/v1/orders/onramp",
-        body: {
-          fiatCurrency: input.fiatCurrency,
-          fiatAmount: input.fiatAmount,
-          ...hercleAsset(input.assetRail),
-          destinationWalletAddress: input.destinationWalletAddress,
-        },
-        onBehalfOf: input.externalCustomerId,
-        idempotencyKey: `sdp-onramp-${input.paymentTransferId}`,
+    const orderObservedAt = hercleAskedAt();
+    const { url, init } = await signedHercleInit(ctx, {
+      method: "POST",
+      pathWithQuery: "/partner/v1/orders/onramp",
+      body: {
+        fiatCurrency: input.fiatCurrency,
+        fiatAmount: input.fiatAmount,
+        ...hercleAsset(input.assetRail),
+        destinationWalletAddress: input.destinationWalletAddress,
       },
-      hercleOnrampOrderSchema
-    );
+      onBehalfOf: input.externalCustomerId,
+      idempotencyKey: `sdp-onramp-${input.paymentTransferId}`,
+    });
+    const answer = await providerFetch(this.id, url, init);
+    const recheckFailure =
+      input.customerLink === undefined
+        ? undefined
+        : await recordHercleOrderRefusal(
+            ctx,
+            input.customerLink,
+            input.externalCustomerId,
+            hercleRefusalCode(answer),
+            orderObservedAt
+          );
+    const order = readHercleAnswer(answer, hercleOnrampOrderSchema, recheckFailure);
     const instruction: HercleFiatFundingInstruction = {
       provider: "hercle",
       kind: "fiat_funding",

@@ -538,6 +538,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                     "type": "string",
                   },
                   "reason": {
+                    "description": "Why the provider does not serve this counterparty in this direction. Some reasons are temporary, such as the provider suspending the counterparty's account, so read the requirements again later.",
                     "type": "string",
                   },
                   "status": {
@@ -654,7 +655,7 @@ exports[`OpenAPI spec > documents counterparty ramp requirements 1`] = `
                 "type": "object",
               },
             ],
-            "description": "Current provider-specific readiness state and any fields or actions required before creating a ramp quote.",
+            "description": "Current provider-specific readiness state and any fields or actions required before creating a ramp quote. A provider that verifies the counterparty itself can withdraw a \`ready\` later, by revoking its verdict or suspending the account, and give it back when it reinstates the counterparty.",
           },
           "meta": {
             "description": "Response metadata.",

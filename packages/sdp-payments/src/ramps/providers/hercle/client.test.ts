@@ -7,6 +7,7 @@ import { rampTestRuntime, replayExchanges } from "#/ramps/test-kit";
 import type {
   RampCustomerLink,
   RampCustomerLinkStore,
+  RampCustomerStatusObservation,
   RampProviderRequirements,
 } from "#/ramps/types";
 import { buildHercleSignature } from "./client";
@@ -46,25 +47,44 @@ const KYB = {
   [HERCLE_FIELD_KEYS.privacyConsent]: "true",
 };
 
-/** The customer-link store the API backs with a row, in memory. */
+/**
+ * The customer-link store the API backs with a row, in memory.
+ * It takes every observation; the API's repository tests pin which ones the row keeps.
+ */
 function memoryLinkStore(initial: RampCustomerLink | null = null) {
-  const state: { link: RampCustomerLink | null; recorded: string[] } = {
-    link: initial,
-    recorded: [],
-  };
+  const state: {
+    link: RampCustomerLink | null;
+    recorded: (string | null)[];
+    observations: RampCustomerStatusObservation[];
+  } = { link: initial, recorded: [], observations: [] };
   const store: RampCustomerLinkStore = {
     read: async () => state.link,
     link: async (providerCustomerReference) => {
       state.link ??= { providerCustomerReference, providerStatus: null };
       return state.link;
     },
-    recordStatus: async (providerStatus) => {
+    recordStatus: async (observation) => {
       assert.ok(state.link, "a status is recorded on a linked customer");
-      state.link = { ...state.link, providerStatus };
-      state.recorded.push(providerStatus);
+      state.link = { ...state.link, providerStatus: observation.providerStatus };
+      state.recorded.push(observation.providerStatus);
+      state.observations.push(observation);
     },
   };
   return { state, store };
+}
+
+/** The instants around `run`, the window an observation SDP stamps while it runs must fall in. */
+async function stampedWindow<T>(
+  run: () => Promise<T>
+): Promise<{ result: T; from: Date; to: Date }> {
+  const from = new Date();
+  const result = await run();
+  return { result, from, to: new Date() };
+}
+
+function assertObservedWithin(observedAt: string, window: { from: Date; to: Date }) {
+  const instant = new Date(observedAt);
+  assert.ok(instant >= window.from && instant <= window.to, observedAt);
 }
 
 interface CapturedCall {
@@ -246,6 +266,108 @@ describe("Hercle order", () => {
         code
       );
     }
+  });
+
+  it("records a suspension Hercle refuses the order for, at the order's time, with no further request", async () => {
+    const input = HERCLE_TEST_KIT.onramp?.quote.input;
+    assert.ok(input);
+    const calls = scriptedFetch([
+      { status: 403, body: { code: "ACCOUNT_SUSPENDED", message: "suspended" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: input.externalCustomerId,
+      providerStatus: "approved",
+    });
+
+    const window = await stampedWindow(() =>
+      assert.rejects(
+        hercle.createOnrampQuote?.(sandbox, { ...input, customerLink: store }) ?? Promise.resolve(),
+        (cause: unknown) => cause instanceof SdpPaymentsError && cause.code === "CONFLICT"
+      )
+    );
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(state.recorded, ["suspended"]);
+    const [observation] = state.observations;
+    assert.ok(observation);
+    assert.deepEqual(
+      { winsTie: observation.winsTie, preserves: observation.preserves },
+      { winsTie: true, preserves: [] }
+    );
+    assertObservedWithin(observation.observedAt, window);
+  });
+
+  it("reads the verdict again when Hercle refuses the order for want of verification", async () => {
+    const input = HERCLE_TEST_KIT.onramp?.quote.input;
+    assert.ok(input);
+    const calls = scriptedFetch([
+      { status: 403, body: { code: "ACCOUNT_NOT_VERIFIED", message: "not verified" } },
+      { status: 200, body: { status: "pending" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: input.externalCustomerId,
+      providerStatus: "approved",
+    });
+
+    await assert.rejects(
+      hercle.createOnrampQuote?.(sandbox, { ...input, customerLink: store }) ?? Promise.resolve(),
+      (cause: unknown) => cause instanceof SdpPaymentsError && cause.code === "CONFLICT"
+    );
+
+    assert.deepEqual(
+      calls.map((call) => `${call.method} ${call.url}`),
+      [
+        `POST ${BASE_URL}/partner/v1/orders/onramp`,
+        `GET ${BASE_URL}/partner/v1/accounts/${input.externalCustomerId}/verification`,
+      ]
+    );
+    assert.deepEqual(state.recorded, ["pending"]);
+    // The refusal shows the account is not suspended, so the verdict may replace a recorded suspension.
+    assert.deepEqual(state.observations[0]?.preserves, []);
+  });
+
+  it("still answers the refusal when the verdict cannot be read again", async () => {
+    const input = HERCLE_TEST_KIT.onramp?.quote.input;
+    assert.ok(input);
+    scriptedFetch([
+      { status: 403, body: { code: "ACCOUNT_NOT_VERIFIED", message: "not verified" } },
+      { status: 503, body: { code: "VERIFICATION_UNAVAILABLE", message: "retry later" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: input.externalCustomerId,
+      providerStatus: "approved",
+    });
+
+    await assert.rejects(
+      hercle.createOnrampQuote?.(sandbox, { ...input, customerLink: store }) ?? Promise.resolve(),
+      (cause: unknown) =>
+        cause instanceof SdpPaymentsError &&
+        cause.code === "CONFLICT" &&
+        typeof cause.diagnostics?.customerLinkRecheckFailed === "string"
+    );
+    assert.deepEqual(state.recorded, []);
+  });
+
+  it("records nothing on the link for an order Hercle opens or refuses for another reason", async () => {
+    const input = HERCLE_TEST_KIT.onramp?.quote.input;
+    assert.ok(input);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: input.externalCustomerId,
+      providerStatus: "approved",
+    });
+    const opened = scriptedFetch([{ status: 200, body: HERCLE_ORDER }]);
+    await hercle.createOnrampQuote?.(sandbox, { ...input, customerLink: store });
+    const refused = scriptedFetch([
+      { status: 409, body: { code: "BANK_ACCOUNT_NOT_PROVISIONED", message: "opening" } },
+    ]);
+    await assert.rejects(
+      hercle.createOnrampQuote?.(sandbox, { ...input, customerLink: store }) ?? Promise.resolve(),
+      SdpPaymentsError
+    );
+
+    assert.equal(opened.length, 1);
+    assert.equal(refused.length, 1);
+    assert.deepEqual(state.recorded, []);
   });
 
   it("refuses an order without the payer the bank enforces", async () => {
@@ -584,21 +706,159 @@ describe("Hercle requirements", () => {
     assert.equal(calls.length, 0);
   });
 
-  it("reads the verdict on a linked business and records a change", async () => {
+  it("reads the verdict on a linked business and records it with the time SDP asked", async () => {
     const calls = scriptedFetch([{ status: 200, body: { status: "pending" } }]);
     const { state, store } = memoryLinkStore({
       providerCustomerReference: "acct_1",
       providerStatus: "action_required",
+    });
+    const window = await stampedWindow(() =>
+      requirementsMember().describe(sandbox, {
+        counterparty: BUSINESS,
+        direction: "onramp",
+        customerLink: store,
+      })
+    );
+    assert.equal(window.result.status, "customer_verifying");
+    assert.deepEqual(state.recorded, ["pending"]);
+    const [observation] = state.observations;
+    assert.ok(observation);
+    // A verdict read cannot see a suspension, so it never replaces one.
+    assert.deepEqual(
+      { winsTie: observation.winsTie, preserves: observation.preserves },
+      { winsTie: true, preserves: ["suspended"] }
+    );
+    assertObservedWithin(observation.observedAt, window);
+    assert.equal(calls[0]?.method, "GET");
+    assert.equal(calls[0]?.url, `${BASE_URL}/partner/v1/accounts/acct_1/verification`);
+  });
+
+  it("records an approval that loses a tie, so a same-second revocation is never undone", async () => {
+    scriptedFetch([{ status: 200, body: { status: "approved" } }]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "pending",
     });
     const answer = await requirementsMember().describe(sandbox, {
       counterparty: BUSINESS,
       direction: "onramp",
       customerLink: store,
     });
-    assert.equal(answer.status, "customer_verifying");
-    assert.deepEqual(state.recorded, ["pending"]);
-    assert.equal(calls[0]?.method, "GET");
-    assert.equal(calls[0]?.url, `${BASE_URL}/partner/v1/accounts/acct_1/verification`);
+    assert.equal(answer.status, "ready");
+    assert.equal(state.observations[0]?.winsTie, false);
+  });
+
+  it("keeps a suspended business unready, reading only its account", async () => {
+    const calls = scriptedFetch([
+      { status: 200, body: { accountId: "acct_1", financialStatus: "Suspended" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "suspended",
+    });
+    const answer = await requirementsMember().describe(sandbox, {
+      counterparty: BUSINESS,
+      direction: "onramp",
+      customerLink: store,
+    });
+    assert.deepEqual(answer, {
+      provider: "hercle",
+      direction: "onramp",
+      status: "unsupported",
+      reason: "Hercle has suspended the business's account.",
+    });
+    assert.deepEqual(
+      calls.map((call) => `${call.method} ${call.url}`),
+      [`GET ${BASE_URL}/partner/v1/accounts/acct_1`]
+    );
+    assert.deepEqual(state.recorded, ["suspended"]);
+  });
+
+  it("shows a business ready again once Hercle lifts its suspension", async () => {
+    const calls = scriptedFetch([
+      { status: 200, body: { accountId: "acct_1", financialStatus: "Active" } },
+      { status: 200, body: { status: "approved" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "suspended",
+    });
+    const answer = await requirementsMember().describe(sandbox, {
+      counterparty: BUSINESS,
+      direction: "onramp",
+      customerLink: store,
+    });
+    assert.equal(answer.status, "ready");
+    assert.deepEqual(
+      calls.map((call) => `${call.method} ${call.url}`),
+      [
+        `GET ${BASE_URL}/partner/v1/accounts/acct_1`,
+        `GET ${BASE_URL}/partner/v1/accounts/acct_1/verification`,
+      ]
+    );
+    assert.deepEqual(state.recorded, ["approved"]);
+    // The account read showed no suspension, so this verdict replaces the recorded one.
+    assert.deepEqual(state.observations[0]?.preserves, []);
+  });
+
+  it("lifts a suspension with no verdict when the reinstated business has no verification", async () => {
+    scriptedFetch([
+      { status: 200, body: { accountId: "acct_1", financialStatus: "" } },
+      { status: 404, body: { code: "VERIFICATION_NOT_STARTED", message: "not started" } },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "suspended",
+    });
+    const answer = await requirementsMember().describe(sandbox, {
+      counterparty: BUSINESS,
+      direction: "onramp",
+      customerLink: store,
+    });
+    assert.equal(answer.status, "collect");
+    assert.deepEqual(state.recorded, [null]);
+  });
+
+  it("starts the verification of a reinstated business on a submission when Hercle holds none", async () => {
+    const calls = scriptedFetch([
+      { status: 200, body: { accountId: "acct_1", financialStatus: "Active" } },
+      { status: 404, body: { code: "VERIFICATION_NOT_STARTED", message: "not started" } },
+      {
+        status: 200,
+        body: { status: "action_required", verificationUrl: "https://verify.hercle.test/acct_1" },
+      },
+    ]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "suspended",
+    });
+    const answer = await requirementsMember().submit(sandbox, {
+      counterparty: BUSINESS,
+      direction: "onramp",
+      customerLink: store,
+      collectedData: KYB,
+    });
+    assert.equal(answer.status, "customer_verification_required");
+    assert.equal(calls[2]?.url, `${BASE_URL}/partner/v1/accounts/acct_1/verifications`);
+    assert.deepEqual(state.recorded, ["action_required"]);
+  });
+
+  it("refuses an account read that answers for another account", async () => {
+    scriptedFetch([{ status: 200, body: { accountId: "acct_9", financialStatus: "Active" } }]);
+    const { state, store } = memoryLinkStore({
+      providerCustomerReference: "acct_1",
+      providerStatus: "suspended",
+    });
+    await assert.rejects(
+      requirementsMember().describe(sandbox, {
+        counterparty: BUSINESS,
+        direction: "onramp",
+        customerLink: store,
+      }),
+      (cause: unknown) =>
+        cause instanceof SdpPaymentsError && cause.code === "PROVIDER_RESPONSE_INVALID"
+    );
+    assert.deepEqual(state.recorded, []);
   });
 
   it("only reads a linked business with no recorded verdict, never starting its verification", async () => {
@@ -728,7 +988,7 @@ describe("Hercle requirements", () => {
       member.isCustomerReady({ providerCustomerReference: "acct_1", providerStatus: "approved" }),
       true
     );
-    for (const providerStatus of [null, "pending", "action_required", "rejected"]) {
+    for (const providerStatus of [null, "pending", "action_required", "rejected", "suspended"]) {
       assert.equal(
         member.isCustomerReady({ providerCustomerReference: "acct_1", providerStatus }),
         false,

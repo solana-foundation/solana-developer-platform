@@ -3,6 +3,8 @@ import { ONRAMP_SUPPORT, RAMP_SUPPORT_HASH } from "@sdp/types/generated/ramp";
 import type { PaymentRampQuote } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
+import { getDb } from "@/db/client";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError, badRequestQuery, internalError } from "@/lib/errors";
@@ -24,6 +26,7 @@ import {
 } from "@/routes/payments/ramps/shared";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { auditedRampWrite } from "@/services/payments/ramp-audit";
+import { createRampCustomerLinkStore } from "@/services/ramps/customer-link-store";
 import {
   type createOnrampQuoteSchema,
   type estimateOnrampSchema,
@@ -189,6 +192,15 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
         destinationWalletAddress,
         externalCustomerId: customerLink.providerCustomerReference,
         paymentTransferId: reservedTransferId,
+        customerLink: createRampCustomerLinkStore(
+          createPostgresCounterpartyProviderAccountsRepository(getDb(c.env)),
+          {
+            organizationId: scope.auth.organizationId,
+            projectId,
+            counterpartyId: counterparty.id,
+            provider: "hercle",
+          }
+        ),
       });
       break;
     }

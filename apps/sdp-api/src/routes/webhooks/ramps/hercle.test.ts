@@ -138,8 +138,45 @@ describe("hercleWebhook", () => {
     });
   });
 
-  it("ignores verification events and events it does not read", () => {
-    for (const event of ["customer.verification.status_changed", "account.created"]) {
+  it("maps each verdict to the business's link, ordered by the envelope's time", () => {
+    const timestamp = 1_762_300_800;
+    const parse = (status: string) =>
+      hercleWebhook.parse(
+        JSON.stringify({
+          event: "customer.verification.status_changed",
+          timestamp,
+          data: { accountId: "acct_1", status },
+        })
+      );
+
+    for (const status of ["action_required", "pending", "rejected"]) {
+      expect(parse(status)).toEqual({
+        provider: "hercle",
+        kind: "customer_status",
+        providerCustomerReference: "acct_1",
+        observation: {
+          providerStatus: status,
+          // The last millisecond of Hercle's whole second, so it outdates any read SDP sent in that second.
+          observedAt: "2025-11-05T00:00:00.999Z",
+          winsTie: true,
+          preserves: ["suspended"],
+        },
+      });
+    }
+    // An approval loses a same-second tie, so it never undoes a revocation Hercle sent in that second.
+    expect(parse("approved")).toMatchObject({
+      kind: "customer_status",
+      observation: { providerStatus: "approved", winsTie: false, preserves: ["suspended"] },
+    });
+    expect(parse("on_hold")).toEqual({
+      provider: "hercle",
+      kind: "ignore",
+      reason: "unsupported_status:on_hold",
+    });
+  });
+
+  it("ignores events it does not read", () => {
+    for (const event of ["account.created", "customer.account.status_changed"]) {
       expect(
         hercleWebhook.parse(
           JSON.stringify({
@@ -149,6 +186,22 @@ describe("hercleWebhook", () => {
           })
         )
       ).toEqual({ provider: "hercle", kind: "ignore", reason: `unsupported_event:${event}` });
+    }
+  });
+
+  it("throws on a verification event without its account, verdict or time so Hercle redelivers", () => {
+    const verification = (envelope: Record<string, unknown>) =>
+      JSON.stringify({ event: "customer.verification.status_changed", ...envelope });
+
+    for (const envelope of [
+      { timestamp: nowSeconds(), data: { status: "approved" } },
+      { timestamp: nowSeconds(), data: { accountId: "acct_1" } },
+      { data: { accountId: "acct_1", status: "approved" } },
+      { timestamp: "yesterday", data: { accountId: "acct_1", status: "approved" } },
+    ]) {
+      expect(() => hercleWebhook.parse(verification(envelope))).toThrow(
+        "carries a malformed verification"
+      );
     }
   });
 

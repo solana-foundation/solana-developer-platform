@@ -288,6 +288,8 @@ export interface RampOnrampQuoteInput {
   customerIpAddress?: string;
   /** Identity pre-fill for an embedded on-ramp widget (Stripe). */
   customerDetails?: RampCustomerDetails;
+  /** The link of a customer the provider onboards itself (Hercle), on which a refused order records what it shows. */
+  customerLink?: RampCustomerLinkStore;
 }
 
 export interface RampOfframpQuoteInput {
@@ -332,6 +334,29 @@ export interface RampCustomerLink {
 }
 
 /**
+ * One report of a linked customer's status at the provider: an event the provider sent, or the answer to a read SDP made.
+ * The link keeps the newest report, so a late or replayed one never undoes a newer one.
+ */
+export interface RampCustomerStatusObservation {
+  /** The provider's status for the customer, verbatim; null while the provider holds none. */
+  providerStatus: string | null;
+  /** When the provider reported it: the event's own time, or when SDP sent the read that returned it. */
+  observedAt: string;
+  /** Whether it replaces a status observed at the same instant. A status that holds quotes back does, so a tie never lets a quote run. */
+  winsTie: boolean;
+  /** Recorded statuses the report cannot see, which it leaves in place. */
+  preserves: readonly string[];
+}
+
+/** A provider's event about one of its customers, keyed on the provider's id for the customer. */
+export interface RampCustomerStatusEvent {
+  provider: RampProviderId;
+  kind: "customer_status";
+  providerCustomerReference: string;
+  observation: RampCustomerStatusObservation;
+}
+
+/**
  * The core's store for one counterparty's customer link with one provider.
  * A provider's requirements member keeps its state here and never touches the database.
  */
@@ -339,8 +364,8 @@ export interface RampCustomerLinkStore {
   read: () => Promise<RampCustomerLink | null>;
   /** Links the provider's customer. The first reference stored stays canonical. */
   link: (providerCustomerReference: string) => Promise<RampCustomerLink>;
-  /** Records the provider's latest status for the linked customer. */
-  recordStatus: (providerStatus: string) => Promise<void>;
+  /** Records the provider's status for the linked customer, unless the link holds a newer report. */
+  recordStatus: (observation: RampCustomerStatusObservation) => Promise<void>;
 }
 
 export interface RampRequirementsInput {

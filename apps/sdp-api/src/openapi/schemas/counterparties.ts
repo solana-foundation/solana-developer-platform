@@ -201,7 +201,10 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
       ...requirementBase,
       provider: z.enum(RAMP_PROVIDERS),
       status: z.literal("unsupported"),
-      reason: z.string(),
+      reason: withOpenApi(z.string(), {
+        description:
+          "Why the provider does not serve this counterparty in this direction. Some reasons are temporary, such as the provider suspending the counterparty's account, so read the requirements again later.",
+      }),
     }),
     z.object({
       ...requirementBase,
@@ -225,7 +228,7 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
   ]),
   {
     description:
-      "Current provider-specific readiness state and any fields or actions required before creating a ramp quote.",
+      "Current provider-specific readiness state and any fields or actions required before creating a ramp quote. A provider that verifies the counterparty itself can withdraw a `ready` later, by revoking its verdict or suspending the account, and give it back when it reinstates the counterparty.",
   }
 );
 

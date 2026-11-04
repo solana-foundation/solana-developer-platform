@@ -18,6 +18,12 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { seedTestCustodySetup } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { installHercleTestEnv } from "@/test/helpers/hercle-env";
+import { hercleSecondsAgo, seedHercleLink } from "@/test/helpers/hercle-links";
+import {
+  deliverHercleWebhook,
+  hercleVerificationBody,
+  hercleWebhookKeyPair,
+} from "@/test/helpers/hercle-webhooks";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -478,11 +484,13 @@ describe("Counterparties Routes", () => {
         return (await created.json()).data.counterparty as { id: string };
       }
 
+      function linkScopeOf(counterpartyId: string) {
+        return { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID, counterpartyId };
+      }
+
       function readLink(counterpartyId: string) {
         return createPostgresCounterpartyProviderAccountsRepository(getDb(env)).getProviderAccount({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          counterpartyId,
+          ...linkScopeOf(counterpartyId),
           provider: "hercle",
         });
       }
@@ -611,24 +619,7 @@ describe("Counterparties Routes", () => {
 
       it("reads Hercle's verdict on a linked business and records the approval", async () => {
         const cp = await createBusiness("hercle_approved");
-        await createPostgresCounterpartyProviderAccountsRepository(
-          getDb(env)
-        ).upsertProviderAccount({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          counterpartyId: cp.id,
-          provider: "hercle",
-          providerCustomerReference: "acct_route_approved",
-        });
-        await createPostgresCounterpartyProviderAccountsRepository(
-          getDb(env)
-        ).recordCustomerLinkStatus({
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          counterpartyId: cp.id,
-          provider: "hercle",
-          providerStatus: "pending",
-        });
+        await seedHercleLink(linkScopeOf(cp.id), "acct_route_approved", "pending");
         const calls = hercleReplies([{ status: 200, body: { status: "approved" } }]);
 
         const res = await app.request(
@@ -673,6 +664,89 @@ describe("Counterparties Routes", () => {
         expect((await res.json()).data).toMatchObject({ status: "collect" });
         expect(calls.map((call) => call.method)).toEqual(["GET"]);
         expect((await readLink(cp.id))?.provider_status).toBeNull();
+      });
+
+      describe("once Hercle no longer accepts the business's orders", () => {
+        const WEBHOOK_KEY = hercleWebhookKeyPair();
+        installHercleTestEnv({ HERCLE_SANDBOX_WEBHOOK_PUBLIC_KEY: WEBHOOK_KEY.publicKeyPem });
+
+        async function readRequirements(counterpartyId: string) {
+          const res = await app.request(
+            `/v1/counterparties/${counterpartyId}/requirements?${requirementsQuery}`,
+            { headers: { Authorization: authHeader } },
+            env
+          );
+          expect(res.status).toBe(200);
+          return (await res.json()).data;
+        }
+
+        async function deliverVerdict(accountId: string, status: string, timestamp: number) {
+          const res = await deliverHercleWebhook(
+            hercleVerificationBody(accountId, status, timestamp),
+            WEBHOOK_KEY.privateKey,
+            { timestamp }
+          );
+          expect(res.status).toBe(200);
+        }
+
+        it("stops showing a business ready on Hercle's revocation, and shows it ready again on reinstatement", async () => {
+          const cp = await createBusiness("hercle_revoked");
+          await seedHercleLink(linkScopeOf(cp.id), "acct_route_revoked", "approved");
+          const calls = hercleReplies([{ status: 200, body: { status: "rejected" } }]);
+          expect(await readRequirements(cp.id)).toMatchObject({ status: "ready" });
+          expect(calls).toHaveLength(0);
+
+          await deliverVerdict("acct_route_revoked", "rejected", hercleSecondsAgo(60));
+
+          expect((await readLink(cp.id))?.provider_status).toBe("rejected");
+          expect(await readRequirements(cp.id)).toEqual({
+            provider: "hercle",
+            direction: "onramp",
+            status: "customer_verification_failed",
+          });
+          expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+            `GET ${HERCLE_BASE_URL}/partner/v1/accounts/acct_route_revoked/verification`,
+          ]);
+
+          // Hercle reinstates the business a second after the read above.
+          await deliverVerdict("acct_route_revoked", "approved", hercleSecondsAgo(-1));
+
+          expect(await readRequirements(cp.id)).toMatchObject({ status: "ready" });
+          expect(calls).toHaveLength(1);
+        });
+
+        it("answers a suspended business unsupported until Hercle lifts the suspension", async () => {
+          const cp = await createBusiness("hercle_suspended");
+          await seedHercleLink(linkScopeOf(cp.id), "acct_route_suspended", "suspended");
+          const account = `${HERCLE_BASE_URL}/partner/v1/accounts/acct_route_suspended`;
+          const calls = hercleReplies([
+            {
+              status: 200,
+              body: { accountId: "acct_route_suspended", financialStatus: "Suspended" },
+            },
+            { status: 200, body: { accountId: "acct_route_suspended", financialStatus: "Active" } },
+            { status: 200, body: { status: "approved" } },
+          ]);
+
+          expect(await readRequirements(cp.id)).toEqual({
+            provider: "hercle",
+            direction: "onramp",
+            status: "unsupported",
+            reason: "Hercle has suspended the business's account.",
+          });
+          expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([`GET ${account}`]);
+
+          expect(await readRequirements(cp.id)).toMatchObject({ status: "ready" });
+          expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+            `GET ${account}`,
+            `GET ${account}`,
+            `GET ${account}/verification`,
+          ]);
+          expect((await readLink(cp.id))?.provider_status).toBe("approved");
+
+          expect(await readRequirements(cp.id)).toMatchObject({ status: "ready" });
+          expect(calls).toHaveLength(3);
+        });
       });
     });
 

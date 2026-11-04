@@ -22,6 +22,7 @@ import {
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { installHercleTestEnv } from "@/test/helpers/hercle-env";
+import { seedHercleLink } from "@/test/helpers/hercle-links";
 import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   installPaymentsRouteTestHooks,
@@ -1487,18 +1488,20 @@ describe("Payments routes — ramps", () => {
     };
 
     async function linkHercleAccount(counterpartyId: string, providerStatus: string) {
-      const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
-      const scope = {
+      await seedHercleLink(
+        { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id, counterpartyId },
+        "acct_route_test",
+        providerStatus
+      );
+    }
+
+    function readHercleLink(counterpartyId: string) {
+      return createPostgresCounterpartyProviderAccountsRepository(getDb(env)).getProviderAccount({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         counterpartyId,
-        provider: "hercle" as const,
-      };
-      await accounts.upsertProviderAccount({
-        ...scope,
-        providerCustomerReference: "acct_route_test",
+        provider: "hercle",
       });
-      await accounts.recordCustomerLinkStatus({ ...scope, providerStatus });
     }
 
     async function createHercleOnrampQuote(
@@ -1615,6 +1618,86 @@ describe("Payments routes — ramps", () => {
         "not provisioned for hercle onramp"
       );
       expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    function hercleRefusesOrders(replies: readonly { status: number; body: unknown }[]) {
+      const requests: Request[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        requests.push(new Request(String(input), init));
+        const reply = replies[requests.length - 1];
+        if (reply === undefined) {
+          throw new Error(`Unexpected Hercle call ${String(input)}`);
+        }
+        return new Response(JSON.stringify(reply.body), {
+          status: reply.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+      return requests;
+    }
+
+    it("records a suspension Hercle refuses an order for, and quotes no more", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 403, body: { code: "ACCOUNT_SUSPENDED", message: "suspended" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { error: { message: string } }).error.message).toBe(
+        "Hercle has suspended the business's account."
+      );
+      expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST https://publicapi.sandbox.hercle.financial/partner/v1/orders/onramp",
+      ]);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("suspended");
+
+      const again = await createHercleOnrampQuote(counterpartyId);
+
+      expect(again.status).toBe(409);
+      expect(((await again.json()) as { error: { message: string } }).error.message).toContain(
+        "not provisioned for hercle onramp"
+      );
+      expect(requests).toHaveLength(1);
+    });
+
+    it("reads the verdict again when Hercle refuses an order for want of verification", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 403, body: { code: "ACCOUNT_NOT_VERIFIED", message: "not verified" } },
+        { status: 200, body: { status: "rejected" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+        "POST https://publicapi.sandbox.hercle.financial/partner/v1/orders/onramp",
+        "GET https://publicapi.sandbox.hercle.financial/partner/v1/accounts/acct_route_test/verification",
+      ]);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("rejected");
+
+      const again = await createHercleOnrampQuote(counterpartyId);
+
+      expect(again.status).toBe(409);
+      expect(requests).toHaveLength(2);
+    });
+
+    it("keeps the link when Hercle refuses an order for a reason that is not the business's standing", async () => {
+      const counterpartyId = await seedCounterparty({ entityType: "business" });
+      await linkHercleAccount(counterpartyId, "approved");
+      const requests = hercleRefusesOrders([
+        { status: 409, body: { code: "BANK_ACCOUNT_NOT_PROVISIONED", message: "opening" } },
+      ]);
+
+      const refused = await createHercleOnrampQuote(counterpartyId);
+
+      expect(refused.status).toBe(409);
+      expect(requests).toHaveLength(1);
+      expect((await readHercleLink(counterpartyId))?.provider_status).toBe("approved");
     });
 
     it("refuses a business Hercle has not approved before calling Hercle", async () => {

@@ -65,7 +65,8 @@ them.
 
 Migration `0091_scope_customer_link_uniqueness_hercle.sql` adds Hercle to the same uniqueness, and Hercle is live.
 SDP opens one Hercle account per counterparty, so a Hercle account id links exactly one tenant's counterparty.
-SDP never resolves a tenant from a Hercle account id. A Hercle settlement matches the transfer's `provider_reference`, Hercle's order id, which SDP stored on the transfer at quote time. The verification verdict is read through the counterparty's own link, and Hercle's verification webhooks are not read.
+A Hercle settlement matches the transfer's `provider_reference`, Hercle's order id, which SDP stored on the transfer at quote time.
+Hercle's verification webhook names the business by its Hercle account id, and SDP resolves the tenant from it: `findCustomerLinkByProviderReference` answers only when exactly one active link of an active counterparty holds the id, and the event is refused unless that link's project runs in the webhook endpoint's environment.
 
 The customer-link uniqueness applies only to the integrations whose
 customers SDP created one-per-counterparty. MoonPay settlements are matched by

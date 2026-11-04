@@ -85,6 +85,7 @@ function isUntimedNoNews(event: RampSettlementEvent): boolean {
 /**
  * Pairs a provider client's status pull with that provider's webhook processor,
  * so a pulled event takes exactly the path a delivered webhook does.
+ * The processor may apply more events than a pull returns, such as Hercle's customer events.
  */
 function statusPull<Event extends RampSettlementEvent>(
   client: {
@@ -93,7 +94,7 @@ function statusPull<Event extends RampSettlementEvent>(
       lookup: RampTransferLookup
     ): Promise<readonly Event[]>;
   },
-  processor: WebhookProcessor<Event>
+  processor: Pick<WebhookProcessor<Event>, "process">
 ): RampStatusPull {
   return async (ctx, env, environment, lookup) => {
     const outcomes: RampStatusPullOutcome[] = [];

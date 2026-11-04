@@ -5,6 +5,7 @@ import type { CounterpartyRequirements, RequirementField } from "@sdp/types/ramp
 import { SdpPaymentsError, unsupportedCounterparty } from "#/errors";
 import { consentField, countryField, readyCounterparty, textField } from "#/ramps/requirements";
 import type { ValidateCounterpartyOptions } from "#/ramps/types";
+import type { HercleVerificationStatus } from "./customer-status-mapping";
 
 /**
  * Hercle onboards regulated businesses in its Swiss and EEA perimeter.
@@ -189,17 +190,17 @@ export function hercleCounterpartyRequirements(
   );
 }
 
-/** Hercle's verdicts on a business's KYB, as its verification endpoints report them. */
-export const HERCLE_VERIFICATION_STATUSES = [
-  "action_required",
-  "pending",
-  "rejected",
-  "approved",
-] as const;
-export type HercleVerificationStatus = (typeof HERCLE_VERIFICATION_STATUSES)[number];
-
-/** The verdict that lets a business place orders; Hercle refuses an order under any other. */
-export const HERCLE_APPROVED_VERIFICATION_STATUS = "approved" satisfies HercleVerificationStatus;
+/**
+ * The answer for a business whose financial operations Hercle has suspended.
+ * Hercle refuses its orders until it lifts the suspension. A requirements read after that answers with Hercle's verdict again.
+ */
+export function hercleSuspendedRequirements(direction: RampDirection): CounterpartyRequirements {
+  return unsupportedCounterparty(
+    "hercle",
+    direction,
+    "Hercle has suspended the business's account."
+  );
+}
 
 /**
  * The requirements answer for a business with a Hercle account.
