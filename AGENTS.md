@@ -60,7 +60,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
   artifacts under "Generated files" regenerated at an unset channel (CI diffs them), every
   hand-written page under `apps/sdp-docs/content` (`content/unpublished` included) that shows the
   request, the response or the behavior, and the dashboard playground's hand-authored forms
-  (`apps/sdp-web/src/app/dashboard/[projectId]/**/*-playground-config.ts`). Run
+  (`apps/sdp-web/src/app/(session)/dashboard/[projectId]/**/*-playground-config.ts`). Run
   `pnpm --filter sdp-docs check:prose` and `check:links`, and name the changed docs in the PR body;
   an API PR with no docs change says why.
 

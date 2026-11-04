@@ -43,7 +43,7 @@ mainnet the API prices no mint, so SOL arrives unpriced on devnet. Value a
 token by its market price or, for a well-known USD stablecoin, by its mint;
 never by its symbol, since anyone can mint a "USDC".
 
-Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes from the URL alone:
+Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Project comes from the URL alone:
 
 - Server code (pages, server actions, route handlers) calls `createSdpApiClient()`, `requestProjectId()` and `requestProjectHref(path)` from `@/lib/sdp-api`; they read the request's `x-project-id`, which `proxy.ts` sets from the URL. Keep signatures Project-free: no `projectId` parameters, no reads of the selection cookie.
 - Browser calls to `/api/*` go through `dashboardRequest` / `dashboardFetch` (`@/lib/dashboard-fetch`).

@@ -6,7 +6,7 @@ import { Input } from "@sdp/ui/input";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { createOrganization } from "@/app/dashboard/create-organization-actions";
+import { createOrganization } from "@/app/(session)/dashboard/create-organization-actions";
 import { useTranslations } from "@/i18n/provider";
 
 /**
