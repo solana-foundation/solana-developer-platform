@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
     })
   ),
   refreshWalletInventory: vi.fn(),
+  loadFireblocksCsr: vi.fn(async () => ({ status: "success" as const, csr: null })),
 }));
 
 /** What a refusal settles about the browser's key: the API answered, nothing replayed. */
@@ -62,6 +63,11 @@ vi.mock("@/app/(session)/dashboard/[projectId]/custody/byok-actions", () => ({
 }));
 vi.mock("@/app/(session)/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
   useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
+}));
+vi.mock("@/app/(session)/dashboard/[projectId]/custody/setup/fireblocks-csr-actions", () => ({
+  loadFireblocksCsrAction: mocks.loadFireblocksCsr,
+  generateFireblocksCsrAction: vi.fn(),
+  loadFireblocksVaultsAction: vi.fn(),
 }));
 
 const { WalletSetupFlow } = await import("./wallet-setup-flow");
@@ -310,6 +316,24 @@ describe("one screen", () => {
     const dialog = screen.getByRole("dialog", { name: "Leave wallet setup?" });
     expect(within(dialog).getByText(/may have created the wallet/)).toBeTruthy();
     expect(within(dialog).queryByText(/No wallet has been made/)).toBeNull();
+  });
+
+  it("says the wallet may exist once a credential submission went out", async () => {
+    mocks.submitCredential.mockResolvedValueOnce({
+      status: "failed",
+      message: "Those credentials did not verify.",
+      connectionId: "conn_failed",
+    });
+    renderFlow({ connectedProviders: [], custodyAvailability: PRIVY_ONLY_AVAILABILITY });
+    typeLabel("Ops");
+    fireEvent.click(ownAnswer());
+    fillPrivyCredentials();
+    await act(async () => {
+      fireEvent.click(connectButton());
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Leave wallet setup?" })).toBeTruthy();
   });
 });
 
@@ -644,6 +668,34 @@ describe("whose account", () => {
     expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
     expect(connectButton()).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Create wallet/ })).toBeNull();
+  });
+
+  // Windscar (#2741): an inline pending handler changed identity every render, so Fireblocks'
+  // CSR read restarted each time it reported, and its pending edge counted as a sent request.
+  it("reads the Fireblocks CSR once, and the read sends no wallet request", async () => {
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: availableCustodyProviders(
+        projectProviderAvailability({
+          project: PRODUCTION_PROJECT,
+          custody: [{ provider: "fireblocks", modes: ["byok"] }],
+          compliance: [],
+          ramps: [],
+          earn: [],
+        })
+      ),
+      environment: "production",
+      initialProvider: "fireblocks",
+    });
+    for (let settle = 0; settle < 5; settle += 1) {
+      await act(async () => {});
+    }
+    expect(mocks.loadFireblocksCsr).toHaveBeenCalledTimes(1);
+
+    // Nothing was typed and nothing was sent, so Cancel leaves at once.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
 
   it("sets a Managed-only provider up with the wallet details and no account question", () => {

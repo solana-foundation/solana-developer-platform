@@ -19,6 +19,7 @@ import {
   type ComponentProps,
   type FormEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -844,7 +845,8 @@ function LeaveSetupDialog({
 /**
  * Cancel's guard: it leaves at once when nothing was put on the screen, and asks first when
  * something was. What the user typed into the credential form and whether a request went out
- * are only read when Cancel is pressed, so they live in refs.
+ * are only read when Cancel is pressed, so they live in refs. Their setters keep one identity
+ * for the flow's life: they reach the credential form, whose effects depend on what it is given.
  *
  * @param onLeave - Leaves the flow for the wallet list.
  * @returns The dialog's state and the handlers that feed it.
@@ -856,17 +858,20 @@ function useLeaveGuard(onLeave: () => void) {
   });
   const credentialsTouchedRef = useRef(false);
   const requestSentRef = useRef(false);
+  const markCredentialsTouched = useCallback(() => {
+    credentialsTouchedRef.current = true;
+  }, []);
+  const clearCredentialsTouched = useCallback(() => {
+    credentialsTouchedRef.current = false;
+  }, []);
+  const markRequestSent = useCallback(() => {
+    requestSentRef.current = true;
+  }, []);
   return {
     dialog,
-    markCredentialsTouched: () => {
-      credentialsTouchedRef.current = true;
-    },
-    clearCredentialsTouched: () => {
-      credentialsTouchedRef.current = false;
-    },
-    markRequestSent: () => {
-      requestSentRef.current = true;
-    },
+    markCredentialsTouched,
+    clearCredentialsTouched,
+    markRequestSent,
     /** Cancel: `hasInput` is what the flow's own state shows was put on the screen. */
     requestLeave: (hasInput: boolean) => {
       if (requestSentRef.current) {
@@ -1631,6 +1636,20 @@ export function WalletSetupFlow({
   const [fireblocksReady, setFireblocksReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const leaveGuard = useLeaveGuard(() => router.push(href("/dashboard/wallets")));
+  const { markRequestSent } = leaveGuard;
+  // The credential form raises its recovery lock the moment a credential submission leaves, so
+  // the lock's rise is the BYOK sign that a request went out. Its pending signal is not: the
+  // Fireblocks fields raise that for their CSR read too. Stable, like every handler the form
+  // gets, since its effects depend on them.
+  const handleRecoveryLockChange = useCallback(
+    (locked: boolean) => {
+      setByokRecoveryLocked(locked);
+      if (locked) {
+        markRequestSent();
+      }
+    },
+    [markRequestSent]
+  );
   const model = resolveWalletSetupModel({
     availability,
     chosenAccount,
@@ -1649,7 +1668,7 @@ export function WalletSetupFlow({
       toast.success(t("DashboardCustody.walletCreatedToast", { label: walletLabel.trim() }));
       router.push(href(`/dashboard/wallets/${encodeURIComponent(walletId)}`));
     },
-    onSend: leaveGuard.markRequestSent,
+    onSend: markRequestSent,
     setErrorMessage,
   });
   // Every setup request, Managed or BYOK, holds the answers above: a BYOK request settling
@@ -1700,15 +1719,10 @@ export function WalletSetupFlow({
           <WalletSetupBody
             answersLocked={setupRequestInFlight || byokRecoveryLocked}
             credentialFormHandlers={{
-              onPendingChange: (pending) => {
-                setByokRequestPending(pending);
-                if (pending) {
-                  leaveGuard.markRequestSent();
-                }
-              },
+              onPendingChange: setByokRequestPending,
               onReadyChange: setFireblocksReady,
               onRecoveryChange: setByokInRecovery,
-              onRecoveryLockChange: setByokRecoveryLocked,
+              onRecoveryLockChange: handleRecoveryLockChange,
             }}
             environment={environment}
             errorMessage={errorMessage}
