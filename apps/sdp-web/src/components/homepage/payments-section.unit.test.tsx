@@ -59,7 +59,8 @@ describe("PaymentsSection", () => {
       "Request",
       "Recurring",
       "Batch",
-      "Micro",
+      // no module ships Micro, so its tab carries the coming-soon label on every channel
+      "MicroComing soon",
       "Deposit",
     ]);
     expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
@@ -82,16 +83,29 @@ describe("PaymentsSection", () => {
     expect(list?.hasAttribute("aria-orientation")).toBe(false);
   });
 
-  it("marks the Deposit tab coming soon on the stable channel, which holds ramps back", async () => {
+  it("marks Micro and Deposit coming soon on the stable channel, which holds ramps back", async () => {
     vi.stubEnv("SDP_RELEASE_CHANNEL", "stable");
     const view = await renderPayments();
     document.body.replaceChildren(view);
     const bench = within(view);
 
-    expect(bench.getByRole("tab", { name: /Coming soon/ })).toBe(
-      bench.getByRole("tab", { name: /^Deposit/ })
-    );
+    expect(bench.getAllByRole("tab", { name: /Coming soon/ })).toEqual([
+      bench.getByRole("tab", { name: /^Micro/ }),
+      bench.getByRole("tab", { name: /^Deposit/ }),
+    ]);
     expect(bench.getByRole("tab", { name: "Pay" })).toBeTruthy();
+  });
+
+  it("keeps Micro coming soon on the experimental channel, where no module ships it", async () => {
+    vi.stubEnv("SDP_RELEASE_CHANNEL", "experimental");
+    const view = await renderPayments();
+    document.body.replaceChildren(view);
+    const bench = within(view);
+
+    expect(bench.getAllByRole("tab", { name: /Coming soon/ })).toEqual([
+      bench.getByRole("tab", { name: /^Micro/ }),
+    ]);
+    expect(bench.getByRole("tab", { name: "Deposit" })).toBeTruthy();
   });
 
   it("offers a real pause button for the walk", async () => {

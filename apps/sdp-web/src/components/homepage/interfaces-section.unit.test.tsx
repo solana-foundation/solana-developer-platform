@@ -111,7 +111,7 @@ describe("InterfacesSection", () => {
 
     const code = doc.querySelector("pre code")?.textContent ?? "";
     expect(code).toContain(`curl -X POST ${DEFAULT_SDP_API_URL}/v1/payments/transfers`);
-    expect(code).toContain('-H "Authorization: Bearer sk_test_…"');
+    expect(code).toContain('-H "Authorization: Bearer sf_…"');
 
     const anchors = [...doc.querySelectorAll("a")].map((a) => [
       a.textContent,
@@ -170,7 +170,7 @@ describe("interface snippets", () => {
     for (const request of [snippet.request, snippet.narrowRequest]) {
       const text = request.map(lineText).join("\n");
       expect(text).toMatch(url);
-      expect(text).toContain('Authorization: Bearer sk_test_…"');
+      expect(text).toContain('Authorization: Bearer sf_…"');
       expect(text.startsWith(`$ curl ${snippet.method === "GET" ? "-G" : "-X POST"}`)).toBe(true);
     }
   });
