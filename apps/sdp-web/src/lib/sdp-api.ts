@@ -297,6 +297,18 @@ export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
 }
 
+/**
+ * The Projects of the organization a session token names, for a token the
+ * browser minted for one of the user's other organizations (`getToken({ organizationId })`).
+ * Everything else lists the request's own organization through `listSdpProjects`.
+ *
+ * @param token - A Clerk session token naming an organization.
+ * @returns That organization's Projects; sdp-api refuses a token it does not admit.
+ */
+export function listSdpProjectsForToken(token: string): Promise<Project[]> {
+  return fetchRequestProjects(token);
+}
+
 const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });
 
 const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
