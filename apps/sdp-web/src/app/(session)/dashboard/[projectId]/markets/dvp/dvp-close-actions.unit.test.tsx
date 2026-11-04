@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Settle and cancel.
  *
@@ -150,9 +151,11 @@ describe("DvpCloseActions", () => {
   });
 });
 
-/** The words on each button the markup marks busy (`aria-busy`): the button with its tags stripped. */
+/** The words on each button the markup marks busy (`aria-busy`). */
 function busyButtonWords(html: string): string[] {
-  return [...html.matchAll(/<button[^>]*aria-busy="true"[^>]*>.*?<\/button>/g)].map(([button]) =>
-    button.replace(/<[^>]+>/g, "")
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return Array.from(
+    doc.querySelectorAll('button[aria-busy="true"]'),
+    (button) => button.textContent
   );
 }
