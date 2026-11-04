@@ -1,5 +1,5 @@
 import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
-import { RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
+import { RAMP_ONLY_TRANSFER_STATUSES, RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
   ORGANIZATION_PROVIDER_FAMILIES,
   RAMP_PROVIDERS,
@@ -182,7 +182,23 @@ function pruneExample(value: Json, published: Published): Json | undefined {
  * channel accepts; response schemas must also accept what a deployment already
  * stores, such as an API key saved with a scope the channel now leaves out.
  */
-type Context = { published: Published; inResponse: boolean };
+type Context = { published: Published; inResponse: boolean; modules: ReadonlySet<SdpModule> };
+
+/** Schema ownership is contextual: `transferId` also names ordinary transfer rows. */
+export const MODULE_GATE = "x-sdp-module";
+/** Marks a transfer status enum, without gating identically named payment-request statuses. */
+export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
+/** Alternate prose for a shared operation when its channel excludes a module. */
+export const DESCRIPTION_GATE = "x-sdp-description-without-module";
+
+const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
+const moduleGateSchema = moduleNameSchema.optional();
+const descriptionGateSchema = z
+  .object({
+    module: moduleNameSchema,
+    description: z.string(),
+  })
+  .optional();
 
 /**
  * An enum without the unpublished values. In a request it narrows; in a
@@ -218,8 +234,9 @@ function pruneProperties(
   const dropped = new Set<string>();
   for (const [name, schema] of Object.entries(value)) {
     const kept = pruneNode(schema, context);
-    if (kept === EMPTY) dropped.add(name);
-    else properties[name] = kept;
+    if (kept === EMPTY) {
+      if (!isJsonObject(schema) || schema[MODULE_GATE] === undefined) dropped.add(name);
+    } else properties[name] = kept;
   }
   // A required property with no publishable value leaves no publishable object.
   const requiredNames = Array.isArray(required) ? required : [];
@@ -251,8 +268,28 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   }
   if (!isJsonObject(node)) return node;
 
+  const module = moduleGateSchema.parse(node[MODULE_GATE]);
+  if (module !== undefined && !context.modules.has(module)) return EMPTY;
+  if (node[TRANSFER_STATUS_GATE] === true && !context.modules.has("ramps")) {
+    const published = context.published;
+    context = {
+      ...context,
+      published: (value) =>
+        published(value) && !RAMP_ONLY_TRANSFER_STATUSES.some((status) => status === value),
+    };
+  }
+  const alternateDescription = descriptionGateSchema.parse(node[DESCRIPTION_GATE]);
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(node)) {
+    if (key === MODULE_GATE || key === TRANSFER_STATUS_GATE || key === DESCRIPTION_GATE) continue;
+    if (
+      key === "description" &&
+      alternateDescription !== undefined &&
+      !context.modules.has(alternateDescription.module)
+    ) {
+      result.description = alternateDescription.description;
+      continue;
+    }
     if (key === "enum" && Array.isArray(value)) {
       const kept = pruneEnum(value, context);
       if (kept === EMPTY) return EMPTY;
@@ -292,6 +329,13 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
       result[key] = kept;
     }
   }
+  if (Array.isArray(result.required) && isJsonObject(result.properties)) {
+    const properties = result.properties;
+    result.required = result.required.filter(
+      (name) => typeof name === "string" && name in properties
+    );
+    if (result.required.length === 0) delete result.required;
+  }
   return result;
 }
 
@@ -314,6 +358,7 @@ export function pruneUnpublishedValues(
     published: (value) =>
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
     inResponse: false,
+    modules,
   });
   if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");
   return openApiDocumentSchema.parse(pruned);

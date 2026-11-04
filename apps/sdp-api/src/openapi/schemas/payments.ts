@@ -13,6 +13,7 @@ import {
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
+import { MODULE_GATE, TRANSFER_STATUS_GATE } from "@/openapi/release-channel-values";
 import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
@@ -156,8 +157,9 @@ export const createTransferRequestSchema = createTransferSchemaBase
       example: "prj_example",
     }),
     transferId: withOpenApi(createTransferSchemaBase.shape.transferId, {
+      [MODULE_GATE]: "ramps",
       description:
-        "Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.",
+        "Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data. Accepted only when the deployment includes Ramps; cannot be combined with `counterpartyAccountId`.",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferSchemaBase.shape.sourceCustodyWalletId, {
       description: "Exact SDP Wallet ID (`id` from `GET /v1/wallets`).",
@@ -169,7 +171,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
     }),
     counterpartyAccountId: withOpenApi(createTransferSchemaBase.shape.counterpartyAccountId, {
       description:
-        "The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.",
+        "The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`.",
       example: "cpacct_example",
     }),
     token: withOpenApi(createTransferSchemaBase.shape.token, {
@@ -208,6 +210,7 @@ const transferDirectionSchema = withOpenApi(transferDirectionSchemaBase, {
 });
 
 const transferStatusSchema = withOpenApi(transferStatusSchemaBase, {
+  [TRANSFER_STATUS_GATE]: true,
   description: "Transfer status.",
   example: "confirmed",
 });
@@ -362,8 +365,7 @@ export const transferSchema = z
       .nullable()
       .openapi({ description: "Block time, if confirmed.", example: "2025-01-01T00:00:00.000Z" }),
     confirmedAt: isoDateTimeSchema.optional().openapi({
-      description:
-        "When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.",
+      description: "When SDP confirmed the transfer on chain.",
       example: "2025-01-01T00:00:00.000Z",
     }),
     fee: z
@@ -393,6 +395,7 @@ export const transferSchema = z
         z.string().min(1).max(RAMPS_MEMO_LIMITS.maxValueLength)
       )
       .openapi({
+        [MODULE_GATE]: "ramps",
         description: `Free-form key-value memo for offchain reconciliation of ramp transfers. At most ${RAMPS_MEMO_LIMITS.maxEntries} entries.`,
         example: { invoice: "INV-123", po: "PO-9" },
       }),
@@ -411,29 +414,43 @@ export const transferSchema = z
       description: "Current display name of the counterparty tied to the transfer.",
       example: "Acme Studio",
     }),
-    providerReference: z.string().optional().openapi({
-      description: "Provider quote or transaction reference used for ramp correlation.",
-      example: "ramp_quote_example",
-    }),
-    deliveryMode: z.enum(["hosted", "manual_instructions", "session_widget"]).optional().openapi({
-      description:
-        "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.",
-      example: "session_widget",
-    }),
-    fiatCurrency: z.string().optional().openapi({
-      description: "Fiat currency for the ramp leg.",
-      example: "USD",
-    }),
+    providerReference: z
+      .string()
+      .optional()
+      .openapi({
+        [MODULE_GATE]: "ramps",
+        description: "Provider quote or transaction reference used for ramp correlation.",
+        example: "ramp_quote_example",
+      }),
+    deliveryMode: z
+      .enum(["hosted", "manual_instructions", "session_widget"])
+      .optional()
+      .openapi({
+        [MODULE_GATE]: "ramps",
+        description:
+          "Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.",
+        example: "session_widget",
+      }),
+    fiatCurrency: z
+      .string()
+      .optional()
+      .openapi({
+        [MODULE_GATE]: "ramps",
+        description: "Fiat currency for the ramp leg.",
+        example: "USD",
+      }),
     fiatAmount: tokenAmountSchema.optional().openapi({
+      [MODULE_GATE]: "ramps",
       description:
         "Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.",
       example: "100.00",
     }),
     settlement: rampTransferSettlementSchema.optional().openapi({
+      [MODULE_GATE]: "ramps",
       description: "Provider-reported ramp settlement economics for live providers.",
     }),
-    fiatPayout: rampFiatPayoutSchema.optional(),
-    deliveryMismatch: rampDeliveryMismatchSchema.optional(),
+    fiatPayout: rampFiatPayoutSchema.optional().openapi({ [MODULE_GATE]: "ramps" }),
+    deliveryMismatch: rampDeliveryMismatchSchema.optional().openapi({ [MODULE_GATE]: "ramps" }),
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),
@@ -1453,7 +1470,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     search: withOpenApi(listTransfersQuerySchemaBase.shape.search, {
       description:
-        "Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
+        "Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.",
       example: "xfr_example",
     }),
     token: withOpenApi(listTransfersQuerySchemaBase.shape.token, {
@@ -1466,10 +1483,10 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
     }),
     status: withOpenApi(listTransfersQuerySchemaBase.shape.status, {
       description: "Filter by transfer status. Accepts a comma-separated list of statuses.",
-      example: "completed,confirmed,finalized",
+      example: "confirmed,finalized",
     }),
     category: withOpenApi(listTransfersQuerySchemaBase.shape.category, {
-      description: "Filter by wallet transfers or ramp transfers.",
+      description: "Filter by transfer category.",
       example: "ramp",
     }),
     type: withOpenApi(listTransfersQuerySchemaBase.shape.type, {
@@ -1485,6 +1502,7 @@ export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
       example: "moonpay",
     }),
     providerReference: withOpenApi(listTransfersQuerySchemaBase.shape.providerReference, {
+      [MODULE_GATE]: "ramps",
       description:
         "Provider quote or transaction reference. Must be supplied with provider for exact ramp transfer lookup.",
       example: "Quote:019e979c-f660-5246-0000-c0588496b9ce",

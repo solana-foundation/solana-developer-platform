@@ -82,7 +82,7 @@ const OPENAPI_TAG = {
   COUNTERPARTIES: {
     name: "Counterparties",
     description:
-      "A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.",
+      "A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.",
   },
   ASSET_PROFILES: {
     name: "Asset Profiles",

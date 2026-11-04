@@ -2219,7 +2219,12 @@ curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
 
 When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
 
-The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
+The account must be an active `crypto_wallet` account in the same project, and
+`destination` must be its address. An unknown or inactive account returns `404`,
+any other mismatch returns `400`, and no transfer is created.
+
+Only fields documented for your deployment are accepted. Unknown fields return
+`400` during validation, before looking up a wallet or transfer.
 
 ## SOL and the rent-exempt minimum
 
@@ -20531,7 +20536,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
 - **`transferId`** · `string` · min length 1
 
-  Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data.
+  Existing off-ramp transfer to use for the on-chain crypto deposit. The transfer must still be awaiting payment and must not already contain on-chain submission data. Accepted only when the deployment includes Ramps; cannot be combined with `counterpartyAccountId`.
 
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
@@ -20543,7 +20548,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
 - **`counterpartyAccountId`** · `string` · min length 1 · example `cpacct_example`
 
-  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`, and it cannot be combined with `transferId`.
+  The counterparty's active Solana `crypto_wallet` account that `destination` belongs to, as a transfer batch recipient names it. The transfer record is tied to that counterparty. Its address must equal `destination`.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -20633,7 +20638,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -21071,7 +21076,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 - **`search`** · `string` · max length 200 · example `xfr_example`
 
-  Search transfer ID, signature, provider reference, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.
+  Search transfer ID, signature, source or destination address, memo, counterparty ID, or counterparty display name. Use at least 3 non-whitespace characters; a blank value is treated as no search filter.
 
 - **`token`** · `string` · example `USDC`
 
@@ -21081,13 +21086,13 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
   Filter by transfer direction.
 
-- **`status`** · `string` · example `completed,confirmed,finalized`
+- **`status`** · `string` · example `confirmed,finalized`
 
   Filter by transfer status. Accepts a comma-separated list of statuses.
 
 - **`category`** · `string` · one of `wallet`, `ramp` · example `ramp`
 
-  Filter by wallet transfers or ramp transfers.
+  Filter by transfer category.
 
 - **`type`** · `string` · example `transfer,transfer_batch`
 
@@ -21209,7 +21214,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-      When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+      When SDP confirmed the transfer on chain.
 
     - **`fee`** · `integer | null` · required · example `5000`
 
@@ -21707,7 +21712,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -22669,7 +22674,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -23616,7 +23621,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -24251,7 +24256,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -27102,7 +27107,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`confirmedAt`** · `string` · format `date-time` · example `2025-01-01T00:00:00.000Z`
 
-        When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.
+        When SDP confirmed the transfer on chain.
 
       - **`fee`** · `integer | null` · required · example `5000`
 
@@ -33387,7 +33392,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Counterparties
 Source: https://platform.solana.com/docs/reference/api/counterparties
 
-> A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.
+> A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payments.
 
 ## Profiles
 
