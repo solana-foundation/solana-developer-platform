@@ -104,6 +104,8 @@ for other placements; its marker, fill and border use the `--attention*` tokens.
 
 Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
 
+A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab.
+
 ### CSS classes (for custom elements within pages)
 
 | Class                       | Element                                                                                                                                                  |
@@ -145,7 +147,7 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 ### Search
 
-⌘K search works out of the box: `RootProvider` (root `layout.tsx`) provides the Fumadocs search dialog + hotkey, backed by the Orama route at `src/app/api/search/route.ts` (`createFromSource(source)`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed — JSX-rendered content like `DocsHome` is not.
+⌘K search: `RootProvider` (root `layout.tsx`) provides the Fumadocs search dialog + hotkey and points it at `docsSearchApiPath` (`/docs/api/search`, `src/lib/site.ts`), the Orama route at `src/app/docs/api/search/route.ts`. It must stay under `/docs`: platform.solana.com forwards only `/docs/*` and a few root files here, so Fumadocs' default `/api/search` reaches the dashboard's sign-in redirect and every search fails (`site-urls.test.ts` pins it). The route leaves out text that 12 or more pages repeat word for word (shared header and envelope descriptions), gives each result its breadcrumb, and ranks pages whose title (then title and description) hold the query first (`rankTitlesFirst`, `src/lib/search-rank.ts`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed: JSX-rendered content like `DocsHome` is not. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`) for the same reason; `robots.txt` names it.
 
 ---
 

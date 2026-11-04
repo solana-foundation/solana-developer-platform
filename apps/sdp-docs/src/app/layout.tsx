@@ -4,7 +4,7 @@ import localFont from "next/font/local";
 import Script from "next/script";
 import "fumadocs-ui/style.css";
 import { RootProvider } from "fumadocs-ui/provider/next";
-import { docsOrigin, docsUrl } from "@/lib/site";
+import { docsOrigin, docsSearchApiPath, docsUrl } from "@/lib/site";
 import "./globals.css";
 
 // The refresh design's faces, loaded from @sdp/design-tokens the way sdp-web loads them. tokens.css
@@ -71,7 +71,7 @@ export default function RootLayout({
         )}
       </head>
       <body className="antialiased">
-        <RootProvider>{children}</RootProvider>
+        <RootProvider search={{ options: { api: docsSearchApiPath } }}>{children}</RootProvider>
       </body>
     </html>
   );
