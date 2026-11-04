@@ -1,4 +1,4 @@
-import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types/payments";
+import { PAYMENT_TRANSFER_STATUSES, WALLET_TRANSFER_STATUSES } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type {
   ApiPlaygroundEndpointConfig,
@@ -223,7 +223,10 @@ export function buildPaymentsPlaygroundEndpointConfigs(
           label: t("DashboardPayments.playground.transferStatus"),
           kind: "select",
           placeholder: t("DashboardPayments.playground.anyStatus"),
-          options: PAYMENT_TRANSFER_STATUSES.map((status) => ({ label: status, value: status })),
+          options: (rampProviders.length > 0
+            ? PAYMENT_TRANSFER_STATUSES
+            : WALLET_TRANSFER_STATUSES
+          ).map((status) => ({ label: status, value: status })),
         },
       ],
       bodyFields: [],

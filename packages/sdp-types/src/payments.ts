@@ -147,6 +147,20 @@ export const PAYMENT_TRANSFER_STATUSES = [
 
 export type PaymentTransferStatus = (typeof PAYMENT_TRANSFER_STATUSES)[number];
 
+/** Statuses of custody-wallet sends, independent of provider settlement. */
+export const WALLET_TRANSFER_STATUSES = [
+  "pending",
+  "processing",
+  "confirmed",
+  "finalized",
+  "failed",
+] as const satisfies readonly PaymentTransferStatus[];
+
+/** Transfer-only statuses hidden when the channel has no ramp provider. */
+export const RAMP_ONLY_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !WALLET_TRANSFER_STATUSES.some((walletStatus) => walletStatus === status)
+);
+
 /** Statuses in which a signed transfer may persist or begin its submission. */
 export const SIGNED_TRANSFER_SUBMISSION_STATUSES = {
   standard: ["processing"],

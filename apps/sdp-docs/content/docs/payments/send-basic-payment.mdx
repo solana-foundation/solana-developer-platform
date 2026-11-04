@@ -195,7 +195,12 @@ Poll status for async confirmations:
 
 When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
 
-The account must be an active `crypto_wallet` account in the same project, and `destination` must be its address. An unknown or inactive account returns `404`, any other mismatch returns `400`, and no transfer is created. `counterpartyAccountId` cannot be combined with `transferId`.
+The account must be an active `crypto_wallet` account in the same project, and
+`destination` must be its address. An unknown or inactive account returns `404`,
+any other mismatch returns `400`, and no transfer is created.
+
+Only fields documented for your deployment are accepted. Unknown fields return
+`400` during validation, before looking up a wallet or transfer.
 
 ## SOL and the rent-exempt minimum
 

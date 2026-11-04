@@ -758,6 +758,57 @@ describe("OpenAPI spec", () => {
     });
   }
 
+  it.each(["stable", "beta"] as const)(
+    "%s hides ramp-only transfer fields and prose",
+    (releaseChannel) => {
+      const doc = createPublicOpenApiDocument({ releaseChannel });
+      const request = getJsonSchema(doc.paths?.["/v1/payments/transfers"]?.post?.requestBody);
+      expect(request.properties).not.toHaveProperty("transferId");
+      expect(request.properties).toHaveProperty("counterpartyAccountId");
+      // All shared transfer responses, including batches, retry and recurring collect.
+      const serialized = JSON.stringify(doc);
+      for (const field of [
+        "deliveryMode",
+        "fiatCurrency",
+        "fiatAmount",
+        "fiatPayout",
+        "providerReference",
+        "deliveryMismatch",
+        "rampsMemo",
+      ]) {
+        expect(serialized).not.toContain(`"${field}"`);
+      }
+      expect(serialized).not.toMatch(/\bramps?\b|onramp\.read|offramp\.read/i);
+      const parameters = doc.paths?.["/v1/payments/transfers"]?.get?.parameters;
+      expect(parameters).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "providerReference" })])
+      );
+      const transfer = getJsonSchema(
+        doc.paths?.["/v1/payments/transfers/{transferId}"]?.get?.responses?.["200"]
+      ).properties?.data?.properties?.transfer;
+      expect(transfer).toBeDefined();
+      for (const status of ["awaiting_payment", "settling", "completed", "canceled", "expired"]) {
+        expect(JSON.stringify(transfer)).not.toContain(`"${status}"`);
+      }
+      // Payment requests own these statuses independently of Ramps.
+      const paymentRequest = JSON.stringify(
+        doc.paths?.["/v1/payments/requests/{paymentRequestId}/cancel"]
+      );
+      expect(paymentRequest).toContain("awaiting_payment");
+      expect(serialized).not.toContain("x-sdp-module");
+    }
+  );
+
+  it("keeps the ramp transfer contract in experimental and internal documents", () => {
+    for (const doc of [createPublicOpenApiDocument(EXPERIMENTAL), createOpenApiDocument()]) {
+      expect(
+        getJsonSchema(doc.paths?.["/v1/payments/transfers"]?.post?.requestBody).properties
+      ).toHaveProperty("transferId");
+      expect(JSON.stringify(doc)).toContain('"deliveryMode"');
+      expect(JSON.stringify(doc)).toContain('"settling"');
+    }
+  });
+
   // Provider availability lists every family in one response, so a channel
   // without Compliance must name neither the family nor its providers there,
   // in values or prose; the runtime response omits those entries to match.
