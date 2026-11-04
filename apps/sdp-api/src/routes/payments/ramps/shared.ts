@@ -16,11 +16,12 @@ import {
   RAMP_PROVIDER_SUPPORT_DETAILS,
   type RampFiatCurrency,
 } from "@sdp/types/generated/ramp";
-import type {
-  CryptoRailId,
-  OfframpPairSupport,
-  OnrampPairSupport,
-  RampProviderDirectionSupport,
+import {
+  type CryptoRailId,
+  cryptoRailMint,
+  type OfframpPairSupport,
+  type OnrampPairSupport,
+  type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
 import type {
   PaymentRampEstimate,
@@ -28,6 +29,7 @@ import type {
   RampProviderEstimateResult,
 } from "@sdp/types/payments";
 import { isRampProviderSurfaced, type RampProviderId } from "@sdp/types/provider-access";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -74,15 +76,21 @@ function isRampProviderOffered(c: AppContext, provider: RampProviderId): boolean
 }
 
 /**
- * The offered providers among `providers`, narrowed to `provider` when the
- * request names one. A request naming a provider outside the release channel is
- * refused before this (`assertRampProviderInChannel`), not answered with nothing.
+ * The offered providers among `providers` for a pair on `assetRail`, narrowed to `provider` when the request names one.
+ * A request naming a provider outside the release channel is refused before this (`assertRampProviderInChannel`).
+ * A rail with no mint on the project's cluster gets no provider, as `rampTransferTokenMint` refuses its quote.
  */
 export function filterProviders(
   c: AppContext,
+  assetRail: CryptoRailId,
   providers: readonly RampProviderId[],
   provider?: RampProviderId
 ): RampProviderId[] {
+  if (
+    cryptoRailMint(assetRail, CLUSTER_BY_SDP_ENVIRONMENT[resolveSdpEnvironment(c)]) === undefined
+  ) {
+    return [];
+  }
   const offered = providers.filter((p) => isRampProviderOffered(c, p));
   if (provider) {
     return offered.includes(provider) ? [provider] : [];

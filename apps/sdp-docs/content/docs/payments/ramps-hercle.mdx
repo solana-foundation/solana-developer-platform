@@ -36,7 +36,7 @@ SDP stores the Hercle account id and its verification status, never the collecte
 
 ## Quotes and settlement
 
-Hercle is on-ramp only: EUR, USD and GBP into `usdc.solana`, `usdt.solana` and `sol.solana`. A Sandbox project runs on devnet, which has no USDT, so a quote for `usdt.solana` is refused there with `400 BAD_REQUEST` before Hercle is called. While Hercle is offered in sandbox only, that leaves `usdc.solana` and `sol.solana`.
+Hercle is on-ramp only: EUR, USD and GBP into `usdc.solana`, `usdt.solana` and `sol.solana`. A Sandbox project runs on devnet, which has no USDT, so it is never offered `usdt.solana`: the currency listing and estimates leave it out, and a quote for it is refused with `400 BAD_REQUEST` before Hercle is called. While Hercle is offered in sandbox only, that leaves `usdc.solana` and `sol.solana`.
 
 A quote is a Hercle order with `deliveryMode: "manual_instructions"`. Its `fiat_funding` instruction names the business's own account at Hercle's bank, the payment reference the wire must carry, and `payerAccountHolder`, the business itself. The bank returns a wire from any other account, and the order fails. `expiresAt` is when the order's funding window closes. An order without the account, the reference or the payer answers `502 PROVIDER_RESPONSE_INVALID`, since nobody could fund it.
 

@@ -1543,6 +1543,31 @@ describe("Payments routes — ramps", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
+    it("estimates no token the cluster has no mint for, and asks Hercle nothing", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await app.request(
+        "/v1/payments/ramps/onramp/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            assetRail: "usdt.solana",
+            fiatCurrency: "EUR",
+            fiatAmount: "100",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown }).data).toEqual({ estimates: [] });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     async function simulateHercleTransfer(transferId: string): Promise<Response> {
       return app.request(
         "/v1/payments/ramps/sandbox/simulate",

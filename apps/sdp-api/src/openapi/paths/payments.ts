@@ -905,7 +905,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "List on-ramp currency support",
     operationId: "listPaymentOnrampCurrencies",
     description:
-      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters.",
+      "Lists generated fiat-to-crypto on-ramp pairs and the providers that support each pair. Supports optional source, destination rail, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there (devnet has no USDT).",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -928,7 +928,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "List off-ramp currency support",
     operationId: "listPaymentOfframpCurrencies",
     description:
-      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters.",
+      "Lists generated crypto-to-fiat off-ramp pairs and the providers that support each pair. Supports optional source rail, destination fiat, and provider filters. A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

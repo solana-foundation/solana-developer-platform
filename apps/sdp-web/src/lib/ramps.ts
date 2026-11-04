@@ -1,8 +1,9 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT, type RampFiatCurrency } from "@sdp/types/generated/ramp";
-import type { CryptoRailId } from "@sdp/types/payment-rails";
+import { type CryptoRailId, cryptoRailMint } from "@sdp/types/payment-rails";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import { isRampProviderSurfaced, isRetiredRampProviderId } from "@sdp/types/provider-access";
+import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 
 export type RampDirection = "onramp" | "offramp";
 
@@ -89,6 +90,23 @@ export function surfacedRampProviderOptions(
 }
 
 /**
+ * The surfaced, enabled providers a pair on `assetRail` is offered with, and none on a rail with no mint on the cluster.
+ * The API refuses a quote for such a rail (USDT on devnet) and lists no pair for it.
+ */
+function offeredPairProviders(
+  assetRail: CryptoRailId,
+  providers: readonly RampProviderId[],
+  environment: SdpEnvironment,
+  enabledProviders: readonly RampProviderId[]
+): RampProviderId[] {
+  if (cryptoRailMint(assetRail, CLUSTER_BY_SDP_ENVIRONMENT[environment]) === undefined) return [];
+  return providers.filter(
+    (provider) =>
+      isRampProviderSurfaced(provider, environment) && enabledProviders.includes(provider)
+  );
+}
+
+/**
  * Returns on-ramp currency pairs with only surfaced and enabled providers.
  *
  * @param environment - The dashboard environment.
@@ -100,10 +118,7 @@ export function onrampPairs(
   enabledProviders: readonly RampProviderId[]
 ): RampPair[] {
   return ONRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
-    const surfaced = providers.filter(
-      (provider) =>
-        isRampProviderSurfaced(provider, environment) && enabledProviders.includes(provider)
-    );
+    const surfaced = offeredPairProviders(dest, providers, environment, enabledProviders);
     if (surfaced.length === 0) return [];
     return [{ fiatCurrency: source, assetRail: dest, providers: surfaced }];
   });
@@ -123,10 +138,7 @@ export function offrampPairs(
   enabledProviders: readonly RampProviderId[]
 ): RampPair[] {
   return OFFRAMP_SUPPORT.flatMap(({ source, dest, providers }) => {
-    const surfaced = providers.filter(
-      (provider) =>
-        isRampProviderSurfaced(provider, environment) && enabledProviders.includes(provider)
-    );
+    const surfaced = offeredPairProviders(source, providers, environment, enabledProviders);
     if (surfaced.length === 0) return [];
     return [{ fiatCurrency: dest, assetRail: source, providers: surfaced }];
   });

@@ -64,7 +64,7 @@ export async function estimateOnramp(c: ValidatedBodyContext<typeof estimateOnra
   const row = ONRAMP_SUPPORT.find(
     (pair) => pair.source === input.fiatCurrency && pair.dest === input.assetRail
   );
-  const providers = row ? filterProviders(c, row.providers) : [];
+  const providers = row ? filterProviders(c, input.assetRail, row.providers) : [];
 
   const estimates = await estimateAcrossProviders(c, "onramp", providers, (client, ctx) =>
     client.estimateOnramp(ctx, {
@@ -250,7 +250,7 @@ export async function listOnrampCurrencies(c: AppContext) {
   const pairs: OnrampCurrencyPair[] = ONRAMP_SUPPORT.flatMap((row) => {
     if (source && row.source !== source) return [];
     if (dest && row.dest !== dest) return [];
-    const providers = filterProviders(c, row.providers, provider);
+    const providers = filterProviders(c, row.dest, row.providers, provider);
     if (providers.length === 0) return [];
     return [{ source: row.source, dest: row.dest, providers }];
   });

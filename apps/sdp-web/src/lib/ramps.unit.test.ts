@@ -1,5 +1,22 @@
+import { cryptoRailMint } from "@sdp/types/payment-rails";
+import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
-import { offersSandboxSettlement } from "./ramps";
+import { offersSandboxSettlement, offrampPairs, onrampPairs } from "./ramps";
+
+describe("ramp pairs", () => {
+  it("offers no on-ramp pair on a rail the sandbox cluster has no mint for", () => {
+    const rails = onrampPairs("sandbox", RAMP_PROVIDERS).map((pair) => pair.assetRail);
+
+    expect(rails).toContain("usdc.solana");
+    expect(rails).not.toContain("usdt.solana");
+  });
+
+  it("offers off-ramp pairs only on rails the sandbox cluster has a mint for", () => {
+    for (const pair of offrampPairs("sandbox", RAMP_PROVIDERS)) {
+      expect(cryptoRailMint(pair.assetRail, "devnet")).toBeDefined();
+    }
+  });
+});
 
 describe("offersSandboxSettlement", () => {
   it("offers a sandbox Hercle deposit the flags enable", () => {

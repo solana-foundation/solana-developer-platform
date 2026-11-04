@@ -40,7 +40,9 @@ function buildApp(stages: SdpRampProviderMaturity) {
   });
   app.get("/onramp/currency", requireAction("onramp.read"), listOnrampCurrencies);
   app.get("/offramp/currency", requireAction("offramp.read"), listOfframpCurrencies);
-  app.get("/offered", (c) => c.json({ providers: filterProviders(c, RAMP_PROVIDERS, undefined) }));
+  app.get("/offered", (c) =>
+    c.json({ providers: filterProviders(c, "usdc.solana", RAMP_PROVIDERS, undefined) })
+  );
   app.get("/counterparties/:counterpartyId/requirements", getCounterpartyRequirements);
   app.get("/counterparties/:counterpartyId/provider-accounts", listCounterpartyProviderAccounts);
   app.onError((err, c) => {

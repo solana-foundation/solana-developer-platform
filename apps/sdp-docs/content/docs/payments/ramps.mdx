@@ -103,6 +103,7 @@ curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=u
 | `provider` | Narrow to one provider. |
 
 The response's `pairs` list which providers cover each source/dest combination; `providerDetails` gives each provider's country coverage and supported entity types for the direction.
+A rail whose asset has no mint on the project's cluster is left out, since SDP refuses its quote there: devnet has no USDT, so a Sandbox project sees no `usdt.solana` pair. Its estimate lists no provider either.
 
 ## Estimating a rate
 

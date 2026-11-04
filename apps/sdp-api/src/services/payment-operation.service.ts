@@ -1,7 +1,11 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
-import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import {
+  type CryptoRailId,
+  cryptoRailMint,
+  getCryptoRailAssetLabel,
+} from "@sdp/types/payment-rails";
 import {
   isWellKnownTokenSymbol,
   SOL_MINT,
@@ -128,22 +132,18 @@ export function normalizePaymentToken(token: string): string {
 }
 
 /**
- * Resolves a quoted ramp asset rail to the mint recorded on the transfer
- * row, keeping ramp rows on the same token-is-a-mint contract as every other
- * transfer. Ramp rails only quote well-known symbols, so an unresolvable
- * transfer. The canonical rail is mapped to its well-known asset symbol at
- * this boundary; unavailable cluster mints fail loudly.
+ * Resolves a quoted ramp asset rail to the mint the transfer row records, as every other transfer records a mint.
+ * The ramp listings and estimates leave out a rail this refuses (`filterProviders`), since both read `cryptoRailMint`.
  *
  * @param assetRail - The canonical quoted crypto rail, e.g. "usdc.solana".
  * @returns The mint address on the open scope's cluster, the one `/transfers` resolves funding tokens on.
  * @throws AppError (400) when the rail's asset has no mint on that cluster.
  */
 export function rampTransferTokenMint(assetRail: CryptoRailId): string {
-  const symbol = getCryptoRailAssetLabel(assetRail);
   const { cluster } = currentClusterScope();
-  const mint = wellKnownMint(symbol, cluster);
+  const mint = cryptoRailMint(assetRail, cluster);
   if (!mint) {
-    throw badRequest(`${symbol} is not available on ${cluster}`);
+    throw badRequest(`${getCryptoRailAssetLabel(assetRail)} is not available on ${cluster}`);
   }
   return mint;
 }
