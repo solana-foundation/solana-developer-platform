@@ -4,6 +4,9 @@ import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ClerkRequestError, describeClerkFailure } from "./clerk-error";
 
+/** Clerk's code for an invitation to an address already a member of the organization. */
+const CLERK_ALREADY_A_MEMBER = "already_a_member_in_organization";
+
 export interface ClerkOrganizationInvitation {
   id: string;
   email_address: string;
@@ -119,6 +122,32 @@ export class ClerkOrganizationsService {
         body: JSON.stringify(payload),
       }
     );
+  }
+
+  /**
+   * The same invitation, or null when Clerk refuses it because the address is
+   * already a member of the Clerk organization. The caller decides what that
+   * membership means; Clerk's refusal for it is the one this interprets.
+   *
+   * @param params - As for {@link createOrganizationInvitation}.
+   * @returns The Clerk invitation, or null for an address already a member.
+   */
+  async createOrganizationInvitationUnlessMember(
+    params: Parameters<ClerkOrganizationsService["createOrganizationInvitation"]>[0]
+  ): Promise<ClerkOrganizationInvitation | null> {
+    try {
+      return await this.createOrganizationInvitation(params);
+    } catch (error) {
+      // The code is Clerk's contract; its wording is the fallback should the
+      // code ever change.
+      if (
+        error instanceof ClerkRequestError &&
+        (error.clerkCode === CLERK_ALREADY_A_MEMBER || /already a member/i.test(error.message))
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**

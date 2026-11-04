@@ -1,6 +1,7 @@
 import {
   INVITATION_EXPIRED_REASON,
   INVITATION_STATUSES,
+  invitationHasExpired,
   MEMBER_STATUSES,
 } from "@sdp/types/organizations";
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
@@ -315,8 +316,7 @@ export async function uninvitedRefusal(
   const newest = row ? newestInvitationSchema.parse(row) : null;
   const expired =
     newest !== null &&
-    (newest.status === "expired" ||
-      (newest.status === "pending" && new Date(newest.expires_at) <= new Date()));
+    invitationHasExpired({ status: newest.status, expiresAt: newest.expires_at }, new Date());
   return expired ? invitationExpired() : unauthorized("No pending invitation to this organization");
 }
 

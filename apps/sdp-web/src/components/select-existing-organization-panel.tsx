@@ -96,10 +96,10 @@ function entryCopy(
  */
 export function SelectExistingOrganizationPanel({
   noAccess,
-  invitationExpired = false,
+  invitationExpired,
 }: {
   noAccess: boolean;
-  invitationExpired?: boolean;
+  invitationExpired: boolean;
 }) {
   const t = useTranslations();
   const router = useRouter();

@@ -60,6 +60,9 @@ describe("member actions", () => {
   });
 
   it("inviteMember forwards the form's idempotencyKey", async () => {
+    client.fetch.mockResolvedValue({
+      invitation: { id: "inv_test", clerkInvitationId: "orginv_test" },
+    });
     const formData = new FormData();
     formData.set("email", "invitee@example.com");
     formData.set("role", "member");

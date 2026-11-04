@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { AppError, type ErrorResponse, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 
 /**
@@ -45,6 +46,11 @@ function extractClerkReason(body: string): string | null {
   return truncate(trimmed);
 }
 
+/** The part of Clerk's error body that names what went wrong, by code. */
+const clerkErrorBodySchema = z.object({
+  errors: z.array(z.object({ code: z.string() })),
+});
+
 /**
  * A failed Clerk Backend API call. The message carries Clerk's reason for the
  * logs, and `details` its status and body for the callers that branch on them,
@@ -63,13 +69,13 @@ export class ClerkRequestError extends AppError {
     if (typeof body !== "string") {
       return null;
     }
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(body) as { errors?: Array<{ code?: unknown }> };
-      const code = parsed.errors?.[0]?.code;
-      return typeof code === "string" ? code : null;
+      parsed = JSON.parse(body);
     } catch {
       return null;
     }
+    return clerkErrorBodySchema.safeParse(parsed).data?.errors[0]?.code ?? null;
   }
 
   override toResponse(): ErrorResponse {

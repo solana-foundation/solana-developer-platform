@@ -20,7 +20,6 @@ import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
 import { listActiveApiKeysCreatedBy } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
-import { ClerkRequestError } from "@/services/clerk-error";
 import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
   type ClerkOrganizationInvitation,
@@ -407,7 +406,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   }
 
   const clerk = new ClerkOrganizationsService(c.env);
-  const clerkInvitation = await createClerkInvitation(clerk, {
+  const clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
     organizationId: clerkOrgId,
     emailAddress: normalizedEmail,
     expiresInDays: INVITATION_TTL_DAYS,
@@ -481,35 +480,6 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     },
   });
 };
-
-/** Clerk's code for an invitation to an address that is already a member of the organization. */
-const CLERK_ALREADY_A_MEMBER = "already_a_member_in_organization";
-
-/**
- * Creates the Clerk invitation, or answers null when Clerk refuses because the
- * address is already a member of the Clerk organization. SDP reaches this only
- * after finding no active SDP membership for the address, so that Clerk
- * membership is one SDP does not honor, and the SDP invitation alone decides
- * admission.
- */
-async function createClerkInvitation(
-  clerk: ClerkOrganizationsService,
-  params: Parameters<ClerkOrganizationsService["createOrganizationInvitation"]>[0]
-): Promise<ClerkOrganizationInvitation | null> {
-  try {
-    return await clerk.createOrganizationInvitation(params);
-  } catch (error) {
-    // The code is Clerk's contract; its wording is the fallback should the
-    // code ever change, since this refusal is the one Clerk answer expected here.
-    if (
-      error instanceof ClerkRequestError &&
-      (error.clerkCode === CLERK_ALREADY_A_MEMBER || /already a member/i.test(error.message))
-    ) {
-      return null;
-    }
-    throw error;
-  }
-}
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
   const { organizationId, userId } = resolveActor(c);

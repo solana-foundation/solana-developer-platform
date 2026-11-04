@@ -46,7 +46,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (!orgId) {
     return (
       <AuthPageShell action={null}>
-        <SelectExistingOrganizationPanel noAccess={false} />
+        <SelectExistingOrganizationPanel noAccess={false} invitationExpired={false} />
       </AuthPageShell>
     );
   }

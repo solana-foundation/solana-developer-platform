@@ -263,9 +263,8 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
   return {
     status: "success",
     email: parsed.data.email,
-    // The invitation is created either way, so a body this cannot read is
-    // reported as the usual sent invitation rather than a failure.
-    emailSent:
-      createdInvitationSchema.safeParse(created).data?.invitation.clerkInvitationId !== null,
+    // A body this cannot read fails loudly rather than guessing whether an
+    // email went out.
+    emailSent: createdInvitationSchema.parse(created).invitation.clerkInvitationId !== null,
   };
 }

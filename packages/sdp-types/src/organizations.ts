@@ -70,6 +70,24 @@ export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
  * rather than that they were never invited.
  */
 export const INVITATION_EXPIRED_REASON = "invitation_expired";
+
+/**
+ * Whether an invitation no longer admits because it expired: marked expired,
+ * or still pending past its expiry, which nothing has marked yet.
+ *
+ * @param invitation.status - The stored status.
+ * @param invitation.expiresAt - The stored expiry, as an ISO timestamp.
+ * @param now - The time to judge the expiry against.
+ */
+export function invitationHasExpired(
+  invitation: { status: InvitationStatus; expiresAt: string },
+  now: Date
+): boolean {
+  return (
+    invitation.status === "expired" ||
+    (invitation.status === "pending" && new Date(invitation.expiresAt) <= now)
+  );
+}
 export const ORGANIZATION_RPC_PROVIDERS = [
   "alchemy",
   "default",
