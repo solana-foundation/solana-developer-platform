@@ -207,6 +207,15 @@ describe("SelectExistingOrganizationPanel", () => {
     expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
   });
 
+  it("tells an invitee whose invitation expired to ask an admin for a new one", () => {
+    mocks.session.activeOrganization = { id: "org_existing" };
+    renderPanel("invitation-expired");
+
+    expect(screen.getByRole("heading", { name: "Your invitation has expired" })).toBeTruthy();
+    expect(screen.getByText(/Ask an admin of the organization to send you a new one/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No access to this organization" })).toBeNull();
+  });
+
   it("keeps an accepted invitation accepted when switching to its organization fails", async () => {
     const user = userEvent.setup();
     const error = vi.spyOn(toast, "error");

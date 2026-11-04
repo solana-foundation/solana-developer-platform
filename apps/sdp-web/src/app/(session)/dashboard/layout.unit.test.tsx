@@ -40,6 +40,34 @@ describe("dashboard layout", () => {
     });
   });
 
+  it("explains an expired invitation when SDP refuses the session for one", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(
+        401,
+        JSON.stringify({
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Invitation to this organization has expired",
+            details: { reason: "invitation_expired" },
+          },
+        })
+      )
+    );
+    const onboarding = vi.spyOn(sdpApi, "requestOnboardingStatus");
+
+    const layout = await DashboardLayout({ children: "dashboard page" });
+
+    expect(layout).toMatchObject({
+      props: {
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { sessionOrganization: "invitation-expired" },
+        },
+      },
+    });
+    expect(onboarding).not.toHaveBeenCalled();
+  });
+
   it("offers the organization picker when this deployment does not link the session's organization", async () => {
     vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
       new sdpApi.SdpApiResponseError(401, "unauthorized")

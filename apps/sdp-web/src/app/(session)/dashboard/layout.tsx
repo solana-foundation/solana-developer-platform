@@ -1,4 +1,6 @@
+import { INVITATION_EXPIRED_REASON } from "@sdp/types/organizations";
 import type { ReactNode } from "react";
+import { z } from "zod";
 import { AuthPageShell } from "@/components/auth-page-shell";
 import {
   SelectExistingOrganizationPanel,
@@ -6,6 +8,20 @@ import {
 } from "@/components/select-existing-organization-panel";
 import { requestMemberRole, requestOnboardingStatus, SdpApiResponseError } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
+
+const refusalBodySchema = z.object({
+  error: z.object({ details: z.object({ reason: z.string() }).optional() }),
+});
+
+/** Whether a refusal's body says the person's invitation expired. */
+function refusedForExpiredInvitation(responseBody: string): boolean {
+  try {
+    const parsed = refusalBodySchema.safeParse(JSON.parse(responseBody));
+    return parsed.success && parsed.data.error.details?.reason === INVITATION_EXPIRED_REASON;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * How SDP stands toward the session's organization. A Clerk membership grants
@@ -22,6 +38,9 @@ async function sessionOrganizationRefusal(): Promise<Exclude<SessionOrganization
   } catch (error) {
     if (!(error instanceof SdpApiResponseError && error.status === 401)) {
       throw error;
+    }
+    if (refusedForExpiredInvitation(error.responseBody)) {
+      return "invitation-expired";
     }
   }
   // One Clerk instance serves several deployments, so the session's organization may be

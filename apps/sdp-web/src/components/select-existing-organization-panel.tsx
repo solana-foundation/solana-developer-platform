@@ -41,18 +41,20 @@ const ENTRY_ROW_CLASS =
 
 /**
  * How the session's organization stands with SDP here: none is active, SDP
- * refuses the active one, or this deployment does not know it (SDP answers
- * `linked: false`, as for an organization another deployment created).
+ * refuses the active one (or refuses it because the person's invitation
+ * expired), or this deployment does not know it (SDP answers `linked: false`,
+ * as for an organization another deployment created).
  */
-export type SessionOrganization = "none" | "refused" | "unlinked";
+export type SessionOrganization = "none" | "refused" | "invitation-expired" | "unlinked";
 
-type EntryState = "no-access" | "create" | "select" | "select-unlinked";
+type EntryState = "invitation-expired" | "no-access" | "create" | "select" | "select-unlinked";
 
 function resolveEntryState(params: {
   sessionOrganization: SessionOrganization;
   isLoaded: boolean;
   hasChoices: boolean;
 }): EntryState {
+  if (params.sessionOrganization === "invitation-expired") return "invitation-expired";
   if (params.sessionOrganization === "refused") return "no-access";
   if (params.isLoaded && !params.hasChoices) return "create";
   if (params.sessionOrganization === "unlinked") return "select-unlinked";
@@ -64,6 +66,11 @@ function entryCopy(
   t: ReturnType<typeof useTranslations>
 ): { title: string; description: string } {
   switch (state) {
+    case "invitation-expired":
+      return {
+        title: t("Shared.SharedComponents.invitationExpiredTitle"),
+        description: t("Shared.SharedComponents.invitationExpiredDescription"),
+      };
     case "no-access":
       return {
         title: t("Shared.SharedComponents.noOrganizationAccessTitle"),
