@@ -81,13 +81,13 @@ import {
   organizationSchema,
 } from "@/openapi/schemas/organizations";
 import {
+  createdPaymentRequestSchema,
   offrampCurrenciesResponseSchema,
   onrampCurrenciesResponseSchema,
   onrampQuoteResponseSchema,
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
-  createdPaymentRequestSchema,
   paymentRequestLinkSchema,
   paymentRequestListResponseSchema,
   paymentRequestSchema,
