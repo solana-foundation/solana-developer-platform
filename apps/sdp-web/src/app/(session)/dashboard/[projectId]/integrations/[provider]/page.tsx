@@ -29,7 +29,6 @@ import {
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
   availableComplianceProviders,
@@ -174,10 +173,7 @@ function resolveConnectionsProvider(
  * sent on behalf of someone who is about to be redirected away.
  */
 async function resolveRequestContext() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

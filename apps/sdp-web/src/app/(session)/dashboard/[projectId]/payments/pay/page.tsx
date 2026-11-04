@@ -4,14 +4,10 @@ import { Suspense } from "react";
 import { PaymentsPayPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import { loadPaymentsActionPageData } from "@/app/(session)/dashboard/[projectId]/payments/ramps/payments-action-page.server";
 import { PaymentsActionPage } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-action-page";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export default async function PaymentsPayPage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

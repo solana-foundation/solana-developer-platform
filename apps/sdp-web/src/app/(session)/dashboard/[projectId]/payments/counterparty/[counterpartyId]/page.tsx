@@ -6,7 +6,6 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
 import { CounterpartyDetailWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace";
 import { isRampsEnabled } from "@/flags/ramps";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { requestProjectHref } from "@/lib/sdp-api";
 
@@ -17,10 +16,7 @@ export default async function CounterpartyDetailRoute({
 }: {
   params: Promise<{ counterpartyId: string }>;
 }) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

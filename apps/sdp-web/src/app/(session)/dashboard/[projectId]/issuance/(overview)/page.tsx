@@ -9,7 +9,6 @@ import {
 import { IssuanceWorkspace } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-workspace";
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 
@@ -50,14 +49,11 @@ interface IssuancePageProps {
  * URL, and the API Playground's data beside them.
  */
 export default async function IssuancePage({ searchParams }: IssuancePageProps) {
-  const [t, { userId, orgId }, resolvedSearchParams] = await Promise.all([
+  const [t, { orgId }, resolvedSearchParams] = await Promise.all([
     getTranslations(),
     auth(),
     searchParams ?? Promise.resolve(undefined),
   ]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
   if (!orgId) {
     redirect("/dashboard");
   }

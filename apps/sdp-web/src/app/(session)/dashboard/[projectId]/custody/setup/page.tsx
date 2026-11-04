@@ -7,7 +7,6 @@ import {
   type KnownCustodyProvider,
 } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/(session)/dashboard/[projectId]/onboarding-status";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
@@ -59,10 +58,7 @@ async function getConnectedCustodyProviders(
 }
 
 export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

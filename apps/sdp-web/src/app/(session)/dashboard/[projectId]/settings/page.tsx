@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { requestMemberRole } from "@/lib/sdp-api";
 import { LeaveOrganizationCard } from "./leave-organization-card";
@@ -32,10 +31,7 @@ export default async function SettingsPage({
 }) {
   const membersPage = resolveMembersPage((await searchParams).membersPage);
 
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

@@ -5,7 +5,6 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
 import { readApiErrorMessage } from "@/lib/api-error";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
 import type { LatestDeployAttempt } from "./token-page/token-page.shared";
@@ -87,14 +86,7 @@ async function readLatestDeploy(
 
 /** One token's page. */
 export async function TokenPage({ params }: TokenPageProps) {
-  const [t, { userId, orgId }, { tokenId }] = await Promise.all([
-    getTranslations(),
-    auth(),
-    params,
-  ]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const [t, { orgId }, { tokenId }] = await Promise.all([getTranslations(), auth(), params]);
   if (!orgId) {
     redirect("/dashboard");
   }

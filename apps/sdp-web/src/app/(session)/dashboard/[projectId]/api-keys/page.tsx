@@ -14,7 +14,6 @@ import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
@@ -24,10 +23,7 @@ import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
 export const dynamic = "force-dynamic";
 
 export default async function ApiKeysPage() {
-  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const [t, { orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!orgId) {
     redirect("/dashboard");
   }

@@ -4,7 +4,6 @@ import { fetchCounterparty } from "@/app/(session)/dashboard/[projectId]/payment
 import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import {
   fetchRecurringPayments,
@@ -19,10 +18,7 @@ interface RecurringPaymentsPageProps {
 }
 
 export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

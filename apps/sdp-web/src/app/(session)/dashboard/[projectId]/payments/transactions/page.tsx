@@ -5,7 +5,6 @@ import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/(session)/dash
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { parseTransactionFilters } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
@@ -22,8 +21,7 @@ interface TransactionsPageProps {
 const CONTACT_OPTION_LIMIT = 100;
 
 export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
-  const { userId, orgId } = await auth();
-  if (!userId) redirect(await getAuthEntryPath());
+  const { orgId } = await auth();
   if (!orgId) redirect("/dashboard");
 
   const params = await searchParams;

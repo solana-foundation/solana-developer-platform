@@ -8,7 +8,6 @@ import { privateChannels } from "@/flags";
 import { getOfferedRampProviders } from "@/flags/ramps";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import {
   availableComplianceProviders,
   availableCustodyProviders,
@@ -57,10 +56,7 @@ async function getPrivateChannelsActive(client: SdpApiClient): Promise<boolean |
  * @returns The rendered catalog.
  */
 export default async function IntegrationsPage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

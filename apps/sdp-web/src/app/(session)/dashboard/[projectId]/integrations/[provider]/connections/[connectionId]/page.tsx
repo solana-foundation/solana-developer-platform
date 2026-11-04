@@ -13,7 +13,6 @@ import {
   providerSupportsStoredCredentialSetup,
 } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { offersCustodyMode } from "@/lib/provider-availability";
 import { fetchProjectProviderAvailability } from "@/lib/provider-availability.server";
@@ -41,10 +40,7 @@ export default async function CustodyConnectionPage({
     notFound();
   }
 
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

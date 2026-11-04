@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));
@@ -39,7 +38,7 @@ describe("custody setup page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/custody/setup`);
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    mocks.auth.mockResolvedValue({ orgId: "org_test" });
     mocks.requestMemberRole.mockResolvedValue("admin");
     mocks.organizationFetch.mockResolvedValue({
       linked: true,

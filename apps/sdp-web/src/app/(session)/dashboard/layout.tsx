@@ -1,8 +1,6 @@
-import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AuthPageShell } from "@/components/auth-page-shell";
 import { SelectExistingOrganizationPanel } from "@/components/select-existing-organization-panel";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { requestMemberRole, SdpApiResponseError } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
 
@@ -27,11 +25,7 @@ async function sdpAdmitsSession(): Promise<boolean> {
 }
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const { orgId, userId } = await getSdpAuth();
-
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await getSdpAuth();
 
   if (!orgId) {
     return (

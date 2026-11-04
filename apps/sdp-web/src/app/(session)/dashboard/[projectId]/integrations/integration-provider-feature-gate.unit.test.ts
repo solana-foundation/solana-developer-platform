@@ -27,7 +27,6 @@ vi.mock("@/flags/release-channel", () => ({
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => false }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));
@@ -45,7 +44,6 @@ import IntegrationDetailPage from "./[provider]/page";
 describe("integration provider route feature gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: null, orgId: null });
     mocks.custody.mockReturnValue(false);
     mocks.rampProviders.mockResolvedValue([]);
     mocks.payments.mockReturnValue(false);
@@ -72,7 +70,7 @@ describe("integration provider route feature gates", () => {
 describe("integration provider route availability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    mocks.auth.mockResolvedValue({ orgId: "org_test" });
     mocks.requestMemberRole.mockResolvedValue("admin");
     mocks.custody.mockReturnValue(true);
     mocks.rampProviders.mockResolvedValue(["moonpay", "stripe"]);

@@ -15,7 +15,6 @@ import {
   fetchRecurringPaymentCollectionAttempts,
 } from "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments.data";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_RECURRING_HREF } from "@/lib/payments-routes";
 import { requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
@@ -82,10 +81,7 @@ export default async function RecurringPaymentDetailRoute({
 }: {
   params: Promise<{ recurringPaymentId: string }>;
 }) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

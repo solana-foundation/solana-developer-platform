@@ -2,13 +2,9 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { loadPaymentsActionPageData } from "@/app/(session)/dashboard/[projectId]/payments/ramps/payments-action-page.server";
 import { PaymentsActionPage } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-action-page";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 
 export default async function PaymentsDepositPage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

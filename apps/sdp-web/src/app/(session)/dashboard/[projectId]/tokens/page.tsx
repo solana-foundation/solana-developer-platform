@@ -1,18 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { fetchPaymentsAggregate } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { HoldingsWorkspace } from "./holdings-workspace";
 
 export default async function TokenHoldingsPage() {
   const t = await getTranslations();
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     return null;
   }

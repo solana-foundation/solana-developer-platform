@@ -6,7 +6,6 @@ import {
   fetchPaymentRequestDetail,
   fetchPaymentRequestLinkToken,
 } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
@@ -18,10 +17,7 @@ export default async function PaymentRequestDetailRoute({
 }: {
   params: Promise<{ requestId: string }>;
 }) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

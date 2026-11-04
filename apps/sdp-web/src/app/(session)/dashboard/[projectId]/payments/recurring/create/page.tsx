@@ -4,17 +4,13 @@ import { fetchCounterparties } from "@/app/(session)/dashboard/[projectId]/payme
 import { fetchIssuedTokenSymbolsWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
 import { fetchPaymentsWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payment-create-workspace";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export const dynamic = "force-dynamic";
 
 export default async function RecurringPaymentCreatePage() {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
+  const { orgId } = await auth();
   if (!orgId) {
     redirect("/dashboard");
   }

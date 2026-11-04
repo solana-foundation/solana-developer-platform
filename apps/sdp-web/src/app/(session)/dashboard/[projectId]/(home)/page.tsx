@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { HomeWorkspace } from "@/app/(session)/dashboard/[projectId]/home-workspace";
 import { resolveTotalBalance } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
@@ -10,20 +9,16 @@ import {
 import { issuance } from "@/flags";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
-import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
 export default async function DashboardPage() {
-  const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
+  const [t, { orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     isModuleInDeploymentReleaseChannel("custody"),
     issuance(),
   ]);
-  if (!userId) {
-    redirect(await getAuthEntryPath());
-  }
   if (!orgId) {
     return null;
   }
