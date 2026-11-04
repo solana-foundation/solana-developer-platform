@@ -1,3 +1,4 @@
+import { ONCHAIN_TRANSFER_STATUSES } from "@sdp/types/payments";
 import { describe, expect, it } from "vitest";
 
 import { buildWalletsPlaygroundEndpointConfigs } from "@/app/(session)/dashboard/[projectId]/custody/wallets-playground-config";
@@ -127,6 +128,41 @@ describe("API playground release channel", () => {
     const body = wallet?.bodyFields.find((field) => field.key === "$body")?.defaultValue ?? "";
     expect(body).not.toMatch(/mint_authority/);
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
+  });
+
+  it("uses the channel's generated transfer fields and response examples", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      getOpenApiPlaygroundEndpoints("payments"),
+      "stable"
+    );
+    const transfer = endpoints.find((endpoint) => endpoint.id === "create-payment-transfer");
+    expect(transfer).toBeDefined();
+    expect(transfer?.bodyFields.find((field) => field.key === "$body")?.defaultValue).not.toContain(
+      "transferId"
+    );
+    const serialized = JSON.stringify(endpoints);
+    expect(serialized).not.toMatch(/deliveryMode|fiatCurrency|providerReference|rampsMemo/);
+  });
+
+  it("keeps ramp statuses out of the curated transfer filter when no provider is offered", () => {
+    const endpoints = filterPlaygroundEndpointsToReleaseChannel(
+      buildPaymentsPlaygroundEndpointConfigs({ wallets: [], transfers: [], rampProviders: [] }, t),
+      "stable"
+    );
+    const statuses = endpoints
+      .find((endpoint) => endpoint.id === "list-transfers")
+      ?.pathFields.find((field) => field.key === "status")
+      ?.options?.map((option) => option.value);
+    expect(statuses).toEqual(ONCHAIN_TRANSFER_STATUSES);
+    const experimental = buildPaymentsPlaygroundEndpointConfigs(
+      { wallets: [], transfers: [], rampProviders: ["moonpay"] },
+      t
+    );
+    expect(
+      experimental
+        .find((endpoint) => endpoint.id === "list-transfers")
+        ?.pathFields.find((field) => field.key === "status")?.options
+    ).toContainEqual({ label: "settling", value: "settling" });
   });
 
   it("filters every playground's forms on every channel without rejecting their examples", () => {

@@ -1,4 +1,5 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   generateKeyPairSigner,
@@ -6,6 +7,7 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -720,64 +722,46 @@ describe("Payments routes — on-chain transfers", () => {
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });
 
-  it("refuses to fund an off-ramp deposit at a provider outside the release channel", async () => {
-    const transferId = generatePaymentTransferId();
-    const repository = createPostgresPaymentsRepository(
-      getDb(env),
-      createTenantScope({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-      })
-    );
-    await repository.createTransfer({
-      id: transferId,
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT.id,
-      custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
-      counterpartyId: null,
-      sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
-      destinationAddress: null,
-      token: SOL_MINT,
-      amount: "1",
-      memo: null,
-      type: "offramp",
-      direction: "outbound",
-      status: "awaiting_payment",
-      provider: "moonpay",
-      providerReference: "moonpay-excluded-deposit",
-      deliveryMode: "hosted",
-      fiatCurrency: "USD",
-      fiatAmount: "100",
-      providerData: {
-        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "1.0" },
-      },
-      serializedTx: null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: TEST_API_KEY.id,
-      idempotencyKey: null,
-      idempotencyFingerprint: null,
-    });
+  it.each([
+    { label: "no ramp provider", maturity: SDP_RAMP_PROVIDER_MATURITY, status: 400 },
+    {
+      label: "a different ramp provider",
+      maturity: { ...SDP_RAMP_PROVIDER_MATURITY, stripe: "stable" } as const,
+      status: 403,
+    },
+  ])(
+    "refuses an excluded off-ramp deposit when stable includes $label",
+    async ({ maturity, status }) => {
+      const transferId = generatePaymentTransferId();
+      await seedSolOfframpDeposit(transferId);
+      const app = createApp({ rampProviderMaturity: maturity });
+      const res = await app.request(
+        "/v1/payments/transfers",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify(solOfframpDepositRequest(transferId)),
+        },
+        { ...env, SDP_RELEASE_CHANNEL: "stable" }
+      );
 
-    // Every ramp provider is `experimental` today, so `stable` leaves MoonPay out.
-    const res = await postTransfer(
-      {
-        transferId,
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        destination: TEST_SOLANA_ADDRESSES.wallet2,
-        token: "SOL",
-        amount: "1",
-      },
-      { releaseChannel: "stable" }
-    );
-
-    expect(res.status).toBe(403);
-    const rows = await listTransferRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
-    expect(rows[0]?.signature).toBeFalsy();
-  });
+      expect(res.status).toBe(status);
+      const { error } = await readErrorResponse(res);
+      expect(error.message).toContain(
+        status === 400 ? 'Unrecognized key: "transferId"' : "moonpay"
+      );
+      const rows = await listTransferRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: transferId, status: "awaiting_payment" });
+      expect(rows[0]?.signature).toBeFalsy();
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("persists a signed outbox for an SPL transfer", async () => {
     answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);

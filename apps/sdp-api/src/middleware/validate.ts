@@ -75,17 +75,17 @@ function zodValidation<S extends z.ZodType>(schema: S, toError: (prettified: str
  * is rejected with a 400. Reading via `c.req.text()` fills hono's body cache,
  * so downstream `c.req.json()` reads stay valid.
  *
- * @param schema - The zod schema the body must satisfy.
+ * @param schema - The zod schema, or a request-scoped selector for a deployment-specific contract.
  * @returns Route-level middleware that rejects invalid bodies with a 400.
  */
 export function validateBody<S extends z.ZodType<object>>(
-  schema: S
+  schema: S | ((c: Context<{ Bindings: Env }>) => S)
   // biome-ignore lint/suspicious/noExplicitAny: mirrors hono's own validator() env default.
 ): MiddlewareHandler<any, string, { in: { json: z.input<S> }; out: { json: z.output<S> } }> {
-  const parse = zodValidation(schema, (prettified) =>
-    badRequest(`Invalid request body:\n${prettified}`)
-  );
   return markValidation(async (c, next) => {
+    const parse = zodValidation(typeof schema === "function" ? schema(c) : schema, (prettified) =>
+      badRequest(`Invalid request body:\n${prettified}`)
+    );
     const raw = await c.req.text();
     let value: unknown = {};
     if (raw.trim().length > 0) {
