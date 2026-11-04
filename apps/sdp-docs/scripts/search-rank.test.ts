@@ -3,20 +3,31 @@ import { describe, it } from "node:test";
 import type { SortedResult } from "fumadocs-core/search";
 import { rankTitlesFirst } from "@/lib/search-rank";
 
-function page(url: string, title: string): SortedResult {
-  return { id: url, type: "page", url, content: title };
-}
-
-function passage(url: string, content: string): SortedResult {
-  return { id: `${url}-passage`, type: "text", url, content };
-}
-
-const descriptions: Record<string, string> = {
+const descriptions = {
   "/docs/tutorial": "Issue a token end to end.",
   "/docs/keys": "Create, rotate and revoke keys.",
   "/docs/payment": "Send a single token transfer.",
   "/docs/payouts": "Pay many recipients at once.",
-};
+} as const satisfies Record<string, string>;
+
+type FixtureUrl = keyof typeof descriptions;
+
+function isFixtureUrl(url: string): url is FixtureUrl {
+  return Object.hasOwn(descriptions, url);
+}
+
+/** A fixture page's description, as the route reads one from the source. */
+function descriptionOf(url: string): string | undefined {
+  return isFixtureUrl(url) ? descriptions[url] : undefined;
+}
+
+function page(url: FixtureUrl, title: string): SortedResult {
+  return { id: url, type: "page", url, content: title };
+}
+
+function passage(url: FixtureUrl, content: string): SortedResult {
+  return { id: `${url}-passage`, type: "text", url, content };
+}
 
 describe("search ranking", () => {
   it("puts the page titled with every query word first, its passages under it", () => {
@@ -27,7 +38,7 @@ describe("search ranking", () => {
       passage("/docs/keys", "Each API key holds grants."),
     ];
     assert.deepEqual(
-      rankTitlesFirst(results, "api key", (url) => descriptions[url]).map((result) => result.id),
+      rankTitlesFirst(results, "api key", descriptionOf).map((result) => result.id),
       ["/docs/keys", "/docs/keys-passage", "/docs/tutorial", "/docs/tutorial-passage"]
     );
   });
@@ -35,9 +46,7 @@ describe("search ranking", () => {
   it("ranks a title and description that hold the query above a title holding part of it", () => {
     const results = [page("/docs/payouts", "Payouts"), page("/docs/payment", "Basic payment")];
     assert.deepEqual(
-      rankTitlesFirst(results, "send payment", (url) => descriptions[url]).map(
-        (result) => result.id
-      ),
+      rankTitlesFirst(results, "send payment", descriptionOf).map((result) => result.id),
       ["/docs/payment", "/docs/payouts"]
     );
   });
@@ -48,7 +57,7 @@ describe("search ranking", () => {
       page("/docs/tutorial", "Issue a stablecoin"),
     ];
     assert.deepEqual(
-      rankTitlesFirst(results, "webhook", (url) => descriptions[url]).map((result) => result.id),
+      rankTitlesFirst(results, "webhook", descriptionOf).map((result) => result.id),
       ["/docs/payouts", "/docs/tutorial"]
     );
   });
