@@ -1,5 +1,13 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
-import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc, getSignatureStatusesFromEveryEndpoint } from "@sdp/rpc/factory";
+import {
+  confirmTransaction,
+  getChainHeight,
+  getRecentBlockhash,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+  VERDICT_HISTORY_HORIZON_BLOCKS,
+} from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
@@ -57,6 +65,7 @@ import { assertMovementAdmitted, decidePrincipal } from "@/lib/money-admission";
 import type { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
 import {
   isNativePaymentToken,
@@ -664,7 +673,10 @@ export type SavedSendOutcome =
 
 /**
  * Reads a saved send from the chain. A send with no record is proven never landed only once the
- * chain's block height is past the expiry of the blockhash it was signed with.
+ * `finalized` block height is past the expiry of the blockhash it was signed with, and every pool
+ * endpoint, read at that finalized slot, has no record of it inside the history horizon. Any
+ * endpoint that cannot answer, or an expiry past the horizon, leaves the send `pending`, so the
+ * caller keeps it and its fence.
  *
  * @param rpc - The cluster's RPC.
  * @param savedSend - The send's signature and its blockhash's expiry.
@@ -675,32 +687,60 @@ export async function readSavedSend(
   rpc: SolanaRpc,
   savedSend: SavedStepSend
 ): Promise<SavedSendOutcome> {
+  const { signature, lastValidBlockHeight } = savedSend;
   // Read before the status: once the chain is past the expiry, nothing lands after the status read.
-  const chainTip = await withTransientRpcRetry(() =>
-    rpc.getEpochInfo({ commitment: "confirmed" }).send()
-  );
-  const statuses = await withTransientRpcRetry(() =>
-    rpc.getSignatureStatuses([savedSend.signature], { searchTransactionHistory: true }).send()
-  );
-  const [status] = statuses.value;
-  if (status) {
-    // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
-    // there does not stop the same send landing, so resending it could collect twice
-    // (APE SOLA9-708).
-    if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
-      return "pending";
+  const finalized = await withTransientRpcRetry(() => getChainHeight(rpc, "finalized"));
+  if (lastValidBlockHeight === null || finalized.blockHeight <= lastValidBlockHeight) {
+    const [status] = await getSignatureStatuses(rpc, [signature], {
+      searchTransactionHistory: true,
+    });
+    if (status !== null) return savedSendStatusOutcome(status);
+    if (lastValidBlockHeight === null) {
+      throw internalError("A saved send with no record has no block height to prove its expiry");
     }
-    return status.err === null ? "succeeded" : "failed";
-  }
-  if (savedSend.lastValidBlockHeight === null) {
-    throw internalError("A saved send with no record has no block height to prove its expiry");
-  }
-  if (chainTip.blockHeight <= savedSend.lastValidBlockHeight) {
     return "pending";
   }
-  // The pool may answer the two reads from different nodes: only a node that has processed the
-  // slot the expiry was seen at has seen every block the send could have landed in.
-  return statuses.context.slot >= chainTip.absoluteSlot ? "expired" : "pending";
+
+  const [read] = await getSignatureStatusesFromEveryEndpoint([signature], {
+    minContextSlot: finalized.absoluteSlot,
+    commitment: "finalized",
+  });
+  if (read.kind === "found") return savedSendStatusOutcome(read.status);
+  if (read.kind === "unresolved") {
+    logEvent("warn", {
+      event: "sdp_api_recurring_saved_send_unresolved",
+      signature,
+      last_valid_block_height: lastValidBlockHeight.toString(),
+      min_context_slot: finalized.absoluteSlot.toString(),
+      endpoint_failures: read.failures.map((failure) =>
+        failure.reason === "node_behind_floor"
+          ? { reason: failure.reason, context_slot: failure.contextSlot.toString() }
+          : { reason: failure.reason, error_name: failure.errorName }
+      ),
+    });
+    return "pending";
+  }
+  if (finalized.blockHeight - lastValidBlockHeight > VERDICT_HISTORY_HORIZON_BLOCKS) {
+    logEvent("error", {
+      event: "sdp_api_recurring_saved_send_verdict_unprovable",
+      signature,
+      last_valid_block_height: lastValidBlockHeight.toString(),
+      finalized_block_height: finalized.blockHeight.toString(),
+      min_context_slot: finalized.absoluteSlot.toString(),
+    });
+    return "pending";
+  }
+  return "expired";
+}
+
+function savedSendStatusOutcome(status: SignatureStatusInfo): SavedSendOutcome {
+  // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
+  // there does not stop the same send landing, so resending it could collect twice
+  // (APE SOLA9-708).
+  if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
+    return "pending";
+  }
+  return status.err === null ? "succeeded" : "failed";
 }
 
 /**

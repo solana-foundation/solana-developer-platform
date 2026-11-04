@@ -5,6 +5,8 @@ import {
   type SolanaCluster,
 } from "@sdp/types/well-known-tokens";
 import {
+  type Commitment,
+  commitmentComparator,
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
   getAbortablePromise,
@@ -12,10 +14,18 @@ import {
   isJsonRpcPayload,
   isSolanaError,
   type RpcTransport,
+  type Signature,
+  type Slot,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
-import { RpcTimeoutError, RpcUnavailableError, SdpRpcError } from "./errors";
+import {
+  MinContextSlotNotReachedError,
+  RpcTimeoutError,
+  RpcUnavailableError,
+  SdpRpcError,
+} from "./errors";
 import {
   MANAGED_RPC_ENV_KEYS,
   MANAGED_RPC_HOSTS,
@@ -23,7 +33,12 @@ import {
 } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
-import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import {
+  DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+} from "./solana";
 import {
   emitRpcTelemetry,
   markRpcAttemptDeadline,
@@ -739,6 +754,95 @@ export function createClusterHistoryRpc(): SolanaRpc {
       : endpointUrls,
     managedPools
   );
+}
+
+/** Why one endpoint left a floored history read unanswered. */
+export type EndpointHistoryFailure =
+  /** The endpoint had not reached the floor: SDP's own `context.slot` check or a served `-32016`. */
+  | { reason: "node_behind_floor"; contextSlot: bigint }
+  | { reason: "history_unavailable"; errorName: string; errorMessage: string };
+
+/** One signature's history status across every endpoint of the scope's managed pool. */
+export type EveryEndpointSignatureStatus =
+  /** At least one endpoint has a status for it; other endpoints' failures do not matter. */
+  | { kind: "found"; status: SignatureStatusInfo }
+  /** Every endpoint answered at the floor, and none has a status for it. */
+  | { kind: "absent" }
+  /** No endpoint has a status for it and at least one could not answer at the floor. */
+  | { kind: "unresolved"; failures: EndpointHistoryFailure[] };
+
+/**
+ * Signature statuses from transaction history on every endpoint of the scope's managed pool, each
+ * read floored at `minContextSlot` against the `commitment` bank. The pool takes the first
+ * endpoint's answer, and one endpoint's history can miss a landed transaction (a snapshot-booted
+ * node, a history-backend error Agave serves as null), so only a null from every endpoint is
+ * `absent`. Each endpoint is its own one-endpoint pool, sharing the managed pool's genesis proofs
+ * and key-refusal memo but never its failover order.
+ *
+ * @param signatures - The signatures to look up, at most `getSignatureStatuses`' batch limit.
+ * @param floor - The slot every endpoint must have reached, and the bank it is checked against.
+ * @returns Each signature's status across the pool, in order.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
+ * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
+ */
+export async function getSignatureStatusesFromEveryEndpoint(
+  signatures: Signature[],
+  floor: Readonly<{ minContextSlot: Slot; commitment: Commitment }>
+): Promise<EveryEndpointSignatureStatus[]> {
+  const { cluster } = currentClusterScope();
+  const endpointReads = await Promise.allSettled(
+    managedEndpointUrls(cluster).map((endpointUrl) =>
+      getSignatureStatuses(pooledClusterRpc(cluster, [endpointUrl], managedPools), signatures, {
+        searchTransactionHistory: true,
+        minContextSlot: floor.minContextSlot,
+        commitment: floor.commitment,
+      })
+    )
+  );
+  const answers = endpointReads.flatMap((read) =>
+    read.status === "fulfilled" ? [read.value] : []
+  );
+  const failures = endpointReads.flatMap((read) =>
+    read.status === "rejected" ? [endpointHistoryFailure(read.reason)] : []
+  );
+  return signatures.map((_signature, index): EveryEndpointSignatureStatus => {
+    const found = mostConfirmedStatus(answers.map((statuses) => statuses[index]));
+    if (found !== null) return { kind: "found", status: found };
+    return failures.length === 0 ? { kind: "absent" } : { kind: "unresolved", failures };
+  });
+}
+
+function endpointHistoryFailure(cause: unknown): EndpointHistoryFailure {
+  if (cause instanceof MinContextSlotNotReachedError) {
+    return { reason: "node_behind_floor", contextSlot: cause.contextSlot };
+  }
+  if (isSolanaError(cause, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
+    return { reason: "node_behind_floor", contextSlot: cause.context.contextSlot };
+  }
+  return cause instanceof Error
+    ? { reason: "history_unavailable", errorName: cause.name, errorMessage: cause.message }
+    : {
+        reason: "history_unavailable",
+        errorName: "NonErrorRejection",
+        errorMessage: String(cause),
+      };
+}
+
+function mostConfirmedStatus(
+  statuses: ReadonlyArray<SignatureStatusInfo | null>
+): SignatureStatusInfo | null {
+  let mostConfirmed: SignatureStatusInfo | null = null;
+  for (const status of statuses) {
+    if (status === null) continue;
+    if (mostConfirmed === null || isMoreConfirmed(status, mostConfirmed)) mostConfirmed = status;
+  }
+  return mostConfirmed;
+}
+
+function isMoreConfirmed(status: SignatureStatusInfo, than: SignatureStatusInfo): boolean {
+  if (status.confirmationStatus === null) return false;
+  if (than.confirmationStatus === null) return true;
+  return commitmentComparator(status.confirmationStatus, than.confirmationStatus) > 0;
 }
 
 /**

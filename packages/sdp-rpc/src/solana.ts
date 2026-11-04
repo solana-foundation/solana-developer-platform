@@ -640,6 +640,29 @@ export async function getSignatureStatuses(
   );
 }
 
+/**
+ * How many blocks past a send's last valid block height a floored history null still proves the
+ * send never landed. Past it the caller keeps the send unresolved and alerts. Sized for a
+ * five-minute reconciler that was down for about an hour (9,000 blocks at Agave's 400 ms target
+ * slot).
+ *
+ * The send could have landed up to 150 blocks before its last valid block height
+ * (`MAX_PROCESSING_AGE`), so the history must cover 9,150 blocks. Agave purges each node's
+ * blockstore oldest-slot-first by shred count, never by slot count (`--limit-blockstore-size`:
+ * 400M shreds by default and no fewer than 100M; `ledger/src/blockstore/cleanup_service.rs`), and
+ * skipped slots carry no shreds, so retention is counted in blocks and shrinks as load grows. A
+ * node at Agave's smallest limit keeps 9,150 blocks until they average about 10,900 shreds
+ * (~55,000 TPS at the 4 transactions a shred `ledger/src/shred.rs` assumes); an indexer-backed node
+ * keeps everything. Snapshot-booted nodes and history-backend errors read as null (Agave `rpc.rs`
+ * `.unwrap_or(None)`) are outside what any horizon can bound; reading every endpoint
+ * (`getSignatureStatusesFromEveryEndpoint`) covers those.
+ *
+ * A history read for the `finalized` bank is floor-checked against the node's root on Agave 4.4
+ * and later. Before 4.4 nodes ignore that commitment: SDP's own `context.slot` check is then the
+ * only floor, and it tests the node's processed slot.
+ */
+export const VERDICT_HISTORY_HORIZON_BLOCKS = 9_000n;
+
 /** A batch row whose blockhash a height read shows expired while its batch status was null. */
 export interface ExpiredUnseenSignature {
   /** The row's position in the batch. */
