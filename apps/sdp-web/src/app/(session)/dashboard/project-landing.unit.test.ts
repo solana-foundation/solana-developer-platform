@@ -26,7 +26,6 @@ const dashboardShell = vi.hoisted(() => ({
     ({ children }: { children: ReactNode; projects: Project[] }) => children
   ),
   passThrough: ({ children }: { children: ReactNode }) => children,
-  ProjectOrganizationSwitch: vi.fn(() => null),
 }));
 
 const DASHBOARD_FLAGS = vi.hoisted(
@@ -60,11 +59,9 @@ vi.mock("@/contexts/network-debug-context", () => ({
   NetworkDebugProvider: dashboardShell.passThrough,
 }));
 vi.mock("@/components/dashboard-shell", () => ({ DashboardShell: dashboardShell.passThrough }));
-vi.mock("./[projectId]/project-organization-switch", () => ({
-  ProjectOrganizationSwitch: dashboardShell.ProjectOrganizationSwitch,
-}));
 
 import ProjectLayout from "./[projectId]/layout";
+import { ProjectOrganizationSwitch } from "./[projectId]/project-organization-switch";
 import DashboardLandingPage from "./page";
 
 const WORKSPACE_LOADING_REDIRECT = "/workspace-loading?return_to=%2Fdashboard";
@@ -170,7 +167,7 @@ describe("project-scoped dashboard layout", () => {
     );
 
     expect(layout).toMatchObject({
-      type: dashboardShell.ProjectOrganizationSwitch,
+      type: ProjectOrganizationSwitch,
       props: {
         projectId: OTHER_ORGANIZATION_PROJECT.id,
         sessionOrganizationId: "org_test",

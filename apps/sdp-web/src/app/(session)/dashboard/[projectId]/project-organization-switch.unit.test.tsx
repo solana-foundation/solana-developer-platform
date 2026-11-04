@@ -2,6 +2,7 @@
 
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as loadingScreen from "@/components/dashboard-loading-screen";
 import {
   dashboardRouter,
   resetDashboardNavigation,
@@ -10,19 +11,18 @@ import {
 import { OTHER_ORGANIZATION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
 
-const clerk = vi.hoisted(() => ({
-  setActive: vi.fn(async (_params: { organization: string }) => undefined),
-  getToken: vi.fn(
-    async ({ organizationId }: { organizationId: string }) => `token_${organizationId}`
-  ),
-  memberships: [] as string[],
-}));
-
-const actions = vi.hoisted(() => ({
-  findProjectOrganization: vi.fn(
-    async (_projectId: string, _tokens: readonly string[]): Promise<number | null> => null
-  ),
-}));
+// Clerk's hooks need a mounted ClerkProvider and clerk-js, so the SDK is the
+// one module this test replaces, as the repo's other Clerk-reading tests do.
+const clerk = vi.hoisted(() => {
+  const memberships: string[] = [];
+  return {
+    setActive: vi.fn(async (_params: { organization: string }) => undefined),
+    getToken: vi.fn(
+      async ({ organizationId }: { organizationId: string }) => `token_${organizationId}`
+    ),
+    memberships,
+  };
+});
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@clerk/nextjs", () => ({
@@ -35,11 +35,8 @@ vi.mock("@clerk/nextjs", () => ({
     },
   }),
 }));
-vi.mock("./project-organization-actions", () => actions);
-vi.mock("@/components/dashboard-loading-screen", () => ({
-  DashboardLoadingScreen: ({ pathname }: { pathname: string }) => <p>{`Loading ${pathname}`}</p>,
-}));
 
+import * as actions from "./project-organization-actions";
 import { ProjectOrganizationSwitch } from "./project-organization-switch";
 
 const FALLBACK_HREF = `/dashboard/${SANDBOX_PROJECT.id}/api-keys`;
@@ -60,18 +57,21 @@ beforeEach(() => {
   setDashboardUrl(`/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys`, {});
   clerk.setActive.mockClear();
   clerk.getToken.mockClear();
-  actions.findProjectOrganization.mockReset();
-  actions.findProjectOrganization.mockResolvedValue(null);
+  vi.spyOn(actions, "findProjectOrganization").mockResolvedValue(null);
+  vi.spyOn(loadingScreen, "DashboardLoadingScreen").mockImplementation(({ pathname }) => (
+    <p>{`Loading ${pathname}`}</p>
+  ));
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("ProjectOrganizationSwitch", () => {
   it("makes active the other organization that lists the project, rendering nothing of it meanwhile", async () => {
     clerk.memberships = ["org_test", "org_first", "org_second"];
-    actions.findProjectOrganization.mockResolvedValue(1);
+    vi.mocked(actions.findProjectOrganization).mockResolvedValue(1);
 
     const view = renderSwitch();
 
@@ -82,7 +82,7 @@ describe("ProjectOrganizationSwitch", () => {
       [{ organizationId: "org_first" }],
       [{ organizationId: "org_second" }],
     ]);
-    expect(actions.findProjectOrganization.mock.calls).toEqual([
+    expect(vi.mocked(actions.findProjectOrganization).mock.calls).toEqual([
       [OTHER_ORGANIZATION_PROJECT.id, ["token_org_first", "token_org_second"]],
     ]);
     expect(dashboardRouter.replace).not.toHaveBeenCalled();
@@ -90,7 +90,7 @@ describe("ProjectOrganizationSwitch", () => {
 
   it("switches once, though switching hands Clerk's session and user new identities", async () => {
     clerk.memberships = ["org_test", "org_first"];
-    actions.findProjectOrganization.mockResolvedValue(0);
+    vi.mocked(actions.findProjectOrganization).mockResolvedValue(0);
 
     const view = renderSwitch();
     await waitFor(() => expect(clerk.setActive).toHaveBeenCalled());
@@ -110,7 +110,7 @@ describe("ProjectOrganizationSwitch", () => {
 
   it("looks again once the server renders for another organization", async () => {
     clerk.memberships = ["org_test", "org_first", "org_second"];
-    actions.findProjectOrganization.mockResolvedValue(null);
+    vi.mocked(actions.findProjectOrganization).mockResolvedValue(null);
 
     const view = renderSwitch();
     await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalled());
@@ -124,7 +124,7 @@ describe("ProjectOrganizationSwitch", () => {
     );
 
     await waitFor(() => expect(actions.findProjectOrganization).toHaveBeenCalledTimes(2));
-    expect(actions.findProjectOrganization.mock.calls[1]).toEqual([
+    expect(vi.mocked(actions.findProjectOrganization).mock.calls[1]).toEqual([
       OTHER_ORGANIZATION_PROJECT.id,
       ["token_org_test", "token_org_second"],
     ]);
@@ -152,7 +152,7 @@ describe("ProjectOrganizationSwitch", () => {
 
   it("goes to the fallback when the lookup fails", async () => {
     clerk.memberships = ["org_test", "org_first"];
-    actions.findProjectOrganization.mockRejectedValue(new Error("unavailable"));
+    vi.mocked(actions.findProjectOrganization).mockRejectedValue(new Error("unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     renderSwitch();
