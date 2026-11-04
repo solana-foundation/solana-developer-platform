@@ -366,11 +366,11 @@ export const transferSchema = z
         "When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.",
       example: "2025-01-01T00:00:00.000Z",
     }),
-    fee: z
-      .number()
-      .int()
-      .nullable()
-      .openapi({ description: "Transaction fee in lamports.", example: 5000 }),
+    fee: z.number().int().nullable().openapi({
+      description:
+        "Network fee the source wallet paid, in lamports: 0 when SDP sponsored the transaction, null when not known.",
+      example: 0,
+    }),
     error: z.string().nullable().openapi({
       description: "Error message if the transaction failed.",
       example: "Signature failed",

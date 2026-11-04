@@ -130,6 +130,7 @@ import {
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
+import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -1280,6 +1281,8 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
+          // The sponsor pays the network fee, so the source wallet paid nothing (HOO-2614).
+          fee: SPONSORED_WALLET_FEE_LAMPORTS,
           error: null,
         })
       );
@@ -1307,6 +1310,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,
+        fee: SPONSORED_WALLET_FEE_LAMPORTS,
         error: null,
       })
     );

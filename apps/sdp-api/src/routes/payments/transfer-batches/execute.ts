@@ -17,6 +17,7 @@ import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService, criticalOutcomeEntry } from "@/services/audit.service";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { SPONSORED_WALLET_FEE_LAMPORTS } from "@/services/payments/sponsored-fee";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
   isDefiniteSubmissionError,
@@ -185,6 +186,8 @@ export async function executeChunk(params: {
       serializedTx,
       signature: null,
       slot: null,
+      // Every chunk is sponsored, so the source wallet pays no network fee (HOO-2614).
+      fee: SPONSORED_WALLET_FEE_LAMPORTS,
       initiatedByKeyId: resolved.scope.auth.id,
     });
 
