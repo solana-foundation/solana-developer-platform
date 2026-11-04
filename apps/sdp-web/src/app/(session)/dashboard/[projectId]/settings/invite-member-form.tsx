@@ -45,14 +45,26 @@ export function InviteMemberForm() {
     reportedState.current = state;
 
     if (state.status === "success") {
-      toast.success(t("Shared.members.inviteSent", { email: state.email }));
+      toast.success(
+        state.emailSent
+          ? t("Shared.members.inviteSent", { email: state.email })
+          : t("Shared.members.inviteGranted", { email: state.email })
+      );
       // Clear the field only on success, so a rejected address stays editable.
       formRef.current?.reset();
       setRole("member");
       return;
     }
 
-    toast.error(t("Shared.members.inviteFailed", { error: state.message }));
+    // A server error's text is not the user's to act on, so only a refusal's
+    // message is shown; an outage or a provider failure gets the generic line.
+    const status = state.answer?.status;
+    const refused = status === undefined || (status !== null && status < 500);
+    toast.error(
+      refused
+        ? t("Shared.members.inviteFailed", { error: state.message })
+        : t("Shared.members.inviteFailedUnexpectedly")
+    );
   }, [state, t]);
 
   return (
