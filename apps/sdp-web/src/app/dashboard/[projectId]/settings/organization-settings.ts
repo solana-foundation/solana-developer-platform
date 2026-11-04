@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 
@@ -15,24 +15,22 @@ export const organizationAlertEmailsSchema = z
   .object({ settings: z.object({ alertEmails: z.boolean().optional() }).nullable() })
   .transform((organization) => organization.settings?.alertEmails !== false);
 
-const saveFailureSchema = z.object({ ok: z.literal(false), error: z.string() });
+function saveResultSchema<TValue extends z.ZodType>(valueSchema: TValue) {
+  return z.discriminatedUnion("ok", [
+    z.object({ ok: z.literal(true), value: valueSchema }),
+    z.object({ ok: z.literal(false), error: z.string() }),
+  ]);
+}
 
-const allowlistSaveResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), value: z.array(z.string()) }),
-  saveFailureSchema,
-]);
+type SaveResult<TValue extends z.ZodType> = z.infer<ReturnType<typeof saveResultSchema<TValue>>>;
 
-const alertEmailsSaveResultSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), value: z.boolean() }),
-  saveFailureSchema,
-]);
-
-function patchOrganizationSettings(
+async function patchOrganizationSettings<TValue extends z.ZodType>(
   organizationId: string,
   settings: { allowedIpAddresses: string[] } | { alertEmails: boolean },
-  idempotencyKey: string
-): Promise<DashboardFetchResult<unknown>> {
-  return dashboardFetch<unknown>(
+  idempotencyKey: string,
+  answerSchema: TValue
+): Promise<SaveResult<TValue>> {
+  const result = await dashboardFetch<unknown>(
     `/api/dashboard/organizations/${encodeURIComponent(organizationId)}`,
     {
       method: "PATCH",
@@ -40,43 +38,48 @@ function patchOrganizationSettings(
       body: { settings },
     }
   );
+  const resultSchema = saveResultSchema(answerSchema);
+  if (!result.ok) return resultSchema.parse({ ok: false, error: result.error });
+  // sdp-api answers `{ data, meta }`; the setting is the organization under `data`.
+  const answer = z
+    .object({ data: z.unknown() })
+    .transform((envelope) => envelope.data)
+    .pipe(answerSchema)
+    .safeParse(result.data);
+  return resultSchema.parse(
+    answer.success
+      ? { ok: true, value: answer.data }
+      : { ok: false, error: z.prettifyError(answer.error) }
+  );
 }
 
 /**
  * Replaces the organization's API-key IP allowlist; an empty value clears it. The API
  * canonicalizes each entry, so the saved list is the one it returns.
  */
-export async function saveOrganizationIpAllowlist(
+export function saveOrganizationIpAllowlist(
   organizationId: string,
   value: string,
   idempotencyKey: string
-): Promise<z.infer<typeof allowlistSaveResultSchema>> {
-  const result = await patchOrganizationSettings(
+): Promise<SaveResult<typeof organizationAllowlistSchema>> {
+  return patchOrganizationSettings(
     organizationId,
     { allowedIpAddresses: parseAllowedIps(value) },
-    idempotencyKey
+    idempotencyKey,
+    organizationAllowlistSchema
   );
-  if (!result.ok) return { ok: false, error: result.error };
-  const parsed = z.object({ data: organizationAllowlistSchema }).safeParse(result.data);
-  return parsed.success
-    ? { ok: true, value: parsed.data.data }
-    : { ok: false, error: z.prettifyError(parsed.error) };
 }
 
 /** Turns every alert email to the organization's admins on or off; the saved value is the API's. */
-export async function saveOrganizationAlertEmails(
+export function saveOrganizationAlertEmails(
   organizationId: string,
   enabled: boolean,
   idempotencyKey: string
-): Promise<z.infer<typeof alertEmailsSaveResultSchema>> {
-  const result = await patchOrganizationSettings(
+): Promise<SaveResult<typeof organizationAlertEmailsSchema>> {
+  return patchOrganizationSettings(
     organizationId,
     { alertEmails: enabled },
-    idempotencyKey
+    idempotencyKey,
+    organizationAlertEmailsSchema
   );
-  if (!result.ok) return { ok: false, error: result.error };
-  const parsed = z.object({ data: organizationAlertEmailsSchema }).safeParse(result.data);
-  return parsed.success
-    ? { ok: true, value: parsed.data.data }
-    : { ok: false, error: z.prettifyError(parsed.error) };
 }
