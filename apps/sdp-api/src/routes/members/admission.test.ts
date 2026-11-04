@@ -200,6 +200,37 @@ describe("sign-in admission", () => {
     expect(await inviteeMembership()).toBeNull();
   });
 
+  it("reports expiry when a revoked invitation was replaced within the same second", async () => {
+    await setInviteeMembership(null);
+    const db = getDb(env);
+    for (const [id, status, expiresInDays] of [
+      ["inv_admission_revoked", "revoked", -2],
+      [INVITATION_ID, "pending", -1],
+    ] as const) {
+      await seedInvitation(db, {
+        id,
+        organizationId: ORGANIZATION.id,
+        email: INVITEE.email,
+        role: "member",
+        invitedBy: ADMIN.userId,
+        status,
+        expiresInDays,
+      });
+    }
+    // Both rows carry one whole-second creation time, as two invites in one second do.
+    await db.execute("UPDATE invitations SET created_at = ? WHERE organization_id = ?", [
+      "2026-11-01 12:00:00",
+      ORGANIZATION.id,
+    ]);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expectUnauthorized(
+        await signIn("member", CLERK_ORG_ID),
+        "Invitation to this organization has expired"
+      );
+    }
+  });
+
   it("refuses without the expired reason once the newest invitation was revoked", async () => {
     await setInviteeMembership(null);
     await seedInvitation(getDb(env), {

@@ -292,7 +292,9 @@ const newestInvitationSchema = z.object({
  * invitation that admits them (ADR 0012). It is read from the newest
  * invitation of the address, so an expired one is reported on every attempt,
  * whether its row was marked expired by an earlier sign-in, by a re-invite, or
- * not at all yet.
+ * not at all yet. `created_at` keeps whole seconds only, so invitations made
+ * in the same second are ordered by `expires_at`, which every invite writes to
+ * the millisecond as its creation time plus the same TTL.
  *
  * @param db - The database or open transaction.
  * @param params.organizationId - The organization.
@@ -308,7 +310,7 @@ export async function uninvitedRefusal(
       `SELECT status, expires_at
          FROM invitations
         WHERE organization_id = ? AND LOWER(email) = ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, expires_at DESC
         LIMIT 1`
     )
     .bind(params.organizationId, params.email.toLowerCase())
