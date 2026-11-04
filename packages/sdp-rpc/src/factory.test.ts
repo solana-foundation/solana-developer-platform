@@ -25,7 +25,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
 } from "@solana/kit";
-import { MinContextSlotNotReachedError, RpcUnavailableError } from "./errors";
+import { RpcUnavailableError } from "./errors";
 import {
   assertManagedRpcConfigured,
   createClusterHistoryRpc,
@@ -58,7 +58,9 @@ type JsonRpcBody = { result: unknown } | { error: { code: number; message: strin
 
 type StubStatus = { slot: number; confirmationStatus: Commitment };
 
-type StatusesAnswer = { contextSlot: number; statuses: ReadonlyArray<StubStatus | null> };
+type StatusesAnswer =
+  | { contextSlot: number; statuses: ReadonlyArray<StubStatus | null> }
+  | { httpStatus: number };
 
 type StatusesCall = { url: string; params: unknown };
 
@@ -257,11 +259,12 @@ function stubSignatureStatusEndpoints(
       return respond(request.id, { result: GENESIS_HASH_BY_CLUSTER.devnet });
     }
     calls.push({ url: request.url, params: request.params });
-    const { contextSlot, statuses } = endpoints[request.url];
-    const value = statuses.map((status) =>
+    const answer = endpoints[request.url];
+    if ("httpStatus" in answer) return new Response("Bad Request", { status: answer.httpStatus });
+    const value = answer.statuses.map((status) =>
       status === null ? null : { ...status, confirmations: null, err: null }
     );
-    return respond(request.id, { result: { context: { slot: contextSlot }, value } });
+    return respond(request.id, { result: { context: { slot: answer.contextSlot }, value } });
   };
   return calls;
 }
@@ -1528,7 +1531,7 @@ describe("getSignatureStatusesFromEveryEndpoint", () => {
     assert.deepEqual(reads, [{ kind: "absent" }]);
   });
 
-  it("is unresolved, carrying the failure, when one endpoint has none and another answers below the floor", async () => {
+  it("is unresolved as node_behind_floor when one endpoint has none and another answers below the floor", async () => {
     const { reads } = await readFromTwoEndpoints(
       "unresolved",
       [
@@ -1541,7 +1544,22 @@ describe("getSignatureStatusesFromEveryEndpoint", () => {
     assert.deepEqual(reads, [
       {
         kind: "unresolved",
-        failures: [new MinContextSlotNotReachedError(BigInt(floorSlot - 1), BigInt(floorSlot))],
+        failures: [{ reason: "node_behind_floor", contextSlot: BigInt(floorSlot - 1) }],
+      },
+    ]);
+  });
+
+  it("is unresolved as history_unavailable, naming the error, when an endpoint fails for another reason", async () => {
+    const { reads } = await readFromTwoEndpoints(
+      "history-unavailable",
+      [{ contextSlot: floorSlot, statuses: [null] }, { httpStatus: 400 }],
+      [firstSignature]
+    );
+
+    assert.partialDeepStrictEqual(reads, [
+      {
+        kind: "unresolved",
+        failures: [{ reason: "history_unavailable", errorName: "SolanaError" }],
       },
     ]);
   });
