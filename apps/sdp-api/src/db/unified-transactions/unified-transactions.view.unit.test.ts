@@ -8,7 +8,9 @@ describe("unified transactions repeatable view", () => {
       path.resolve(process.cwd(), "src/db/migrations/postgres/repeatable/unified_transactions.sql"),
       "utf8"
     );
-    expect(renderUnifiedTransactionsView()).toBe(committed);
+    // Line endings are not part of the view, so both sides compare as LF.
+    const lf = (text: string) => text.replaceAll("\r\n", "\n");
+    expect(lf(renderUnifiedTransactionsView())).toBe(lf(committed));
   });
 
   it("uses latest-schema custody joins and exact base-unit conversion", () => {
