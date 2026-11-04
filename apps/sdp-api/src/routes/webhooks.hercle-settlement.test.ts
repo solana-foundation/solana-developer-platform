@@ -1,14 +1,19 @@
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { ParsedTransaction } from "@sdp/rpc/solana";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { app } from "@/index";
 import {
   applyStoredRampWebhookEvent,
   RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+  replayRampWebhookEvents,
 } from "@/services/jobs/replay-ramp-webhook-events";
+import { type RampChainReader, verifyRampDeliveries } from "@/services/jobs/verify-ramp-deliveries";
 import { env } from "@/test/helpers/env";
 import { installHercleTestEnv } from "@/test/helpers/hercle-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -18,6 +23,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
  * Evidence for `docs/contributing/ramp-provider-safety.md` with Hercle's own deliveries.
  * Each event is signed with a generated P-256 key and goes through the public webhook route and the inbox.
  * Hercle sends no delivery id and no ordering field, so redeliveries and stale events rely on the status guards.
+ * The chain verification cases take the settled event the route stored to the shared delivery verifier.
  */
 describe("Hercle settlement webhooks", () => {
   const ORG_ID = "org_hercle_settlement";
@@ -28,6 +34,9 @@ describe("Hercle settlement webhooks", () => {
   const DESTINATION = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
   const DELIVERY_SIGNATURE =
     "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW";
+  const OTHER_SIGNATURE =
+    "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+  const TRANSFER_CREATED_AT = "2026-11-02T00:00:00.000Z";
 
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const PUBLIC_KEY_PEM = publicKey.export({ format: "pem", type: "spki" }).toString();
@@ -79,11 +88,31 @@ describe("Hercle settlement webhooks", () => {
     return res;
   }
 
-  async function readTransfer() {
+  async function readTransfer(id = TRANSFER_ID) {
     return getDb(env)
       .prepare("SELECT status, provider_data FROM payment_transfers WHERE id = ?")
-      .bind(TRANSFER_ID)
+      .bind(id)
       .first<{ status: string; provider_data: Record<string, unknown> }>();
+  }
+
+  /** The columns a quote fixes and a settlement may fill, which no provider report may overwrite. */
+  async function readTerms() {
+    return getDb(env)
+      .prepare(
+        `SELECT status, token, destination_address, fiat_currency, fiat_amount, amount, signature, error
+         FROM payment_transfers WHERE id = ?`
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        token: string;
+        destination_address: string;
+        fiat_currency: string;
+        fiat_amount: string;
+        amount: string | null;
+        signature: string | null;
+        error: string | null;
+      }>();
   }
 
   async function readInboxRows() {
@@ -108,22 +137,32 @@ describe("Hercle settlement webhooks", () => {
     destinationWalletAddress: DESTINATION,
   };
 
-  beforeEach(async () => {
-    await seedTestDatabase(env);
+  async function seedOrganization(organizationId: string, projectId: string) {
     await getDb(env)
       .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-      .bind(ORG_ID, "Hercle Settlement Org", "hercle-settlement-org", "enterprise", "active")
-      .run();
-    await getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-      .bind(USER_ID, "hercle-settlement@example.com", 1, "active")
+      .bind(
+        organizationId,
+        organizationId,
+        organizationId.replaceAll("_", "-"),
+        "enterprise",
+        "active"
+      )
       .run();
     await seedDefaultProjects(getDb(env), {
-      organizationId: ORG_ID,
+      organizationId,
       createdBy: USER_ID,
       members: [],
-      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+      ids: { sandbox: projectId, production: `${projectId}_production` },
     });
+  }
+
+  /** A Hercle on-ramp as the quote stores it: pending, bound to its order, with no crypto amount quoted. */
+  async function insertTransfer(input: {
+    id: string;
+    organizationId: string;
+    projectId: string;
+    orderId: string;
+  }) {
     await getDb(env)
       .prepare(
         `INSERT INTO payment_transfers (
@@ -134,9 +173,9 @@ describe("Hercle settlement webhooks", () => {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
-        TRANSFER_ID,
-        ORG_ID,
-        PROJECT_ID,
+        input.id,
+        input.organizationId,
+        input.projectId,
         "wallet_hercle_settlement",
         null,
         null,
@@ -148,7 +187,7 @@ describe("Hercle settlement webhooks", () => {
         "inbound",
         "pending",
         "hercle",
-        ORDER_ID,
+        input.orderId,
         "manual_instructions",
         "EUR",
         "100.00",
@@ -156,10 +195,25 @@ describe("Hercle settlement webhooks", () => {
         null,
         null,
         null,
-        "2026-11-02T00:00:00.000Z",
-        "2026-11-02T00:00:00.000Z"
+        TRANSFER_CREATED_AT,
+        TRANSFER_CREATED_AT
       )
       .run();
+  }
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+      .bind(USER_ID, "hercle-settlement@example.com", 1, "active")
+      .run();
+    await seedOrganization(ORG_ID, PROJECT_ID);
+    await insertTransfer({
+      id: TRANSFER_ID,
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      orderId: ORDER_ID,
+    });
   });
 
   it("moves a settled order to settling, never to completed, from the quote's pending", async () => {
@@ -246,5 +300,307 @@ describe("Hercle settlement webhooks", () => {
     expect(res.status).toBe(401);
     expect(await readInboxRows()).toHaveLength(0);
     expect((await readTransfer())?.status).toBe("pending");
+  });
+
+  it.each([
+    { reported: { status: "awaiting_payment" }, status: "awaiting_payment", error: null },
+    { reported: { status: "settling" }, status: "settling", error: null },
+    {
+      reported: { status: "expired", error: "FUNDING_WINDOW_EXPIRED" },
+      status: "expired",
+      error: "The order's funding window closed before the wire arrived.",
+    },
+  ])(
+    "moves a pending transfer to $status on Hercle's report",
+    async ({ reported, status, error }) => {
+      const res = await deliver(settlementBody(reported));
+
+      expect(res.status).toBe(200);
+      expect(await readTerms()).toMatchObject({ status, error, signature: null });
+      expect(await readInboxRows()).toMatchObject([
+        { status: "discharged", apply_outcome: "applied" },
+      ]);
+    }
+  );
+
+  it("ignores an order status SDP does not know, leaving the transfer for the status pull to hold", async () => {
+    await deliver(settlementBody({ status: "refunding" }));
+
+    expect((await readTransfer())?.status).toBe("pending");
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "ignored" },
+    ]);
+  });
+
+  it("waits at settling on a settled report without a transaction, then takes the report naming it", async () => {
+    await deliver(settlementBody({ status: "settled" }));
+    expect(await readTerms()).toMatchObject({ status: "settling", signature: null });
+
+    await deliver(settlementBody(SETTLED));
+
+    expect(await readTerms()).toMatchObject({ status: "settling", signature: DELIVERY_SIGNATURE });
+    expect((await readTransfer())?.provider_data.providerSettlement).toMatchObject({
+      onchain: { signature: DELIVERY_SIGNATURE, destinationAddress: DESTINATION },
+    });
+  });
+
+  it("keeps the delivery Hercle named first when a later report names another transaction", async () => {
+    await deliver(settlementBody(SETTLED));
+    const first = await readTransfer();
+
+    await deliver(settlementBody({ ...SETTLED, txHash: OTHER_SIGNATURE }));
+
+    expect(await readTransfer()).toEqual(first);
+    expect((await readTerms())?.signature).toBe(DELIVERY_SIGNATURE);
+  });
+
+  it.each([
+    { status: "awaiting_payment" },
+    { status: "settling" },
+    { status: "failed", error: "SETTLEMENT_FAILED" },
+    { status: "expired", error: "FUNDING_WINDOW_EXPIRED" },
+  ])(
+    "keeps the settled claim when a later report without an ordering field says $status",
+    async (late) => {
+      await deliver(settlementBody(SETTLED));
+      const settled = await readTransfer();
+
+      await deliver(settlementBody(late));
+
+      expect(await readTransfer()).toEqual(settled);
+    }
+  );
+
+  it("discards a report for an order SDP never quoted, touching no transfer", async () => {
+    await deliver(settlementBody({ ...SETTLED, reference: "ord_never_quoted" }));
+
+    expect(await readTransfer()).toMatchObject({ status: "pending", provider_data: {} });
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "discarded", last_error: "provider event unmatched" },
+    ]);
+  });
+
+  it("moves only the transfer bound to the order, never another tenant's", async () => {
+    await seedOrganization("org_hercle_other_tenant", "prj_hercle_other_tenant");
+    await insertTransfer({
+      id: "xfr_hercle_other_tenant",
+      organizationId: "org_hercle_other_tenant",
+      projectId: "prj_hercle_other_tenant",
+      orderId: "ord_hercle_other_tenant",
+    });
+
+    await deliver(settlementBody(SETTLED));
+
+    expect((await readTransfer())?.status).toBe("settling");
+    expect(await readTransfer("xfr_hercle_other_tenant")).toMatchObject({
+      status: "pending",
+      provider_data: {},
+    });
+  });
+
+  it("replays a stored delivery whose apply never ran, as after a crash between the ack and the apply", async () => {
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const { row } = await events.insertVerifiedEvent({
+      provider: "hercle",
+      environment: "sandbox",
+      rawBody: settlementBody(SETTLED),
+      providerEventId: null,
+    });
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+      .bind(TRANSFER_CREATED_AT, TRANSFER_CREATED_AT, row.id)
+      .run();
+
+    expect(await replayRampWebhookEvents(env, SDP_RAMP_PROVIDER_MATURITY)).toBe(1);
+    expect((await readTransfer())?.status).toBe("settling");
+    expect(await readInboxRows()).toMatchObject([
+      { status: "discharged", apply_outcome: "applied" },
+    ]);
+  });
+
+  describe("chain verification", () => {
+    const getTransaction = vi.fn<RampChainReader["getTransaction"]>();
+    const getSignatureStatuses = vi.fn<RampChainReader["getSignatureStatuses"]>();
+    const chain: RampChainReader = { getTransaction, getSignatureStatuses };
+    /** Five minutes after the transfer was created. */
+    const LANDED_AT = BigInt(Date.parse(TRANSFER_CREATED_AT) / 1000 + 300);
+    const DELIVERED_BASE_UNITS = "99020000";
+
+    beforeEach(() => {
+      getTransaction.mockReset();
+      getSignatureStatuses.mockReset();
+    });
+
+    function verifySweep() {
+      return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        verifyRampDeliveries(env, chain)
+      );
+    }
+
+    /** A finalized transaction that moved `baseUnits` of `mint`, at six decimals, to `owner`. */
+    function landed(
+      baseUnits = DELIVERED_BASE_UNITS,
+      owner = DESTINATION,
+      mint = usdcMint()
+    ): ParsedTransaction {
+      return {
+        slot: 42n,
+        blockTime: LANDED_AT,
+        accountKeys: ["hercle-delivery-signer"],
+        executionResultKnown: true,
+        err: null,
+        preTokenBalances: [],
+        postTokenBalances: [{ accountIndex: 0, mint, owner, amount: baseUnits, decimals: 6 }],
+        instructions: [],
+      };
+    }
+
+    it("completes a settled order only from the chain, with one transaction read, keeping the quoted terms", async () => {
+      await deliver(settlementBody(SETTLED));
+      getTransaction.mockResolvedValue(landed());
+
+      await verifySweep();
+
+      expect(getTransaction).toHaveBeenCalledExactlyOnceWith(DELIVERY_SIGNATURE);
+      expect(getSignatureStatuses).not.toHaveBeenCalled();
+      // Neither Hercle nor the quote names a crypto amount, so the amount is the one the chain shows.
+      expect(await readTerms()).toMatchObject({
+        status: "completed",
+        token: usdcMint(),
+        destination_address: DESTINATION,
+        fiat_currency: "EUR",
+        fiat_amount: "100.00",
+        amount: "99.02",
+        signature: DELIVERY_SIGNATURE,
+      });
+      expect((await readTransfer())?.provider_data.verifiedDelivery).toMatchObject({
+        signature: DELIVERY_SIGNATURE,
+        destinationAddress: DESTINATION,
+        amount: "99.02",
+      });
+    });
+
+    const contradicted: [string, () => ParsedTransaction, string][] = [
+      ["to another wallet", () => landed(DELIVERED_BASE_UNITS, "attacker-wallet"), "not_delivered"],
+      [
+        "of another mint",
+        () => landed(DELIVERED_BASE_UNITS, DESTINATION, "wrong-mint"),
+        "not_delivered",
+      ],
+      [
+        "that failed",
+        () => ({ ...landed(), err: { InstructionError: [0, "Custom"] } }),
+        "transaction_failed",
+      ],
+      [
+        "that landed before the order",
+        () => ({ ...landed(), blockTime: BigInt(Date.parse("2026-10-01T00:00:00.000Z") / 1000) }),
+        "predates_transfer",
+      ],
+    ];
+
+    it.each(contradicted)(
+      "holds a delivery %s and stops re-reading it",
+      async (_case, transaction, reason) => {
+        await deliver(settlementBody(SETTLED));
+        getTransaction.mockResolvedValue(transaction());
+
+        await verifySweep();
+        await verifySweep();
+
+        expect(getTransaction).toHaveBeenCalledTimes(1);
+        expect(await readTerms()).toMatchObject({ status: "settling", amount: null });
+        expect((await readTransfer())?.provider_data.deliveryMismatch).toMatchObject({ reason });
+      }
+    );
+
+    it.each([
+      ["is not finalized yet", () => getTransaction.mockResolvedValueOnce(null)],
+      [
+        "has no known execution result",
+        () => getTransaction.mockResolvedValueOnce({ ...landed(), executionResultKnown: false }),
+      ],
+      [
+        "cannot be read while the RPC is down",
+        () => getTransaction.mockRejectedValueOnce(new TypeError("fetch failed")),
+      ],
+    ])(
+      "keeps a delivery that %s at settling and completes it once it reads",
+      async (_case, firstRead) => {
+        await deliver(settlementBody(SETTLED));
+        firstRead();
+
+        await verifySweep();
+        expect(await readTerms()).toMatchObject({ status: "settling", amount: null });
+        expect((await readTransfer())?.provider_data).not.toHaveProperty("deliveryMismatch.reason");
+
+        getTransaction.mockResolvedValueOnce(landed());
+        await verifySweep();
+
+        expect(getTransaction).toHaveBeenCalledTimes(2);
+        expect((await readTerms())?.status).toBe("completed");
+      }
+    );
+
+    it("never reads the chain when Hercle names another destination, and holds the report", async () => {
+      await deliver(settlementBody({ ...SETTLED, destinationWalletAddress: "attacker-wallet" }));
+
+      await verifySweep();
+      await verifySweep();
+
+      expect(getTransaction).not.toHaveBeenCalled();
+      expect(await readTerms()).toMatchObject({
+        status: "settling",
+        destination_address: DESTINATION,
+      });
+      expect((await readTransfer())?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "provider_report_mismatch",
+      });
+    });
+
+    it("completes from the chain after Hercle contradicts its settled report without an ordering field", async () => {
+      await deliver(settlementBody(SETTLED));
+      await deliver(settlementBody({ status: "failed", error: "SETTLEMENT_FAILED" }));
+      getTransaction.mockResolvedValue(landed());
+
+      await verifySweep();
+
+      expect(getTransaction).toHaveBeenCalledExactlyOnceWith(DELIVERY_SIGNATURE);
+      expect((await readTerms())?.status).toBe("completed");
+    });
+
+    it("does not complete when the stored settlement changes during the chain read", async () => {
+      await deliver(settlementBody(SETTLED));
+      getTransaction.mockImplementation(async () => {
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_transfers
+             SET provider_data = jsonb_set(provider_data, '{providerSettlement,reference}', '"ord_changed"'::jsonb)
+             WHERE id = ?`
+          )
+          .bind(TRANSFER_ID)
+          .run();
+        return landed();
+      });
+
+      await verifySweep();
+
+      expect(await readTerms()).toMatchObject({ status: "settling", amount: null });
+    });
+
+    it("changes nothing when Hercle redelivers or contradicts a completed order", async () => {
+      await deliver(settlementBody(SETTLED));
+      getTransaction.mockResolvedValue(landed());
+      await verifySweep();
+      const completed = await readTransfer();
+      expect(completed?.status).toBe("completed");
+
+      await deliver(settlementBody(SETTLED));
+      await deliver(settlementBody({ status: "failed", error: "SETTLEMENT_FAILED" }));
+      await verifySweep();
+
+      expect(await readTransfer()).toEqual(completed);
+      expect(getTransaction).toHaveBeenCalledTimes(1);
+    });
   });
 });
