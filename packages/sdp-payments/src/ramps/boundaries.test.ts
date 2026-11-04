@@ -20,8 +20,9 @@ function typescriptFiles(directory: string): string[] {
   });
 }
 
+/** Posix-separated, so it compares against the webhook processor paths on every platform. */
 function repositoryPath(file: string): string {
-  return path.relative(REPOSITORY_ROOT, file);
+  return path.relative(REPOSITORY_ROOT, file).split(path.sep).join("/");
 }
 
 describe("ramp provider boundaries", () => {
