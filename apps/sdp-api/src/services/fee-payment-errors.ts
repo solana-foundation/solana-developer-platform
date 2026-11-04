@@ -2,21 +2,29 @@ import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { Instruction } from "@solana/kit";
 import {
   identifySubscriptionsInstruction,
+  parseTransferFixedInstruction,
+  parseTransferRecurringInstruction,
+  parseTransferSubscriptionInstruction,
   SUBSCRIPTIONS_PROGRAM_ADDRESS,
   SubscriptionsInstruction,
 } from "@solana/subscriptions";
 import {
   identifySystemInstruction,
+  parseTransferSolInstruction,
   SYSTEM_PROGRAM_ADDRESS,
   SystemInstruction,
 } from "@solana-program/system";
 import {
   identifyTokenInstruction,
+  parseTransferCheckedInstruction,
+  parseTransferInstruction,
   TOKEN_PROGRAM_ADDRESS,
   TokenInstruction,
 } from "@solana-program/token";
 import {
   identifyToken2022Instruction,
+  parseTransferCheckedInstruction as parseToken2022TransferCheckedInstruction,
+  parseTransferInstruction as parseToken2022TransferInstruction,
   TOKEN_2022_PROGRAM_ADDRESS,
   Token2022Instruction,
 } from "@solana-program/token-2022";
@@ -48,48 +56,82 @@ function simulatedProgramError(
   };
 }
 
-const SUBSCRIPTION_PULLS: ReadonlySet<SubscriptionsInstruction> = new Set([
-  SubscriptionsInstruction.TransferFixed,
-  SubscriptionsInstruction.TransferRecurring,
-  SubscriptionsInstruction.TransferSubscription,
-]);
+type InstructionParser = (instruction: Instruction) => { accounts: object };
 
 /**
- * Whether `instruction` moves value out of a wallet it names as the source:
- * a System Program transfer, an SPL Token / Token-2022 transfer, or a
- * subscriptions-program pull from a delegator. For these,
- * custom error 0x1 is the source's own shortfall (System
- * `ResultWithNegativeLamports`, Token `InsufficientFunds`). The same code from
- * any other instruction, such as a destination token account the sponsor pays
- * rent for, is not the caller's.
+ * The parser for each instruction that spends from a source it names, keyed by
+ * program. A Token-2022 transfer hook runs only when the transfer carries its
+ * extra accounts and may raise its own custom 0x1, so an instruction counts
+ * only while it carries exactly the accounts its parser declares.
  */
-function isSourceFundedTransfer(instruction: Instruction): boolean {
+function sourceTransferParser(instruction: Instruction): InstructionParser | null {
   const { data, programAddress } = instruction;
-  if (data === undefined || data.length === 0) return false;
+  if (data === undefined || data.length === 0) return null;
   // The identify helpers throw on a discriminator they do not know.
   try {
     if (programAddress === SYSTEM_PROGRAM_ADDRESS) {
-      return identifySystemInstruction(data) === SystemInstruction.TransferSol;
+      return identifySystemInstruction(data) === SystemInstruction.TransferSol
+        ? (parseTransferSolInstruction as InstructionParser)
+        : null;
     }
     if (programAddress === TOKEN_PROGRAM_ADDRESS) {
-      const kind = identifyTokenInstruction(data);
-      return kind === TokenInstruction.Transfer || kind === TokenInstruction.TransferChecked;
-    }
-    if (programAddress === SUBSCRIPTIONS_PROGRAM_ADDRESS) {
-      // A delegated pull: its own errors start at 100, so a custom 0x1 here is
-      // the token transfer it makes from the delegator's account.
-      return SUBSCRIPTION_PULLS.has(identifySubscriptionsInstruction(data));
+      switch (identifyTokenInstruction(data)) {
+        case TokenInstruction.Transfer:
+          return parseTransferInstruction as InstructionParser;
+        case TokenInstruction.TransferChecked:
+          return parseTransferCheckedInstruction as InstructionParser;
+        default:
+          return null;
+      }
     }
     if (programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
-      const kind = identifyToken2022Instruction(data);
-      return (
-        kind === Token2022Instruction.Transfer || kind === Token2022Instruction.TransferChecked
-      );
+      switch (identifyToken2022Instruction(data)) {
+        case Token2022Instruction.Transfer:
+          return parseToken2022TransferInstruction as InstructionParser;
+        case Token2022Instruction.TransferChecked:
+          return parseToken2022TransferCheckedInstruction as InstructionParser;
+        default:
+          return null;
+      }
     }
+    if (programAddress === SUBSCRIPTIONS_PROGRAM_ADDRESS) {
+      // A delegated pull: the program's own errors start at 100, so a custom
+      // 0x1 here comes from the token transfer it makes from the delegator.
+      switch (identifySubscriptionsInstruction(data)) {
+        case SubscriptionsInstruction.TransferFixed:
+          return parseTransferFixedInstruction as InstructionParser;
+        case SubscriptionsInstruction.TransferRecurring:
+          return parseTransferRecurringInstruction as InstructionParser;
+        case SubscriptionsInstruction.TransferSubscription:
+          return parseTransferSubscriptionInstruction as InstructionParser;
+        default:
+          return null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Whether `instruction` moves value out of a wallet it names as the source
+ * (a System Program transfer, an SPL Token / Token-2022 transfer, or a
+ * subscriptions-program pull) with no transfer-hook accounts. For these,
+ * custom error 0x1 is the source's own shortfall (System
+ * `ResultWithNegativeLamports`, Token `InsufficientFunds`). The same code from
+ * any other instruction, such as a destination token account the sponsor pays
+ * rent for, or from a transfer hook, is not provably the caller's.
+ */
+function isSourceFundedTransfer(instruction: Instruction): boolean {
+  const parse = sourceTransferParser(instruction);
+  const accounts = instruction.accounts;
+  if (parse === null || accounts === undefined) return false;
+  try {
+    return accounts.length === Object.keys(parse(instruction).accounts).length;
   } catch {
     return false;
   }
-  return false;
 }
 
 /** Custom error 0x1 on a source-funded transfer: the sending wallet is short. */
