@@ -2229,7 +2229,9 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 ## Insufficient funds
 
-When the source wallet holds less of the token, or less SOL, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+
+A source wallet that has never held the token has no token account for it, so the request is refused earlier with `400 BAD_REQUEST` ("Source wallet has no token account for this mint").
 
 ## Deduplication
 
@@ -20509,7 +20511,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/create-payment-t
 
 `POST /v1/payments/transfers`
 
-Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet does not hold enough of the token, or enough SOL, to cover the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key.
+Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum. When the source wallet's policy at its custody provider refuses to sign, the transfer fails with 422 `CUSTODY_POLICY_REFUSED` and nothing is signed or sent; the message names the provider whose policy to review. When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with 400 `TRANSACTION_FAILED` and is recorded `failed` with that reason in `error`; a retry with the same Idempotency-Key returns the same error, so fund the wallet and send again with a new key. A source wallet with no token account for the token is refused earlier with 400 `BAD_REQUEST`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `transfers.execute` action.
 

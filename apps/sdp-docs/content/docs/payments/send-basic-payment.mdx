@@ -205,7 +205,9 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 ## Insufficient funds
 
-When the source wallet holds less of the token, or less SOL, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+When the source wallet holds less SOL, or less of the token in its token account, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+
+A source wallet that has never held the token has no token account for it, so the request is refused earlier with `400 BAD_REQUEST` ("Source wallet has no token account for this mint").
 
 ## Deduplication
 

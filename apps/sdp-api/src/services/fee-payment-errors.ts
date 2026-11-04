@@ -1,8 +1,21 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { Instruction } from "@solana/kit";
-import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
-import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  identifySystemInstruction,
+  SYSTEM_PROGRAM_ADDRESS,
+  SystemInstruction,
+} from "@solana-program/system";
+import {
+  identifyTokenInstruction,
+  TOKEN_PROGRAM_ADDRESS,
+  TokenInstruction,
+} from "@solana-program/token";
+import {
+  identifyToken2022Instruction,
+  TOKEN_2022_PROGRAM_ADDRESS,
+  Token2022Instruction,
+} from "@solana-program/token-2022";
+import { z } from "zod";
 import { AppError } from "@/lib/errors";
 
 /** What a caller is told when their own wallet cannot cover the amount it sends. */
@@ -30,12 +43,6 @@ function simulatedProgramError(
   };
 }
 
-/** SystemInstruction::Transfer, a u32 little-endian discriminator. */
-const SYSTEM_TRANSFER = 2;
-/** TokenInstruction::Transfer and TransferChecked, shared by SPL Token and Token-2022. */
-const TOKEN_TRANSFER = 3;
-const TOKEN_TRANSFER_CHECKED = 12;
-
 /**
  * Whether `instruction` moves value out of a wallet it names as the source:
  * a System Program transfer or an SPL Token / Token-2022 transfer. For these,
@@ -45,22 +52,25 @@ const TOKEN_TRANSFER_CHECKED = 12;
  * rent for, is not the caller's.
  */
 function isSourceFundedTransfer(instruction: Instruction): boolean {
-  const data = instruction.data;
+  const { data, programAddress } = instruction;
   if (data === undefined || data.length === 0) return false;
-  if (instruction.programAddress === SYSTEM_PROGRAM_ADDRESS) {
-    return (
-      data.length >= 4 &&
-      data[0] === SYSTEM_TRANSFER &&
-      data[1] === 0 &&
-      data[2] === 0 &&
-      data[3] === 0
-    );
-  }
-  if (
-    instruction.programAddress === TOKEN_PROGRAM_ADDRESS ||
-    instruction.programAddress === TOKEN_2022_PROGRAM_ADDRESS
-  ) {
-    return data[0] === TOKEN_TRANSFER || data[0] === TOKEN_TRANSFER_CHECKED;
+  // The identify helpers throw on a discriminator they do not know.
+  try {
+    if (programAddress === SYSTEM_PROGRAM_ADDRESS) {
+      return identifySystemInstruction(data) === SystemInstruction.TransferSol;
+    }
+    if (programAddress === TOKEN_PROGRAM_ADDRESS) {
+      const kind = identifyTokenInstruction(data);
+      return kind === TokenInstruction.Transfer || kind === TokenInstruction.TransferChecked;
+    }
+    if (programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
+      const kind = identifyToken2022Instruction(data);
+      return (
+        kind === Token2022Instruction.Transfer || kind === Token2022Instruction.TransferChecked
+      );
+    }
+  } catch {
+    return false;
   }
   return false;
 }
@@ -106,6 +116,14 @@ export function callerInsufficientFundsError(
     : null;
 }
 
+/** A `TransactionError` naming an instruction that failed with a custom program error. */
+const simulatedCustomInstructionErrorSchema = z.object({
+  InstructionError: z.tuple([
+    z.number().int().nonnegative(),
+    z.object({ Custom: z.number().int() }),
+  ]),
+});
+
 /**
  * The same verdict from SDP's own preflight simulation, whose error is the
  * JSON-serialized `TransactionError`, e.g. `{"InstructionError":[1,{"Custom":1}]}`.
@@ -119,19 +137,15 @@ export function simulatedInsufficientFundsError(
   instructions: readonly Instruction[]
 ): AppError | null {
   if (simulationError === null) return null;
-  let parsed: unknown;
+  let json: unknown;
   try {
-    parsed = JSON.parse(simulationError);
+    json = JSON.parse(simulationError);
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || !("InstructionError" in parsed)) {
-    return null;
-  }
-  const [index, detail] = Array.isArray(parsed.InstructionError) ? parsed.InstructionError : [];
-  const custom =
-    typeof detail === "object" && detail !== null && "Custom" in detail ? detail.Custom : undefined;
-  if (typeof index !== "number" || typeof custom !== "number") return null;
+  const parsed = simulatedCustomInstructionErrorSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const [index, { Custom: custom }] = parsed.data.InstructionError;
   return isSourceShortfall(index, custom, instructions) ? insufficientFunds(simulationError) : null;
 }
 
