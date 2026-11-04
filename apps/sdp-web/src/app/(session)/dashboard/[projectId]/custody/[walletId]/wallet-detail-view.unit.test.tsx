@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WalletActivityRow } from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.data";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 
@@ -103,11 +104,54 @@ vi.mock("./use-wallet-activity", async () => {
 
 const { WalletDetailView } = await import("./wallet-detail-view");
 
-/** The activity table, once the streamed balances and the feed have rendered it. */
-async function waitForActivityTable(): Promise<Element> {
-  await screen.findAllByText(/xfr_/);
-  return document.querySelector("[data-wallet-activity-table]") as Element;
+/** What a query found, or a failure naming what is missing, so a test needs no assertion. */
+function present<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`Expected ${what} on the page`);
+  }
+  return value;
 }
+
+/** The activity table, once the streamed balances and the feed have rendered it. */
+async function waitForActivityTable(): Promise<HTMLElement> {
+  await screen.findAllByText(/xfr_/);
+  return present(
+    document.querySelector<HTMLElement>("[data-wallet-activity-table]"),
+    "the activity table"
+  );
+}
+
+/** The details under the one open activity row. */
+function openRowDetails(): HTMLElement {
+  return present(
+    document.querySelector<HTMLElement>("[data-wallet-activity-details]"),
+    "an open row's details"
+  );
+}
+
+const OUTGOING_ROW: WalletActivityRow = {
+  id: "payment-xfr_7c1c0000c1c7",
+  sourceKind: "payments",
+  operationLabel: "Outgoing",
+  status: "finalized",
+  signature: null,
+  token: USDC,
+  amount: "500.00",
+  address: "Dq73aaaaaaaaaaaaaaaaaaaa2KCh",
+  createdAt: "2026-09-11T00:00:00.000Z",
+};
+
+const INCOMING_ROW: WalletActivityRow = {
+  id: "payment-xfr_a0460000a2a63",
+  sourceKind: "payments",
+  operationLabel: "Incoming",
+  status: "pending",
+  signature: null,
+  token: USDC,
+  amount: "1250.00",
+  address: "FSegbbbbbbbbbbbbbbbbbb2WSY",
+  createdAt: "2026-09-10T00:00:00.000Z",
+};
 
 const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
   walletId: "wallet_one",
@@ -154,30 +198,7 @@ function renderView(overrides: Partial<ComponentProps<typeof WalletDetailView>> 
 beforeEach(() => {
   mocks.tab = null;
   mocks.activity = {
-    activityRows: [
-      {
-        id: "payment-xfr_7c1c0000c1c7",
-        sourceKind: "payments",
-        operationLabel: "Outgoing",
-        status: "finalized",
-        signature: null,
-        token: USDC,
-        amount: "500.00",
-        address: "Dq73aaaaaaaaaaaaaaaaaaaa2KCh",
-        createdAt: "2026-09-11T00:00:00.000Z",
-      },
-      {
-        id: "payment-xfr_a0460000a2a63",
-        sourceKind: "payments",
-        operationLabel: "Incoming",
-        status: "pending",
-        signature: null,
-        token: USDC,
-        amount: "1250.00",
-        address: "FSegbbbbbbbbbbbbbbbbbb2WSY",
-        createdAt: "2026-09-10T00:00:00.000Z",
-      },
-    ],
+    activityRows: [OUTGOING_ROW, INCOMING_ROW],
     activityError: null,
     activityNotice: null,
     hasMore: false,
@@ -208,7 +229,10 @@ describe("Overview", () => {
       [...document.querySelectorAll("[data-record-fact] dt")].map((label) => label.textContent)
     ).toEqual(["Provider", "Purpose", "Created", "Address", "Wallet ID"]);
 
-    const tokens = document.querySelector("[data-wallet-tokens]") as HTMLElement;
+    const tokens = present(
+      document.querySelector<HTMLElement>("[data-wallet-tokens]"),
+      "the tokens table"
+    );
     expect(within(tokens).getByText("USDC")).toBeTruthy();
     // The mint under its token, with a copy of the whole.
     expect(
@@ -216,7 +240,7 @@ describe("Overview", () => {
     ).toBeTruthy();
     expect(within(tokens).getByRole("button", { name: "Copy usdc mint" })).toBeTruthy();
 
-    const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
+    const activity = await waitForActivityTable();
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
     expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
     expect(within(activity).getByText("xfr_7c1c…c1c7")).toBeTruthy();
@@ -253,21 +277,25 @@ describe("Overview", () => {
   });
 
   it("opens a row to its signature, the address on the other side and the explorer", async () => {
-    const [first, second] = mocks.activity.activityRows as Record<string, unknown>[];
     mocks.activity = {
       ...mocks.activity,
-      activityRows: [{ ...first, signature: "5VERYlongSignature1111111111111111abcdefgh" }, second],
+      activityRows: [
+        { ...OUTGOING_ROW, signature: "5VERYlongSignature1111111111111111abcdefgh" },
+        INCOMING_ROW,
+      ],
     };
     await act(async () => {
       renderView();
     });
-    const activity = (await waitForActivityTable()) as HTMLElement;
-    const [openFirst, openSecond] = within(activity).getAllByRole("button", { name: "Details" });
-    expect(openFirst?.getAttribute("aria-expanded")).toBe("false");
+    const activity = await waitForActivityTable();
+    const toggles = within(activity).getAllByRole("button", { name: "Details" });
+    const openFirst = present(toggles[0], "the first row's Details");
+    const openSecond = present(toggles[1], "the second row's Details");
+    expect(openFirst.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.click(openFirst as HTMLElement);
-    expect(openFirst?.getAttribute("aria-expanded")).toBe("true");
-    const details = document.querySelector("[data-wallet-activity-details]") as HTMLElement;
+    fireEvent.click(openFirst);
+    expect(openFirst.getAttribute("aria-expanded")).toBe("true");
+    const details = openRowDetails();
     expect(within(details).getByText("5VERYlon...abcdefgh")).toBeTruthy();
     expect(within(details).getByText("Counterparty address")).toBeTruthy();
     expect(within(details).getByRole("button", { name: "Copy signature" })).toBeTruthy();
@@ -276,9 +304,9 @@ describe("Overview", () => {
     ).toContain("5VERYlongSignature1111111111111111abcdefgh");
 
     // One row open at a time; a row with no signature yet says so and offers no explorer.
-    fireEvent.click(openSecond as HTMLElement);
-    expect(openFirst?.getAttribute("aria-expanded")).toBe("false");
-    const pending = document.querySelector("[data-wallet-activity-details]") as HTMLElement;
+    fireEvent.click(openSecond);
+    expect(openFirst.getAttribute("aria-expanded")).toBe("false");
+    const pending = openRowDetails();
     expect(within(pending).getByText("None yet")).toBeTruthy();
     expect(within(pending).queryByRole("link", { name: "View on explorer" })).toBeNull();
   });
@@ -289,7 +317,7 @@ describe("Overview", () => {
       renderView();
     });
     expect(await screen.findByText("Wallet activity is unavailable right now.")).toBeTruthy();
-    const activity = document.querySelector("[data-wallet-activity-table]") as HTMLElement;
+    const activity = await waitForActivityTable();
     expect(within(activity).getByText("−500.00 USDC")).toBeTruthy();
     expect(within(activity).getByText("+1250.00 USDC")).toBeTruthy();
   });
@@ -337,11 +365,10 @@ describe("Activity", () => {
 
   it("loads older activity and points the full history at this wallet's ledger", async () => {
     mocks.tab = "activity";
-    const [first] = mocks.activity.activityRows as { id: string }[];
     mocks.activity = {
       ...mocks.activity,
       activityRows: Array.from({ length: 20 }, (_, index) => ({
-        ...first,
+        ...OUTGOING_ROW,
         id: `payment-xfr_row_${index}`,
       })),
       hasMore: true,
@@ -366,11 +393,10 @@ describe("Activity", () => {
   it("keeps the loaded rows when older activity fails, and retries the same window", async () => {
     mocks.tab = "activity";
     mocks.widerActivityFails = true;
-    const [first] = mocks.activity.activityRows as { id: string }[];
     mocks.activity = {
       ...mocks.activity,
       activityRows: Array.from({ length: 20 }, (_, index) => ({
-        ...first,
+        ...OUTGOING_ROW,
         id: `payment-xfr_row_${index}`,
       })),
       hasMore: true,
@@ -395,11 +421,10 @@ describe("Activity", () => {
 
   it("offers older activity only from the last page of what is loaded", async () => {
     mocks.tab = "activity";
-    const [first] = mocks.activity.activityRows as { id: string }[];
     mocks.activity = {
       ...mocks.activity,
       activityRows: Array.from({ length: 30 }, (_, index) => ({
-        ...first,
+        ...OUTGOING_ROW,
         id: `payment-xfr_row_${index}`,
       })),
       hasMore: true,
@@ -421,15 +446,16 @@ describe("Settings", () => {
     await act(async () => {
       renderView();
     });
-    const field = (await screen.findByLabelText("Wallet label")) as HTMLInputElement;
-    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
-    expect(field.value).toBe("Settlement Fireblocks");
-    expect(save.disabled).toBe(true);
+    const field = await screen.findByLabelText("Wallet label");
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect(field).toHaveProperty("value", "Settlement Fireblocks");
+    expect(save).toHaveProperty("disabled", true);
     fireEvent.change(field, { target: { value: "Treasury" } });
-    expect(save.disabled).toBe(false);
-    expect(
-      (screen.getByRole("button", { name: "Prove ownership" }) as HTMLButtonElement).disabled
-    ).toBe(false);
+    expect(save).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "Prove ownership" })).toHaveProperty(
+      "disabled",
+      false
+    );
   });
 
   it("keeps a label, holds purpose and creation as fixed, and reads Never before a proof", async () => {
@@ -437,10 +463,9 @@ describe("Settings", () => {
     await act(async () => {
       renderView();
     });
-    const field = (await screen.findByLabelText("Wallet label")) as HTMLInputElement;
-    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    const field = await screen.findByLabelText("Wallet label");
     fireEvent.change(field, { target: { value: "   " } });
-    expect(save.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
     expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(
       screen.getByText(
@@ -448,10 +473,14 @@ describe("Settings", () => {
       )
     ).toBeTruthy();
 
-    const fixed = screen.getByRole("heading", { name: "Fixed at creation" }).closest("section");
-    expect(
-      [...(fixed as HTMLElement).querySelectorAll("dt")].map((label) => label.textContent)
-    ).toEqual(["Purpose", "Created"]);
+    const fixed = present(
+      screen.getByRole("heading", { name: "Fixed at creation" }).closest("section"),
+      "the Fixed at creation block"
+    );
+    expect([...fixed.querySelectorAll("dt")].map((label) => label.textContent)).toEqual([
+      "Purpose",
+      "Created",
+    ]);
     expect(screen.getByText("Last proof")).toBeTruthy();
     expect(screen.getByText("Never")).toBeTruthy();
   });
@@ -461,10 +490,10 @@ describe("Settings", () => {
     await act(async () => {
       renderView({ wallet: { ...wallet, isRuntimeExecutionAllowed: false } });
     });
-    const prove = (await screen.findByRole("button", {
-      name: "Prove ownership",
-    })) as HTMLButtonElement;
-    expect(prove.disabled).toBe(true);
+    expect(await screen.findByRole("button", { name: "Prove ownership" })).toHaveProperty(
+      "disabled",
+      true
+    );
     expect(
       screen.getByText("This wallet cannot sign right now, so the check cannot run.")
     ).toBeTruthy();

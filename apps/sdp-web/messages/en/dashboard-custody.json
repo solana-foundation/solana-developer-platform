@@ -14,7 +14,6 @@
     "walletActivityDetails": "Details",
     "walletActivityNoSignature": "None",
     "walletActivityNoSignatureYet": "None yet",
-    "walletActivityNoSignatureCanceled": "None, canceled before it was sent",
     "walletActivityCounterpartyAddress": "Counterparty address",
     "walletActivityViewOnExplorer": "View on explorer",
     "walletLabelRequired": "Give the wallet a label. Without one it reads as Untitled wallet everywhere it appears.",

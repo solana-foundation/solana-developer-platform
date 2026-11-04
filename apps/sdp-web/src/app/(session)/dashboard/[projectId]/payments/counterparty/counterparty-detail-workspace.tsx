@@ -242,7 +242,7 @@ function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
   const locale = useLocale();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
-      <Table className="min-w-[560px] table-fixed rounded-none border-0">
+      <Table className="min-w-[35rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[38%]" />
           <col className="w-[38%]" />
@@ -386,7 +386,7 @@ function PaymentsTable({
   const locale = useLocale();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
-      <Table className="min-w-[720px] table-fixed rounded-none border-0">
+      <Table className="min-w-[45rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[18%]" />
           <col className="w-[22%]" />

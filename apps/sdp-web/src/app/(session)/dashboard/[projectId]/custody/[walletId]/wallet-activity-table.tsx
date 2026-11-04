@@ -4,8 +4,8 @@ import { cn } from "@sdp/ui/cn";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { ArrowUpRightIcon, ChevronDownIcon } from "lucide-react";
-import { Fragment, type ReactNode, useId, useState } from "react";
+import { ArrowUpRightIcon } from "lucide-react";
+import { Fragment, type ReactNode, useId } from "react";
 import { toTitleCase } from "@/app/(session)/dashboard/[projectId]/activity-format-utils";
 import type { WalletActivityRow } from "@/app/(session)/dashboard/[projectId]/custody/wallet-activity.data";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
@@ -19,20 +19,39 @@ import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
+import { RowDisclosureButton } from "@/components/row-disclosure-button";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
+import { useOpenRow } from "@/lib/use-open-row";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { activityDisplayId } from "./wallet-detail.shared";
 
 const SETTLED = new Set(["confirmed", "finalized", "completed", "succeeded", "success"]);
 const FAILED = new Set(["failed", "rejected", "canceled", "cancelled", "expired"]);
-const CANCELED = new Set(["canceled", "cancelled"]);
 
 function statusTone(status: string): StatusTone {
   const normalized = status.toLowerCase();
   if (SETTLED.has(normalized)) return "positive";
   if (FAILED.has(normalized)) return "critical";
   return "progress";
+}
+
+/** Why a row has no signature, by how its status reads: not yet while it moves, else none. */
+function noSignatureKey(tone: StatusTone): MessageKey {
+  switch (tone) {
+    case "progress":
+      return "DashboardCustody.walletActivityNoSignatureYet";
+    case "positive":
+    case "attention":
+    case "critical":
+    case "neutral":
+      return "DashboardCustody.walletActivityNoSignature";
+    default: {
+      const unreachable: never = tone;
+      return unreachable;
+    }
+  }
 }
 
 /** A detail under an open row: a 13px label over its value, with a copy of the whole. */
@@ -64,12 +83,7 @@ function DetailFact({
 function WalletActivityDetails({ row }: { row: WalletActivityRow }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
-  const status = row.status.toLowerCase();
-  const noSignature = CANCELED.has(status)
-    ? t("DashboardCustody.walletActivityNoSignatureCanceled")
-    : FAILED.has(status) || SETTLED.has(status)
-      ? t("DashboardCustody.walletActivityNoSignature")
-      : t("DashboardCustody.walletActivityNoSignatureYet");
+  const noSignature = t(noSignatureKey(statusTone(row.status)));
   return (
     <div className="grid gap-x-6 gap-y-3 @2xl:grid-cols-[35%_21%_minmax(0,1fr)_max-content] @2xl:items-end @2xl:gap-x-0">
       <div className="min-w-0 @2xl:pe-6">
@@ -126,14 +140,14 @@ export function WalletActivityTable({
   const t = useTranslations();
   const locale = useLocale();
   const detailsId = useId();
-  const [openRowId, setOpenRowId] = useState<string | null>(null);
+  const openRow = useOpenRow();
   const incoming = t("DashboardCustody.incoming");
   const outgoing = t("DashboardCustody.outgoing");
   const detailsLabel = t("DashboardCustody.walletActivityDetails");
   return (
     <div className="overflow-x-auto refresh:-mx-3">
       <Table
-        className="min-w-[760px] rounded-none border-0 [&_table]:table-fixed"
+        className="min-w-[47.5rem] rounded-none border-0 [&_table]:table-fixed"
         data-wallet-activity-table
       >
         <TableHeader>
@@ -163,8 +177,8 @@ export function WalletActivityTable({
             const sign =
               row.operationLabel === incoming ? "+" : row.operationLabel === outgoing ? "−" : "";
             const token = row.token ? resolveTransferTokenLabel(row.token, symbols) : "";
-            const open = openRowId === row.id;
-            const toggle = () => setOpenRowId(open ? null : row.id);
+            const open = openRow.isOpen(row.id);
+            const toggle = () => openRow.toggle(row.id);
             const detailId = `${detailsId}-${index}`;
             return (
               <Fragment key={row.id}>
@@ -215,23 +229,12 @@ export function WalletActivityTable({
                     {formatDate(row.createdAt, locale) ?? "—"}
                   </TableCell>
                   <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-right")}>
-                    <button
-                      type="button"
-                      aria-expanded={open}
-                      aria-controls={open ? detailId : undefined}
-                      aria-label={detailsLabel}
-                      onClick={(event) => {
-                        // The row toggles too; one press must not open and close it.
-                        event.stopPropagation();
-                        toggle();
-                      }}
-                      className="-my-1 ms-auto inline-grid size-6 place-items-center rounded-sm text-tertiary outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--button-focus-ring)]"
-                    >
-                      <ChevronDownIcon
-                        aria-hidden="true"
-                        className={cn("size-3.5 transition-transform", open && "rotate-180")}
-                      />
-                    </button>
+                    <RowDisclosureButton
+                      open={open}
+                      controls={detailId}
+                      label={detailsLabel}
+                      onToggle={toggle}
+                    />
                   </TableCell>
                 </TableRow>
                 {open ? (

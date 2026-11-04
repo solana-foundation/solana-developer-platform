@@ -228,7 +228,7 @@ function TokensTable({
   return (
     <div className="overflow-x-auto refresh:-mx-3">
       <Table
-        className="min-w-[560px] rounded-none border-0 [&_table]:table-fixed"
+        className="min-w-[35rem] rounded-none border-0 [&_table]:table-fixed"
         data-wallet-tokens
       >
         <TableHeader>

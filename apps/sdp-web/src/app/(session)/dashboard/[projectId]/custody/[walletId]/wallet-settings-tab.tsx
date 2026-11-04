@@ -70,7 +70,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
   if (!wallet.canManageCustody) {
     return (
       <RecordBlock title={t("DashboardCustody.walletLabel")}>
-        <dl className="max-w-[660px]">
+        <dl className="max-w-[41.25rem]">
           <RecordLine label={t("DashboardCustody.walletLabel")}>{wallet.name}</RecordLine>
         </dl>
       </RecordBlock>
@@ -79,7 +79,7 @@ function LabelBlock({ wallet }: { wallet: WalletPageView }) {
 
   return (
     <RecordBlock title={t("DashboardCustody.walletLabel")}>
-      <form onSubmit={save} className="flex max-w-[660px] flex-col gap-6">
+      <form onSubmit={save} className="flex max-w-[41.25rem] flex-col gap-6">
         <div className="flex flex-col gap-2">
           <Label htmlFor="wallet-settings-label">{t("DashboardCustody.walletLabel")}</Label>
           <Input
@@ -149,7 +149,7 @@ function OwnershipBlock({ wallet }: { wallet: WalletPageView }) {
         : null;
   return (
     <RecordBlock title={t("DashboardCustody.walletOwnership")}>
-      <div className="flex max-w-[660px] flex-col gap-4">
+      <div className="flex max-w-[41.25rem] flex-col gap-4">
         {/* The last proof always has a row, "Never" until one passes; what the check does is
             its (i). */}
         <dl>
@@ -211,7 +211,7 @@ export function WalletSettingsTab({ wallet }: { wallet: WalletPageView }) {
     <RecordStack>
       <LabelBlock wallet={wallet} />
       <RecordBlock title={t("DashboardCustody.walletFixedAtCreation")}>
-        <dl className="max-w-[660px]">
+        <dl className="max-w-[41.25rem]">
           <RecordLine
             label={t("DashboardCustody.purpose")}
             hint={t("DashboardCustody.walletPurposeFixedInfo")}
