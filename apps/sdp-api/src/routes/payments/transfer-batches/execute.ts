@@ -15,6 +15,10 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
 import { type AuditIntent, AuditService, criticalOutcomeEntry } from "@/services/audit.service";
+import {
+  callerInsufficientFundsError,
+  simulatedInsufficientFundsError,
+} from "@/services/fee-payment-errors";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -274,6 +278,11 @@ export async function executeChunk(params: {
     try {
       const simulated = await simulateTransaction(resolved.rpc, txBytes);
       if (!simulated.success) {
+        const shortfall = simulatedInsufficientFundsError(
+          simulated.error,
+          chunk.message.instructions
+        );
+        if (shortfall) throw shortfall;
         throw transactionFailed(
           `Batch transfer preflight failed: ${simulated.error ?? "unknown simulation error"}`,
           { logs: simulated.logs }
@@ -312,7 +321,11 @@ export async function executeChunk(params: {
       });
       return;
     }
-    await failAuditedChunk(error);
+    // A source wallet short of funds fails the chunk with the reason the
+    // caller can act on, not the sponsor's raw refusal (HOO-2621).
+    await failAuditedChunk(
+      callerInsufficientFundsError(error, chunk.message.instructions) ?? error
+    );
     return;
   }
 }

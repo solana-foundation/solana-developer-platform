@@ -203,6 +203,10 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `details.recipientIndexes` (`[0]`) or `details.sourceRemainder` identifies the problem; `details.minimumAmount` gives the minimum. Fund the address, send at least the minimum, or send the source wallet's whole balance. The `409` is not stored under the `Idempotency-Key`, so the same request can run after the balance changes. Token transfers are unaffected: SDP sponsors rent for a missing token account.
 
+## Insufficient funds
+
+When the source wallet holds less of the token, or less SOL, than the amount, the transfer fails with `400 TRANSACTION_FAILED` and nothing is sent. The transfer is recorded `failed`, and its `error` says the wallet does not have enough funds. Fund the wallet, then send the payment again with a new `Idempotency-Key`: the failed key replays the same error.
+
 ## Deduplication
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`; without one it returns `400 IDEMPOTENCY_KEY_REQUIRED`. Use one stable key per payment and reuse it for retries. A same-key retry returns the original transfer. A changed request, wallet, or credential returns `422 IDEMPOTENCY_KEY_REUSED`; an in-flight request returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`.
