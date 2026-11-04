@@ -39,6 +39,7 @@ describe("dashboard loading route", () => {
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
     ["/dashboard/settings", "settings"],
     ["/dashboard/members", "settings"],
+    ["/dashboard/account", "account"],
     ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
     ["/dashboard/integrations/privy", "integration-detail"],
@@ -55,6 +56,8 @@ describe("dashboard loading route", () => {
     "/dashboard/api-keys/key-1",
     "/dashboard/unknown",
     "/dashboard/walletsmith",
+    "/dashboard/accounts",
+    "/dashboard/account/security",
     "/sign-in",
   ])("does not invent a fallback for unsupported route %s", (pathname) => {
     expect(resolveDashboardLoadingRoute(pathname)).toBeNull();

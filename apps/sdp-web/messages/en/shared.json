@@ -235,10 +235,7 @@
     "selectOrganization": "Select organization",
     "selectExistingOrganizationDescription": "Choose an existing organization to continue.",
     "organizations": "Organizations",
-    "projects": "Projects",
-    "current": "Current",
     "noOrganizations": "No organizations yet.",
-    "noProjects": "No projects yet.",
     "locked": "Locked",
     "sandboxOnly": "Only sandbox mode is supported for now.",
     "mainnetSoon": "Mainnet support coming soon.",
@@ -342,7 +339,13 @@
     "acceptInvitationFailed": "Could not accept the invitation. Try the link in your invitation email.",
     "noOrganizationAccessTitle": "No access to this organization",
     "noOrganizationAccessDescription": "You are not a member of this organization in SDP. Choose another organization, or ask an admin to invite you.",
-    "switchOrganizationFailed": "Joined, but could not switch to the organization. Choose it from the list."
+    "switchOrganizationFailed": "Joined, but could not switch to the organization. Choose it from the list.",
+    "environmentsOf": "Environments of {organization}",
+    "environmentSandbox": "Sandbox",
+    "environmentSandboxDetail": "Devnet · test tokens",
+    "environmentProduction": "Production",
+    "environmentProductionDetail": "Mainnet · real funds",
+    "organizationSettings": "Organization settings"
   },
   "dashboardShell": {
     "readOnly": "Read-only",
@@ -383,11 +386,11 @@
     "backToApiKeys": "Back to API keys",
     "apiDocs": "API Docs",
     "settings": "Settings",
-    "manageAccount": "Manage account",
     "signOut": "Sign out",
+    "accountSettings": "Account settings",
     "accountMenu": "Account menu",
     "language": "Language",
-    "colorTheme": "Color theme",
+    "theme": "Theme",
     "chooseLanguage": "Choose language",
     "moreLanguagesHint": "Additional languages will appear here as they become available.",
     "collapseSidebar": "Collapse sidebar",
@@ -647,5 +650,93 @@
     "keyReusedRestoreOriginal": "This differs from the request first sent for this action, which may already have gone through. Restore the original details to retry it, or check the list for its outcome.",
     "processingCheckStatus": "This payment is still processing. Check its status before sending it again; sending the same details now returns this payment.",
     "keyNotPersisted": "This browser isn’t keeping the request’s retry key (private browsing or storage full), so it wasn’t sent. Allow site storage and try again."
+  },
+  "organizationSettings": {
+    "detailsTitle": "Organization",
+    "name": "Name"
+  },
+  "account": {
+    "title": "Account",
+    "tabs": {
+      "profile": "Profile",
+      "security": "Security",
+      "preferences": "Preferences"
+    },
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "profile": {
+      "photoTitle": "Photo",
+      "photoDescription": "Shown beside your name across the dashboard. PNG, JPEG, GIF or WebP, up to 10 MB.",
+      "photoUpload": "Upload photo",
+      "photoRemove": "Remove",
+      "photoWrongType": "Choose a PNG, JPEG, GIF or WebP image.",
+      "photoTooLarge": "Choose an image of 10 MB or less.",
+      "detailsTitle": "Details",
+      "name": "Name",
+      "noName": "Not set",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "nameSaved": "Name saved.",
+      "userId": "User ID",
+      "organization": "Organization",
+      "organizationRole": "{organization}, {role}"
+    },
+    "emails": {
+      "title": "Email addresses",
+      "description": "Sign-in codes and notices go to the primary address. Make another verified address primary to remove this one.",
+      "add": "Add email",
+      "primary": "Primary",
+      "verified": "Verified",
+      "unverified": "Unverified",
+      "makePrimary": "Make primary",
+      "verify": "Verify",
+      "remove": "Remove",
+      "newAddress": "New email address",
+      "newAddressHint": "Usable for sign-in once you enter the code SDP sends to it.",
+      "sendCode": "Send code",
+      "enterCode": "Enter the code sent to {email}",
+      "codeHint": "The code is six digits.",
+      "confirmCode": "Verify",
+      "resendCode": "Send a new code",
+      "codeResent": "A new code is on its way.",
+      "verifiedToast": "{email} is verified."
+    },
+    "security": {
+      "passwordTitle": "Password",
+      "passwordSet": "Set. Change it at any time.",
+      "passwordNotSet": "Not set. Set one to sign in with your email and password.",
+      "changePassword": "Change password",
+      "setPassword": "Set password",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "newPasswordHint": "A few unrelated words work well. Saving signs you out on your other devices.",
+      "passwordSaved": "Password saved. Your other devices are signed out.",
+      "sessionsTitle": "Sessions",
+      "sessionsDescription": "Where you are signed in.",
+      "sessionsFailed": "Your sessions didn’t load.",
+      "thisDevice": "This device",
+      "unknownDevice": "Unknown device",
+      "lastActive": "Last active {time}",
+      "signOutSession": "Sign out"
+    },
+    "preferences": {
+      "languageTitle": "Language",
+      "dashboardLanguage": "Dashboard language",
+      "languageDescription": "Addresses, amounts and API names stay as they are."
+    },
+    "errors": {
+      "generic": "That didn’t work. Try again.",
+      "codeIncorrect": "That code is not the one we sent. Check the latest email.",
+      "codeExpired": "That code has expired. Send a new one.",
+      "tooManyAttempts": "Too many attempts. Wait a few minutes, then send a new code.",
+      "emailTaken": "That address is already on an account.",
+      "emailInvalid": "Enter an email address, for example jane@company.com.",
+      "currentPasswordIncorrect": "The current password is not right.",
+      "passwordPwned": "That password has appeared in a data breach. Choose another.",
+      "passwordWeak": "That password is too easy to guess. Make it longer.",
+      "passwordTooLong": "That password is too long."
+    }
   }
 }

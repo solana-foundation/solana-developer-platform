@@ -6,27 +6,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import * as Sentry from "@sentry/nextjs";
 import {
+  ArrowUpRightIcon,
+  BookOpenIcon,
   BugIcon,
   ChevronsUpDownIcon,
-  LanguagesIcon,
-  LibraryIcon,
   LogOutIcon,
   type LucideIcon,
   MessageSquarePlusIcon,
   MonitorIcon,
   MoonIcon,
-  Settings2Icon,
   SunIcon,
   SunMoonIcon,
   UserRoundIcon,
@@ -34,20 +28,18 @@ import {
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
-import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
+import { UserAvatar, userDisplayName } from "@/components/user-avatar";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
-import { supportedLocales } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/messages";
-import { useLocale, useTranslations } from "@/i18n/provider";
-import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { useTranslations } from "@/i18n/provider";
+import { DASHBOARD_ACCOUNT_HREF } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
-// opens the account menu — feedback, API docs, settings, the API debug-log
-// switch, the colour theme, the language, and the Clerk account actions the top-bar
-// UserButton used to provide. The caller names the side the popover opens on,
-// because it knows its own geometry: the desktop sidebar has room to the
+// opens the account menu — account settings, the colour theme, API docs,
+// feedback, the API debug-log switch, and sign out. The caller names the side
+// the popover opens on, because it knows its own geometry: the desktop sidebar has room to the
 // right, while the mobile More sheet spans the viewport and only has room above
 // (Radix can only mirror a side, so it cannot recover from "right" on its own).
 export function SidebarUserMenu({
@@ -60,7 +52,7 @@ export function SidebarUserMenu({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const { user } = useUser();
-  const { openUserProfile, signOut } = useClerk();
+  const { signOut } = useClerk();
   const { theme } = useTheme();
 
   useEffect(() => {
@@ -72,8 +64,7 @@ export function SidebarUserMenu({
     return null;
   }
   const email = user.primaryEmailAddress?.emailAddress;
-  const fallbackName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  const name = user.fullName || fallbackName || user.username || email;
+  const name = userDisplayName(user);
 
   return (
     <DropdownMenu modal={false}>
@@ -108,29 +99,34 @@ export function SidebarUserMenu({
         align={menuSide === "right" ? "end" : "start"}
         side={menuSide}
         sideOffset={6}
-        className="w-64"
+        className="w-72"
       >
-        <FeedbackMenuItem />
+        <div className="flex items-center gap-2.5 px-2.5 py-2">
+          <UserAvatar name={name} imageUrl={user.imageUrl} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-sm font-medium text-primary">{name}</span>
+            {email ? <span className="truncate text-xs text-tertiary">{email}</span> : null}
+          </span>
+        </div>
+        <DropdownMenuSeparator />
         <DropdownMenuItem asChild className="gap-2.5">
-          <a href={docsHref} target="_blank" rel="noopener noreferrer">
-            <LibraryIcon className="size-4 shrink-0 text-secondary" />
-            {t("Shared.dashboardShell.apiDocs")}
-          </a>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild className="gap-2.5">
-          <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
-            <Settings2Icon className="size-4 shrink-0 text-secondary" />
-            {t("Shared.dashboardShell.settings")}
+          <Link href={projectHref(DASHBOARD_ACCOUNT_HREF)}>
+            <UserRoundIcon className="size-4 shrink-0 text-secondary" />
+            {t("Shared.dashboardShell.accountSettings")}
           </Link>
         </DropdownMenuItem>
-        <NetworkDebugMenuItem />
-        <ThemeMenuItem />
-        <LanguageMenuItem />
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="gap-2.5" onSelect={() => openUserProfile()}>
-          <UserRoundIcon className="size-4 shrink-0 text-secondary" />
-          {t("Shared.dashboardShell.manageAccount")}
+        <ThemeMenuItem />
+        <DropdownMenuItem asChild className="gap-2.5">
+          <a href={docsHref} target="_blank" rel="noopener noreferrer">
+            <BookOpenIcon className="size-4 shrink-0 text-secondary" />
+            <span className="min-w-0 flex-1">{t("Shared.dashboardShell.apiDocs")}</span>
+            <ArrowUpRightIcon className="size-4 shrink-0 text-tertiary" />
+          </a>
         </DropdownMenuItem>
+        <FeedbackMenuItem />
+        <NetworkDebugMenuItem />
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           className="gap-2.5"
           onSelect={() => {
@@ -142,25 +138,6 @@ export function SidebarUserMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function UserAvatar({ name, imageUrl }: { name: string | undefined; imageUrl: string }) {
-  if (imageUrl) {
-    return (
-      // biome-ignore lint/performance/noImgElement: Clerk provides external URLs not in next/image config.
-      <img
-        src={imageUrl}
-        alt=""
-        className="size-7 shrink-0 rounded-full object-cover refresh:size-8"
-        aria-hidden="true"
-      />
-    );
-  }
-  return (
-    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-on-primary refresh:size-8 refresh:text-meta refresh:font-medium">
-      {(name ?? "").trim().slice(0, 2).toUpperCase() || "?"}
-    </span>
   );
 }
 
@@ -211,7 +188,7 @@ function ThemeMenuItem() {
       }}
     >
       <SunMoonIcon className="size-4 shrink-0 text-secondary" />
-      <span className="min-w-0 flex-1">{t("Shared.dashboardShell.colorTheme")}</span>
+      <span className="min-w-0 flex-1">{t("Shared.dashboardShell.theme")}</span>
       <span className="flex shrink-0 items-center gap-0.5 rounded-lg bg-fill-subtle p-0.5">
         {THEME_PREFERENCES.map((option) => {
           const { icon: Icon, labelKey } = THEME_PREFERENCE_PRESENTATIONS[option];
@@ -243,39 +220,6 @@ function ThemeMenuItem() {
         })}
       </span>
     </DropdownMenuItem>
-  );
-}
-
-// The interface language, beside the colour theme: the row names the current
-// one and opens the languages, each named in itself so a reader lost in the
-// wrong one can still find theirs.
-function LanguageMenuItem() {
-  const t = useTranslations();
-  const locale = useLocale();
-  const selectLocale = useSelectLocale();
-
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="gap-2.5">
-        <LanguagesIcon className="size-4 shrink-0 text-secondary" />
-        <span className="min-w-0 flex-1">{t("Shared.dashboardShell.language")}</span>
-        <span className="shrink-0 font-normal text-tertiary">
-          {localeDisplayName(locale, locale)}
-        </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent sideOffset={6} className="w-48">
-        <DropdownMenuRadioGroup value={locale} onValueChange={selectLocale}>
-          {supportedLocales.map((option) => (
-            <DropdownMenuRadioItem key={option} value={option} lang={option}>
-              <span className="min-w-0 flex-1">{localeDisplayName(option, option)}</span>
-              <span className="shrink-0 text-xs font-normal tracking-wide text-tertiary uppercase">
-                {option}
-              </span>
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
   );
 }
 
