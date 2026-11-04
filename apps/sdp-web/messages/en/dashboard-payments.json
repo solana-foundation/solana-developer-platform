@@ -732,7 +732,8 @@
         "notSet": "Not set",
         "lastPaid": "Last paid",
         "paidSoFar": "Paid so far",
-        "notPaidYet": "Not yet",
+        "neverPaid": "Never",
+        "nothingPaidYet": "Nothing yet",
         "paymentsNotLoaded": "Not loaded",
         "paymentCountOne": "1 payment",
         "paymentCountOther": "{count} payments",
@@ -774,7 +775,7 @@
         "paymentsLoadFailedDescription": "Something went wrong reading this contact's payments. Try again in a moment.",
         "notKeptHere": "Not kept here",
         "notKeptHereDescription": "Phone, address and identity details are collected per payment.",
-        "delete": "Delete"
+        "delete": "Delete contact…"
       },
       "newSolanaAddress": "New Solana address",
       "screenAndAdd": "Screen and add",
@@ -1576,6 +1577,10 @@
       "cancelConfirmBody": "Anyone who opens it sees the request is canceled. A payer who already signed can still complete the payment; it is recorded as paid late.",
       "requestCanceled": "Request canceled",
       "cancelFailed": "Couldn't cancel this request",
+      "anyoneWithTheLink": "Anyone with the link",
+      "dangerZone": "Danger zone",
+      "cancelEffect": "The link stops accepting payments. Cannot be undone.",
+      "cancelRequestEllipsis": "Cancel request…",
       "why": {
         "paid": "Settled to the destination wallet. Nothing further to do.",
         "awaiting": "The link is live and nobody has paid it yet. It does not expire.",
