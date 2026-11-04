@@ -2083,6 +2083,90 @@ describe("payment transfer batches", () => {
       expectShortfallRecorded(body);
     });
 
+    it("gives the failed row of a partially failed batch readable text, on create and on read", async () => {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+      createKoraAdapterMock.mockReturnValueOnce(
+        ownedSubmissionAdapter(vi.fn().mockResolvedValue(FIRST_SIGNATURE))
+      );
+      // Chunks run concurrently: whichever simulates second comes back short.
+      let simulations = 0;
+      rpc.respond("simulateTransaction", () => {
+        simulations += 1;
+        return {
+          result: {
+            context: { slot: 1 },
+            value: {
+              err: simulations === 1 ? null : { InstructionError: [0, { Custom: 1 }] },
+              logs: [],
+              accounts: null,
+              unitsConsumed: 150,
+              returnData: null,
+            },
+          },
+        };
+      });
+      const counterpartyId = await seedCounterparty("batch_partial_shortfall");
+      const recipients = await Promise.all(
+        [TEST_SOLANA_ADDRESSES.wallet2, TEST_SOLANA_ADDRESSES.wallet3].map(
+          async (walletAddress, position) => ({
+            counterpartyId,
+            counterpartyAccountId: await seedCryptoWalletCounterpartyAccount({
+              counterpartyId,
+              walletAddress,
+            }),
+            amount: position === 0 ? "0.1" : "0.2",
+          })
+        )
+      );
+
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            externalId: testRunId(),
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const partialSchema = z.object({
+        data: z.object({
+          batch: z.object({ id: z.string() }),
+          recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+        }),
+      });
+      const created = partialSchema.parse(await response.json());
+      const failedRows = (body: z.infer<typeof partialSchema>) =>
+        body.data.recipients.filter((recipient) => recipient.status === "failed");
+      expect(failedRows(created)).toEqual([
+        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
+      ]);
+      expect(created.data.recipients).toHaveLength(2);
+
+      const read = await app.request(
+        `/v1/payments/transfer-batches/${created.data.batch.id}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(read.status).toBe(200);
+      expect(failedRows(partialSchema.parse(await read.json()))).toEqual([
+        { status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE },
+      ]);
+    });
+
     it("fails a chunk SDP's preflight finds short with the same reason, before the sponsor signs", async () => {
       const signAsFeePayer = vi.fn().mockImplementation(fullySignTestTransaction);
       createKoraAdapterMock.mockReturnValueOnce(

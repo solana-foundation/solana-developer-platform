@@ -2204,7 +2204,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -2438,7 +2438,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -3172,7 +3172,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -3312,7 +3312,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -9302,7 +9302,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -10189,7 +10189,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",

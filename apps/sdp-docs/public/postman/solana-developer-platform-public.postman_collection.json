@@ -1232,7 +1232,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collect",
-            "description": "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation."
+            "description": "Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt. Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why."
           }
         },
         {

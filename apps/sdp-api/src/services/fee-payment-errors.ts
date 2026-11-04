@@ -1,6 +1,11 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { Instruction } from "@solana/kit";
 import {
+  identifySubscriptionsInstruction,
+  SUBSCRIPTIONS_PROGRAM_ADDRESS,
+  SubscriptionsInstruction,
+} from "@solana/subscriptions";
+import {
   identifySystemInstruction,
   SYSTEM_PROGRAM_ADDRESS,
   SystemInstruction,
@@ -43,9 +48,16 @@ function simulatedProgramError(
   };
 }
 
+const SUBSCRIPTION_PULLS: ReadonlySet<SubscriptionsInstruction> = new Set([
+  SubscriptionsInstruction.TransferFixed,
+  SubscriptionsInstruction.TransferRecurring,
+  SubscriptionsInstruction.TransferSubscription,
+]);
+
 /**
  * Whether `instruction` moves value out of a wallet it names as the source:
- * a System Program transfer or an SPL Token / Token-2022 transfer. For these,
+ * a System Program transfer, an SPL Token / Token-2022 transfer, or a
+ * subscriptions-program pull from a delegator. For these,
  * custom error 0x1 is the source's own shortfall (System
  * `ResultWithNegativeLamports`, Token `InsufficientFunds`). The same code from
  * any other instruction, such as a destination token account the sponsor pays
@@ -62,6 +74,11 @@ function isSourceFundedTransfer(instruction: Instruction): boolean {
     if (programAddress === TOKEN_PROGRAM_ADDRESS) {
       const kind = identifyTokenInstruction(data);
       return kind === TokenInstruction.Transfer || kind === TokenInstruction.TransferChecked;
+    }
+    if (programAddress === SUBSCRIPTIONS_PROGRAM_ADDRESS) {
+      // A delegated pull: its own errors start at 100, so a custom 0x1 here is
+      // the token transfer it makes from the delegator's account.
+      return SUBSCRIPTION_PULLS.has(identifySubscriptionsInstruction(data));
     }
     if (programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
       const kind = identifyToken2022Instruction(data);
