@@ -2,9 +2,9 @@ import { RAMP_PROVIDER_CLIENTS, resolveRampProviderClient } from "@sdp/payments/
 import { isDefinitiveProviderRejection } from "@sdp/payments/ramps/fetch";
 import type { RampProvider } from "@sdp/payments/ramps/types";
 import {
+  isAwaitingPayInRampTransferStatus,
   isCancelableRampTransferStatus,
   isRampTransferType,
-  isAwaitingPayInRampTransferStatus,
 } from "@sdp/types/payments";
 import { isRetiredRampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";

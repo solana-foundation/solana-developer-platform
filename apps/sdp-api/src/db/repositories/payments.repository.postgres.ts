@@ -1,5 +1,6 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
+  AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES,
   type PaymentTransferStatus,
   PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
   RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS,
@@ -7,7 +8,6 @@ import {
   RAMP_TRANSFER_TYPES,
   type RampTransferType,
   SIGNED_TRANSFER_SUBMISSION_STATUSES,
-  AWAITING_PAY_IN_RAMP_TRANSFER_STATUSES,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
@@ -1370,10 +1370,7 @@ export function createPostgresPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
         includeAllOrganizationProjects: canAccessAllOrganizationProjects,
-        extraClauses: [
-          "id = ?",
-          "provider_data->>'sandboxSettlementRequestedAt' = ?",
-        ],
+        extraClauses: ["id = ?", "provider_data->>'sandboxSettlementRequestedAt' = ?"],
         extraValues: [input.transferId, input.requestedAt],
       });
       const row = await db
