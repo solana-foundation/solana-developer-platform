@@ -263,7 +263,7 @@ export function WorkspaceSwitcher({
           </>
         ) : null}
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="gap-2.5">
+        <DropdownMenuItem asChild className="gap-2.5" disabled={isSwitching}>
           <Link href={projectHref(DASHBOARD_SIDE_NAV_HREFS.settings)}>
             <Building2Icon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
             {t("Shared.SharedComponents.organizationSettings")}
