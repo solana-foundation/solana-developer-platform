@@ -102,16 +102,20 @@ export function DashboardWorkspaceProvider({
   );
   // Set while rendering, before any child reads a key, so a key store never
   // hands one user's or org's Idempotency-Keys to another in the same tab.
-  setIdempotencyKeyScope(liveDashboardCacheScopeKey);
+  const liveWorkspaceIsMissing = auth.isLoaded && (!auth.userId || !auth.orgId);
+  setIdempotencyKeyScope(liveWorkspaceIsMissing ? "" : liveDashboardCacheScopeKey);
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
     [serverDashboardCacheScope]
   );
-  const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
+  const dashboardScopeIsFresh =
+    !liveWorkspaceIsMissing && liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = !dashboardScopeIsFresh;
-  const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
-    projectId: selectedProjectId,
-  });
+  const swrScopeKey = liveWorkspaceIsMissing
+    ? "signed-out"
+    : `${auth.sessionId}:${getDashboardCacheScopeKey(liveDashboardCacheScope, {
+        projectId: selectedProjectId,
+      })}`;
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
@@ -142,14 +146,14 @@ export function DashboardWorkspaceProvider({
   // An Organization switched in Clerk leaves this URL naming the previous
   // Organization's Project; the bare landing resolves the new one's.
   useEffect(() => {
-    if (liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
+    if (!auth.isLoaded || dashboardScopeIsFresh) {
       return;
     }
 
     startProjectSwitchTransition(() => {
       router.replace("/dashboard");
     });
-  }, [liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
+  }, [auth.isLoaded, dashboardScopeIsFresh, router]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {

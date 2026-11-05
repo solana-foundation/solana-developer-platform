@@ -1,6 +1,6 @@
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 
@@ -50,6 +50,7 @@ Dashboard pages live under `app/(session)/dashboard/[projectId]/`, and the Proje
 - Links use `useProjectHref()` (client) or `requestProjectHref()` (server); route comparisons use `useDashboardPathname()`. `src/lib/dashboard-project-links.unit.test.ts` fails a literal `/dashboard/…` link or redirect target; bare `/dashboard` (choose a Project) is the one unscoped target.
 - A missing page or an unmatched address inside a Project renders `[projectId]/not-found.tsx` in the shell; the `[...unmatched]` catch-all exists so unmatched URLs reach it instead of the root 404.
 - The shell keys its page frame (header and content) by pathname, so a route change replaces the frame rather than moving it. Whatever a page adds to the header after it mounts must not change the header's height: a title mark is held by the route's `titleMark`, and controls a page portals into the tab row (`DashboardHeaderTabsTrailing`) get a placeholder in the route's skeleton.
+- The shell sizes itself in `dvh` (`h-dvh`, `min-h-dvh`), never `h-screen`: a phone browser's `vh` is its height with the toolbars hidden, so a locked page (a flow's footer) sat under the toolbar.
 - Tests mock with `vi.mock("next/navigation", () => import("@/test/next-navigation"))` and `vi.mock("next/headers", () => import("@/test/next-headers"))`; fixtures live in `src/test/`.
 
 A button whose action is running takes `loading` and keeps its words: the
@@ -65,6 +66,10 @@ transitions), so one stale assertion can fail the whole file. A flow's new
 step fades in through `useStepFade` (`src/lib`), which `WizardFrame` applies
 for every flow it frames; both it and `Modal`'s entrance come from
 `@sdp/ui/motion` and stay off under reduced motion.
+
+Run the unit suite on Node 24.22.1, the version CI pins. On Node 26 every test
+that touches `localStorage` or `sessionStorage` fails with "Cannot read
+properties of undefined (reading 'clear')", although `engines` allows it.
 
 # Stage smoke
 

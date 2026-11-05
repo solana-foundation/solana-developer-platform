@@ -1,23 +1,24 @@
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { cache } from "react";
 import { z } from "zod";
 import type { QuickStartStatus } from "./dashboard-quick-start";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
-import { createOrgSdpApiClient, listSdpProjects, requestOnboardingStatus } from "./sdp-api";
+import {
+  createOrgSdpApiClient,
+  createSdpApiClient,
+  listSdpProjects,
+  requestOnboardingStatus,
+} from "./sdp-api";
 
 // Only the fields the guide reads: the rest of each response is not its business.
 const onboardingStatusSchema = z.object({
   linked: z.boolean(),
-  setup: z
-    .object({
-      canManage: z.boolean(),
-      custodyProviders: z.array(z.enum(CUSTODY_PROVIDERS)),
-    })
-    .nullish(),
+  setup: z.object({ canManage: z.boolean() }).nullish(),
 });
 const apiKeysSchema = z.object({
   apiKeys: z.array(z.object({ lastUsedAt: z.string().nullable() })),
 });
+// The list the open project's Wallets page shows, without balances.
+const walletsSchema = z.object({ wallets: z.array(z.object({ walletId: z.string() })) });
 
 function latestTimestamp(values: readonly (string | null)[]): string | null {
   let latest: string | null = null;
@@ -36,29 +37,38 @@ export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | n
     // Shared with the page's own gates: one onboarding read per request.
     const status = onboardingStatusSchema.parse(await requestOnboardingStatus());
     if (!status.linked || !status.setup?.canManage) return null;
-    const client = await createOrgSdpApiClient();
+    const [client, projectClient] = await Promise.all([
+      createOrgSdpApiClient(),
+      createSdpApiClient(),
+    ]);
     const signal = AbortSignal.timeout(10_000);
 
     // A first call can come from a key in any project, not only the default sandbox.
     const projects = await listSdpProjects();
     if (projects.length === 0) return null;
-    const keys = await Promise.allSettled(
-      projects.map((project) =>
-        client
-          .fetch<unknown>("/v1/api-keys", {
-            headers: { [PROJECT_HEADER_NAME]: project.id },
-            signal,
-          })
-          .then((body) => apiKeysSchema.parse(body))
-      )
-    );
+    const [keys, wallets] = await Promise.all([
+      Promise.allSettled(
+        projects.map((project) =>
+          client
+            .fetch<unknown>("/v1/api-keys", {
+              headers: { [PROJECT_HEADER_NAME]: project.id },
+              signal,
+            })
+            .then((body) => apiKeysSchema.parse(body))
+        )
+      ),
+      // The wallet step links into the open project, so it reads that project's wallets.
+      projectClient
+        .fetch<unknown>("/v1/wallets", { signal })
+        .then((body) => walletsSchema.parse(body)),
+    ]);
     const apiKeys = keys.flatMap((result) =>
       result.status === "fulfilled" ? result.value.apiKeys : []
     );
     if (apiKeys.length === 0 && keys.some((result) => result.status === "rejected")) return null;
 
     return {
-      custodyProvider: status.setup.custodyProviders[0] ?? null,
+      hasWallet: wallets.wallets.length > 0,
       apiKeyCount: apiKeys.length,
       lastCallAt: latestTimestamp(apiKeys.map((key) => key.lastUsedAt)),
     };

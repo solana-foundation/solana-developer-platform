@@ -7,9 +7,9 @@ import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
 
+// Reads never return the link token; only create does.
 const exampleRequest = {
   id: "preq_abc123",
-  publicToken: "example-public-token",
   status: "awaiting_payment",
   amount: "10.00",
   token: "EXAMPLE_TOKEN_MINT",
@@ -18,6 +18,7 @@ const exampleRequest = {
   expiresAt: null,
   createdAt: "2026-06-24T12:00:00.000Z",
 };
+const exampleCreatedRequest = { ...exampleRequest, publicToken: "example-public-token" };
 
 export function buildPaymentRequestsPlaygroundEndpointConfigs(
   wallets: PaymentsDashboardWallet[],
@@ -90,7 +91,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
           placeholder: "2026-07-01T00:00:00.000Z",
         },
       ],
-      expectedResponse: exampleRequest,
+      expectedResponse: exampleCreatedRequest,
     },
   ];
 }

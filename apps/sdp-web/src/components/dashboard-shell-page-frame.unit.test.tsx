@@ -160,6 +160,21 @@ describe("dashboard shell page frame", () => {
     expect(named?.querySelector(".animate-pulse")).toBeNull();
   });
 
+  // A phone browser's vh is its height with the toolbars hidden, so a vh shell kept a locked
+  // page's footer under the toolbar.
+  it("sizes a locked page to the visible viewport", async () => {
+    await renderAt(`${PROJECT}/custody/setup`);
+
+    const shell = container.querySelector("main[data-sdp-dashboard-shell]");
+    expect(shell?.hasAttribute("data-sdp-locked-viewport")).toBe(true);
+    expect(shell?.classList.contains("h-dvh")).toBe(true);
+    expect(
+      container.querySelector(
+        '[class~="h-screen"], [class~="min-h-screen"], [class~="md:h-screen"]'
+      )
+    ).toBeNull();
+  });
+
   it.each([
     // New draft hides its title, since the flow names itself in its step header.
     ["a route that hides its title", `${PROJECT}/issuance/create`],

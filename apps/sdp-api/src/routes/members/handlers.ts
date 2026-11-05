@@ -406,12 +406,39 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   }
 
   const clerk = new ClerkOrganizationsService(c.env);
-  const clerkInvitation = await clerk.createOrganizationInvitation({
+  const clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
     organizationId: clerkOrgId,
     emailAddress: normalizedEmail,
     expiresInDays: INVITATION_TTL_DAYS,
     redirectUrl,
   });
+
+  // The address already holds the Clerk membership, typically from accepting
+  // an earlier Clerk invitation whose SDP invitation then expired or was
+  // revoked. That membership grants nothing (ADR 0012): the pending SDP row
+  // just claimed is what admits them at their next sign-in, so the invite has
+  // succeeded with no Clerk invitation to record. Only a revocation that won
+  // the row in the meantime makes it fail.
+  if (clerkInvitation === null) {
+    const current = invitationStatusSchema.parse(
+      await getDb(c.env)
+        .prepare("SELECT status FROM invitations WHERE id = ? AND organization_id = ?")
+        .bind(invitationId, organizationId)
+        .first<Record<string, unknown>>()
+    );
+    if (current.status === "revoked") {
+      throw conflict("The invitation was revoked while it was being sent");
+    }
+    return created(c, {
+      invitation: {
+        id: invitationId,
+        email: normalizedEmail,
+        role,
+        expiresAt,
+        clerkInvitationId: null,
+      },
+    });
+  }
 
   // Clerk's invitation id is the only key that identifies exactly one pending
   // Clerk invitation, so revocation acts on it rather than on the address. A

@@ -19,6 +19,9 @@ export const createTransferSchema = z.strictObject({
   memo: z.string().max(256).optional(),
 });
 
+/** Ordinary transfers cannot name a ramp deposit on a channel without Ramps. */
+export const walletTransferSchema = createTransferSchema.omit({ transferId: true });
+
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 
 export const transferStatusSchema = z.enum(PAYMENT_TRANSFER_STATUSES);

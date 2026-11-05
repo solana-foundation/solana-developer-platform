@@ -51,6 +51,21 @@ describe("initializeCustodySetupAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
+  it("returns the first wallet's ID once the provider is set up", async () => {
+    client.fetch.mockResolvedValue({
+      configId: "cfg_new",
+      publicKey: "11111111111111111111111111111111",
+      walletId: "privy_wallet_first",
+    });
+
+    const result = await initializeCustodySetupAction(
+      walletForm({ provider: "privy", walletLabel: "Treasury" })
+    );
+
+    expect(result).toEqual({ status: "success", walletId: "privy_wallet_first" });
+    expect(mocks.revalidatePath).toHaveBeenCalled();
+  });
+
   // The key's original request never recorded its outcome: the wallet may
   // exist, so the user is told to check the list, not that the provider is set up.
   it("tells the user to check the list after an unknown outcome", async () => {
@@ -118,16 +133,17 @@ describe("createCustodySetupWalletAction", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    client.fetch.mockResolvedValue({});
+    client.fetch.mockResolvedValue({ wallet: { id: "cw_new", walletId: "privy_wallet_new" } });
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("creates the wallet in the chosen connection", async () => {
+  // The flow opens the new wallet's page, addressed by its provider wallet ID.
+  it("creates the wallet in the chosen connection and returns its ID", async () => {
     const result = await createCustodySetupWalletAction(
       walletForm({ provider: "privy", label: "Treasury", connectionId: "conn_eu" })
     );
 
-    expect(result).toEqual({ status: "success" });
+    expect(result).toEqual({ status: "success", walletId: "privy_wallet_new" });
     expect(client.fetch).toHaveBeenCalledWith("/v1/wallets", expect.anything());
     expect(requestBody(client)).toEqual({ connectionId: "conn_eu", label: "Treasury" });
   });

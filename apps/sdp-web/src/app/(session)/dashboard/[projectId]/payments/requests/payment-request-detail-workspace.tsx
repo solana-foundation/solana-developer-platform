@@ -19,13 +19,12 @@ import {
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   RecordAmount,
-  RecordColumns,
-  RecordList,
   RecordLoadError,
-  RecordRow,
+  RecordSection,
   RecordStateBand,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { RecordFact, RecordFactColumns } from "@/components/refresh-record";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -193,12 +192,12 @@ function RequestPaymentLink({
 }
 
 /**
- * The footer under a rule while the request is open, for a member who may manage payment
- * requests: Cancel request, which asks in a modal before it acts. The modal cannot be closed and
- * its controls are disabled while the cancel is in flight; the page reads the request again once
- * it settles either way.
+ * The record's danger zone while the request is open, for a member who may manage payment
+ * requests: Cancel request, what it does, and its button, which asks in a modal before it acts.
+ * The modal cannot be closed and its controls are disabled while the cancel is in flight; the
+ * page reads the request again once it settles either way.
  */
-function RequestCancelFooter({ requestId }: { requestId: string }) {
+function RequestDangerZone({ requestId }: { requestId: string }) {
   const t = useTranslations();
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
@@ -221,10 +220,24 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
 
   const title = t("DashboardPayments.requestDetail.cancelRequest");
   return (
-    <div className="flex justify-end border-t border-border-default pt-4">
-      <Button type="button" variant="outline" size="sm" onClick={() => setConfirming(true)}>
-        {title}
-      </Button>
+    <RecordSection title={t("DashboardPayments.requestDetail.dangerZone")}>
+      <div className="flex flex-col items-start gap-3 @2xl:flex-row @2xl:items-center @2xl:justify-between @2xl:gap-6">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="text-body font-medium text-primary">{title}</p>
+          <p className="max-w-[40em] text-body text-secondary">
+            {t("DashboardPayments.requestDetail.cancelEffect")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          className="shrink-0"
+          onClick={() => setConfirming(true)}
+        >
+          {t("DashboardPayments.requestDetail.cancelRequestEllipsis")}
+        </Button>
+      </div>
       <Modal
         isOpen={confirming}
         ariaLabel={title}
@@ -260,7 +273,7 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
           </div>
         </div>
       </Modal>
-    </div>
+    </RecordSection>
   );
 }
 
@@ -406,40 +419,45 @@ function PaymentRequestRecord({
           ) : null}
         </section>
 
+        {/* Who pays and where it lands, then how it is known: two columns of facts. Anyone
+            holding the link can pay it, so From names nobody. */}
         <div className="pt-2">
-          <RecordColumns>
-            <RecordList>
-              <RecordRow label={t("DashboardPayments.requests.to")}>
+          <RecordFactColumns>
+            <dl>
+              <RecordFact label={t("DashboardPayments.requests.from")}>
+                {t("DashboardPayments.requestDetail.anyoneWithTheLink")}
+              </RecordFact>
+              <RecordFact label={t("DashboardPayments.requests.to")}>
                 {walletName ? (
                   <>
-                    {walletName}
-                    <span className="ms-2 font-mono text-secondary">
+                    <span className="truncate">{walletName}</span>
+                    <span className="shrink-0 text-secondary tabular-nums">
                       {shortenAddress(request.destinationAddress)}
                     </span>
                   </>
                 ) : (
-                  <span className="font-mono">{shortenAddress(request.destinationAddress)}</span>
+                  <span className="tabular-nums">{shortenAddress(request.destinationAddress)}</span>
                 )}
-              </RecordRow>
-            </RecordList>
-            <RecordList>
-              <RecordRow label={t("DashboardPayments.requests.reference")}>
-                <span className="font-mono">{request.reference}</span>
-              </RecordRow>
-              <RecordRow label={t("DashboardPayments.requests.expires")}>
+              </RecordFact>
+            </dl>
+            <dl>
+              <RecordFact label={t("DashboardPayments.requests.reference")}>
+                <span className="truncate tabular-nums">{request.reference}</span>
+              </RecordFact>
+              <RecordFact label={t("DashboardPayments.requests.expires")}>
                 {expires ?? t("DashboardPayments.requests.noExpiry")}
-              </RecordRow>
-              <RecordRow label={t("DashboardPayments.recurring.created")}>
+              </RecordFact>
+              <RecordFact label={t("DashboardPayments.recurring.created")}>
                 {formatDateTime(request.createdAt, locale) ?? request.createdAt}
-              </RecordRow>
-            </RecordList>
-          </RecordColumns>
+              </RecordFact>
+            </dl>
+          </RecordFactColumns>
         </div>
 
         {now !== null &&
         isPaymentRequestPayableAt(request, now) &&
         dashboardAccess.capabilities.canManagePaymentRequests ? (
-          <RequestCancelFooter requestId={request.id} />
+          <RequestDangerZone requestId={request.id} />
         ) : null}
       </div>
     </DashboardWorkspaceOverviewPanel>

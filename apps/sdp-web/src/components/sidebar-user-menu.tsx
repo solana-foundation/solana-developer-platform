@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
+import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
 import * as Sentry from "@sentry/nextjs";
 import {
@@ -34,6 +35,7 @@ import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/th
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_ACCOUNT_HREF } from "@/lib/dashboard-navigation-loading";
+import { clearDashboardSnapshots } from "@/lib/dashboard-snapshot-storage";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { userDisplayName } from "@/lib/user-display-name";
 
@@ -52,7 +54,7 @@ export function SidebarUserMenu({
 }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
-  const { user } = useUser();
+  const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
   const { theme } = useTheme();
 
@@ -61,6 +63,24 @@ export function SidebarUserMenu({
     feedback?.setTheme(theme);
   }, [theme]);
 
+  if (!isLoaded) {
+    return (
+      <div
+        role="status"
+        aria-label={t("Shared.SharedComponents.loading")}
+        aria-busy="true"
+        className={cn("flex h-12 items-center", collapsed ? "w-full justify-center" : "gap-3 px-2")}
+      >
+        <SkeletonBlock className="size-8 shrink-0 rounded-full" />
+        {collapsed ? null : (
+          <div className="flex flex-1 flex-col gap-1.5">
+            <SkeletonBlock className="h-3.5 w-24 rounded" />
+            <SkeletonBlock className="h-3 w-32 rounded" />
+          </div>
+        )}
+      </div>
+    );
+  }
   if (!user) {
     return null;
   }
@@ -131,6 +151,7 @@ export function SidebarUserMenu({
         <DropdownMenuItem
           className="gap-2.5"
           onSelect={() => {
+            clearDashboardSnapshots();
             void signOut();
           }}
         >

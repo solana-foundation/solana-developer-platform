@@ -28,7 +28,7 @@ A failed request returns an error status and this body. The health checks are th
 | `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
 | `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
 | `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
-| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the signing provider refused the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
 | `502` | Solana RPC answered, but with an error SDP could not use. | `SOLANA_RPC_ERROR` |
@@ -39,6 +39,7 @@ Each operation's page lists its statuses and shows a success example. The OpenAP
 ## Retrying
 
 - `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
+- `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider; review the policy there or change the request before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
 - `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix; quote `meta.requestId` when you report one.

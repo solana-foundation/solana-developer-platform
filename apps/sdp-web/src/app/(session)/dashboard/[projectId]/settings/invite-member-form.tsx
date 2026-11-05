@@ -18,6 +18,10 @@ import { useZodForm } from "@/lib/use-zod-form";
 
 const ROLE_LABEL_ID = "invite-role-label";
 
+const createdInvitationSchema = z.object({
+  data: z.object({ invitation: z.object({ clerkInvitationId: z.string().nullable() }) }),
+});
+
 const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().min(1),
   role: z.enum(ORGANIZATION_ROLES),
@@ -56,11 +60,27 @@ export function InviteMemberForm() {
       });
       if (!result.ok) {
         setRejected(true);
-        toast.error(t("Shared.members.inviteFailed", { error: result.error }));
+        // A server error's text is not the user's to act on, so only a refusal's
+        // message is shown; an outage or a provider failure gets the generic line.
+        const refused = result.status !== null && result.status < 500;
+        toast.error(
+          refused
+            ? t("Shared.members.inviteFailed", { error: result.error })
+            : t("Shared.members.inviteFailedUnexpectedly")
+        );
         return;
       }
       setRejected(false);
-      toast.success(t("Shared.members.inviteSent", { email: invite.email }));
+      // A null Clerk invitation id means the address already held the organization in Clerk:
+      // the SDP invitation admits them and no email went out. An unreadable body fails loudly
+      // rather than guessing.
+      const emailSent =
+        createdInvitationSchema.parse(result.data).data.invitation.clerkInvitationId !== null;
+      toast.success(
+        emailSent
+          ? t("Shared.members.inviteSent", { email: invite.email })
+          : t("Shared.members.inviteGranted", { email: invite.email })
+      );
       // Clear the field only on success, so a rejected address stays editable.
       form.reset();
       refreshKeepingDashboardUrl(router);

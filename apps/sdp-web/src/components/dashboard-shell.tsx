@@ -650,7 +650,7 @@ export function DashboardShell({
 
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+      <main className="min-h-dvh bg-[var(--sdp-shell-bg)] p-0 text-primary">
         <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             {t("Shared.dashboardShell.signInToContinue")}
@@ -690,10 +690,12 @@ export function DashboardShell({
       data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
-        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
+        // dvh, not vh: a phone browser's vh is its height with the toolbars hidden, so a vh shell
+        // put a locked page's bottom (a flow's footer) under the toolbar while it shows.
+        "min-h-dvh bg-[var(--sdp-shell-bg)] p-0 text-primary",
         // clip, not hidden: a hidden box can still be scrolled by the browser (focusing a
         // control below the fold), which shifts the locked page up and leaves a gap under it.
-        shouldLockShellViewport ? "h-screen overflow-clip" : "",
+        shouldLockShellViewport ? "h-dvh overflow-clip" : "",
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
@@ -707,7 +709,7 @@ export function DashboardShell({
             <NetworkDebugPanel />
             <div
               className={[
-                "mx-auto grid min-h-screen w-full max-w-none gap-0",
+                "mx-auto grid min-h-dvh w-full max-w-none gap-0",
                 shouldLockViewportScroll ? "h-full" : "",
                 "md:grid-cols-[auto_1fr]",
               ].join(" ")}
@@ -717,7 +719,7 @@ export function DashboardShell({
                 style={{
                   width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
                 }}
-                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
+                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:justify-between"
               >
                 <ThemeScopeProvider scope={sidebarScope}>
                   <DashboardSidebarContent

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import {
@@ -17,6 +18,17 @@ import { InviteMemberForm } from "./invite-member-form";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
+function created(clerkInvitationId: string | null): Response {
+  return dashboardDataResponse(201, { invitation: { clerkInvitationId } });
+}
+
+async function invite(email: string) {
+  const user = userEvent.setup();
+  render(<InviteMemberForm />, { wrapper: EnglishI18n });
+  await user.type(screen.getByRole("textbox", { name: "Email address" }), email);
+  await user.click(screen.getByRole("button", { name: "Send invite" }));
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
@@ -26,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   restoreWindowLocation();
 });
 
@@ -61,25 +74,20 @@ describe("InviteMemberForm", () => {
   });
 
   it("sends nothing for an empty address", async () => {
-    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(201, {}));
-    const user = userEvent.setup();
-    render(<InviteMemberForm />, { wrapper: EnglishI18n });
+    const fetchMock = stubDashboardFetch(() => created("inv_clerk_1"));
 
-    await user.type(screen.getByRole("textbox", { name: "Email address" }), "   ");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await invite("   ");
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("invites the normalized address, then re-reads the page keeping the Members tab", async () => {
+  it("invites the normalized address, says the email went out, and keeps the Members tab", async () => {
     const membersTabUrl = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
     window.history.replaceState(null, "", membersTabUrl);
-    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(201, {}));
-    const user = userEvent.setup();
-    render(<InviteMemberForm />, { wrapper: EnglishI18n });
+    const success = vi.spyOn(toast, "success");
+    const fetchMock = stubDashboardFetch(() => created("inv_clerk_1"));
 
-    await user.type(screen.getByRole("textbox", { name: "Email address" }), " Invitee@Example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await invite(" Invitee@Example.com");
 
     await waitFor(() =>
       expect(dashboardRouter.replace).toHaveBeenCalledWith(membersTabUrl, { scroll: false })
@@ -87,5 +95,42 @@ describe("InviteMemberForm", () => {
     expect(sentDashboardRequests(fetchMock).map((request) => request.body)).toEqual([
       { email: "invitee@example.com", role: "member" },
     ]);
+    expect(success).toHaveBeenCalledWith("Invitation sent to invitee@example.com.");
+  });
+
+  it("says no email went out when the address already holds the organization", async () => {
+    const success = vi.spyOn(toast, "success");
+    stubDashboardFetch(() => created(null));
+
+    await invite("a@example.com");
+
+    await waitFor(() =>
+      expect(success).toHaveBeenCalledWith(expect.stringContaining("no email was sent"))
+    );
+  });
+
+  it.each<[string, () => Promise<Response>, string]>([
+    [
+      "500",
+      async () => dashboardErrorResponse(500, "An internal error occurred"),
+      "Could not send the invitation. Try again in a moment.",
+    ],
+    [
+      "network failure",
+      async () => Promise.reject(new TypeError("Failed to fetch")),
+      "Could not send the invitation. Try again in a moment.",
+    ],
+    [
+      "409",
+      async () => dashboardErrorResponse(409, "An internal error occurred"),
+      "Could not send the invitation: An internal error occurred",
+    ],
+  ])("shows a %s answer's own message only below 500", async (_answer, answer, shown) => {
+    const error = vi.spyOn(toast, "error");
+    stubDashboardFetch(answer);
+
+    await invite("a@example.com");
+
+    await waitFor(() => expect(error).toHaveBeenCalledWith(shown));
   });
 });

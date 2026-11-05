@@ -180,11 +180,9 @@ function ContactRecord({
   // the total.
   const partial = payoutsTotal > payouts.length;
   // With nothing read, a failed read is not "never paid".
-  const notYet = (
+  const notPaid = (unpaid: string) => (
     <span className="text-tertiary">
-      {payoutsFailed
-        ? t("DashboardPayments.counterparty.detail.paymentsNotLoaded")
-        : t("DashboardPayments.counterparty.detail.notPaidYet")}
+      {payoutsFailed ? t("DashboardPayments.counterparty.detail.paymentsNotLoaded") : unpaid}
     </span>
   );
   return (
@@ -222,7 +220,7 @@ function ContactRecord({
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.detail.lastPaid")}>
           {summary.lastPaidAt === undefined ? (
-            notYet
+            notPaid(t("DashboardPayments.counterparty.detail.neverPaid"))
           ) : (
             <span title={formatDateTime(summary.lastPaidAt, locale) ?? undefined}>
               {lastPaidLabel(summary.lastPaidAt, locale)}
@@ -230,7 +228,9 @@ function ContactRecord({
           )}
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.detail.paidSoFar")}>
-          {summary.count === 0 ? notYet : paidSoFarLabel(summary, partial, locale, t)}
+          {summary.count === 0
+            ? notPaid(t("DashboardPayments.counterparty.detail.nothingPaidYet"))
+            : paidSoFarLabel(summary, partial, locale, t)}
         </DetailRow>
       </DetailList>
     </section>
@@ -242,7 +242,7 @@ function AddressesTable({ accounts }: { accounts: CounterpartyAccount[] }) {
   const locale = useLocale();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
-      <Table className="min-w-[560px] table-fixed rounded-none border-0">
+      <Table className="min-w-[35rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[38%]" />
           <col className="w-[38%]" />
@@ -386,7 +386,7 @@ function PaymentsTable({
   const locale = useLocale();
   return (
     <div className="overflow-x-auto refresh:-mx-3">
-      <Table className="min-w-[720px] table-fixed rounded-none border-0">
+      <Table className="min-w-[45rem] table-fixed rounded-none border-0">
         <colgroup>
           <col className="w-[18%]" />
           <col className="w-[22%]" />
