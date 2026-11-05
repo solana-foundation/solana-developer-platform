@@ -15558,7 +15558,7 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -16134,7 +16134,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-      Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+      How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
     - **`fiatCurrency`** · `string` · example `USD`
 
@@ -16632,7 +16632,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -17598,7 +17598,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -18551,7 +18551,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -19186,7 +19186,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -22047,7 +22047,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
       - **`deliveryMode`** · `string` · one of `hosted`, `manual_instructions`, `session_widget` · example `session_widget`
 
-        Ramp delivery mode. Hosted flows require the customer to complete a provider-hosted UI; manual instructions require the customer to fund displayed instructions; session widgets use a provider SDK session.
+        How the customer completes the ramp with its provider: `hosted` on a provider-hosted page, `session_widget` in a provider SDK session. `manual_instructions` appears only on a retired provider's records.
 
       - **`fiatCurrency`** · `string` · example `USD`
 
@@ -28596,11 +28596,11 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Create on-ramp quote
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-onramp-quote
 
-> Creates a provider-specific on-ramp quote.
+> Creates an on-ramp quote with the provider you name, and the transfer that follows it.
 
 `POST /v1/payments/ramps/onramp/quote`
 
-Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.
+`quote.deliveryMode` says how to hand the customer to the provider: `hosted` returns a provider-hosted URL, and `session_widget` a provider session to mount.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp.execute` action.
 
@@ -28608,11 +28608,11 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `onramp
 
 `application/json` · required
 
-Create an on-ramp quote. The response uses `deliveryMode` to indicate whether the client should display manual instructions, open a hosted provider flow, or mount a provider session widget.
+Create an on-ramp quote. The response's `quote.deliveryMode` says whether to open a provider-hosted page (`hosted`) or mount a provider session widget (`session_widget`).
 
 - **`provider`** · `string` · required · one of `moonpay`, `stripe` · example `moonpay`
 
-  Ramp provider identifier. Hosted providers return a URL, manual providers return funding instructions, and Stripe returns a session widget secret.
+  Ramp provider to quote with. The response's `quote.deliveryMode` says how that provider hands off: a hosted URL or a session widget.
 
 - **`counterpartyId`** · `string` · required · min length 1 · example `cpty_example`
 
@@ -28660,9 +28660,9 @@ Create an on-ramp quote. The response uses `deliveryMode` to indicate whether th
 
         Provider that created the quote.
 
-      - **`status`** · `string` · required · one of `pending`, `processing`, `completed`, `failed` · example `pending`
+      - **`status`** · `string` · required · always `pending` · example `pending`
 
-        Quote status.
+        Always `pending`: a quote opens its transfer before the customer pays, and SDP never updates the quote. Follow the transfer for progress.
 
       - **`deliveryMode`** · `string` · required · one of `hosted`, `session_widget` · example `hosted`
 
@@ -28853,11 +28853,13 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Simulate sandbox transfer
 Source: https://platform.solana.com/docs/reference/api/payments/simulate-sandbox-transfer
 
-> Sandbox-only.
+> Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets 400.
 
 `POST /v1/payments/ramps/sandbox/simulate`
 
-Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.
+To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.
+
+The checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_transfers.manage` action.
 
@@ -28871,17 +28873,15 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_t
 
 `application/json` · required
 
-Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote. Only the transfer ID is accepted; every provider-specific value is derived from the transfer.
+Names the sandbox on-ramp transfer. Only the transfer ID is accepted.
 
 - **`transferId`** · `string` · required · min length 1 · example `xfr_example`
 
-  ID of an on-ramp transfer that is awaiting payment. The provider, quote reference, counterparty, and fiat amount are read from the transfer; each transfer can be simulated once.
+  ID of a sandbox on-ramp transfer that is awaiting payment.
 
 ## Responses
 
-- **`204`** Sandbox pay-in requested from the provider
-
-- **`400`** Bad Request
+- **`400`** No ramp provider SDP integrates offers a simulated pay-in, or the transfer isn't an on-ramp.
 
   - **`error`** · `object` · required
 
@@ -28967,14 +28967,11 @@ r = requests.post("https://api.solana.com/v1/payments/ramps/sandbox/simulate",
 
 ## Example responses
 
-```json tab="403"
+```json tab="400"
 {
   "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: ramp_transfers.manage",
-    "details": {
-      "action": "ramp_transfers.manage"
-    }
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
   },
   "meta": {
     "requestId": "req_example"
@@ -37300,7 +37297,7 @@ data = response.json()["data"]
 
 ### The response
 
-The response holds `quote` and `transferId`, the **Payment Transfer** the quote opened. Follow the ramp with [`GET /v1/payments/transfers/{transferId}`](/docs/reference/api/payments/get-payment-transfer). `quote.status` is a snapshot from when the quote was created, and SDP doesn't update it. There's no endpoint to read a quote again.
+The response holds `quote` and `transferId`, the **Payment Transfer** the quote opened. Follow the ramp with [`GET /v1/payments/transfers/{transferId}`](/docs/reference/api/payments/get-payment-transfer). `quote.status` is always `pending`: SDP never updates a quote, so the transfer is what moves. There's no endpoint to read a quote again.
 
 `quote.deliveryMode` says how to hand the customer to the provider:
 
@@ -39039,7 +39036,7 @@ The configurator groups the variables into sections:
 | Solana RPC | The devnet and mainnet RPC endpoints. |
 | Authentication (Clerk) | Clerk keys, issuer, dashboard URL, and webhook secret. |
 | Signing provider | Which signers to enable, the default one, and their credentials. |
-| Fee payment | How transaction fees are paid. |
+| Fee payment | The Kora that sponsors each cluster's transaction fees, if any. |
 | Secrets | App secrets, generated where you run the configurator. |
 | Advanced | Image source, ports, public URLs, proxy trust, and optional features. |
 
@@ -39088,6 +39085,19 @@ The configurator offers `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, 
 Privy, Coinbase CDP, Para, and Turnkey are open to every organization. The others, `local` included, also need a per-organization activation: [First devnet deployment](/docs/self-hosting/first-devnet-deployment) shows how for the local signer.
 
 For provider co-signers that run outside the stack, see [External co-signers](/docs/self-hosting/external-co-signers).
+
+## Fee payment
+
+SDP pays transaction fees through a Kora on each project's cluster, and the stack doesn't bundle one. The configurator's choice of clusters (`FEE_SPONSOR_CLUSTERS`) isn't written to the file: it shows each chosen cluster's fields. Without a Kora, sends SDP sponsors, such as payment transfers, answer `503 PROVIDER_UNAVAILABLE`.
+
+| Variable | Description |
+|---|---|
+| `KORA_DEVNET_URL` | The Kora that pays fees for Sandbox projects. |
+| `KORA_DEVNET_RPC_URL` | The Solana RPC endpoint that Kora reads. SDP prices and settles sponsored fees through it. Set it with `KORA_DEVNET_URL`: the API won't start with only one of the two. |
+| `KORA_DEVNET_API_KEY` | Optional. The API key your Kora requires, if any. |
+| `KORA_DEVNET_CLOUD_RUN_AUDIENCE` | Optional. For a private Kora on Cloud Run: SDP sends it a Google identity token for this audience, which needs the API on Google Cloud and the Kora URL on the audience's `https` origin. |
+
+The `KORA_MAINNET_*` variables do the same for Production projects.
 
 ## Advanced
 

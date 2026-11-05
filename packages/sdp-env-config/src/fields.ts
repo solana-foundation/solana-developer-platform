@@ -36,6 +36,12 @@ export const parseList = (value: string | undefined): string[] =>
 const listIncludes = (key: string, value: string) => (v: Values) =>
   parseList(v[key]).includes(value);
 
+const KORA_RPC_URL_HELP =
+  "The Solana RPC endpoint this Kora reads. SDP prices and settles sponsored fees through it, and won't start with only one of the two Kora URLs set.";
+const KORA_API_KEY_HELP = "Optional. The API key your Kora requires, if it requires one.";
+const KORA_CLOUD_RUN_AUDIENCE_HELP =
+  "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.";
+
 /** Curated provider set the configurator collects full env for. */
 const SIGNING_PROVIDER_OPTIONS: SelectOption[] = [
   { value: "local", label: "local" },
@@ -478,62 +484,93 @@ export const FIELDS: EnvField[] = [
     help: "Comma-separated Utila user resources. Leave empty to default to users/$UTILA_SERVICE_ACCOUNT_EMAIL.",
   },
 
-  // Fee
+  // Fee. The API reads only the KORA_<CLUSTER>_* keys: a cluster with a Kora sponsors fees through
+  // it, and the API refuses to start when a cluster names its Kora URL without its RPC URL, or
+  // the reverse, so each chosen cluster requires both.
   {
-    key: "FEE_PAYMENT_PROVIDER",
+    key: "FEE_SPONSOR_CLUSTERS",
     section: "fee",
-    kind: "select",
-    label: "Fee payment",
-    defaultValue: "native",
+    kind: "multiselect",
+    label: "Sponsor fees with Kora on",
     options: [
-      { value: "native", label: "native" },
-      { value: "kora", label: "kora" },
+      { value: "devnet", label: "Devnet (Sandbox projects)" },
+      { value: "mainnet", label: "Mainnet (Production projects)" },
     ],
-  },
-  {
-    key: "FEE_PAYER_PRIVATE_KEY",
-    section: "fee",
-    kind: "password",
-    label: "Fee payer key (base58)",
-    required: true,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "native" && v.SIGNING_PROVIDER !== "local",
-    help: "Base58 keypair that pays transaction fees. Required because a managed signing provider is selected; with local signing the signing key is used instead.",
+    help: "SDP pays transaction fees through a Kora on each project's cluster. Without one, sends that SDP sponsors, such as payment transfers, answer 503 PROVIDER_UNAVAILABLE.",
   },
   {
     key: "KORA_DEVNET_URL",
     section: "fee",
     kind: "url",
-    label: "Kora URL",
+    label: "Devnet Kora URL",
+    required: true,
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora",
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "devnet"),
+    help: "The Kora that pays fees for Sandbox projects.",
+  },
+  {
+    key: "KORA_DEVNET_RPC_URL",
+    section: "fee",
+    kind: "url",
+    label: "Devnet Kora RPC URL",
+    required: true,
+    pattern: /^https?:\/\//,
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "devnet"),
+    help: KORA_RPC_URL_HELP,
+  },
+  {
+    key: "KORA_DEVNET_API_KEY",
+    section: "fee",
+    kind: "password",
+    label: "Devnet Kora API key",
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "devnet"),
+    help: KORA_API_KEY_HELP,
   },
   {
     key: "KORA_DEVNET_CLOUD_RUN_AUDIENCE",
     section: "fee",
     kind: "url",
-    label: "Private Kora Cloud Run audience",
+    label: "Devnet private Kora Cloud Run audience",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) => v.FEE_PAYMENT_PROVIDER === "kora",
-    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "devnet"),
+    help: KORA_CLOUD_RUN_AUDIENCE_HELP,
   },
   {
     key: "KORA_MAINNET_URL",
     section: "fee",
     kind: "url",
-    label: "Kora URL",
+    label: "Mainnet Kora URL",
+    required: true,
     pattern: /^https?:\/\//,
-    visibleWhen: (v) =>
-      v.FEE_PAYMENT_PROVIDER === "kora" && Boolean(v.SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL),
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "mainnet"),
+    help: "The Kora that pays fees for Production projects.",
+  },
+  {
+    key: "KORA_MAINNET_RPC_URL",
+    section: "fee",
+    kind: "url",
+    label: "Mainnet Kora RPC URL",
+    required: true,
+    pattern: /^https?:\/\//,
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "mainnet"),
+    help: KORA_RPC_URL_HELP,
+  },
+  {
+    key: "KORA_MAINNET_API_KEY",
+    section: "fee",
+    kind: "password",
+    label: "Mainnet Kora API key",
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "mainnet"),
+    help: KORA_API_KEY_HELP,
   },
   {
     key: "KORA_MAINNET_CLOUD_RUN_AUDIENCE",
     section: "fee",
     kind: "url",
-    label: "Private Kora Cloud Run audience",
+    label: "Mainnet private Kora Cloud Run audience",
     pattern: /^https?:\/\//,
-    visibleWhen: (v) =>
-      v.FEE_PAYMENT_PROVIDER === "kora" && Boolean(v.SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL),
-    help: "Optional. Fetches a Google service identity token for a private Kora Cloud Run service while retaining Kora API-key authentication.",
+    visibleWhen: listIncludes("FEE_SPONSOR_CLUSTERS", "mainnet"),
+    help: KORA_CLOUD_RUN_AUDIENCE_HELP,
   },
 
   // Secrets (auto-generated locally)
@@ -734,6 +771,7 @@ export const UI_ONLY_KEYS = new Set([
   "CACHE_MODE",
   "SIGNING_PROVIDERS",
   "POSTGRES_PASSWORD_MODE",
+  "FEE_SPONSOR_CLUSTERS",
 ]);
 
 /** A field is visible unless its visibleWhen predicate returns false. */

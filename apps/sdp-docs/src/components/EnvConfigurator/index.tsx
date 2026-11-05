@@ -45,7 +45,7 @@ const CONFIG_STEPS: ConfigStep[] = [
     id: "signing",
     label: "Signing",
     title: "Local devnet signing",
-    description: "Generate a local signer for devnet and keep native fee payment enabled.",
+    description: "Generate a local signer for devnet, then name a Kora if one sponsors your fees.",
     sections: ["signing", "fee", "secrets"],
   },
   {
@@ -645,9 +645,10 @@ export function EnvConfigurator() {
               <div className="sdp-cfg-box">
                 <h3>Devnet default</h3>
                 <p>
-                  This wizard starts with bundled Postgres, bundled Redis, local signing, native fee
-                  payment, and localhost service URLs. That path is meant for the first self-hosted
-                  devnet deployment.
+                  This wizard starts with bundled Postgres, bundled Redis, local signing, no Kora
+                  fee sponsor, and localhost service URLs. That path is meant for the first
+                  self-hosted devnet deployment. Sends SDP sponsors, such as payment transfers, need
+                  a Kora.
                 </p>
               </div>
             </div>
