@@ -3,8 +3,10 @@ import type {
   PrivateChannelInstance,
   PrivateChannelWithdrawal,
 } from "@sdp/types/private-channels";
-import { usePrivateChannelInstance } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
-import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
+import {
+  usePrivateChannelInstance,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 
 export const PRIVATE_CHANNELS_INSTANCE_READ = "/api/dashboard/private-channels/instance";
 export const WALLET_SUMMARIES_READ = "/api/dashboard/wallets?view=summary";
@@ -56,7 +58,7 @@ export function privateChannelMovementFixture(
 
 /** Keeps the reads a deposit or withdrawal must refresh on screen: the instance and the custody wallets. */
 export function MovementReadsProbe() {
-  usePrivateChannelInstance();
+  usePrivateChannelInstance(true);
   useWalletSummaries({ includeBalances: false });
   return null;
 }
