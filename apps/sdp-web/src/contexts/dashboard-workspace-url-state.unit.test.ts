@@ -57,18 +57,10 @@ describe("dashboard workspace tab URL state", () => {
   });
 
   it("keeps the playground tab when landing on the private channels overview", () => {
-    // A cross-route jump from a sibling sub-page, and the legacy
-    // /api-playground redirect, both arrive here carrying tab=playground.
+    // A cross-route jump from a sibling sub-page arrives here carrying tab=playground.
     expect(
       shouldClearDashboardTabAfterPathnameChange({
         previousPathname: "/dashboard/integrations/private-channels/members",
-        pathname: "/dashboard/integrations/private-channels/overview",
-        tab: "playground",
-      })
-    ).toBe(false);
-    expect(
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/integrations/private-channels/api-playground",
         pathname: "/dashboard/integrations/private-channels/overview",
         tab: "playground",
       })
@@ -89,11 +81,8 @@ describe("dashboard workspace tab URL state", () => {
   );
 
   it.each([
-    ["/dashboard/members", "members", false],
-    ["/dashboard/members", "security", false],
     ["/dashboard/payments", "members", false],
     ["/dashboard/payments", "security", false],
-    ["/dashboard/members", "playground", true],
   ])("from %s, Settings clears the %s tab: %s", (previousPathname, tab, cleared) => {
     expect(
       shouldClearDashboardTabAfterPathnameChange({

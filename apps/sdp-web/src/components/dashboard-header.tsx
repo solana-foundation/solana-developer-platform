@@ -15,12 +15,12 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
+import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
-import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
@@ -573,9 +573,6 @@ function refreshFlowPageConfig(config: {
 /** Width of the refresh Payments overview and list pages: the design's 900px column. */
 const REFRESH_PAGE_WIDTH = "max-w-page";
 
-/** Embedded Yield's former home, which still renders the same pages. */
-const LEGACY_EARN_PROGRAM_HREF = "/dashboard/markets/earn";
-
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -640,16 +637,6 @@ function getPrivateChannelsRoutePageConfig(
 ): DashboardPageConfig | null {
   if (!pathname.startsWith("/dashboard/integrations/private-channels")) {
     return null;
-  }
-  if (pathname === "/dashboard/integrations/private-channels") {
-    return {
-      title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/integrations",
-        label: t("Shared.integrations.backToIntegrations"),
-      },
-    };
   }
   if (pathname === "/dashboard/integrations/private-channels/setup") {
     return privacySetupPageConfig(t);
@@ -796,11 +783,7 @@ function getMarketsRoutePageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
-  // Embedded Yield, also at its legacy `earn` alias, with the integration as its page action.
-  if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === LEGACY_EARN_PROGRAM_HREF
-  ) {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram) {
     return {
       title: t("Shared.dashboardShell.earnProgram"),
       titlePosition: "left",
@@ -812,13 +795,8 @@ function getMarketsRoutePageConfig(
       },
     };
   }
-  // The integration guide, under both its routes and the legacy alias: the way back to the
-  // portfolio over a left title.
-  if (
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate` ||
-    pathname === `${LEGACY_EARN_PROGRAM_HREF}/configure`
-  ) {
+  // The integration guide: the way back to the portfolio over a left title.
+  if (pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`) {
     return {
       title: t("DashboardMarkets.earnProgram.configureShort"),
       contentWidthClass: REFRESH_PAGE_WIDTH,
@@ -843,9 +821,8 @@ function getWalletRoutePageConfig(
   t: ReturnType<typeof useTranslations>,
   paymentsEnabled: boolean
 ): DashboardPageConfig | null {
-  const walletDetailMatch = pathname.match(/^\/dashboard\/(?:wallets|custody)\/([^/]+)\/?$/);
-  const isWalletDetail =
-    walletDetailMatch !== null && !["setup", "connections"].includes(walletDetailMatch[1] ?? "");
+  const walletDetailMatch = pathname.match(/^\/dashboard\/wallets\/([^/]+)\/?$/);
+  const isWalletDetail = walletDetailMatch !== null && walletDetailMatch[1] !== "setup";
   if (!isWalletDetail) return null;
 
   // The wallet names itself (and sets its provider mark and star) through DashboardPageTitle;
@@ -1009,8 +986,7 @@ function getIntegrationsPageConfig(
 }
 
 /**
- * Header config for the wallet section's landing routes, under both the
- * `/wallets` and legacy `/custody` prefixes. Returns null elsewhere.
+ * Header config for the wallet section's landing routes. Returns null elsewhere.
  */
 function getWalletSectionPageConfig(
   pathname: string,
@@ -1018,7 +994,7 @@ function getWalletSectionPageConfig(
 ): DashboardPageConfig | null {
   // The list and the create flow are built on the refresh design: a left title over the
   // design's 900px column with the page's one action beside it.
-  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
+  if (pathname === "/dashboard/wallets") {
     return {
       title: t("Shared.dashboardShell.wallets"),
       headerTabs: playgroundHeaderTabs(t),
@@ -1034,7 +1010,7 @@ function getWalletSectionPageConfig(
   }
   // The flow names itself in its step header, as the design draws it; the title stays for
   // assistive tech and the footer's Cancel is the way back.
-  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+  if (pathname === "/dashboard/wallets/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
       hideTitle: true,
@@ -1042,10 +1018,7 @@ function getWalletSectionPageConfig(
       headerWidthClass: "max-w-flow",
     };
   }
-  if (
-    pathname === "/dashboard/wallets/connections" ||
-    pathname === "/dashboard/custody/connections"
-  ) {
+  if (pathname === "/dashboard/wallets/connections") {
     return {
       title: t("Shared.dashboardShell.connections"),
       contentWidthClass: "max-w-none",
@@ -1296,8 +1269,7 @@ export function getDashboardPageConfig(
   if (pathname === "/dashboard/helius-rings") {
     return { title: t("Shared.dashboardShell.heliusRings") };
   }
-  // Members only redirects into Settings, so its loading frame carries the Settings title.
-  if (pathname.startsWith("/dashboard/settings") || pathname === "/dashboard/members") {
+  if (pathname.startsWith("/dashboard/settings")) {
     return {
       title: t("Shared.organizationSettings.title"),
       contentWidthClass: REFRESH_PAGE_WIDTH,

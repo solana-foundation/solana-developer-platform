@@ -9,8 +9,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
+import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import {
   DashboardHeaderAction,
   DashboardTopBar,
@@ -380,10 +380,8 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
 
 function usesWorkspaceViewport(pathname: string): boolean {
   const isWalletDetailRoute =
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
-  const isWalletSetupRoute =
-    pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup";
+    pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup";
+  const isWalletSetupRoute = pathname === "/dashboard/wallets/setup";
 
   return (
     pathname === "/dashboard/issuance" ||
@@ -395,7 +393,6 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname.startsWith("/dashboard/payments") ||
     pathname.startsWith("/dashboard/markets") ||
     pathname === "/dashboard/wallets" ||
-    pathname === "/dashboard/custody" ||
     isWalletSetupRoute ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
     isWalletDetailRoute

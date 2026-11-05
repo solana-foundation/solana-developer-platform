@@ -6,8 +6,7 @@ const READ_ONLY_PAGES = [
   "/dashboard/tokens",
   "/dashboard/payments/counterparty",
   "/dashboard/api-keys",
-  "/dashboard/members",
-  "/dashboard/custody",
+  "/dashboard/wallets",
   "/dashboard/settings",
 ];
 

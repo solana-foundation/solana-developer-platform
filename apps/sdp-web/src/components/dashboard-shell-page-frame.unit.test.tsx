@@ -164,7 +164,7 @@ describe("dashboard shell page frame", () => {
   // A phone browser's vh is its height with the toolbars hidden, so a vh shell kept a locked
   // page's footer under the toolbar.
   it("sizes a locked page to the visible viewport", async () => {
-    await renderAt(`${PROJECT}/custody/setup`);
+    await renderAt(`${PROJECT}/wallets/setup`);
 
     const shell = container.querySelector("main[data-sdp-dashboard-shell]");
     expect(shell?.hasAttribute("data-sdp-locked-viewport")).toBe(true);

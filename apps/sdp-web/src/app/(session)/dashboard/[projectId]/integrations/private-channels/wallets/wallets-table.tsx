@@ -13,12 +13,12 @@ import { Trash2Icon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import type { WalletChannelBalance } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
-import type { WalletChannelBalance } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

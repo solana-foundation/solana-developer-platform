@@ -11,8 +11,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/wallets", "wallets-overview"],
     ["/dashboard/wallets/setup", "wallet-setup"],
     ["/dashboard/wallets/wallet-1", "wallet-detail"],
-    ["/dashboard/custody", "wallets-overview"],
-    ["/dashboard/custody/wallet-1", "wallet-detail"],
     ["/dashboard/issuance", "issuance-overview"],
     ["/dashboard/issuance/create", "issuance-create"],
     ["/dashboard/issuance/token-1", "issuance-detail"],
@@ -38,7 +36,6 @@ describe("dashboard loading route", () => {
     ["/dashboard/api-keys/new", "api-key-new"],
     ["/dashboard/api-keys/key-1/edit", "api-key-edit"],
     ["/dashboard/settings", "settings"],
-    ["/dashboard/members", "settings"],
     ["/dashboard/account", "account"],
     ["/dashboard/helius-rings", "helius-rings"],
     ["/dashboard/integrations", "integrations"],
@@ -137,7 +134,7 @@ describe("holdings route", () => {
 
 describe("project switch destination", () => {
   it.each([
-    ["/dashboard/custody/cwlt_test_1", "/dashboard/wallets"],
+    ["/dashboard/wallets/cwlt_test_1", "/dashboard/wallets"],
     ["/dashboard/wallets/setup", "/dashboard/wallets"],
     ["/dashboard/payments/transactions/tx_test_1", "/dashboard/payments/transactions"],
     ["/dashboard/payments", "/dashboard/payments"],
