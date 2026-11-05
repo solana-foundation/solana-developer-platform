@@ -1018,16 +1018,6 @@ function getWalletSectionPageConfig(
       headerWidthClass: "max-w-flow",
     };
   }
-  if (pathname === "/dashboard/wallets/connections") {
-    return {
-      title: t("Shared.dashboardShell.connections"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
-    };
-  }
   return null;
 }
 
