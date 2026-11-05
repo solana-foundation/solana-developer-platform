@@ -22,6 +22,10 @@ const REFRESH_ROUTES = [
   // The Private Channels connect form, with or without an instance: /private-channels/setup and
   // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
   /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/,
+  // Account: profile, security and preferences, as ?tab= tabs of one page.
+  /^\/dashboard\/account\/?$/,
+  // Organization settings: General and Members, as ?tab= tabs of one page.
+  /^\/dashboard\/settings\/?$/,
 ] as const;
 
 /**

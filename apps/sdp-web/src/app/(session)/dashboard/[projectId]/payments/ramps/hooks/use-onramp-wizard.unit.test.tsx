@@ -12,6 +12,7 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
+import { stubClerkSession } from "@/test/clerk";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -34,9 +35,9 @@ vi.mock("sonner", () => ({
     success: mocks.toastSuccess,
   },
 }));
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
-}));
+beforeEach(() => {
+  stubClerkSession({ orgId: "org-test", userId: "user-test" });
+});
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TRANSFER_ID = "xfr_moonpay_wizard";

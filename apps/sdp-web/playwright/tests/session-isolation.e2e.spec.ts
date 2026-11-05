@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "@/playwright/env";
 import { resolveClerkTestIdentity } from "@/playwright/support/clerk-admin";
+import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { provisionLinkedOrgProjects } from "@/playwright/support/local-dashboard-bootstrap";
 
 declare global {
@@ -163,6 +164,7 @@ test.describe
         const page = await context.newPage();
         await page.goto(`${env.baseURL}/sign-in`);
         await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
+        await recordClerkSession(page);
         await page.goto(`${env.baseURL}/dashboard`);
         await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
         await expectContacts(page, primaryProject, contactA, contactB);
@@ -241,11 +243,11 @@ test.describe
     test("project switching keeps Sandbox contacts out of Production", async ({ page }) => {
       await expectContacts(page, primaryProject, contactA, contactB);
       await page.getByRole("button", { name: primaryName, exact: true }).click();
-      await page.getByRole("menuitem", { name: "Default Production Project", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Production/ }).click();
       await expect(page).toHaveURL(new RegExp(`/dashboard/${productionProject}/payments`));
       await expect(page.getByRole("row", { name: new RegExp(contactA) })).toHaveCount(0);
       await page.getByRole("button", { name: primaryName, exact: true }).click();
-      await page.getByRole("menuitem", { name: "Default Sandbox Project", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Sandbox/ }).click();
       await expect(page).toHaveURL(new RegExp(`/dashboard/${primaryProject}/payments`));
       await expectContacts(page, primaryProject, contactA, contactB);
     });
@@ -335,6 +337,7 @@ test.describe
     }, testInfo) => {
       await page.goto("/sign-in");
       await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
+      await recordClerkSession(page);
       await page.goto("/dashboard");
       await expectContacts(page, primaryProject, contactA, contactB);
       await expect

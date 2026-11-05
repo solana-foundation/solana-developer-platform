@@ -1,3 +1,4 @@
+import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
   DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
@@ -19,6 +20,8 @@ const ROUTE_TABS = new Map<string, readonly string[]>([
   ["/dashboard/integrations/private-channels/overview", PLAYGROUND_TAB],
   // The Integrations sidebar submenu links to the hub with a family tab.
   [DASHBOARD_SIDE_NAV_HREFS.integrations, Object.keys(DASHBOARD_INTEGRATIONS_SUBNAV_HREFS)],
+  // The retired /members route redirects to the Members tab of Organization settings.
+  ["/dashboard/settings", SETTINGS_TABS.map((settingsTab) => settingsTab.id)],
 ]);
 
 function normalizePathname(pathname: string): string {

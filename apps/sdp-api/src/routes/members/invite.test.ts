@@ -225,6 +225,69 @@ describe("POST /v1/members/invite", () => {
     expect((await invite(INVITEE_EMAIL)).status).toBe(201);
   });
 
+  it("re-invites an address that already holds the Clerk membership, keeping Clerk's wording out of the answer", async () => {
+    await seedInvitation(getDb(env), {
+      id: "inv_invite_expired",
+      organizationId: ORGANIZATION.id,
+      email: INVITEE_EMAIL,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "expired",
+      expiresInDays: -1,
+    });
+    clerk.answer({
+      status: 400,
+      body: {
+        errors: [
+          {
+            code: "already_a_member_in_organization",
+            message: "already a member",
+            long_message: `${INVITEE_EMAIL} is already a member of the organization.`,
+          },
+        ],
+      },
+    });
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(201);
+    const rows = await invitationRows();
+    const fresh = rows.find((row) => row.id !== "inv_invite_expired");
+    expect(fresh).toMatchObject({
+      email: INVITEE_EMAIL,
+      role: "admin",
+      status: "pending",
+      clerk_invitation_id: null,
+    });
+    expect(await response.json()).toEqual({
+      data: {
+        invitation: {
+          id: fresh?.id,
+          email: INVITEE_EMAIL,
+          role: "admin",
+          expiresAt: fresh?.expires_at,
+          clerkInvitationId: null,
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+  });
+
+  it("answers a Clerk failure with the generic internal error, never Clerk's own text", async () => {
+    clerk.answer({
+      status: 422,
+      body: { errors: [{ code: "form_param_format_invalid", long_message: "Clerk says no" }] },
+    });
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: { code: "INTERNAL_ERROR", message: "An internal error occurred" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+
   it("keeps the claimed invitation pending with no Clerk id when Clerk refuses it", async () => {
     clerk.answer({ status: 500, body: { errors: [] } });
 
