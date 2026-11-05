@@ -6,6 +6,7 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 
+const TWO_ITEMS = ["one", "two"] as const;
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
 const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
@@ -128,44 +129,61 @@ export function WalletsOnboardingSkeleton() {
 }
 
 /**
- * The create flow in the refresh wizard's geometry: the step header and bar, the question, the
- * provider list in its frame, and the footer band.
+ * The create flow in its one-screen geometry, as a project's first wallet draws it: the title,
+ * the custody question with its two answers, the label, the summary rows, and the footer band.
  */
 export function WalletSetupSkeleton() {
   return (
     <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden px-4 pt-9 md:px-6">
         <div className="mx-auto w-full max-w-flow">
-          <div className="mb-12 space-y-2">
-            <div className="flex items-center justify-between">
-              <Pulse className="h-4 w-16" />
-              <Pulse className="h-3 w-16" />
-            </div>
-            <Pulse className="h-1 w-full rounded-full" />
-          </div>
-          <Pulse className="h-7 w-80 max-w-full" />
-          <Pulse className="mt-2 h-4 w-64 max-w-full" />
-          <div className="mt-6 overflow-hidden rounded-card border border-border-default bg-surface-tile">
-            {FIVE_ITEMS.map((provider) => (
-              <div
-                key={provider}
-                className="flex items-center gap-3 border-t border-border-subtle px-4 py-3 first:border-t-0"
-              >
-                <Pulse className="size-8 shrink-0 rounded-full" />
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <Pulse className="h-4 w-28" />
-                  <Pulse className="h-3.5 w-72 max-w-full" />
-                </div>
-                <Pulse className="size-4 shrink-0 rounded-full" />
+          <Pulse className="mb-6 h-8 w-44" />
+          <div className="space-y-8">
+            <div>
+              <Pulse className="h-5 w-64 max-w-full" />
+              <div className="mt-3 overflow-hidden rounded-card border border-border-default bg-surface-tile">
+                {TWO_ITEMS.map((answer) => (
+                  <div
+                    key={answer}
+                    className="flex items-center gap-3 border-t border-border-subtle px-4 py-3 first:border-t-0"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <Pulse className="h-4 w-40" />
+                      <Pulse className="h-3.5 w-64 max-w-full" />
+                    </div>
+                    <Pulse className="size-4 shrink-0 rounded-full" />
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            <div className="space-y-2">
+              <Pulse className="h-4 w-24" />
+              <Pulse className="h-9 w-full rounded-control" />
+            </div>
+            <div>
+              <Pulse className="h-5 w-24" />
+              <div className="mt-2">
+                {FOUR_ITEMS.map((row) => (
+                  <div
+                    key={row}
+                    className="flex h-12 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
+                  >
+                    <Pulse className="h-4 w-20" />
+                    <Pulse className="h-4 w-32" />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
       <div className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
-        <div className="mx-auto flex w-full max-w-flow items-center justify-end gap-4">
-          <Pulse className="h-10 w-20 rounded-control" />
-          <Pulse className="h-10 w-28 rounded-control" />
+        <div className="mx-auto flex w-full max-w-flow flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <Pulse className="h-4 w-56 max-w-full" />
+          <div className="flex items-center justify-end gap-4 sm:ml-auto">
+            <Pulse className="h-10 w-20 rounded-control" />
+            <Pulse className="h-10 w-28 rounded-control" />
+          </div>
         </div>
       </div>
     </LoadingRegion>

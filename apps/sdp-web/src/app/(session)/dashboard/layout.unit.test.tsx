@@ -28,7 +28,36 @@ describe("dashboard layout", () => {
       type: AuthPageShell,
       props: {
         action: null,
-        children: { type: SelectExistingOrganizationPanel, props: { noAccess: true } },
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { noAccess: true, invitationExpired: false },
+        },
+      },
+    });
+  });
+
+  it("explains an expired invitation when SDP refuses the session for one", async () => {
+    vi.spyOn(sdpApi, "requestMemberRole").mockRejectedValue(
+      new sdpApi.SdpApiResponseError(
+        401,
+        JSON.stringify({
+          error: {
+            code: "UNAUTHORIZED",
+            message: "Invitation to this organization has expired",
+            details: { reason: "invitation_expired" },
+          },
+        })
+      )
+    );
+
+    const layout = await DashboardLayout({ children: "dashboard page" });
+
+    expect(layout).toMatchObject({
+      props: {
+        children: {
+          type: SelectExistingOrganizationPanel,
+          props: { noAccess: true, invitationExpired: true },
+        },
       },
     });
   });

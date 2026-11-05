@@ -3,26 +3,28 @@
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { InfoHint } from "@sdp/ui/info-hint";
-import { StatusText, type StatusTone } from "@sdp/ui/status-text";
+import type { StatusTone } from "@sdp/ui/status-text";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { StateBand, type StateBandTone } from "@/components/refresh-record";
 import { useTranslations } from "@/i18n/provider";
 
 // The design's record pages (a transaction, a payment request): the state as a tinted band,
 // the amount at 40px, then label and value rows in two columns, and titled sections below.
 
-const BAND_TONE: Record<StatusTone, string> = {
-  positive: "bg-success/7 dark:bg-success/12",
-  progress: "bg-info/7 dark:bg-info/12",
-  attention: "bg-warning/7 dark:bg-warning/12",
-  critical: "bg-error/7 dark:bg-error/12",
-  neutral: "bg-fill-subtle",
+/** A status's reading as the record band's tone: the same colours a status list uses. */
+const BAND_TONE: Record<StatusTone, StateBandTone> = {
+  positive: "ok",
+  progress: "info",
+  attention: "warn",
+  critical: "error",
+  neutral: "neutral",
 };
 
 /**
- * Where the record stands: the state in its colour, a line on why, and what can be done about
- * it at the band's end. Flat: the tint is the status colour, nothing is raised.
+ * Where the record stands, as every record's band reads: the state in its colour, a line on
+ * why, and what can be done about it at the band's end.
  */
 export function RecordStateBand({
   state,
@@ -36,21 +38,9 @@ export function RecordStateBand({
   action?: ReactNode;
 }) {
   return (
-    <div
-      data-slot="state-band"
-      className={cn(
-        "flex flex-col items-start gap-3 rounded-[var(--corner-card)] px-4 py-3 @2xl:flex-row @2xl:items-center @2xl:justify-between @2xl:gap-6",
-        BAND_TONE[tone]
-      )}
-    >
-      <div className="flex w-full min-w-0 flex-col gap-0.5 @2xl:flex-1">
-        <p className="text-nav font-medium">
-          <StatusText tone={tone}>{state}</StatusText>
-        </p>
-        {why ? <p className="text-nav text-secondary">{why}</p> : null}
-      </div>
-      {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
-    </div>
+    <StateBand tone={BAND_TONE[tone]} state={state} action={action}>
+      {why}
+    </StateBand>
   );
 }
 

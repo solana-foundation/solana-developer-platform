@@ -26,7 +26,11 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
-import { findPendingInvitation } from "@/services/organization-membership.service";
+import {
+  findPendingInvitation,
+  invitationExpired,
+  uninvitedRefusal,
+} from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
@@ -273,15 +277,17 @@ async function ensureMembership(
 
     // Admission comes only from an SDP invitation (ADR 0012): the Clerk
     // membership that let this token name the organization grants nothing.
+    // The refusal is read from the newest invitation every time, so an
+    // expired one is still reported as expired once its row says so.
     if (!pendingInvite) {
-      throw unauthorized("No pending invitation to this organization");
+      throw await uninvitedRefusal(db, params);
     }
-    if (new Date(pendingInvite.expiresAt) < new Date()) {
+    if (new Date(pendingInvite.expiresAt) <= new Date()) {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
         .bind(pendingInvite.id)
         .run();
-      throw unauthorized("Invitation to this organization has expired");
+      throw invitationExpired();
     }
 
     const role = pendingInvite.role;

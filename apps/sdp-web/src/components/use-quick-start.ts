@@ -64,9 +64,9 @@ function useQuickStartStatus(
   live: boolean,
   skipped: QuickStartPrefs["skipped"]
 ): QuickStartStatus | null {
-  const { initialQuickStartStatus } = useDashboardWorkspace();
+  const { initialQuickStartStatus, selectedProjectId } = useDashboardWorkspace();
   const { data: status, mutate: refreshStatus } = usePersistedDashboardSWR(
-    live ? quickStartQueryKeys.status() : null,
+    live && selectedProjectId ? quickStartQueryKeys.status(selectedProjectId) : null,
     fetchQuickStartStatus,
     {
       fallbackData: initialQuickStartStatus ?? undefined,

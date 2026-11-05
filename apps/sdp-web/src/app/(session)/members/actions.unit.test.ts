@@ -57,6 +57,9 @@ describe("member actions", () => {
   });
 
   it("inviteMember forwards the form's idempotencyKey", async () => {
+    client.fetch.mockResolvedValue({
+      invitation: { id: "inv_test", clerkInvitationId: "orginv_test" },
+    });
     const formData = new FormData();
     formData.set("email", "invitee@example.com");
     formData.set("role", "member");
@@ -65,6 +68,7 @@ describe("member actions", () => {
     expect(await inviteMember(formData)).toEqual({
       status: "success",
       email: "invitee@example.com",
+      emailSent: true,
     });
     expect(client.fetch.mock.calls).toEqual([
       [
@@ -76,6 +80,22 @@ describe("member actions", () => {
         },
       ],
     ]);
+  });
+
+  it("inviteMember reports no email sent when the invitation has no Clerk invitation", async () => {
+    client.fetch.mockResolvedValue({
+      invitation: { id: "inv_test", clerkInvitationId: null },
+    });
+    const formData = new FormData();
+    formData.set("email", "invitee@example.com");
+    formData.set("role", "member");
+    formData.set("idempotencyKey", "key_invite");
+
+    expect(await inviteMember(formData)).toEqual({
+      status: "success",
+      email: "invitee@example.com",
+      emailSent: false,
+    });
   });
 
   const wireRole: string = "owner";

@@ -1,7 +1,11 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import type { WalletFaucetResponse } from "@sdp/types/custody";
+import type {
+  CustodyWalletResponse,
+  InitializeSigningResponse,
+  WalletFaucetResponse,
+} from "@sdp/types/custody";
 import { isIdempotencyErrorCode } from "@sdp/types/idempotency";
 import { decimalFixedPointToNumber, lamports, lamportsToSol } from "@solana/kit";
 import { revalidatePath } from "next/cache";
@@ -94,8 +98,9 @@ function toApiActionErrorMessage(
  * Connects the provider the form names and provisions its first wallet.
  *
  * @param formData - The submitted setup form: `provider`, optional `walletLabel`, `network`, `accountPolicy`.
+ * @returns The provisioned wallet's ID, the one its dashboard page is addressed by.
  */
-async function initializeCustodyWallet(formData: FormData): Promise<void> {
+async function initializeCustodyWallet(formData: FormData): Promise<string> {
   const provider = requireCustodyProvider(formData);
   const walletLabel = getOptionalString(formData, "walletLabel");
   const network = getOptionalString(formData, "network");
@@ -116,11 +121,12 @@ async function initializeCustodyWallet(formData: FormData): Promise<void> {
   }
 
   const client = await createSdpApiClient();
-  await client.fetch("/v1/wallets/initialize", {
+  const { walletId } = await client.fetch<InitializeSigningResponse>("/v1/wallets/initialize", {
     method: "POST",
     body: JSON.stringify(payload),
     headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
   });
+  return walletId;
 }
 
 async function revalidateWalletPaths() {
@@ -147,8 +153,9 @@ function parseWalletPurpose(value: string | undefined): string | undefined {
  *
  * @param formData - The submitted wallet form: `provider`, optional `connectionId`, optional
  *   `label`, optional `purpose`.
+ * @returns The new wallet's ID, the one its dashboard page is addressed by.
  */
-async function createCustodyWalletForProvider(formData: FormData) {
+async function createCustodyWalletForProvider(formData: FormData): Promise<string> {
   const label = getOptionalString(formData, "label");
   const purpose = parseWalletPurpose(getOptionalString(formData, "purpose"));
   // A Connection pins the wallet to one specific stored credential, which
@@ -159,16 +166,19 @@ async function createCustodyWalletForProvider(formData: FormData) {
   const target = connectionId ? { connectionId } : { provider: requireCustodyProvider(formData) };
 
   const client = await createSdpApiClient();
-  await client.fetch("/v1/wallets", {
+  const { wallet } = await client.fetch<CustodyWalletResponse>("/v1/wallets", {
     method: "POST",
     body: JSON.stringify({ ...target, label, purpose }),
     headers: actionIdempotencyHeaders(formData.get("idempotencyKey")),
   });
+  return wallet.walletId;
 }
 
 export type WalletSetupActionResult =
   | {
       status: "success";
+      /** The new wallet's ID, for its page at `/dashboard/wallets/<walletId>`. */
+      walletId: string;
     }
   | {
       status: "error";
@@ -197,9 +207,9 @@ export async function initializeCustodySetupAction(
 ): Promise<InitializeCustodySetupActionResult> {
   const t = await getTranslations();
   try {
-    await initializeCustodyWallet(formData);
+    const walletId = await initializeCustodyWallet(formData);
     await revalidateWalletPaths();
-    return { status: "success" };
+    return { status: "success", walletId };
   } catch (error) {
     const answer = sdpApiAnswer(error);
     // Only the provider's own conflict means it is set up. The key's refusals (a
@@ -220,9 +230,9 @@ export async function createCustodySetupWalletAction(
 ): Promise<WalletSetupActionResult> {
   const t = await getTranslations();
   try {
-    await createCustodyWalletForProvider(formData);
+    const walletId = await createCustodyWalletForProvider(formData);
     await revalidateWalletPaths();
-    return { status: "success" };
+    return { status: "success", walletId };
   } catch (error) {
     return {
       status: "error",

@@ -404,6 +404,11 @@ export const ONCHAIN_TRANSFER_STATUSES = [
 
 export type OnchainTransferStatus = (typeof ONCHAIN_TRANSFER_STATUSES)[number];
 
+/** Transfer-only statuses hidden when the channel has no ramp provider. */
+export const RAMP_ONLY_TRANSFER_STATUSES = PAYMENT_TRANSFER_STATUSES.filter(
+  (status) => !ONCHAIN_TRANSFER_STATUSES.some((onchainStatus) => onchainStatus === status)
+);
+
 /** Onchain transfer statuses that still await a chain verdict. */
 export const ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES = [
   "pending",

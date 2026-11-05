@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
@@ -68,6 +69,7 @@ import { paymentRecurringPaymentListResponseSchema } from "@/openapi/schemas/pay
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
+import { INSUFFICIENT_FUNDS_MESSAGE } from "@/services/fee-payment-errors";
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import * as counterpartyAccountResolution from "@/services/payments/counterparty-account-resolution";
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
@@ -4380,6 +4382,48 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string; signature: string | null }>();
     expect(transfer?.status).toBe("failed");
     expect(transfer?.signature).toBeTruthy();
+  });
+
+  it("records why a collection from a wallet short of funds failed (HOO-2621)", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    // Instruction 2 is the subscriptions pull; 0 creates the receiver account, 1 approves.
+    recurringExecution
+      .signAsFeePayerMock()
+      .mockRejectedValueOnce(
+        new FeePaymentError(
+          "Failed to sign transaction as fee payer: Kora Error -32000: Invalid transaction: Transaction simulation failed: Error processing Instruction 2: custom program error: 0x1",
+          "PROVIDER_REJECTED"
+        )
+      );
+
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(collectRes.status).toBe(400);
+    const collectBody = errorResponseSchema.parse(await collectRes.json());
+    expect(collectBody.error.code).toBe("TRANSACTION_FAILED");
+    expect(collectBody.error.message).toBe(INSUFFICIENT_FUNDS_MESSAGE);
+    const attempt = await getDb(env)
+      .prepare(
+        "SELECT status, error, transfer_id FROM payment_subscription_collection_attempts WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .first<{ status: string; error: string | null; transfer_id: string | null }>();
+    expect(attempt).toMatchObject({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE });
+    const transfer = await getDb(env)
+      .prepare("SELECT status, error FROM payment_transfers WHERE id = ?")
+      .bind(attempt?.transfer_id)
+      .first<{ status: string; error: string | null }>();
+    expect(transfer).toMatchObject({ status: "failed", error: INSUFFICIENT_FUNDS_MESSAGE });
   });
 
   it.each(["amount", "transfer_hook_accounts"] as const)(
