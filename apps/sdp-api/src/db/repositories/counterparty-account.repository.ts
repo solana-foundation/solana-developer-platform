@@ -4,6 +4,7 @@ import type {
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
 } from "@sdp/types/counterparties";
+import { z } from "zod";
 
 export function generateCounterpartyAccountId(): string {
   return `cpacct_${crypto.randomUUID()}`;
@@ -11,6 +12,12 @@ export function generateCounterpartyAccountId(): string {
 
 /** Unique over a counterparty's active crypto_wallet accounts by network and address (0211). */
 const ACTIVE_ADDRESS_INDEX = "counterparty_accounts_active_address_unique";
+
+/** A Postgres unique violation (SQLSTATE 23505) on the active-address index. */
+const duplicateAddressErrorSchema = z.object({
+  code: z.literal("23505"),
+  constraint: z.literal(ACTIVE_ADDRESS_INDEX),
+});
 
 /**
  * Whether a write failed because the counterparty already has an active account
@@ -20,14 +27,7 @@ const ACTIVE_ADDRESS_INDEX = "counterparty_accounts_active_address_unique";
  * @returns True only for a unique violation on the active-address index.
  */
 export function isDuplicateCounterpartyAccountAddress(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "23505" &&
-    "constraint" in error &&
-    error.constraint === ACTIVE_ADDRESS_INDEX
-  );
+  return duplicateAddressErrorSchema.safeParse(error).success;
 }
 
 export interface CounterpartyAccountRow {
