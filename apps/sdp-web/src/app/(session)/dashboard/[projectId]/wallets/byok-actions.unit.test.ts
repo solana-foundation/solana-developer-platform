@@ -77,7 +77,6 @@ describe("recheckPrivyCredentialAction", () => {
       expect.objectContaining({ method: "POST" })
     );
     expect(mocks.revalidatePath.mock.calls).toEqual([
-      [`/dashboard/${PRODUCTION_PROJECT.id}/custody`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
       [`/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy`],
     ]);

@@ -17,7 +17,6 @@ describe("themeScopeForPath", () => {
     "/dashboard/wallets",
     "/dashboard/wallets/setup",
     "/dashboard/wallets/fb_wallet",
-    "/dashboard/wallets/connections",
     "/dashboard/issuance",
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",

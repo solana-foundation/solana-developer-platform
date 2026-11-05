@@ -64,11 +64,13 @@ import ProjectLayout from "./[projectId]/layout";
 import { ProjectOrganizationSwitch } from "./[projectId]/project-organization-switch";
 import DashboardLandingPage from "./page";
 
-const WORKSPACE_LOADING_REDIRECT = "/workspace-loading?return_to=%2Fdashboard";
-
 async function expectRedirect(render: Promise<unknown>, url: string): Promise<void> {
   await expect(render).rejects.toThrow("NEXT_REDIRECT");
   expect(nextNavigationMock.redirect.mock.calls).toEqual([[url]]);
+}
+
+function renderLanding(searchParams: { return_to?: string }) {
+  return DashboardLandingPage({ searchParams: Promise.resolve(searchParams) });
 }
 
 function renderProjectPage(projectId: string, pathname: string) {
@@ -91,23 +93,52 @@ describe("bare dashboard landing", () => {
   it("lands on the last-used project while the organization lists it", async () => {
     setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
 
-    await expectRedirect(DashboardLandingPage(), `/dashboard/${PRODUCTION_PROJECT.id}`);
+    await expectRedirect(renderLanding({}), `/dashboard/${PRODUCTION_PROJECT.id}`);
   });
 
   it("lands on the sandbox when the last-used project is no longer listed", async () => {
     setLastUsedProjectCookie(OTHER_ORGANIZATION_PROJECT.id);
 
-    await expectRedirect(DashboardLandingPage(), `/dashboard/${SANDBOX_PROJECT.id}`);
+    await expectRedirect(renderLanding({}), `/dashboard/${SANDBOX_PROJECT.id}`);
   });
 
   it("lands on the sandbox without a last-used project", async () => {
-    await expectRedirect(DashboardLandingPage(), `/dashboard/${SANDBOX_PROJECT.id}`);
+    await expectRedirect(renderLanding({}), `/dashboard/${SANDBOX_PROJECT.id}`);
   });
 
-  it("waits on the workspace loading page while no project is provisioned", async () => {
+  it("returns a docs playground link to its endpoint inside the last-used project", async () => {
+    setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
+
+    await expectRedirect(
+      renderLanding({ return_to: "/dashboard/payments?tab=playground&endpoint=ep_test" }),
+      `/dashboard/${PRODUCTION_PROJECT.id}/payments?tab=playground&endpoint=ep_test`
+    );
+  });
+
+  it("replaces a project named in the requested page with the landing project", async () => {
+    setLastUsedProjectCookie(PRODUCTION_PROJECT.id);
+
+    await expectRedirect(
+      renderLanding({ return_to: `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/api-keys?tab=x` }),
+      `/dashboard/${PRODUCTION_PROJECT.id}/api-keys?tab=x`
+    );
+  });
+
+  it.each([
+    ["//evil.com", `/dashboard/${SANDBOX_PROJECT.id}`],
+    ["https://evil.com/dashboard", `/dashboard/${SANDBOX_PROJECT.id}`],
+    ["/dashboard//evil.com", `/dashboard/${SANDBOX_PROJECT.id}//evil.com`],
+  ])("keeps a crafted return_to %s inside the dashboard", async (returnTo, url) => {
+    await expectRedirect(renderLanding({ return_to: returnTo }), url);
+  });
+
+  it("waits on the workspace loading page with the requested page while no project is provisioned", async () => {
     sdpApi.listSdpProjects.mockResolvedValue([]);
 
-    await expectRedirect(DashboardLandingPage(), "/workspace-loading");
+    await expectRedirect(
+      renderLanding({ return_to: "/dashboard/payments?tab=x" }),
+      `/workspace-loading?return_to=${encodeURIComponent("/dashboard/payments?tab=x")}`
+    );
   });
 });
 
@@ -164,6 +195,6 @@ describe("project-scoped dashboard layout", () => {
       `/dashboard/${OTHER_ORGANIZATION_PROJECT.id}/payments`
     );
 
-    expect(layout).toMatchObject({ props: { fallbackHref: WORKSPACE_LOADING_REDIRECT } });
+    expect(layout).toMatchObject({ props: { fallbackHref: "/workspace-loading" } });
   });
 });
