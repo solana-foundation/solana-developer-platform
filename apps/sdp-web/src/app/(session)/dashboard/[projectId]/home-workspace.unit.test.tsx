@@ -7,6 +7,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { DashboardReadError } from "@/lib/dashboard-swr";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import type { HomeActivityRow } from "./home-page.data";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
@@ -393,6 +394,11 @@ describe("Overview (HomeWorkspace)", () => {
   });
 
   it("shows the activity error over its notice, and a loading line before the first read", () => {
+    mocks.read.activity = { error: new DashboardReadError(503, null, null) };
+    const failed = renderOverview();
+    expect(screen.getByText("Activity is unavailable right now.")).toBeTruthy();
+    failed.unmount();
+
     mocks.read.activity = {
       data: { activityRows: [], activityError: "Partial outage.", activityNotice: "Hidden." },
     };

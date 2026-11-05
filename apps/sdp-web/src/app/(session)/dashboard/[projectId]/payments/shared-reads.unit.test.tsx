@@ -25,6 +25,7 @@ const FIRST_PAGE = {
     },
     { id: "tok_test_draft", mintAddress: null, symbol: "DRAFT", imageUrl: null },
   ],
+  total: ISSUANCE_MAX_PAGE_SIZE + 4,
   hasMore: true,
 };
 const SECOND_PAGE = {
@@ -32,6 +33,7 @@ const SECOND_PAGE = {
     { id: "", mintAddress: "MintTwo2222222222222222222222222222222222222", symbol: "TWO" },
     { id: "tok_test_unminted", mintAddress: "", symbol: "EMPTY", imageUrl: null },
   ],
+  total: ISSUANCE_MAX_PAGE_SIZE + 4,
   hasMore: false,
 };
 
@@ -79,6 +81,18 @@ describe("useIssuedTokens", () => {
     expect(sentDashboardReads(fetchMock)).toEqual([
       { path: FIRST_PAGE_URL, projectId: SANDBOX_PROJECT.id, demo: "1" },
       { path: SECOND_PAGE_URL, projectId: SANDBOX_PROJECT.id, demo: "1" },
+    ]);
+  });
+
+  it("stops once the pages read cover the listing's total, even while it says there is more", async () => {
+    const fetchMock = stubDashboardFetch(() => Response.json(FIRST_PAGE));
+
+    const { result } = renderHook(() => useIssuedTokens(true), { wrapper: DashboardReadsProvider });
+
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+      FIRST_PAGE_URL,
+      SECOND_PAGE_URL,
     ]);
   });
 

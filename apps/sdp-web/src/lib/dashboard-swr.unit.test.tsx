@@ -22,8 +22,10 @@ import {
 } from "./dashboard-request-key";
 import {
   DashboardReadError,
+  readDashboardRequest,
   useDashboardKeyScope,
   useDashboardRead,
+  useDashboardSWR,
   useInvalidateDashboardReads,
 } from "./dashboard-swr";
 
@@ -81,18 +83,27 @@ describe("useDashboardRead", () => {
     ]);
   });
 
-  it("fails a refused read with its status and the API's error code", async () => {
-    stubDashboardFetch(() =>
-      Response.json({ error: { code: "FORBIDDEN", message: "No access" } }, { status: 403 })
-    );
+  it.each([
+    [
+      Response.json({ error: { code: "FORBIDDEN", message: "No access" } }, { status: 403 }),
+      { status: 403, code: "FORBIDDEN", message: "No access" },
+    ],
+    [
+      Response.json({ error: { code: "FORBIDDEN" } }, { status: 403 }),
+      { status: 403, code: "FORBIDDEN", message: "" },
+    ],
+    [new Response("<html></html>", { status: 502 }), { status: 502, code: null, message: "" }],
+  ])(
+    "fails a refused read with its status, code and the API's own message",
+    async (answer, expected) => {
+      stubDashboardFetch(() => answer);
 
-    const { result } = renderHook(() => useDashboardRead(WALLETS_KEY, amountSchema), {
-      wrapper: DashboardReadsProvider,
-    });
+      const read = readDashboardRequest(WALLETS_KEY, amountSchema);
 
-    await waitFor(() => expect(result.current.error).toBeInstanceOf(DashboardReadError));
-    expect(result.current.error).toMatchObject({ status: 403, code: "FORBIDDEN" });
-  });
+      await expect(read).rejects.toBeInstanceOf(DashboardReadError);
+      await expect(read).rejects.toMatchObject(expected);
+    }
+  );
 
   it.each([
     ["a body its schema rejects", () => dashboardDataResponse(200, { amount: "7" })],
@@ -133,19 +144,40 @@ function useReads({ walletsMounted }: { walletsMounted: boolean }) {
   };
 }
 
+function useSharedKeyReads({
+  secondMounted,
+  fetcher,
+}: {
+  secondMounted: boolean;
+  fetcher: () => Promise<string>;
+}) {
+  return {
+    invalidate: useInvalidateDashboardReads(),
+    first: useDashboardSWR(WALLETS_KEY, fetcher),
+    second: useDashboardSWR(secondMounted ? WALLETS_KEY : null, fetcher),
+  };
+}
+
 describe("useInvalidateDashboardReads", () => {
-  it("refetches a mounted matching read and leaves the others alone", async () => {
+  it("refetches a mounted matching read without blanking it, and leaves the others alone", async () => {
     const fetchMock = stubCountingReads();
-    const { result } = renderHook(useReads, {
-      wrapper: DashboardReadsProvider,
-      initialProps: { walletsMounted: true },
-    });
+    const shown: unknown[] = [];
+    const { result } = renderHook(
+      (props: { walletsMounted: boolean }) => {
+        const reads = useReads(props);
+        shown.push(reads.wallets.data);
+        return reads;
+      },
+      { wrapper: DashboardReadsProvider, initialProps: { walletsMounted: true } }
+    );
     await waitFor(() => expect(result.current.counterparties.data).toBeDefined());
     await waitFor(() => expect(result.current.wallets.data).toEqual({ data: { amount: 1 } }));
+    const shownBeforeInvalidation = shown.length;
 
     await act(() => result.current.invalidate(readsUnderPath("/api/dashboard/wallets")));
 
     await waitFor(() => expect(result.current.wallets.data).toEqual({ data: { amount: 2 } }));
+    expect(shown.slice(shownBeforeInvalidation)).not.toContain(undefined);
     expect(readsOf(fetchMock, "/api/dashboard/counterparty")).toBe(1);
     expect(result.current.counterparties.data).toEqual({ data: { amount: 1 } });
   });
@@ -165,6 +197,29 @@ describe("useInvalidateDashboardReads", () => {
     expect(result.current.wallets.data).toBeUndefined();
     expect(result.current.wallets.isLoading).toBe(true);
     await waitFor(() => expect(result.current.wallets.data).toEqual({ data: { amount: 2 } }));
+  });
+
+  it("keeps a read on screen while another component reading the same key unmounts", async () => {
+    let answer = "before";
+    const fetcher = vi.fn(async () => answer);
+    const shown: unknown[] = [];
+    const { result, rerender } = renderHook(
+      (props: { secondMounted: boolean; fetcher: () => Promise<string> }) => {
+        const reads = useSharedKeyReads(props);
+        shown.push(reads.first.data);
+        return reads;
+      },
+      { wrapper: DashboardReadsProvider, initialProps: { secondMounted: true, fetcher } }
+    );
+    await waitFor(() => expect(result.current.second.data).toBe("before"));
+    rerender({ secondMounted: false, fetcher });
+    const shownBeforeInvalidation = shown.length;
+    answer = "after";
+
+    await act(() => result.current.invalidate(readsUnderPath("/api/dashboard/wallets")));
+
+    await waitFor(() => expect(result.current.first.data).toBe("after"));
+    expect(shown.slice(shownBeforeInvalidation)).not.toContain(undefined);
   });
 
   it("never touches a key that is not a request key, whatever the predicate matches", async () => {
