@@ -27,6 +27,15 @@ describe("earnQueryKeys", () => {
     ]);
   });
 
+  it("keys the Kamino allocations read by its vaults on mainnet", () => {
+    expect(earnQueryKeys.kaminoAllocations(SCOPE, { vaults: "Kvault_a,Kvault_b" })).toEqual([
+      SANDBOX_PROJECT.id,
+      "live",
+      "/api/dashboard/markets/earn/kamino-allocations",
+      { vaults: "Kvault_a,Kvault_b", cluster: "mainnet-beta" },
+    ]);
+  });
+
   it("never shares a cache entry with the shared wallet summaries", () => {
     expect(dashboardRequestUrl(earnQueryKeys.fundingWalletInventory(SCOPE))).toBe(
       "/api/dashboard/wallets?includeBalances=true"

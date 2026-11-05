@@ -100,16 +100,21 @@ describe("useKaminoVaultAllocations", () => {
     );
   });
 
-  it("splits a list past one batch into reads of at most 100 and merges them", async () => {
+  it("splits a list past one batch into mainnet reads of their own vaults and merges them", async () => {
     const fetchMock = answerEveryVault();
+    const vaults = Array.from({ length: 150 }, (_, index) => `Kvault${index}`);
 
-    const { result } = renderAllocations(
-      Array.from({ length: 150 }, (_, index) => `Kvault${index}`)
-    );
+    const { result } = renderAllocations(vaults);
 
     await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
-    expect(sentDashboardReads(fetchMock).map((read) => requestedVaults(read.path).length)).toEqual([
-      100, 50,
+    expect(
+      sentDashboardReads(fetchMock).map((read) => {
+        const params = new URL(read.path, "https://dashboard.test").searchParams;
+        return { cluster: params.get("cluster"), vaults: requestedVaults(read.path) };
+      })
+    ).toEqual([
+      { cluster: "mainnet-beta", vaults: vaults.slice(0, 100) },
+      { cluster: "mainnet-beta", vaults: vaults.slice(100) },
     ]);
     expect(result.current.allocationsByVault?.Kvault0).toEqual(payload());
     expect(result.current.allocationsByVault?.Kvault149).toEqual(payload());

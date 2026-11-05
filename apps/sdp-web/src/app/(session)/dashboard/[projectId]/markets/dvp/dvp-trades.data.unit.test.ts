@@ -183,23 +183,28 @@ describe("trade reads", () => {
 });
 
 describe("useDvpTrade", () => {
-  it("re-reads an open trade every six seconds", async () => {
+  it("re-reads an open trade every six seconds, however often its page re-renders", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetchMock = answerTradeReads({
       trades: [],
       trade: tradeFixture({ status: "partially_funded" }),
     });
-    const { result } = renderHook(() => useDvpTrade("dvp_1"), { wrapper: DashboardReadsProvider });
+    const { result, rerender } = renderHook(() => useDvpTrade("dvp_1"), {
+      wrapper: DashboardReadsProvider,
+    });
     await waitFor(() => expect(result.current.data).toBeDefined());
 
-    await act(() => vi.advanceTimersByTimeAsync(6_000));
+    for (let second = 0; second < 7; second += 1) {
+      rerender();
+      await act(() => vi.advanceTimersByTimeAsync(1_000));
+    }
 
     await waitFor(() => expect(readsOf(fetchMock, TRADE_PATH)).toBe(2));
   });
 
-  it("stops reading a settled trade", async () => {
+  it.each(["settled", "expired", "create_failed"])("stops reading a %s trade", async (status) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const fetchMock = answerTradeReads({ trades: [], trade: tradeFixture({ status: "settled" }) });
+    const fetchMock = answerTradeReads({ trades: [], trade: tradeFixture({ status }) });
     const { result } = renderHook(() => useDvpTrade("dvp_1"), { wrapper: DashboardReadsProvider });
     await waitFor(() => expect(result.current.data).toBeDefined());
 

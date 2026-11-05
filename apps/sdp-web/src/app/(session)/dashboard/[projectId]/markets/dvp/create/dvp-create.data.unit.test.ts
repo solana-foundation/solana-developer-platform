@@ -9,7 +9,7 @@ import {
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { EnglishDashboardReads } from "@/test/dashboard-reads";
 import { TOKEN_2022_PROGRAM, useDvpCreateContext } from "./dvp-create.data";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -56,9 +56,9 @@ const ACCOUNT = {
   address: "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC",
 };
 
-function stubCreateReads(failing: string | null) {
+function stubCreateReads(failing: string | null, apiMessage: string) {
   return stubDashboardFetch(({ path }) => {
-    if (path === failing) return dashboardErrorResponse(503, `Unavailable: ${path}`);
+    if (path === failing) return dashboardErrorResponse(503, apiMessage);
     if (path === WALLETS_URL) {
       return Response.json({ data: { wallets: [CONFIG_WALLET, CONNECTION_WALLET] } });
     }
@@ -69,7 +69,7 @@ function stubCreateReads(failing: string | null) {
 
 function renderContext(issuanceEnabled: boolean) {
   return renderHook(() => useDvpCreateContext(issuanceEnabled), {
-    wrapper: DashboardReadsProvider,
+    wrapper: EnglishDashboardReads,
   });
 }
 
@@ -84,7 +84,7 @@ afterEach(() => {
 
 describe("useDvpCreateContext", () => {
   it("offers the Project's wallets, minted tokens and counterparty accounts", async () => {
-    const fetchMock = stubCreateReads(null);
+    const fetchMock = stubCreateReads(null, "");
 
     const { result } = renderContext(true);
 
@@ -137,7 +137,7 @@ describe("useDvpCreateContext", () => {
   });
 
   it("offers no issued tokens and reads no listing while Issuance is off", async () => {
-    const fetchMock = stubCreateReads(null);
+    const fetchMock = stubCreateReads(null, "");
 
     const { result } = renderContext(false);
 
@@ -147,17 +147,20 @@ describe("useDvpCreateContext", () => {
   });
 
   it.each([
-    [WALLETS_URL, 0, 0],
-    [TOKENS_URL, 2, 0],
-    [ACCOUNTS_URL, 2, 2],
+    [WALLETS_URL, "Wallets unavailable.", "Wallets unavailable.", 0, 0],
+    [WALLETS_URL, "", "Wallets could not be loaded.", 0, 0],
+    [TOKENS_URL, "Issuance unavailable.", "Issuance unavailable.", 2, 0],
+    [TOKENS_URL, "", "Issued tokens could not be loaded.", 2, 0],
+    [ACCOUNTS_URL, "Accounts unavailable.", "Accounts unavailable.", 2, 2],
+    [ACCOUNTS_URL, "", "Counterparty accounts could not be loaded.", 2, 2],
   ])(
-    "names a failed %s read and keeps the options read before it",
-    async (failing, wallets, tokens) => {
-      stubCreateReads(failing);
+    "names a failed %s read (API message %j) and keeps the options read before it",
+    async (failing, apiMessage, shown, wallets, tokens) => {
+      stubCreateReads(failing, apiMessage);
 
       const { result } = renderContext(true);
 
-      await waitFor(() => expect(result.current.context?.error).toBe(`Unavailable: ${failing}`));
+      await waitFor(() => expect(result.current.context?.error).toBe(shown));
       expect(result.current.context?.wallets).toHaveLength(wallets);
       expect(result.current.context?.tokens).toHaveLength(tokens);
       expect(result.current.context?.counterpartyAccounts).toEqual([]);
@@ -165,9 +168,9 @@ describe("useDvpCreateContext", () => {
   );
 
   it("reads again only what failed when the reader retries", async () => {
-    const fetchMock = stubCreateReads(TOKENS_URL);
+    const fetchMock = stubCreateReads(TOKENS_URL, "Issuance unavailable.");
     const { result } = renderContext(true);
-    await waitFor(() => expect(result.current.context?.error).toBe(`Unavailable: ${TOKENS_URL}`));
+    await waitFor(() => expect(result.current.context?.error).toBe("Issuance unavailable."));
 
     act(() => result.current.retry());
 

@@ -358,9 +358,9 @@ describe("DvpCreateWorkspace", () => {
   });
 
   it("surfaces a context error rather than showing an empty picker silently", () => {
-    renderForm({ error: "Token list failed (500).", tokens: [] });
+    renderForm({ error: "Issued tokens could not be loaded.", tokens: [] });
 
-    expect(screen.getByText("Token list failed (500).")).toBeTruthy();
+    expect(screen.getByText("Issued tokens could not be loaded.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(retryContext).toHaveBeenCalledTimes(1);
   });
