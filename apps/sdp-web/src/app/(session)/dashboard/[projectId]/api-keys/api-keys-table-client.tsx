@@ -7,7 +7,7 @@ import { Button } from "@sdp/ui/button";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { KeyRoundIcon, PlusIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -189,7 +189,6 @@ export function ApiKeysTableClient({
   if (sortedApiKeys.length === 0) {
     return (
       <ListEmptyState
-        icon={<KeyRoundIcon className="size-5" />}
         message={t("DashboardCustody.noApiKeysFound")}
         action={
           canManageApiKeys ? (

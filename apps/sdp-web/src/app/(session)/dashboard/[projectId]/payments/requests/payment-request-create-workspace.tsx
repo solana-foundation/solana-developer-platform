@@ -189,7 +189,7 @@ function CreateFooter({
         variant={complete ? "default" : "outline"}
         disabled={!complete}
         loading={busy}
-        className={cn(!complete && "opacity-100 text-tertiary refresh:bg-fill")}
+        className={cn(!complete && "opacity-100 text-tertiary bg-fill")}
         onClick={onCreate}
       >
         {t("DashboardPayments.requests.createAndCopyLink")}

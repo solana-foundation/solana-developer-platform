@@ -1,13 +1,7 @@
 /**
- * What code needs from the tokens: the refresh scope's attribute and the scale names theme.css
- * adds to Tailwind. The values themselves live in tokens.css and theme.css.
+ * What code needs from the tokens: the scale names theme.css adds to Tailwind. The values
+ * themselves live in tokens.css and theme.css.
  */
-
-export const REFRESH_THEME_ATTRIBUTE = "data-sdp-theme";
-export const REFRESH_THEME_VALUE = "refresh";
-
-/** Spread onto the root element of a surface that renders in the 2026 refresh design. */
-export const refreshThemeProps = { [REFRESH_THEME_ATTRIBUTE]: REFRESH_THEME_VALUE } as const;
 
 /**
  * The scale names theme.css adds to Tailwind's `text`, `radius`, `spacing`, `container` and

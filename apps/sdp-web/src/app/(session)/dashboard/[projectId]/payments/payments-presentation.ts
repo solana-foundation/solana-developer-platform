@@ -14,7 +14,7 @@ export function isInboundTransfer(transfer: PaymentTransferSummary): boolean {
 }
 
 /**
- * How each transfer status reads in a refresh list. Finer than the shared success / pending /
+ * How each transfer status reads in a Payments list. Finer than the shared success / pending /
  * danger / neutral tone: a transfer the rails are moving ("processing", "settling") is
  * progress, while one waiting on a person or a payer ("pending", "awaiting payment") needs
  * attention.

@@ -91,3 +91,37 @@ describe("Combobox disabled options", () => {
     expect(onEnterSelect).toHaveBeenCalledWith("ok");
   });
 });
+
+describe("Combobox closed trigger", () => {
+  it.each([
+    {
+      labels: "repeated",
+      choices: [
+        { value: "wallet-a", label: "SDP wallet", description: "Abc1…wxyz" },
+        { value: "wallet-b", label: "SDP wallet", description: "Def2…stuv" },
+      ],
+      value: "wallet-b",
+      shown: ["SDP wallet", "Def2…stuv"],
+      hidden: "Abc1…wxyz",
+    },
+    {
+      labels: "unique",
+      choices: [
+        { value: "treasury", label: "Treasury", description: "Ghi3…qrst" },
+        { value: "payroll", label: "Payroll", description: "Jkl4…mnop" },
+      ],
+      value: "payroll",
+      shown: ["Payroll"],
+      hidden: "Jkl4…mnop",
+    },
+  ])("names the choice with $labels labels", ({ choices, value, shown, hidden }) => {
+    render(
+      <EnglishUiI18nProvider>
+        <Combobox label="Wallet" value={value} onChange={vi.fn()} options={choices} />
+      </EnglishUiI18nProvider>
+    );
+    const triggerText = screen.getByRole("button", { name: "Wallet" }).textContent;
+    for (const text of shown) expect(triggerText).toContain(text);
+    expect(triggerText).not.toContain(hidden);
+  });
+});

@@ -121,7 +121,6 @@ function ContactFields({ form }: StepProps) {
         counterpartiesResult={liveCounterparties}
         onChange={selectCounterparty}
         value={fields.counterpartyId}
-        hint={t("DashboardPayments.payForm.contactHint")}
         footer={(close) => (
           <button
             type="button"

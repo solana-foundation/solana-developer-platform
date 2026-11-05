@@ -94,4 +94,4 @@ properties of undefined (reading 'clear')", although `engines` allows it.
 
 # Stage smoke
 
-Pull-request CI never runs the `gcp-read-only` Playwright project (`playwright/tests/gcp-read-only-*.e2e.spec.ts`). It runs after each merge against the deployed stage dashboard, with whatever design flags Vercel serves there, and a red run holds the production API and web release until a later merge goes green. A change that renames something these specs select (a link's name, a heading) updates them in the same pull request; where the two designs differ, match both.
+Pull-request CI never runs the `gcp-read-only` Playwright project (`playwright/tests/gcp-read-only-*.e2e.spec.ts`). It runs after each merge against the deployed stage dashboard, and a red run holds the production API and web release until a later merge goes green. A change that renames something these specs select (a link's name, a heading) updates them in the same pull request.

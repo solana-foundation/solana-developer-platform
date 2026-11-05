@@ -7,7 +7,6 @@ import {
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
-import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as quickStart from "@/components/dashboard-quick-start";
@@ -29,7 +28,6 @@ import { dashboardFlagsAt } from "@/test/release-channel-flags";
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isSignedIn: true, orgId: "org-release-channel" }),
   useUser: () => ({ isLoaded: true, isSignedIn: true, user: null }),
-  SignInButton: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));

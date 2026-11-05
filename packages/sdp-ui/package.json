@@ -119,11 +119,6 @@
       "import": "./src/motion.ts",
       "default": "./src/motion.ts"
     },
-    "./provider-selection-card": {
-      "types": "./src/provider-selection-card.tsx",
-      "import": "./src/provider-selection-card.tsx",
-      "default": "./src/provider-selection-card.tsx"
-    },
     "./search-input": {
       "types": "./src/search-input.tsx",
       "import": "./src/search-input.tsx",
@@ -168,16 +163,6 @@
       "types": "./src/textarea.tsx",
       "import": "./src/textarea.tsx",
       "default": "./src/textarea.tsx"
-    },
-    "./theme-scope": {
-      "types": "./src/theme-scope.ts",
-      "import": "./src/theme-scope.ts",
-      "default": "./src/theme-scope.ts"
-    },
-    "./theme-scope-provider": {
-      "types": "./src/theme-scope-provider.tsx",
-      "import": "./src/theme-scope-provider.tsx",
-      "default": "./src/theme-scope-provider.tsx"
     },
     "./toggle-switch": {
       "types": "./src/toggle-switch.tsx",
