@@ -11,6 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { earnQueryKeys } from "./earn-query-key";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -158,6 +162,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("EarnVaultParRedemptionModal", () => {
@@ -263,22 +268,36 @@ describe("EarnVaultParRedemptionModal", () => {
     expect(screen.queryByText(/burns PRIME into wYLDS/)).toBeNull();
   });
 
-  it("allows a pending par request to be cancelled before operator settlement", async () => {
+  it("cancels a pending par request, reading Earn's positions again after the request and the cancel", async () => {
+    const positionsUrl = "/api/dashboard/markets/earn/vault-positions?limit=100";
+    const fetchMock = stubDashboardFetch(() => Response.json({}));
     mocks.createRequest.mockResolvedValue({
       ok: true,
       status: 201,
       data: { kind: "submitted", withdrawalRequest: request() },
     });
-    renderModal();
+    renderBesideReads(
+      <EarnVaultParRedemptionModal
+        environment="sandbox"
+        onClose={vi.fn()}
+        position={position}
+        projectId="project_1"
+        terms={terms}
+      />,
+      [earnQueryKeys.vaultPositions({ projectId: SANDBOX_PROJECT.id, mode: "live" })]
+    );
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(1));
 
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2500" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(await screen.findByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(2));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel and keep wYLDS" }));
 
     await waitFor(() =>
       expect(mocks.cancelRequest).toHaveBeenCalledWith("request_1", IDEMPOTENCY_KEY)
     );
     expect(await screen.findByText("Cancelling")).toBeTruthy();
+    await waitFor(() => expect(readsOf(fetchMock, positionsUrl)).toBe(3));
   });
 });

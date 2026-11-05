@@ -25,7 +25,8 @@ export function resolveTradesListState(input: {
   chosen: { status: DvpTradesUrlStatus; query: string };
   queryInput: string;
   tradeCount: number;
-  inboundCount: number;
+  /** Null when the inbound read failed, which says nothing about whether the project has any. */
+  inboundCount: number | null;
   /** Rows on the segment showing: inbound when waiting, else trades. */
   shownCount: number;
   showingInbound: boolean;

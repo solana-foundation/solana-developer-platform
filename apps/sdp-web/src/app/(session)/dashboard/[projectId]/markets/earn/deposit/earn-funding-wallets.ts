@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import useSWR from "swr";
+import { useCallback, useMemo, useRef } from "react";
 import { z } from "zod";
 import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
-import { dashboardRequest } from "@/lib/dashboard-fetch";
+import {
+  type DashboardKeyScope,
+  type DashboardRequestKey,
+  dashboardRequestKey,
+} from "@/lib/dashboard-request-key";
+import {
+  DashboardReadError,
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardSWR,
+} from "@/lib/dashboard-swr";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -87,19 +96,10 @@ export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
  * from short-TTL caches on both sides. They are shown as context only — never
  * as a gate on what the user may deposit.
  */
-const WALLETS_PATH = "/api/dashboard/wallets?view=summary&includeBalances=true";
-
-export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
-  const response = await dashboardRequest(WALLETS_PATH, {});
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  const parsed = fundingWalletsResponseSchema.safeParse(await response.json());
-  if (!parsed.success) {
-    throw new Error("Invalid custody wallet response");
-  }
+export async function fetchFundingWallets(key: DashboardRequestKey): Promise<EarnFundingWallet[]> {
+  const body = await readDashboardRequest(key, fundingWalletsResponseSchema);
   // Only usable funding sources: an inactive wallet cannot originate a transfer.
-  return parsed.data.data.wallets.filter((wallet) => wallet.status === "active");
+  return body.data.wallets.filter((wallet) => wallet.status === "active");
 }
 
 /**
@@ -112,28 +112,26 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
  * on the pre-transaction balance.
  */
 export async function fetchLiveFundingWalletBalance(
+  scope: DashboardKeyScope,
   walletId: string,
   minimumSlot?: number
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
-  const query = minimumSlot === undefined ? "" : `?minimumSlot=${minimumSlot}`;
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances${query}`,
-    { cache: "no-store" }
+  const body = await readDashboardRequest(
+    dashboardRequestKey(
+      scope,
+      `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+      minimumSlot === undefined ? undefined : { minimumSlot }
+    ),
+    fundingWalletBalanceResponseSchema
   );
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
-  }
-  const parsed = fundingWalletBalanceResponseSchema.safeParse(await response.json());
-  if (!parsed.success) {
-    throw new Error("Invalid custody wallet balance response");
-  }
   if (
     minimumSlot !== undefined &&
-    (parsed.data.data.balanceReadContext?.minimumSlot ?? -1) < minimumSlot
+    (body.data.balanceReadContext?.minimumSlot ?? -1) < minimumSlot
   ) {
-    throw new Error("Wallet balance read did not establish confirmation freshness");
+    // A success that does not prove the confirmed slot was read is an unreadable answer.
+    throw new DashboardReadError(200, null, null);
   }
-  return parsed.data.data.walletBalances.balances;
+  return body.data.walletBalances.balances;
 }
 
 /**
@@ -142,6 +140,7 @@ export async function fetchLiveFundingWalletBalance(
  * while any wallet still carries a cached pre-transfer balance.
  */
 export async function refreshFundingWalletBalances(
+  scope: DashboardKeyScope,
   wallets: readonly EarnFundingWallet[],
   minimumSlot?: number | ReadonlyMap<string, number>
 ): Promise<EarnFundingWallet[]> {
@@ -160,7 +159,7 @@ export async function refreshFundingWalletBalances(
     wallets.map(async (wallet) => {
       const slot =
         typeof minimumSlot === "number" ? minimumSlot : slotsByAddress.get(wallet.publicKey);
-      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, slot);
+      const balances = await fetchLiveFundingWalletBalance(scope, wallet.walletId, slot);
       return { ...wallet, balances };
     })
   );
@@ -168,34 +167,46 @@ export async function refreshFundingWalletBalances(
 
 /** Identical sweeps in flight together share one collection read and one set of live reads. */
 export function useEarnFundingWallets() {
+  const { projectId, mode } = useDashboardKeyScope();
+  // One key per scope, so the refresh callbacks below keep their identity across renders.
+  const requestKey = useMemo(
+    () => earnQueryKeys.fundingWalletInventory({ projectId, mode }),
+    [projectId, mode]
+  );
   const minimumSlot = useRef<number | undefined>(undefined);
   const walletMinimumSlots = useRef(new Map<string, number>());
   const inFlight = useRef(new Map<string, Promise<EarnFundingWallet[]>>());
-  const sweep = useCallback((readLive: boolean) => {
+  const sweep = useCallback((key: DashboardRequestKey, readLive: boolean) => {
     const hasFloor = () => minimumSlot.current !== undefined || walletMinimumSlots.current.size > 0;
     const live = readLive || hasFloor();
-    const key = JSON.stringify([
+    const sweepKey = JSON.stringify([
+      key[0],
+      key[1],
       live,
       minimumSlot.current ?? null,
       [...walletMinimumSlots.current],
     ]);
-    const running = inFlight.current.get(key);
+    const running = inFlight.current.get(sweepKey);
     if (running) return running;
     const started = (async () => {
-      const wallets = await fetchFundingWallets();
+      const wallets = await fetchFundingWallets(key);
       return live || hasFloor()
-        ? refreshFundingWalletBalances(wallets, minimumSlot.current ?? walletMinimumSlots.current)
+        ? refreshFundingWalletBalances(
+            { projectId: key[0], mode: key[1] },
+            wallets,
+            minimumSlot.current ?? walletMinimumSlots.current
+          )
         : wallets;
     })();
     const settle = () => {
-      if (inFlight.current.get(key) === started) inFlight.current.delete(key);
+      if (inFlight.current.get(sweepKey) === started) inFlight.current.delete(sweepKey);
     };
-    inFlight.current.set(key, started);
+    inFlight.current.set(sweepKey, started);
     started.then(settle, settle);
     return started;
   }, []);
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
-    sweep(false)
+  const { data, error, isLoading, mutate } = useDashboardSWR(requestKey, (key) =>
+    sweep(key, false)
   );
   const refreshBalances = useCallback(
     (slot?: number, custodyWalletIds?: readonly string[]) => {
@@ -213,9 +224,9 @@ export function useEarnFundingWallets() {
             ...walletMinimumSlots.current.values()
           );
       }
-      return mutate(sweep(true), { revalidate: false, throwOnError: true });
+      return mutate(sweep(requestKey, true), { revalidate: false, throwOnError: true });
     },
-    [mutate, sweep]
+    [mutate, sweep, requestKey]
   );
   return { wallets: data, error, isLoading, refresh: () => void mutate(), refreshBalances };
 }

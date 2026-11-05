@@ -11,9 +11,8 @@ export default async function MarketsLayout({ children }: { children: ReactNode 
   // and this one holds the flag they all share.
   //
   // A hand-typed URL still 404s before any child layout or page does auth or
-  // data work. Keeping the flag reads out of the shared layout also keeps hard
-  // navigations streaming each child route's own loading.tsx: a child layout
-  // that suspends on a flag read paints THIS segment's loading boundary instead.
+  // data work. No Markets route has a loading.tsx: pages render thin and each
+  // component shows its own skeleton while its reads load.
   if (!(await markets())) {
     notFound();
   }

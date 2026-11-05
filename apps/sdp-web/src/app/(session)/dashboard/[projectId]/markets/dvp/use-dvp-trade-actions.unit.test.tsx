@@ -11,9 +11,15 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
-import { dashboardRouter } from "@/test/dashboard-navigation";
-import { useDvpTradeActions } from "./use-dvp-trade-actions";
+import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
+import { useDashboardRead } from "@/lib/dashboard-swr";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { EnglishDashboardReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { dvpQueryKeys } from "./dvp-query-key";
+import { type DvpTradeActions, useDvpTradeActions } from "./use-dvp-trade-actions";
 
 // The hook confirms each outcome in words, so it needs the catalog those words
 // come from — the same provider the surfaces rendering it already sit inside.
@@ -34,6 +40,24 @@ const BROADCAST = {
   data: { tradeId: "dvp_1", action: "settle", signature: "sig_close", confirmed: true },
 };
 
+const SCOPE = { projectId: SANDBOX_PROJECT.id, mode: "live" } as const;
+const TRADE_PATH = "/api/dashboard/markets/dvp/trades/dvp_1";
+const WALLETS_PATH = "/api/dashboard/wallets?view=summary";
+
+function renderBesideTradeReads() {
+  return renderHook(
+    () => ({
+      actions: useDvpTradeActions("dvp_1", "devnet"),
+      trade: useDashboardRead(dvpQueryKeys.trade(SCOPE, { tradeId: "dvp_1" }), z.unknown()),
+      wallets: useDashboardRead(
+        sharedReadQueryKeys.walletSummaries(SCOPE, { includeBalances: false }),
+        z.unknown()
+      ),
+    }),
+    { wrapper: EnglishDashboardReads }
+  );
+}
+
 function respond(status: number, body: unknown = status < 300 ? BROADCAST : {}) {
   return vi.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
@@ -48,17 +72,57 @@ describe("useDvpTradeActions", () => {
   });
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.unstubAllGlobals();
   });
 
-  it("refreshes the page after a successful settle", async () => {
-    global.fetch = respond(200) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
-      wrapper: withI18n,
-    });
+  it.each([
+    ["settle", (actions: DvpTradeActions) => actions.act("settle")],
+    ["cancel", (actions: DvpTradeActions) => actions.act("cancel")],
+    [
+      "fund",
+      (actions: DvpTradeActions) =>
+        actions.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" }),
+    ],
+    [
+      "reclaim",
+      (actions: DvpTradeActions) =>
+        actions.act("reclaim", { side: "b", walletId: "cwlt_shown_b", symbol: "USDC" }),
+    ],
+  ])(
+    "reads the trade and the wallets on screen again after a successful %s",
+    async (_action, press) => {
+      const fetchMock = stubDashboardFetch(() => Response.json(BROADCAST));
+      const { result } = renderBesideTradeReads();
+      await waitFor(() => expect(result.current.wallets.data).toBeDefined());
+      await waitFor(() => expect(result.current.trade.data).toBeDefined());
 
-    await act(async () => await result.current.act("settle"));
+      await act(async () => await press(result.current.actions));
 
-    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(readsOf(fetchMock, TRADE_PATH)).toBe(2));
+      await waitFor(() => expect(readsOf(fetchMock, WALLETS_PATH)).toBe(2));
+      expect(toast.success).toHaveBeenCalled();
+    }
+  );
+
+  it("reads the trade and the wallets again after a fund lost in transit", async () => {
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      method === "POST" ? Promise.reject(new TypeError("Failed to fetch")) : Response.json({})
+    );
+    const { result } = renderBesideTradeReads();
+    await waitFor(() => expect(result.current.wallets.data).toBeDefined());
+    await waitFor(() => expect(result.current.trade.data).toBeDefined());
+
+    await act(
+      async () =>
+        await result.current.actions.act("fund", {
+          side: "a",
+          walletId: "cwlt_shown_a",
+          symbol: "USDC",
+        })
+    );
+
+    await waitFor(() => expect(readsOf(fetchMock, TRADE_PATH)).toBe(2));
+    await waitFor(() => expect(readsOf(fetchMock, WALLETS_PATH)).toBe(2));
   });
 
   it("surfaces the API's own message on a failure", async () => {
@@ -339,20 +403,19 @@ describe("useDvpTradeActions", () => {
   // A success answer with nothing readable on it says nothing about what was
   // sent. Reporting success there is a guess; the refresh shows what landed.
   it("reports an unreadable success answer as unconfirmed, not as done", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => {
-        throw new SyntaxError("Unexpected token <");
-      },
-    }) as never;
-    const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
-      wrapper: withI18n,
-    });
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      method === "POST" ? new Response("<html></html>", { status: 200 }) : Response.json({})
+    );
+    const { result } = renderBesideTradeReads();
+    await waitFor(() => expect(result.current.trade.data).toBeDefined());
 
     await act(
       async () =>
-        await result.current.act("fund", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
+        await result.current.actions.act("fund", {
+          side: "a",
+          walletId: "cwlt_shown_a",
+          symbol: "USDC",
+        })
     );
 
     expect(toast.success).not.toHaveBeenCalled();
@@ -360,7 +423,7 @@ describe("useDvpTradeActions", () => {
       "SDP sent this but couldn't read the answer. Check the trade before trying again.",
       expect.anything()
     );
-    expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(readsOf(fetchMock, TRADE_PATH)).toBe(2));
   });
 
   // A request the proxy or network retries must be answered with the first

@@ -29,7 +29,7 @@ import {
   useEarnVaultDeposits,
   useEarnVaultWithdrawals,
 } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
-import type { EarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-surfacing";
+import { useEarnProviderAccess } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-provider-access";
 import type { EarnVaultParRedemptionSource } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -427,12 +427,9 @@ function useTreasuryCatalogueShelves(sdpEnvironment: SdpEnvironment) {
   };
 }
 
-export function TreasurySolutionsWorkspace({
-  providerAccess,
-}: {
-  providerAccess: EarnProviderAccess | null;
-}) {
+export function TreasurySolutionsWorkspace() {
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
+  const { providerAccess } = useEarnProviderAccess();
   const {
     catalogueCluster,
     catalogueStrategies,
@@ -662,7 +659,10 @@ export function TreasurySolutionsWorkspace({
         activeWallets={activeWallets}
         allocation={allocation}
         catalogueFailed={Boolean(catalogueError)}
-        catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
+        // A strategy's availability needs the organization's access, so its rows wait for it.
+        catalogueLoading={
+          (catalogueLoading && catalogueStrategies === undefined) || providerAccess === undefined
+        }
         catalogueStrategies={catalogueStrategies}
         devnetCatalogueFailed={Boolean(devnetCatalogueError)}
         devnetCatalogueLoading={devnetCatalogueLoading}
@@ -683,7 +683,7 @@ export function TreasurySolutionsWorkspace({
         programs={programs}
         programsLoading={programsLoading}
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
-        providerAccess={providerAccess}
+        providerAccess={providerAccess ?? null}
         summaryLoading={summaryLoading}
         balancesRefreshing={balancesRefreshing}
         vaultDeposits={vaultDepositWatches}

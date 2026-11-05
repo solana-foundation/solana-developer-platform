@@ -33,6 +33,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 vi.mock("next/headers", () => import("@/test/next-headers"));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 /**
  * The route resolves its vault allowlist from the strategy catalogue through
@@ -120,7 +121,7 @@ function renderIsolatedHook(vaults: readonly string[]) {
   return renderHook(() => useKaminoVaultAllocations(vaults), { wrapper });
 }
 
-describe("Kamino allocations: route → dashboardFetch → hook", () => {
+describe("Kamino allocations: route → dashboard read → hook", () => {
   beforeEach(() => {
     seenUrls.length = 0;
     upstreamResponse = () => Response.json(upstreamPayload());
@@ -157,7 +158,7 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     // One browser→BFF hop and one BFF→Kamino hop, nothing else on the wire.
     // The hook states its cluster explicitly for the BFF's mainnet-only gate.
     expect(seenUrls).toEqual([
-      `${BFF_PATH}?vaults=${VAULTS.happy}&cluster=mainnet-beta`,
+      `${BFF_PATH}?cluster=mainnet-beta&vaults=${VAULTS.happy}`,
       `${UPSTREAM_BASE}/${VAULTS.happy}/allocations`,
     ]);
   });
@@ -189,7 +190,7 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     expect(result.current.allocationsByVault?.[VAULTS.batchHappy]).toBeDefined();
     expect(result.current.allocationsByVault?.[VAULTS.upstreamDown]).toBeUndefined();
     expect(seenUrls.filter((url) => url.startsWith(BFF_PATH))).toEqual([
-      `${BFF_PATH}?vaults=${VAULTS.batchHappy},${VAULTS.upstreamDown}&cluster=mainnet-beta`,
+      `${BFF_PATH}?cluster=mainnet-beta&vaults=${VAULTS.batchHappy}%2C${VAULTS.upstreamDown}`,
     ]);
     // Kamino load is unchanged by the batch: one upstream read per vault.
     expect(upstreamCalls).toBe(2);

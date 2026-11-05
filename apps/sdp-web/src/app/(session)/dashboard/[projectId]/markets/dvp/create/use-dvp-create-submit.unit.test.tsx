@@ -8,12 +8,19 @@
  * client's only job is to hand each logical request exactly one key.
  */
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { dvpQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-query-key";
+import { parseDvpTradesFilters } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-trades-query";
 import { EnglishTestI18n } from "@/app/(session)/dashboard/[projectId]/markets/test-i18n";
+import { useDashboardRead } from "@/lib/dashboard-swr";
+import { readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { dashboardRouter } from "@/test/dashboard-navigation";
+import { EnglishDashboardReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import type { DvpCreateRequest } from "./use-dvp-create-submit";
 import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 
@@ -246,6 +253,42 @@ describe("useDvpCreateSubmit confirmation", () => {
       "https://explorer.solana.com/tx/sig_create?cluster=devnet",
       "_blank",
       "noopener,noreferrer"
+    );
+  });
+});
+
+describe("useDvpCreateSubmit reads", () => {
+  it("reads the trade list on screen again and opens the new trade", async () => {
+    const listKey = dvpQueryKeys.trades(
+      { projectId: SANDBOX_PROJECT.id, mode: "live" },
+      parseDvpTradesFilters({}).filters
+    );
+    const fetchMock = stubDashboardFetch(({ method }) =>
+      Response.json({
+        data:
+          method === "POST"
+            ? { trade: { id: "dvp_test_created", createSignature: "sig_create" } }
+            : { trades: [] },
+      })
+    );
+    const { result } = renderHook(
+      () => ({
+        create: useDvpCreateSubmit("devnet"),
+        list: useDashboardRead(listKey, z.unknown()),
+      }),
+      { wrapper: EnglishDashboardReads }
+    );
+    await waitFor(() => expect(result.current.list.data).toBeDefined());
+
+    await act(async () => {
+      await result.current.create.submit(request());
+    });
+
+    await waitFor(() =>
+      expect(readsOf(fetchMock, "/api/dashboard/markets/dvp/trades?limit=50")).toBe(2)
+    );
+    expect(dashboardRouter.push).toHaveBeenCalledWith(
+      "/dashboard/prj_test_sandbox/markets/dvp/dvp_test_created"
     );
   });
 });

@@ -4,7 +4,11 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useEarnVaultPositions } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const position: EarnVaultPosition = {
   id: "position",
@@ -144,5 +148,30 @@ describe("shared vault position reads", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     await act(async () => requests[1]?.answer());
+  });
+
+  it("keeps the positions on screen while a money movement reads them again", async () => {
+    const { fetchMock, requests } = stubPositionReads();
+    const shown: unknown[] = [];
+    const { result } = renderHook(
+      () => {
+        const read = useEarnVaultPositions();
+        shown.push(read.positions);
+        return { read, invalidate: useInvalidateDashboardReads() };
+      },
+      { wrapper }
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => requests[0]?.answer());
+    await waitFor(() => expect(result.current.read.positions).toEqual([position]));
+    const shownBeforeInvalidation = shown.length;
+
+    await act(async () => {
+      void result.current.invalidate(earnQueryKeys.isMoneyMovementRead);
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await act(async () => requests[1]?.answer());
+    expect(shown.slice(shownBeforeInvalidation)).not.toContain(undefined);
   });
 });

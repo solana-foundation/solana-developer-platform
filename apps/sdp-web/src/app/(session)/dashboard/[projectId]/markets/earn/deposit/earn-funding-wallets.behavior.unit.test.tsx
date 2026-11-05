@@ -5,6 +5,8 @@ import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useEarnFundingWallets } from "./earn-funding-wallets";
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
 const wallets = ["a", "b"].map((id) => ({
   id: `wallet-${id}`,
   walletId: `provider-${id}`,
@@ -66,7 +68,7 @@ describe("shared funding wallet sweeps", () => {
       ]);
     });
     expect(urls()).toEqual([
-      "/api/dashboard/wallets?view=summary&includeBalances=true",
+      "/api/dashboard/wallets?includeBalances=true",
       "/api/dashboard/payments/wallets/provider-a/balances?minimumSlot=101",
       "/api/dashboard/payments/wallets/provider-b/balances",
     ]);

@@ -18,12 +18,12 @@ import { Modal } from "@sdp/ui/modal";
 import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
-import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
@@ -257,7 +257,7 @@ function useParRedemptionSubmission(options: {
   setError: (error: string | null) => void;
 }) {
   const t = useTranslations();
-  const { mutate } = useSWRConfig();
+  const invalidateReads = useInvalidateDashboardReads();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -289,12 +289,14 @@ function useParRedemptionSubmission(options: {
       const answer = fetchResultAnswer(result);
       settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
       const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (result.ok || uncertain !== null) {
+        void invalidateReads(earnQueryKeys.isMoneyMovementRead);
+      }
       if (result.ok) {
         setOutcome(result.data);
         options.onRequested?.(result.data.withdrawalRequest);
       } else if (uncertain !== null) {
         options.setError(t(uncertain));
-        void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
       } else {
         options.setError(result.error);
       }
@@ -321,6 +323,7 @@ function useParRedemptionRequestView(
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const request = freshCancelRecord(cancelResult, observed, submitted);
   const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
 
@@ -338,6 +341,7 @@ function useParRedemptionRequestView(
       const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
       if (result.ok) {
         vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
+        void invalidateReads(earnQueryKeys.isMoneyMovementRead);
         setCancelResult(result.data);
       } else {
         settleIdempotencyKey(

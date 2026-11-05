@@ -3,6 +3,8 @@ import type { EarnVaultPosition } from "@sdp/types/earn";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnVaultPositionsRead } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-program-data";
+import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import type { VaultActivity } from "./treasury-vault-balance";
 import { treasuryRefreshRetryDelay, useTreasuryBalances } from "./use-treasury-balances";
 
@@ -367,7 +369,11 @@ it("recovers more than 100 outstanding pairs through bounded HTTP reads", async 
   );
   mocks.refreshPositions.mockImplementation(
     async (ids: readonly string[], positionIds?: ReadonlyMap<string, string>) => {
-      const read = await readEarnVaultPositions(ids, positionIds);
+      const read = await readEarnVaultPositions(
+        earnQueryKeys.vaultPositions({ projectId: SANDBOX_PROJECT.id, mode: "live" }),
+        ids,
+        positionIds
+      );
       mocks.reads = [read];
       return read;
     }

@@ -62,6 +62,11 @@ export function sentDashboardReads(fetchMock: Mock<typeof fetch>): SentDashboard
   });
 }
 
+/** How many times a {@link stubDashboardFetch} stub has been asked for `path`. */
+export function readsOf(fetchMock: Mock<typeof fetch>, path: string): number {
+  return sentDashboardReads(fetchMock).filter((read) => read.path === path).length;
+}
+
 /** sdp-api's success envelope, as `proxyToSdpApi` streams it back. */
 export function dashboardDataResponse(status: number, data: JsonValue): Response {
   return Response.json({ data, meta: { requestId: "req_test" } }, { status });

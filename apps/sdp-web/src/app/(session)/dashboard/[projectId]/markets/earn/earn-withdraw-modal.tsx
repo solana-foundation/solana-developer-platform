@@ -19,11 +19,14 @@ import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "reac
 import { BASE58_ADDRESS_PATTERN } from "@/app/(session)/dashboard/[projectId]/markets/base58-address";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 export function isPositiveUsdAmount(value: string): boolean {
@@ -552,6 +555,7 @@ export function EarnWithdrawModal({
   onWithdrawalCreated,
 }: EarnWithdrawModalProps) {
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const locale = useLocale();
   const contentRef = useModalFocus({
     focusKey: programId,
@@ -748,6 +752,10 @@ export function EarnWithdrawModal({
     submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {
+      // An answer whose outcome is unknown may still have created the payout.
+      if (uncertainMoneyAnswerMessage(fetchResultAnswer(result)) !== null) {
+        void invalidateReads(earnQueryKeys.isMoneyMovementRead);
+      }
       // A create can still lose a race with a rebalance between preview and
       // confirm. When the refusal names the lane ceiling, answer with SDP copy
       // carrying that number and correct the available line — echoing the
@@ -773,6 +781,7 @@ export function EarnWithdrawModal({
       );
       return;
     }
+    void invalidateReads(earnQueryKeys.isMoneyMovementRead);
     setCreated({ withdrawal: result.data.data.withdrawal, token });
     onWithdrawalCreated(result.data.data.withdrawal.withdrawalRef);
   };

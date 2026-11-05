@@ -1,7 +1,20 @@
+"use client";
+
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { useMemo } from "react";
 import { z } from "zod";
-import { dvpErrorEnvelopeSchema } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-trade";
-import type { SdpApiClient } from "@/lib/sdp-api";
+import { dvpQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-query-key";
+import {
+  type IssuedTokenSymbol,
+  useIssuedTokens,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
+import { useTranslations } from "@/i18n/provider";
+import {
+  type DashboardReadError,
+  useDashboardKeyScope,
+  useDashboardRead,
+} from "@/lib/dashboard-swr";
 
 /**
  * What the create form needs to offer real choices instead of blank fields.
@@ -32,7 +45,12 @@ export interface DvpCreateOption {
 }
 
 /** Wallet choices are derived from the validated custody response. */
-export type DvpCreateWallet = Omit<z.infer<typeof walletRowSchema>, "publicKey" | "balances"> & {
+export interface DvpCreateWallet {
+  id: string;
+  label: string | null;
+  custodyConfigId?: string;
+  custodyConnectionId?: string;
+  isRuntimeExecutionAllowed: boolean;
   address: string;
   /**
    * What this wallet holds, or null when balances were not loaded. The page
@@ -40,7 +58,7 @@ export type DvpCreateWallet = Omit<z.infer<typeof walletRowSchema>, "publicKey" 
    * nothing on the form renders one (PRO-1851). Null is never read as zero.
    */
   balances: DvpWalletBalance[] | null;
-};
+}
 
 /** One token balance, as much of it as the amount field needs. */
 export interface DvpWalletBalance {
@@ -73,96 +91,25 @@ export interface DvpCreateContext {
   error: string | null;
 }
 
-/**
- * The subset of `/v1/issuance/tokens` this form uses.
- *
- * Mirrors `RawToken` in `issuance-tokens.data.ts` rather than being guessed:
- * the list carries no token program and its `extensions` is an object about
- * the permanent delegate, NOT the Token-2022 extension set. So it cannot tell
- * us whether DvP will accept a mint, and pretending otherwise would put a
- * confident wrong answer in front of someone.
- */
-interface TokenRow {
-  id?: string;
-  mintAddress?: string | null;
-  name?: string | null;
-  symbol?: string | null;
-  decimals?: number;
-}
+/** A deployment without Issuance has no issued tokens to offer, and the listing is never read. */
+const NO_ISSUED_TOKENS: readonly IssuedTokenSymbol[] = [];
 
-const walletBalanceRowSchema = z.object({
-  mint: z.string().nullish(),
-  amount: z.string().nullish(),
-  decimals: z.number().nullish(),
-  token: z.string().nullish(),
-});
-
-type WalletBalanceRow = z.infer<typeof walletBalanceRowSchema>;
-
-const walletRowSchema = z
-  .object({
-    id: z.string().min(1),
-    publicKey: z.string().min(1),
-    label: z.string().nullable().default(null),
-    custodyConfigId: z.string().min(1).optional(),
-    custodyConnectionId: z.string().min(1).optional(),
-    isRuntimeExecutionAllowed: z.boolean(),
-    balances: z.array(walletBalanceRowSchema).nullish(),
-  })
-  .refine(
-    (wallet) =>
-      (wallet.custodyConfigId !== undefined) !== (wallet.custodyConnectionId !== undefined),
-    { message: "Wallet must have exactly one custody owner" }
-  );
-
-const walletsResponseSchema = z.object({
-  data: z.union([z.array(walletRowSchema), z.object({ wallets: z.array(walletRowSchema) })]),
-});
-
-function mapBalances(rows: WalletBalanceRow[]): DvpWalletBalance[] {
-  return rows.flatMap((balance) =>
-    balance.mint && typeof balance.decimals === "number" && balance.amount
-      ? [
-          {
-            mint: balance.mint,
-            amount: balance.amount,
-            decimals: balance.decimals,
-            // The API falls back to the raw mint when it has no symbol, which
-            // is not a label — the field would rather show nothing than repeat
-            // the address it is already displaying.
-            symbol: balance.token && balance.token !== balance.mint ? balance.token : null,
-          },
-        ]
-      : []
-  );
-}
-
-function mapWallets(rows: z.infer<typeof walletRowSchema>[]): DvpCreateWallet[] {
-  return rows.map((wallet) => ({
-    id: wallet.id,
-    address: wallet.publicKey,
-    label: wallet.label,
-    custodyConfigId: wallet.custodyConfigId,
-    custodyConnectionId: wallet.custodyConnectionId,
-    isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
-    // Absent or null means the read did not carry balances, which is not "holds nothing".
-    balances:
-      wallet.balances === undefined || wallet.balances === null
-        ? null
-        : mapBalances(wallet.balances),
-  }));
-}
-
-interface CounterpartyAccountRow {
-  counterpartyAccountId?: string;
+const counterpartyAccountRowSchema = z.object({
+  counterpartyAccountId: z.string().optional(),
   /** `counterparty_display_name` — the picker's label, always present. */
-  name?: string;
-  label?: string | null;
-  address?: string;
-}
+  name: z.string().optional(),
+  label: z.string().nullable().optional(),
+  address: z.string().optional(),
+});
 
-function mapCounterpartyAccounts(rows: CounterpartyAccountRow[] | null | undefined) {
-  return (rows ?? []).flatMap((account) =>
+type CounterpartyAccountRow = z.infer<typeof counterpartyAccountRowSchema>;
+
+const counterpartyAccountsResponseSchema = z.object({
+  data: z.object({ accounts: z.array(counterpartyAccountRowSchema) }),
+});
+
+function mapCounterpartyAccounts(rows: readonly CounterpartyAccountRow[]) {
+  return rows.flatMap((account) =>
     account.counterpartyAccountId && account.name && account.address
       ? [
           {
@@ -176,104 +123,98 @@ function mapCounterpartyAccounts(rows: CounterpartyAccountRow[] | null | undefin
   );
 }
 
-/** Never throws: a form that renders with empty pickers beats a 500. */
-export async function fetchDvpCreateContext(
-  request: SdpApiClient["request"]
-): Promise<DvpCreateContext> {
-  try {
-    const [walletsResponse, tokensResponse, counterpartiesResponse] = await Promise.all([
-      // Without balances. Reading them costs a chain read per wallet, which
-      // held the whole form back by five to seven seconds, and no field shows
-      // one. Funding still refuses a short balance with the amount named.
-      request("/v1/wallets"),
-      request("/v1/issuance/tokens?pageSize=100"),
-      // The registered crypto-wallet accounts a slot can name, address resolved
-      // server-side the same way create will resolve `counterpartyAccountId`.
-      request("/v1/counterparties/accounts?pageSize=100"),
-    ]);
+/**
+ * The create form's options, or `undefined` while any read is in flight. A failed read never reads
+ * as "you have none": a token list that failed would send someone hunting for assets they can see
+ * in Issuance, and a counterparty list that failed would hide the second-reference option from
+ * somebody who uses it daily. Each failure keeps the options read before it and names itself.
+ *
+ * Wallets are read without balances: a chain read per wallet held the whole form back by five to
+ * seven seconds, and no field shows one. Funding still refuses a short balance with the amount
+ * named.
+ */
+/** The API's own message for a failed read, or this form's words when it sent none. */
+function failedReadMessage(error: DashboardReadError | undefined, ownCopy: string): string {
+  return error !== undefined && error.message !== "" ? error.message : ownCopy;
+}
 
-    const walletsBody: unknown = await walletsResponse.json().catch(() => ({}));
-    const tokensBody = (await tokensResponse.json().catch(() => ({}))) as {
-      data?: TokenRow[];
-      error?: { message?: string };
-    };
-    const counterpartiesBody = (await counterpartiesResponse.json().catch(() => ({}))) as {
-      data?: { accounts?: CounterpartyAccountRow[] };
-      error?: { message?: string };
-    };
-
-    if (!walletsResponse.ok) {
+export function useDvpCreateContext(issuanceEnabled: boolean) {
+  const t = useTranslations();
+  const scope = useDashboardKeyScope();
+  const walletsRead = useWalletSummaries({ includeBalances: false });
+  const tokensRead = useIssuedTokens(issuanceEnabled);
+  const accountsRead = useDashboardRead(
+    dvpQueryKeys.createCounterpartyAccounts(scope),
+    counterpartyAccountsResponseSchema
+  );
+  const wallets = walletsRead.data;
+  const walletsError = walletsRead.error;
+  const tokenRows = issuanceEnabled ? tokensRead.data : NO_ISSUED_TOKENS;
+  const tokensError = tokensRead.error;
+  const accountRows = accountsRead.data;
+  const accountsError = accountsRead.error;
+  const retry = () => {
+    if (walletsError !== undefined) void walletsRead.mutate();
+    if (tokensError !== undefined) void tokensRead.mutate();
+    if (accountsError !== undefined) void accountsRead.mutate();
+  };
+  const context = useMemo((): DvpCreateContext | undefined => {
+    if (
+      (wallets === undefined && walletsError === undefined) ||
+      (tokenRows === undefined && tokensError === undefined) ||
+      (accountRows === undefined && accountsError === undefined)
+    ) {
+      return undefined;
+    }
+    if (wallets === undefined) {
       return {
         wallets: [],
         tokens: [],
         counterpartyAccounts: [],
-        error:
-          dvpErrorEnvelopeSchema.safeParse(walletsBody).data?.error.message ??
-          `Wallet list failed (${walletsResponse.status}).`,
+        error: failedReadMessage(walletsError, t("DashboardMarkets.dvp.createWalletsFailed")),
       };
     }
-
-    const parsedWallets = walletsResponseSchema.safeParse(walletsBody);
-    if (!parsedWallets.success) {
+    const walletOptions: DvpCreateWallet[] = wallets.map((wallet) => ({
+      id: wallet.id,
+      address: wallet.publicKey,
+      label: wallet.label,
+      custodyConfigId: wallet.custodyConfigId,
+      custodyConnectionId: wallet.custodyConnectionId,
+      isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
+      // Read without balances, which is not "holds nothing".
+      balances: null,
+    }));
+    if (tokenRows === undefined) {
       return {
-        wallets: [],
+        wallets: walletOptions,
         tokens: [],
         counterpartyAccounts: [],
-        error: "Invalid custody wallet response",
+        error: failedReadMessage(tokensError, t("DashboardMarkets.dvp.createTokensFailed")),
       };
     }
-    const walletRows = Array.isArray(parsedWallets.data.data)
-      ? parsedWallets.data.data
-      : parsedWallets.data.data.wallets;
-    // A failed token request must not read as "you have no tokens". Silently
-    // returning an empty list would send someone hunting for assets they can
-    // see in Issuance.
-    if (!tokensResponse.ok) {
+    // Only deployed tokens have a mint to trade. A draft has nothing to put in escrow, so offering
+    // it would be an invitation to a 400. Whether DvP will ACCEPT a mint is deliberately not
+    // decided here: create reads the mint on chain and refuses with the offending extension named.
+    const tokens = tokenRows.map(toTokenOption);
+    if (accountRows === undefined) {
       return {
-        wallets: mapWallets(walletRows),
-        tokens: [],
+        wallets: walletOptions,
+        tokens,
         counterpartyAccounts: [],
-        error: tokensBody.error?.message ?? `Token list failed (${tokensResponse.status}).`,
+        error: failedReadMessage(
+          accountsError,
+          t("DashboardMarkets.dvp.createCounterpartyAccountsFailed")
+        ),
       };
     }
-    const tokenRows = tokensBody.data ?? [];
-
-    // Same rule as the tokens: a counterparty list that failed must not read
-    // as "you have no counterparties", which would hide the second-reference
-    // option from somebody who uses it daily.
-    if (!counterpartiesResponse.ok) {
-      return {
-        wallets: mapWallets(walletRows),
-        tokens: tokenRows.flatMap(toTokenOption),
-        counterpartyAccounts: [],
-        error:
-          counterpartiesBody.error?.message ??
-          `Counterparty list failed (${counterpartiesResponse.status}).`,
-      };
-    }
-    const accountRows = counterpartiesBody.data?.accounts ?? [];
-
     return {
-      wallets: mapWallets(walletRows),
-      // Only deployed tokens have a mint to trade. A draft has nothing to put
-      // in escrow, so offering it would be an invitation to a 400.
-      //
-      // Whether DvP will ACCEPT a mint is deliberately not decided here. The
-      // create endpoint reads the mint on chain and refuses with the offending
-      // extension named, which is strictly better than anything this list could
-      // claim — it carries no extension data at all.
-      tokens: tokenRows.flatMap(toTokenOption),
-      counterpartyAccounts: mapCounterpartyAccounts(accountRows),
+      wallets: walletOptions,
+      tokens,
+      counterpartyAccounts: mapCounterpartyAccounts(accountRows.data.accounts),
       error: null,
     };
-  } catch (error) {
-    return {
-      wallets: [],
-      tokens: [],
-      counterpartyAccounts: [],
-      error: error instanceof Error ? error.message : "Could not load trade options.",
-    };
-  }
+  }, [wallets, walletsError, tokenRows, tokensError, accountRows, accountsError, t]);
+  return { context, retry };
 }
 
 /**
@@ -283,17 +224,17 @@ export async function fetchDvpCreateContext(
  */
 export const TOKEN_2022_PROGRAM = SPL_TOKEN_PROGRAMS["token-2022"];
 
-function toTokenOption(token: TokenRow) {
-  return token.mintAddress
-    ? [
-        {
-          mint: token.mintAddress,
-          label: token.symbol || token.name || token.mintAddress,
-          name: token.name ? token.name : null,
-          decimals: typeof token.decimals === "number" ? token.decimals : null,
-          // Every SDP-issued asset is minted under Token-2022.
-          tokenProgram: TOKEN_2022_PROGRAM,
-        },
-      ]
-    : [];
+/**
+ * The listing carries no token program and its `extensions` is an object about the permanent
+ * delegate, NOT the Token-2022 extension set, so it cannot tell us whether DvP will accept a mint.
+ */
+function toTokenOption(token: IssuedTokenSymbol): DvpCreateOption {
+  return {
+    mint: token.mintAddress,
+    label: token.symbol || token.name || token.mintAddress,
+    name: token.name ? token.name : null,
+    decimals: token.decimals,
+    // Every SDP-issued asset is minted under Token-2022.
+    tokenProgram: TOKEN_2022_PROGRAM,
+  };
 }

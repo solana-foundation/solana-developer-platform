@@ -8,11 +8,14 @@ const mocks = vi.hoisted(() => {
   const state: { data: unknown } = { data: undefined };
   return {
     state,
-    useSWR: vi.fn(() => ({ data: state.data })),
+    useDashboardSWR: vi.fn(() => ({ data: state.data })),
   };
 });
 
-vi.mock("swr", () => ({ default: mocks.useSWR }));
+vi.mock("@/lib/dashboard-swr", () => ({
+  useDashboardKeyScope: () => ({ projectId: "prj_test_sandbox", mode: "live" }),
+  useDashboardSWR: mocks.useDashboardSWR,
+}));
 
 import { useEarnVaultWithdrawalRequestOutcome } from "./earn-program-data";
 

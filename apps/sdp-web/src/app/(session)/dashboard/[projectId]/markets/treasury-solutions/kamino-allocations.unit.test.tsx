@@ -1,17 +1,23 @@
 // @vitest-environment jsdom
 
-import { renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { SWRConfig } from "swr";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as dashboardFetchModule from "@/lib/dashboard-fetch";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  dashboardErrorResponse,
+  sentDashboardReads,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import {
   kaminoAllocationsVault,
   kaminoAllocationsVaults,
   useKaminoVaultAllocations,
 } from "./kamino-allocations";
 
-const mocks = { fetch: vi.fn() };
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const ALLOCATIONS_PATH = "/api/dashboard/markets/earn/kamino-allocations";
 
 function payload() {
   return {
@@ -21,13 +27,21 @@ function payload() {
   };
 }
 
-// Each test renders inside an isolated SWR cache so a previous test's data
-// never serves (or suppresses the fetch of) a later read.
-function renderIsolatedHook(vaults: readonly string[]) {
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <SWRConfig value={{ provider: () => new Map() }}>{children}</SWRConfig>
+function requestedVaults(path: string): string[] {
+  const vaults = new URL(path, "https://dashboard.test").searchParams.get("vaults");
+  return vaults === null ? [] : vaults.split(",");
+}
+
+function answerEveryVault() {
+  return stubDashboardFetch(({ path }) =>
+    Response.json({
+      vaults: Object.fromEntries(requestedVaults(path).map((vault) => [vault, payload()])),
+    })
   );
-  return renderHook(() => useKaminoVaultAllocations(vaults), { wrapper });
+}
+
+function renderAllocations(vaults: readonly string[]) {
+  return renderHook(() => useKaminoVaultAllocations(vaults), { wrapper: DashboardReadsProvider });
 }
 
 const kamino = (providerReference: string, hostCluster: "devnet" | "mainnet-beta") => ({
@@ -62,91 +76,84 @@ describe("kaminoAllocationsVaults", () => {
 });
 
 describe("useKaminoVaultAllocations", () => {
-  beforeEach(() => {
-    vi.spyOn(dashboardFetchModule, "dashboardFetch").mockImplementation(mocks.fetch);
-    mocks.fetch.mockResolvedValue({
-      ok: true,
-      data: { vaults: { Kvault1111: payload(), Kvault2222: payload() } },
-      status: 200,
-    });
-  });
-
   afterEach(() => {
-    vi.restoreAllMocks();
-    mocks.fetch.mockReset();
+    cleanup();
+    vi.unstubAllGlobals();
   });
 
-  it("reads every vault in one request through the BFF seam", async () => {
-    const { result } = renderIsolatedHook(["Kvault1111", "Kvault2222"]);
+  it("reads every vault in one request under the key's Project", async () => {
+    const fetchMock = answerEveryVault();
+
+    const { result } = renderAllocations(["Kvault1111", "Kvault2222"]);
 
     await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
     expect(result.current.error).toBeUndefined();
-    expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    expect(mocks.fetch).toHaveBeenCalledWith(
-      "/api/dashboard/markets/earn/kamino-allocations?vaults=Kvault1111,Kvault2222&cluster=mainnet-beta"
-    );
+    expect(sentDashboardReads(fetchMock)).toEqual([
+      {
+        path: `${ALLOCATIONS_PATH}?cluster=mainnet-beta&vaults=Kvault1111%2CKvault2222`,
+        projectId: SANDBOX_PROJECT.id,
+        demo: null,
+      },
+    ]);
     expect(result.current.allocationsByVault?.Kvault2222?.allocations[0]?.marketName).toBe(
       "SOL/BTC Market"
     );
   });
 
-  it("splits a list past one batch into reads of at most 100 and merges them", async () => {
+  it("splits a list past one batch into mainnet reads of their own vaults and merges them", async () => {
+    const fetchMock = answerEveryVault();
     const vaults = Array.from({ length: 150 }, (_, index) => `Kvault${index}`);
-    const requested = (url: string) =>
-      new URL(url, "https://dashboard.test").searchParams.get("vaults")?.split(",") ?? [];
-    mocks.fetch.mockImplementation(async (url: string) => ({
-      ok: true,
-      data: { vaults: Object.fromEntries(requested(url).map((vault) => [vault, payload()])) },
-      status: 200,
-    }));
 
-    const { result } = renderIsolatedHook(vaults);
+    const { result } = renderAllocations(vaults);
 
     await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
-    expect(mocks.fetch.mock.calls.map(([url]) => requested(url).length)).toEqual([100, 50]);
-    expect(Object.keys(result.current.allocationsByVault ?? {})).toHaveLength(150);
+    expect(
+      sentDashboardReads(fetchMock).map((read) => {
+        const params = new URL(read.path, "https://dashboard.test").searchParams;
+        return { cluster: params.get("cluster"), vaults: requestedVaults(read.path) };
+      })
+    ).toEqual([
+      { cluster: "mainnet-beta", vaults: vaults.slice(0, 100) },
+      { cluster: "mainnet-beta", vaults: vaults.slice(100) },
+    ]);
+    expect(result.current.allocationsByVault?.Kvault0).toEqual(payload());
+    expect(result.current.allocationsByVault?.Kvault149).toEqual(payload());
   });
 
-  it("issues no request when no row has a readable vault", async () => {
-    const { result } = renderIsolatedHook([]);
+  it("issues no request when no row has a readable vault", () => {
+    const fetchMock = answerEveryVault();
+
+    const { result } = renderAllocations([]);
 
     expect(result.current.allocationsByVault).toBeUndefined();
     expect(result.current.isLoading).toBe(false);
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("encodes each vault into the request, never into the URL unescaped", async () => {
-    const { result } = renderIsolatedHook(["5YxwKgsv+TdT/not=A RealKey"]);
+    const fetchMock = answerEveryVault();
+
+    const { result } = renderAllocations(["5YxwKgsv+TdT/not=A RealKey"]);
+
     await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
-    expect(mocks.fetch).toHaveBeenCalledWith(
-      `/api/dashboard/markets/earn/kamino-allocations?vaults=${encodeURIComponent(
-        "5YxwKgsv+TdT/not=A RealKey"
-      )}&cluster=mainnet-beta`
-    );
+    expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+      `${ALLOCATIONS_PATH}?cluster=mainnet-beta&vaults=5YxwKgsv%2BTdT%2Fnot%3DA+RealKey`,
+    ]);
   });
 
-  it("surfaces a failed BFF read as an error with no data", async () => {
-    mocks.fetch.mockResolvedValue({
-      ok: false,
-      error: "Vault allocations could not be read",
-      status: 502,
-      body: null,
-    });
+  it.each([
+    ["a failed BFF read", () => dashboardErrorResponse(502, "Vault allocations could not be read")],
+    [
+      "a malformed BFF payload",
+      () =>
+        Response.json({
+          vaults: { Kvault1111: { allocations: [{ marketName: "SOL/BTC Market" }] } },
+        }),
+    ],
+  ])("surfaces %s as an error, never as partial data", async (_case, answer) => {
+    stubDashboardFetch(answer);
 
-    const { result } = renderIsolatedHook(["Kvault1111"]);
-
-    await waitFor(() => expect(result.current.error).toBeDefined());
-    expect(result.current.allocationsByVault).toBeUndefined();
-  });
-
-  it("surfaces a malformed BFF payload as an error, never as partial data", async () => {
-    mocks.fetch.mockResolvedValue({
-      ok: true,
-      data: { vaults: { Kvault1111: { allocations: [{ marketName: "SOL/BTC Market" }] } } },
-      status: 200,
-    });
-
-    const { result } = renderIsolatedHook(["Kvault1111"]);
+    const { result } = renderAllocations(["Kvault1111"]);
 
     await waitFor(() => expect(result.current.error).toBeDefined());
     expect(result.current.allocationsByVault).toBeUndefined();
