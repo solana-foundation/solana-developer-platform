@@ -20,6 +20,7 @@ const FIRST_PAGE = {
     {
       id: "tok_test_one",
       name: "Token One",
+      decimals: 6,
       mintAddress: "MintOne1111111111111111111111111111111111111",
       symbol: "ONE",
       imageUrl: "https://assets.test/one.png",
@@ -27,6 +28,7 @@ const FIRST_PAGE = {
     {
       id: "tok_test_draft",
       name: "Draft Token",
+      decimals: 6,
       mintAddress: null,
       symbol: "DRAFT",
       imageUrl: null,
@@ -40,12 +42,14 @@ const SECOND_PAGE = {
     {
       id: "",
       name: "Token Two",
+      decimals: 0,
       mintAddress: "MintTwo2222222222222222222222222222222222222",
       symbol: "TWO",
     },
     {
       id: "tok_test_unminted",
       name: "Unminted Token",
+      decimals: 6,
       mintAddress: "",
       symbol: "EMPTY",
       imageUrl: null,
@@ -106,6 +110,7 @@ describe("useIssuedTokens", () => {
         {
           id: "tok_test_one",
           name: "Token One",
+          decimals: 6,
           mintAddress: "MintOne1111111111111111111111111111111111111",
           symbol: "ONE",
           imageUrl: "https://assets.test/one.png",
@@ -113,6 +118,7 @@ describe("useIssuedTokens", () => {
         {
           id: null,
           name: "Token Two",
+          decimals: 0,
           mintAddress: "MintTwo2222222222222222222222222222222222222",
           symbol: "TWO",
           imageUrl: null,

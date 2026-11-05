@@ -9,6 +9,7 @@ import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context"
 import {
   dashboardDataResponse,
   sentDashboardReads,
+  sentDashboardRequests,
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
@@ -22,6 +23,7 @@ import {
 } from "./dashboard-request-key";
 import {
   DashboardReadError,
+  readDashboardPostRequest,
   readDashboardRequest,
   useDashboardKeyScope,
   useDashboardRead,
@@ -118,6 +120,50 @@ describe("useDashboardRead", () => {
     await waitFor(() => expect(result.current.error).toBeInstanceOf(DashboardReadError));
     expect(result.current.error).toMatchObject({ status: 200, code: null });
     expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("readDashboardPostRequest", () => {
+  const ESTIMATE_PATH = "/api/dashboard/payments/ramps/onramp/estimate";
+  const ESTIMATE_PARAMS = { amount: "25.00", fiatCurrency: "USD" };
+
+  it.each([
+    ["live", null],
+    ["demo", "1"],
+  ] as const)("posts a %s read's params under the key's Project, unkeyed", async (mode, demo) => {
+    setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/payments`);
+    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, { amount: 7 }));
+    const key = dashboardRequestKey(
+      { projectId: SANDBOX_PROJECT.id, mode },
+      ESTIMATE_PATH,
+      ESTIMATE_PARAMS
+    );
+
+    await expect(readDashboardPostRequest(key, amountSchema)).resolves.toEqual({
+      data: { amount: 7 },
+    });
+    expect(sentDashboardRequests(fetchMock)).toEqual([
+      { path: ESTIMATE_PATH, method: "POST", idempotencyKey: null, body: ESTIMATE_PARAMS },
+    ]);
+    expect(sentDashboardReads(fetchMock)).toEqual([
+      { path: ESTIMATE_PATH, projectId: SANDBOX_PROJECT.id, demo },
+    ]);
+  });
+
+  it("fails a refused read like a GET read", async () => {
+    stubDashboardFetch(() =>
+      Response.json({ error: { code: "VALIDATION_ERROR", message: "Too small" } }, { status: 422 })
+    );
+    const key = dashboardRequestKey(SCOPE, ESTIMATE_PATH, ESTIMATE_PARAMS);
+
+    const read = readDashboardPostRequest(key, amountSchema);
+
+    await expect(read).rejects.toBeInstanceOf(DashboardReadError);
+    await expect(read).rejects.toMatchObject({
+      status: 422,
+      code: "VALIDATION_ERROR",
+      message: "Too small",
+    });
   });
 });
 
