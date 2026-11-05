@@ -13,7 +13,6 @@ export interface UtilaEnv {
   UTILA_SERVICE_ACCOUNT_EMAIL?: string;
   UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   UTILA_VAULT_ID?: string;
-  UTILA_WALLET_ID?: string;
   UTILA_NETWORK?: UtilaNetwork;
   UTILA_API_BASE_URL?: string;
   UTILA_POLL_INTERVAL_MS?: string;
@@ -26,7 +25,6 @@ interface BuildUtilaConfigOptions {
   /** The cluster the work runs on; picks the Utila network when neither the config nor env names one. */
   cluster: SolanaCluster;
   defaultWalletId?: string | null;
-  defaultWalletIdFromEnv?: boolean;
   missingMessage?: string;
   network?: UtilaNetwork;
   vaultId?: string;
@@ -48,9 +46,6 @@ export function buildKeychainUtilaConfig(
     );
   }
 
-  const defaultWalletId =
-    options.defaultWalletId ?? (options.defaultWalletIdFromEnv ? env.UTILA_WALLET_ID : undefined);
-
   return {
     serviceAccountEmail,
     serviceAccountPrivateKeyPem,
@@ -66,7 +61,9 @@ export function buildKeychainUtilaConfig(
       "UTILA_MAX_POLL_ATTEMPTS"
     ),
     designatedSigners: parseCsvList(env.UTILA_DESIGNATED_SIGNERS),
-    defaultWalletId: defaultWalletId ? normalizeUtilaWalletId(defaultWalletId) : undefined,
+    defaultWalletId: options.defaultWalletId
+      ? normalizeUtilaWalletId(options.defaultWalletId)
+      : undefined,
   };
 }
 

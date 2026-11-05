@@ -149,7 +149,6 @@ export interface Env extends ManagedRpcEnv {
   // Privy configuration (@solana/keychain-privy)
   PRIVY_APP_ID?: string;
   PRIVY_APP_SECRET?: string;
-  PRIVY_WALLET_ID?: string;
   PRIVY_API_BASE_URL?: string;
   PRIVY_REQUEST_DELAY_MS?: string;
 
@@ -199,7 +198,6 @@ export interface Env extends ManagedRpcEnv {
   UTILA_SERVICE_ACCOUNT_EMAIL?: string;
   UTILA_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   UTILA_VAULT_ID?: string;
-  UTILA_WALLET_ID?: string;
   UTILA_NETWORK?: "networks/solana-devnet" | "networks/solana-mainnet";
   UTILA_API_BASE_URL?: string;
   UTILA_POLL_INTERVAL_MS?: string;
