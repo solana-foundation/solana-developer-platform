@@ -57,13 +57,11 @@ async function readLatestDeploy(key: DashboardRequestKey): Promise<DeployAttempt
   }
 }
 
-async function readLatestDeploys(key: DashboardRequestKey): Promise<LatestDeploys> {
+async function readLatestDeploys(
+  key: DashboardRequestKey,
+  tokenIds: readonly string[]
+): Promise<LatestDeploys> {
   const scope = { projectId: key[0], mode: key[1] };
-  const joinedTokenIds = key[3]?.tokenIds;
-  if (typeof joinedTokenIds !== "string") {
-    throw new Error("The latest-deploys read was given a key without token ids");
-  }
-  const tokenIds = joinedTokenIds.split(",");
   const statuses = await Promise.all(
     tokenIds.map((tokenId) =>
       readLatestDeploy(issuanceQueryKeys.latestDeployOf(scope, { tokenId }))
@@ -94,7 +92,7 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
   );
   const { data } = useDashboardSWR(
     ids.length > 0 ? issuanceQueryKeys.latestDeploys({ projectId, mode }, { tokenIds: ids }) : null,
-    readLatestDeploys,
+    (key) => readLatestDeploys(key, ids),
     {
       keepPreviousData: true,
       revalidateOnFocus: false,

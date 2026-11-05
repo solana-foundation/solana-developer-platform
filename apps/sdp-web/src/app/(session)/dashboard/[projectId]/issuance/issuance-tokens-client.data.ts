@@ -1,6 +1,6 @@
 "use client";
 
-import { ASSET_CATEGORIES, type IssuanceMetadata } from "@sdp/types/asset-profiles";
+import { ASSET_CATEGORIES } from "@sdp/types/asset-profiles";
 import { z } from "zod";
 import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
 import { readDashboardRequest } from "@/lib/dashboard-swr";
@@ -42,9 +42,7 @@ const issuanceListTokenSchema = z.object({
       assetCategory: z.enum(ASSET_CATEGORIES),
       assetType: z.string(),
       assetTypeVersion: z.number(),
-      issuanceMetadata: z.custom<IssuanceMetadata>(
-        (value) => typeof value === "object" && value !== null && !Array.isArray(value)
-      ),
+      issuanceMetadata: z.record(z.string(), z.unknown()),
     })
     .nullable(),
 }) satisfies z.ZodType<IssuanceTokenListItem>;

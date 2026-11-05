@@ -31,10 +31,7 @@ export const issuanceQueryKeys = {
       pageSize: query.pageSize,
     }),
   isTokensKey: (key: DashboardRequestKey) => key[2] === TOKENS_PATH,
-  /**
-   * The latest deploy of each listed token that has no mint yet: one read per token at
-   * `/tokens/:id/transactions` with the other params, stored under this one key.
-   */
+  /** Its fetcher fans out to per-token transaction reads and never sends this key's URL. */
   latestDeploys: (scope: DashboardKeyScope, { tokenIds }: { tokenIds: readonly string[] }) =>
     dashboardRequestKey(scope, TOKENS_PATH, {
       ...LATEST_DEPLOY_PARAMS,
