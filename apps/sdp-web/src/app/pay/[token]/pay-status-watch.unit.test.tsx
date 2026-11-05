@@ -10,16 +10,20 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const STATUS_URL = "https://api.test/pay/tok_1";
 
-function respondWith(status: string) {
+const PAY_URL = "solana:https://api.test/pay/tok_1/tx";
+
+function respondWith(status: string, solanaPayUrl: string | null = PAY_URL) {
   return vi
     .spyOn(globalThis, "fetch")
-    .mockImplementation(async () => new Response(JSON.stringify({ status }), { status: 200 }));
+    .mockImplementation(
+      async () => new Response(JSON.stringify({ status, solanaPayUrl }), { status: 200 })
+    );
 }
 
-function renderWatch(status: "awaiting_payment" | "paid") {
+function renderWatch(status: "awaiting_payment" | "paid", payable = true) {
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
-      <PayStatusWatch statusUrl={STATUS_URL} status={status} />
+      <PayStatusWatch statusUrl={STATUS_URL} status={status} payable={payable} />
     </SWRConfig>
   );
 }
@@ -56,6 +60,24 @@ describe("PayStatusWatch", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(dashboardRouter.refresh).not.toHaveBeenCalled();
+  });
+
+  it("redraws an open link once the API stops offering a way to pay it (HOO-2009)", async () => {
+    respondWith("awaiting_payment", null);
+    renderWatch("awaiting_payment", true);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("redraws an unavailable link once the API offers a way to pay it again", async () => {
+    respondWith("awaiting_payment", PAY_URL);
+    renderWatch("awaiting_payment", false);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
   });
 
   it("reads a link that is no longer open no more", async () => {

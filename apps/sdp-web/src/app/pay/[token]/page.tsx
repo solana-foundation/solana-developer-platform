@@ -144,6 +144,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
         <PayStatusWatch
           statusUrl={`${publicApiBaseUrl}/pay/${encodeURIComponent(token)}`}
           status={request.status}
+          payable={request.solanaPayUrl !== null}
         />
       ) : null}
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">

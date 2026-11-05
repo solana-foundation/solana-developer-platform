@@ -1,4 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
+import type { OrganizationStatus } from "@sdp/types/organizations";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -781,7 +782,7 @@ describe("Auth Middleware", () => {
     });
 
     it("names a suspended organization rather than blaming the key, and admits it on resume (HOO-2009)", async () => {
-      const setStatus = (status: string) =>
+      const setStatus = (status: OrganizationStatus) =>
         getDb(env)
           .prepare("UPDATE organizations SET status = ? WHERE id = ?")
           .bind(status, TEST_ORG.id)

@@ -1,5 +1,6 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
+import type { OrganizationStatus } from "@sdp/types/organizations";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -209,7 +210,7 @@ describe("Public payment request routes", () => {
 
   it("withholds the Solana Pay link while the request's organization is suspended (HOO-2009)", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-    const setStatus = (status: string) =>
+    const setStatus = (status: OrganizationStatus) =>
       getDb(env)
         .prepare("UPDATE organizations SET status = ? WHERE id = ?")
         .bind(status, TEST_ORG.id)
