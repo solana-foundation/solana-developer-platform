@@ -13,6 +13,7 @@ or with an explicit `GAP`.
 
 | Section        | Critical flows                               | Spec                                                                                               |
 | -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| account        | profile, security, and preferences           | GAP                                                                                                |
 | allowlist      | manage the address allowlist                 | GAP                                                                                                |
 | api-keys       | create, reveal, and revoke API keys          | api-keys.e2e.spec.ts                                                                               |
 | custody        | custody overview and operations              | GAP                                                                                                |

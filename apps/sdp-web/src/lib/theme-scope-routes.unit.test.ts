@@ -30,6 +30,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets/embedded-yield/integrate",
     "/dashboard/markets/earn",
     "/dashboard/markets/earn/configure",
+    "/dashboard/account",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
@@ -53,6 +54,8 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets/dvp",
     "/dashboard/markets/dvp/create",
     "/dashboard/markets/dvp/trade_1",
+    "/dashboard/accounts",
+    "/dashboard/account/security",
   ])("keeps %s in the base design", (pathname) => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });

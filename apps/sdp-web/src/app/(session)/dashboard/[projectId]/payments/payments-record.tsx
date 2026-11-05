@@ -112,11 +112,25 @@ export function RecordRow({
   );
 }
 
-/** A titled part of the record: an 18px heading 32px under what is above, its rows 14px under. */
-export function RecordSection({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * A titled part of the record: an 18px heading 32px under what is above, its rows 14px under.
+ * `aside` sits at the heading's right end, for the part's one action (Edit, Add).
+ */
+export function RecordSection({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="flex flex-col gap-3.5 pt-5.5">
-      <h2 className="text-subheading font-medium text-primary">{title}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-subheading font-medium text-primary">{title}</h2>
+        {aside}
+      </div>
       {children}
     </section>
   );

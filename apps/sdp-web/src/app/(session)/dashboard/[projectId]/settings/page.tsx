@@ -8,6 +8,7 @@ import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
+import { OrganizationDetailsSection } from "./organization-details-section";
 
 /** Anything that is not a positive integer falls back to the first page. */
 function resolveMembersPage(value: string | string[] | undefined): number {
@@ -17,7 +18,7 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * Organization settings: the quick start for API key managers, and the members,
+ * Organization settings: the organization's name and ID, the quick start for API key managers, and the members,
  * mainnet access, API-key IP allowlist and email alert sections for organization admins.
  *
  * @param props - The route props.
@@ -40,6 +41,7 @@ export default async function SettingsPage({
 
   return (
     <div className="w-full flex flex-col gap-6">
+      <OrganizationDetailsSection />
       {dashboardAccess.capabilities.canManageApiKeys ? (
         <DashboardQuickStart variant="settings" />
       ) : null}

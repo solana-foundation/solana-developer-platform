@@ -20,6 +20,28 @@ export function CompactOperationsCardSkeleton({ route }: { route: "allowlist" })
   );
 }
 
+export function AccountPageSkeleton() {
+  return (
+    <div className="flex w-full flex-col gap-6" data-loading-layout="account" aria-busy="true">
+      {[0, 1].map((index) => (
+        <section
+          key={index}
+          className="flex flex-col gap-6 rounded-[var(--sdp-surface-radius)] bg-surface-raised py-6 shadow-sm ring-1 ring-border-default"
+        >
+          <header className="space-y-2 px-6">
+            <SkeletonBlock className="h-6 w-32" />
+            <SkeletonBlock className="h-4 w-full max-w-md" />
+          </header>
+          <div className="space-y-3 px-6">
+            <SkeletonBlock className="h-10 w-full" />
+            <SkeletonBlock className="h-10 w-full" />
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsPageSkeleton() {
   return (
     <div className="flex w-full flex-col gap-6" data-loading-layout="settings" aria-busy="true">

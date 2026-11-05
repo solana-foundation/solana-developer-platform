@@ -17,6 +17,7 @@ import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
+import { OrganizationDetailsSection } from "./organization-details-section";
 import SettingsPage from "./page";
 
 function sectionTypes(page: ReactElement<{ children: ReactNode }>): ReactElement["type"][] {
@@ -36,6 +37,7 @@ describe("settings page", () => {
     [
       "admin",
       [
+        OrganizationDetailsSection,
         DashboardQuickStart,
         MembersSection,
         MainnetAccessSection,
@@ -43,7 +45,7 @@ describe("settings page", () => {
         OrganizationAlertEmailsSection,
       ],
     ],
-    ["member", [LeaveOrganizationCard]],
+    ["member", [OrganizationDetailsSection, LeaveOrganizationCard]],
   ])("renders the sections SDP's %s role holds", async (role, sections) => {
     vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue(role);
 

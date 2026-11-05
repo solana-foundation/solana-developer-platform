@@ -10,6 +10,8 @@ export const DASHBOARD_SIDE_NAV_HREFS = {
   integrations: "/dashboard/integrations",
 } as const;
 
+export const DASHBOARD_ACCOUNT_HREF = "/dashboard/account";
+
 export const DASHBOARD_MARKETS_SUBNAV_HREFS = {
   treasurySolutions: "/dashboard/markets/treasury-solutions",
   earnProgram: "/dashboard/markets/embedded-yield",
@@ -68,6 +70,7 @@ export type DashboardLoadingRoute =
   | "api-key-new"
   | "api-key-edit"
   | "settings"
+  | "account"
   | "integrations"
   | "integration-detail"
   | "private-channels-setup"
@@ -127,6 +130,7 @@ function resolveOperationsLoadingRoute(pathname: string): DashboardLoadingRoute 
   if (/^\/dashboard\/api-keys\/[^/]+\/edit$/.test(pathname)) return "api-key-edit";
   // Members only redirects into Settings, so it loads as the page it lands on.
   if (pathname === "/dashboard/settings" || pathname === "/dashboard/members") return "settings";
+  if (pathname === DASHBOARD_ACCOUNT_HREF) return "account";
   return null;
 }
 
