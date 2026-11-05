@@ -282,12 +282,7 @@ describe("fetchPaymentRequestCanceler", () => {
   };
 
   it("reads nothing for a request that is not canceled", async () => {
-    expect(
-      await fetchPaymentRequestCanceler(
-        { request: unused, orgRequest: unused },
-        requestRow("preq_1")
-      )
-    ).toBeNull();
+    expect(await fetchPaymentRequestCanceler(unused, requestRow("preq_1"))).toBeNull();
   });
 
   it("names the API key from the Project's keys", async () => {
@@ -298,17 +293,14 @@ describe("fetchPaymentRequestCanceler", () => {
     };
 
     expect(
-      await fetchPaymentRequestCanceler(
-        { request, orgRequest: unused },
-        canceled({ canceledByApiKeyId: "key_1" })
-      )
+      await fetchPaymentRequestCanceler(request, canceled({ canceledByApiKeyId: "key_1" }))
     ).toEqual({ kind: "api_key", id: "key_1", name: "Checkout bot" });
     expect(paths).toEqual(["/v1/api-keys/key_1"]);
   });
 
   it("names the member by name, else email, reading pages until it finds them", async () => {
     const paths: string[] = [];
-    const orgRequest = async (path: string) => {
+    const membersRequest = async (path: string) => {
       paths.push(path);
       return path.includes("page=1&")
         ? json({ data: { members: [member("usr_1", "Ada")], meta: { hasMore: true } } })
@@ -316,10 +308,7 @@ describe("fetchPaymentRequestCanceler", () => {
     };
 
     expect(
-      await fetchPaymentRequestCanceler(
-        { request: unused, orgRequest },
-        canceled({ canceledByUserId: "usr_2" })
-      )
+      await fetchPaymentRequestCanceler(membersRequest, canceled({ canceledByUserId: "usr_2" }))
     ).toEqual({ kind: "member", id: "usr_2", name: "usr_2@example.com" });
     expect(paths).toEqual(["/v1/members?page=1&pageSize=100", "/v1/members?page=2&pageSize=100"]);
   });
@@ -330,22 +319,13 @@ describe("fetchPaymentRequestCanceler", () => {
     const empty = async () => json({ data: { members: [], meta: { hasMore: false } } });
 
     expect(
-      await fetchPaymentRequestCanceler(
-        { request: refused, orgRequest: unused },
-        canceled({ canceledByApiKeyId: "key_1" })
-      )
+      await fetchPaymentRequestCanceler(refused, canceled({ canceledByApiKeyId: "key_1" }))
     ).toEqual({ kind: "api_key", id: "key_1", name: null });
     expect(
-      await fetchPaymentRequestCanceler(
-        { request: unused, orgRequest: broken },
-        canceled({ canceledByUserId: "usr_1" })
-      )
+      await fetchPaymentRequestCanceler(broken, canceled({ canceledByUserId: "usr_1" }))
     ).toEqual({ kind: "member", id: "usr_1", name: null });
     expect(
-      await fetchPaymentRequestCanceler(
-        { request: unused, orgRequest: empty },
-        canceled({ canceledByUserId: "usr_1" })
-      )
+      await fetchPaymentRequestCanceler(empty, canceled({ canceledByUserId: "usr_1" }))
     ).toEqual({ kind: "member", id: "usr_1", name: null });
   });
 });

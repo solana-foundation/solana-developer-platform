@@ -393,7 +393,7 @@ async function readApiKeyName(
 }
 
 async function readMemberName(
-  orgRequest: SdpApiClient["request"],
+  request: SdpApiClient["request"],
   userId: string
 ): Promise<string | null> {
   for (let page = 1; page <= MEMBERS_LOOKUP_MAX_PAGES; page += 1) {
@@ -401,7 +401,7 @@ async function readMemberName(
       page: String(page),
       pageSize: String(MEMBERS_LOOKUP_PAGE_SIZE),
     });
-    const response = await orgRequest(`/v1/members?${query.toString()}`);
+    const response = await request(`/v1/members?${query.toString()}`);
     if (!response.ok) return null;
     const directory = memberDirectoryPageSchema.parse(await response.json()).data;
     const member = directory.members.find((candidate) => candidate.user.id === userId);
@@ -417,12 +417,12 @@ async function readMemberName(
  * removed, or a role that may not read either leaves the name null, and the page says "an API
  * key" or "a member" instead.
  *
- * @param fetchers - `request` for the Project's API keys, `orgRequest` for the members directory.
+ * @param request - Authenticated SDP API fetcher; the members read ignores its Project.
  * @param paymentRequest - The request as the API returned it.
  * @returns The canceler, or null when the request is not canceled or names nobody; never throws.
  */
 export async function fetchPaymentRequestCanceler(
-  fetchers: { request: SdpApiClient["request"]; orgRequest: SdpApiClient["request"] },
+  request: SdpApiClient["request"],
   paymentRequest: PaymentRequest
 ): Promise<PaymentRequestCanceler | null> {
   if (paymentRequest.status !== "canceled") return null;
@@ -432,14 +432,14 @@ export async function fetchPaymentRequestCanceler(
       return {
         kind: "api_key",
         id: apiKeyId,
-        name: await readApiKeyName(fetchers.request, apiKeyId),
+        name: await readApiKeyName(request, apiKeyId),
       };
     }
     if (userId) {
       return {
         kind: "member",
         id: userId,
-        name: await readMemberName(fetchers.orgRequest, userId),
+        name: await readMemberName(request, userId),
       };
     }
   } catch {

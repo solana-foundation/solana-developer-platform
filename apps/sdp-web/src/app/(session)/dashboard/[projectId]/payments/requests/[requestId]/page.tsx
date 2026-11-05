@@ -9,7 +9,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
-import { createOrgSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -54,18 +54,8 @@ export default async function PaymentRequestDetailRoute({
       // Only a canceled request names who did it; its key or member is read after the request.
       const canceler =
         request?.status === "canceled"
-          ? await trace.step("fetch_payment_request_canceler", async () =>
-              fetchPaymentRequestCanceler(
-                {
-                  request: apiClient.request,
-                  orgRequest: (
-                    await createOrgSdpApiClient(
-                      trace.childContext("dashboard.payment-requests.detail.canceler.api")
-                    )
-                  ).request,
-                },
-                request
-              )
+          ? await trace.step("fetch_payment_request_canceler", () =>
+              fetchPaymentRequestCanceler(apiClient.request, request)
             )
           : null;
 
