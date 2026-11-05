@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
@@ -75,9 +75,24 @@ const navItemInactive = "text-primary hover:bg-fill";
 // Sub-items keep the secondary ink until active; the design indents them under the icon
 // column instead of drawing a rail beside them.
 const childNavItemBase =
-  "flex h-control-md flex-1 items-center gap-2.5 rounded-control pr-2 pl-13 text-nav transition-colors";
+  "relative flex h-control-md flex-1 items-center gap-2.5 rounded-control pr-2 pl-13 text-nav transition-colors";
 const childNavItemActive = `${navItemActive} font-medium`;
 const childNavItemInactive = "text-secondary hover:bg-fill hover:text-primary";
+
+/**
+ * Shown on the row the user clicked until the next page's payload arrives. Always rendered at a
+ * fixed size and faded in, so a click never shifts the row.
+ */
+function NavLinkPendingHint() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden="true"
+      data-pending={pending}
+      className="pointer-events-none absolute top-1/2 left-1 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary opacity-0 transition-opacity delay-100 data-[pending=true]:opacity-60 motion-reduce:transition-none"
+    />
+  );
+}
 
 /** A sub-item's own leading mark, when it has one. */
 function SubNavItemLeading({ item }: { item: SubNavItem }) {
@@ -169,6 +184,7 @@ function SidebarGroup({
                 >
                   <Icon className="size-5 shrink-0 text-primary/45" strokeWidth={1.9} />
                   {isCollapsed ? null : <span className="whitespace-nowrap">{item.label}</span>}
+                  <NavLinkPendingHint />
                 </Link>
                 {subnavKey && !isCollapsed ? (
                   <button
@@ -218,6 +234,7 @@ function SidebarGroup({
                           >
                             <SubNavItemLeading item={child} />
                             <span className="min-w-0 truncate">{child.label}</span>
+                            <NavLinkPendingHint />
                           </Link>
                         )}
                       </div>

@@ -1,16 +1,14 @@
 "use client";
 import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
-import { useSWRConfig } from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { fetchTokenAuthorityWallets } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-authority-wallets.data";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import { useTranslations } from "@/i18n/provider";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { isTokenAllowlistKey } from "./allowlist-cache";
 import { fetchFrozenAccountsTotal } from "./frozen-accounts.data";
 import { isTokenTransactionsKey } from "./transactions-cache";
 
 // Shared cache keys and TTLs keep operational data coherent after mutations.
-const TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS = 60_000;
 const TOKEN_FROZEN_ACCOUNTS_KEY = "token-frozen-accounts";
 
 function isTokenFrozenAccountsKey(key: unknown, tokenId: string): boolean {
@@ -35,18 +33,13 @@ export function useTokenOperationData({
     data: authorityWalletsData,
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
-  } = usePersistedDashboardSWR(
+  } = useSWR(
     shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
     ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
       revalidateIfStale: true,
-    },
-    {
-      key: `token.${token.id}.authority-wallets`,
-      ttlMs: TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS,
-      version: 2,
     }
   );
   const authorityWalletsError = requestErrorMessage(
@@ -59,11 +52,10 @@ export function useTokenOperationData({
     data: frozenAccountsTotal,
     error: frozenAccountsRequestError,
     isLoading: frozenAccountsLoading,
-  } = usePersistedDashboardSWR(
+  } = useSWR(
     token.mintAddress ? ([TOKEN_FROZEN_ACCOUNTS_KEY, token.id] as const) : null,
     ([, tokenId]: readonly [string, string]) => fetchFrozenAccountsTotal(tokenId),
-    { revalidateOnFocus: true, revalidateIfStale: true },
-    { key: `token.${token.id}.frozen-accounts`, ttlMs: 30_000 }
+    { revalidateOnFocus: true, revalidateIfStale: true }
   );
 
   const revalidateAfterSuccess = async () => {

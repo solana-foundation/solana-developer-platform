@@ -412,6 +412,21 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
   return sendWithProject(path, init, headers);
 }
 
+/**
+ * A read sent under the Project and mode its SWR key names, never the tab's URL at send time, so
+ * the answer always belongs to the key that stores it.
+ */
+export function dashboardReadRequest(
+  url: string,
+  scope: { projectId: string; demo: boolean }
+): Promise<Response> {
+  const headers = new Headers({ [PROJECT_HEADER_NAME]: scope.projectId });
+  if (scope.demo) {
+    headers.set(TAB_DEMO_HEADER_NAME, "1");
+  }
+  return fetch(url, { method: "GET", cache: "no-store", headers });
+}
+
 /** A key its caller keeps in its own store, and whether that store persisted it. */
 export interface CallerIdempotencyKey {
   value: string;
