@@ -10,6 +10,7 @@ import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/rele
 import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { ERROR_CODES } from "@/lib/errors";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
 import {
   ANONYMOUS_MAX_REQUESTS,
@@ -74,6 +75,25 @@ function literalEarnPaths(source: string): string[] {
 
 function getWalletListItemSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
+}
+
+const errorEnvelopeSchema = z.object({
+  properties: z.object({
+    error: z.object({
+      properties: z.object({ code: z.object({ enum: z.array(z.string()).optional() }) }),
+    }),
+  }),
+});
+
+/** The codes each error envelope under `node` allows, wherever in the document it sits. */
+function errorEnvelopeCodes(node: unknown): (string[] | undefined)[] {
+  if (Array.isArray(node)) return node.flatMap(errorEnvelopeCodes);
+  if (typeof node !== "object" || node === null) return [];
+  const nested = Object.values(node).flatMap(errorEnvelopeCodes);
+  const envelope = errorEnvelopeSchema.safeParse(node);
+  return envelope.success
+    ? [envelope.data.properties.error.properties.code.enum, ...nested]
+    : nested;
 }
 
 describe("OpenAPI spec", () => {
@@ -761,6 +781,23 @@ describe("OpenAPI spec", () => {
       expect([...leaked]).toEqual([]);
     });
   }
+
+  // Error codes name no module, so no channel prunes them: an envelope that lists fewer codes
+  // than the API answers with fails a client that checks the enum.
+  it("lists every ErrorCode in each error envelope of every document", () => {
+    const documents = [
+      createOpenApiDocument(),
+      ...SDP_RELEASE_CHANNEL_NAMES.map((releaseChannel) =>
+        createPublicOpenApiDocument({ releaseChannel })
+      ),
+    ];
+    for (const doc of documents) {
+      const lists = errorEnvelopeCodes(doc);
+      expect(lists.length).toBeGreaterThan(0);
+      const distinct = [...new Map(lists.map((codes) => [JSON.stringify(codes), codes])).values()];
+      expect(distinct).toEqual([ERROR_CODES]);
+    }
+  });
 
   it.each(["stable", "beta"] as const)(
     "%s hides ramp-only transfer fields and prose",
