@@ -10,7 +10,7 @@ export function GET() {
     "",
     "Content-Signal: search=yes, ai-input=yes, ai-train=yes",
     "",
-    `Sitemap: ${docsOrigin}/sitemap.xml`,
+    `Sitemap: ${docsOrigin}/docs/sitemap.xml`,
     `Host: ${host}`,
     "",
   ].join("\n");
