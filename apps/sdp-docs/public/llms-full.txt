@@ -26793,7 +26793,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
-Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.
+Before a new collection, SDP requires an active counterparty and account in the schedule's project. If either is archived or unavailable, the schedule pauses with `pausedReason` `destination_unavailable` and the request returns 409 without signing; that 409, and every later collect or resume of the schedule while its recipient stays unavailable, tells the caller to cancel the schedule and create a new one. An earlier in-flight collection still recovers. If submission cannot be confirmed immediately, a 200 response returns the same transfer as `processing` with its known signature; reconciliation settles it, and the next due time advances only after exact on-chain confirmation. When the source wallet cannot cover the amount, the request returns 400 `TRANSACTION_FAILED` and the failed collection attempt and its transfer record the same reason in `error`, so the collection history shows why.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -27568,7 +27568,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-r
 
 `POST /v1/payments/recurring-payments/{id}/resume`
 
-SDP pauses a recurring payment when a due period fails 5 times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable. Resume requires both recipient records to be active. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
+SDP pauses a recurring payment when a due period fails 5 times, at once when the custody provider's policy refuses to sign a collection, or before a new collection when its counterparty or account is archived or unavailable. Resume requires both recipient records to be active; while either is archived or unavailable it returns 409 telling the caller to cancel the schedule and create a new one. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
