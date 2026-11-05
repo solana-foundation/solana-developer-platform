@@ -33,6 +33,7 @@ import {
 } from "./api-key-authoring";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
 import { ApiKeyGrantPicker } from "./api-key-grant-picker";
+import { apiKeyReads } from "./api-keys-query-key";
 
 const API_KEYS_PATH = "/dashboard/api-keys";
 
@@ -634,9 +635,9 @@ export function ApiKeyAuthoringWorkspace({
       if (mode === "create" && selectedProjectId) {
         invalidateQuickStartStatus();
       }
+      void invalidateReads(apiKeyReads);
       void invalidateReads(memberReads);
       router.push(href(API_KEYS_PATH));
-      router.refresh();
     });
   };
 

@@ -9,15 +9,15 @@ import { Combobox, type ComboboxOption } from "@sdp/ui/combobox";
 import { Modal } from "@sdp/ui/modal";
 import { WizardStepProgress } from "@sdp/ui/wizard-step-progress";
 import { CheckCircle2Icon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type ReactNode, type UIEvent, useCallback, useRef, useState, useTransition } from "react";
 import { z } from "zod";
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { SdpTermsContent } from "@/components/sdp-terms-content";
 import { useTranslations } from "@/i18n/provider";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useZodForm } from "@/lib/use-zod-form";
 import { notifyMainnetAccess, requestMainnetAccess } from "./mainnet-access";
+import { organizationReads } from "./organization-query-key";
 
 const COUNTRY_OPTIONS: readonly ComboboxOption[] = COUNTRIES.map((country) => {
   const flag = regionFlagEmoji(country.code);
@@ -43,8 +43,8 @@ interface RequestProps {
 
 /**
  * The Mainnet section: the organization's mainnet record (`record`), with the one-time request
- * at the heading while it has none. It owns the dialog and stays mounted when the page refreshes
- * to the sent request, so the dialog's confirmation outlives that refresh.
+ * at the heading while it has none. It owns the dialog and stays mounted when the record re-reads
+ * to the sent request, so the dialog's confirmation outlives that re-read.
  */
 export function MainnetAccessRequestHost({
   canRequest,
@@ -81,7 +81,7 @@ function MainnetAccessRequestModal({
   onClose,
 }: RequestProps & { onClose: () => void }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [step, setStep] = useState<Step>("jurisdiction");
   const jurisdiction = useZodForm(JURISDICTION_SCHEMA, { countryCode: null });
   const terms = useZodForm(TERMS_SCHEMA, { accepted: false });
@@ -90,11 +90,11 @@ function MainnetAccessRequestModal({
   const [readToEnd, setReadToEnd] = useState(false);
 
   // A failed submit may still have recorded the request (its email did not go out), so the
-  // card behind the dialog is refreshed after any attempt, not only a sent one.
+  // card behind the dialog is re-read after any attempt, not only a sent one.
   const attempted = useRef(false);
   const close = () => {
     onClose();
-    if (attempted.current) refreshKeepingDashboardUrl(router);
+    if (attempted.current) void invalidateReads(organizationReads);
   };
 
   const steps = [t("Shared.mainnetAccess.stepJurisdiction"), t("Shared.mainnetAccess.stepTerms")];
@@ -119,7 +119,7 @@ function MainnetAccessRequestModal({
       } else {
         setError(result.error);
       }
-      refreshKeepingDashboardUrl(router);
+      void invalidateReads(organizationReads);
     });
   };
 
@@ -379,7 +379,7 @@ function TermsStep({
 /** Sends a recorded request whose email did not go out. */
 export function MainnetAccessResendButton({ organizationId }: { organizationId: string }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [error, setError] = useState<string | null>(null);
   const [pending, startResend] = useTransition();
   return (
@@ -393,7 +393,7 @@ export function MainnetAccessResendButton({ organizationId }: { organizationId: 
           startResend(async () => {
             setError(null);
             const result = await notifyMainnetAccess(organizationId);
-            if (result.ok) refreshKeepingDashboardUrl(router);
+            if (result.ok) void invalidateReads(organizationReads);
             else setError(result.error);
           })
         }

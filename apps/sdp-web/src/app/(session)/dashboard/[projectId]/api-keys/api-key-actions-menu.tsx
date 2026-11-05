@@ -10,10 +10,14 @@ import {
 import { Modal } from "@sdp/ui/modal";
 import { ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { memberReads } from "@/app/(session)/dashboard/[projectId]/settings/members-query-key";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { rotateApiKeyAction } from "./actions";
+import { apiKeyReads } from "./api-keys-query-key";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
 const DEFAULT_ROTATION_GRACE_HOURS = 24;
@@ -43,6 +47,7 @@ export function ApiKeyActionsMenu({
       <form ref={rotateFormRef} action={rotateApiKeyAction} className="hidden">
         <input type="hidden" name="keyId" value={keyId} />
         <input type="hidden" name="grace" value={String(DEFAULT_ROTATION_GRACE_HOURS)} />
+        <RotationSettledWatcher />
       </form>
 
       <DropdownMenu modal={false}>
@@ -126,4 +131,20 @@ export function ApiKeyActionsMenu({
       />
     </>
   );
+}
+
+// The rotation is a form action that answers with a redirect, so there is no success callback:
+// once its submission settles, the keys it replaced are re-read.
+function RotationSettledWatcher() {
+  const { pending } = useFormStatus();
+  const invalidateReads = useInvalidateDashboardReads();
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !pending) {
+      void invalidateReads(apiKeyReads);
+      void invalidateReads(memberReads);
+    }
+    wasPending.current = pending;
+  }, [pending, invalidateReads]);
+  return null;
 }

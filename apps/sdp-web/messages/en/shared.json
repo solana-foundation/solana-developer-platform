@@ -610,8 +610,11 @@
   "tokenHoldings": {
     "retry": "Try again"
   },
-  "apiKeyAuthoring": {
-    "retry": "Try again"
+  "apiKeys": {
+    "retry": "Try again",
+    "loadFailed": "API keys could not be loaded.",
+    "keyNotFound": "This API key does not exist in this project, or it was deleted.",
+    "backToApiKeys": "Back to API keys"
   },
   "integrations": {
     "pageDescription": "Every provider SDP can run for this organization, with what is connected and what to do next. Custody installs from Wallets; other families are provisioned per deployment.",
@@ -677,7 +680,9 @@
     },
     "detailsTitle": "Details",
     "name": "Name",
-    "dangerZoneTitle": "Danger zone"
+    "dangerZoneTitle": "Danger zone",
+    "retry": "Try again",
+    "unexpectedError": "the server did not answer as expected"
   },
   "account": {
     "title": "Account",

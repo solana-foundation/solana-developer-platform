@@ -11,7 +11,6 @@ import {
 } from "@sdp/ui/dropdown-menu";
 import { Modal } from "@sdp/ui/modal";
 import { MoreHorizontalIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -26,7 +25,6 @@ import {
   useDashboardRead,
   useInvalidateDashboardReads,
 } from "@/lib/dashboard-swr";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { memberReads, membersQueryKeys } from "./members-query-key";
@@ -67,7 +65,6 @@ export function MemberActions({
   isLastAdmin: boolean;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const scope = useDashboardKeyScope();
   const invalidateReads = useInvalidateDashboardReads();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
@@ -111,7 +108,6 @@ export function MemberActions({
       }
       toast.success(t("Shared.members.roleChanged", { member: label }));
       void invalidateReads(memberReads);
-      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -159,7 +155,6 @@ export function MemberActions({
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
       void invalidateReads(memberReads);
-      refreshKeepingDashboardUrl(router);
     });
   };
 

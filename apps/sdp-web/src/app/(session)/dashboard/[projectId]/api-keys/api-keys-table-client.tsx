@@ -9,7 +9,6 @@ import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import { PlusIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { memberReads } from "@/app/(session)/dashboard/[projectId]/settings/members-query-key";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -18,6 +17,7 @@ import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { ApiKeyActionsMenu } from "./api-key-actions-menu";
 import { grantSummaryLines, grantsSummaryLabel } from "./api-key-grant-labels";
+import { apiKeyReads } from "./api-keys-query-key";
 
 const PREFIX_COLUMN_CLASS = "hidden @4xl/api-keys-table:table-cell";
 const STATUS_COLUMN_CLASS = "hidden @5xl/api-keys-table:table-cell";
@@ -170,7 +170,6 @@ export function ApiKeysTableClient({
   const t = useTranslations();
   const locale = useLocale();
   const timeZone = useTimeZone();
-  const router = useRouter();
   const invalidateReads = useInvalidateDashboardReads();
   const href = useProjectHref();
   const [apiKeys, setApiKeys] = useState(initialApiKeys);
@@ -288,8 +287,8 @@ export function ApiKeysTableClient({
                     canRotate={canRotate}
                     onDeleted={() => {
                       setApiKeys((previous) => previous.filter((item) => item.id !== key.id));
+                      void invalidateReads(apiKeyReads);
                       void invalidateReads(memberReads);
-                      router.refresh();
                     }}
                   />
                 ) : null}

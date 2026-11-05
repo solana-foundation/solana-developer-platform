@@ -227,7 +227,6 @@ export async function saveApiKeyAuthoringAction(
         key: created.apiKey.key,
         keyPrefix: created.apiKey.keyPrefix,
       });
-      revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
       return {
         ok: true,
         message: t("DashboardCustody.apiKeyCreated", { name: created.apiKey.name }),
@@ -258,11 +257,6 @@ export async function saveApiKeyAuthoringAction(
       level: "success",
       message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
     });
-    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-    revalidatePath(
-      await requestProjectHref(`${API_KEYS_PAGE_PATH}/${encodeURIComponent(keyId)}/edit`),
-      "page"
-    );
     return {
       ok: true,
       message: t("DashboardCustody.apiKeyUpdated", { name: input.draft.name.trim() }),
@@ -337,10 +331,5 @@ export async function deactivateApiKeyInlineAction(input: {
   confirmation: string;
   cancelRecurringPayments?: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
-  const result = await deactivateApiKeyRequest(input);
-  if (result.ok) {
-    revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  }
-
-  return result;
+  return deactivateApiKeyRequest(input);
 }

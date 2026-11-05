@@ -3,7 +3,7 @@
 import type { Action } from "@sdp/types/actions";
 import { Button } from "@sdp/ui/button";
 import { ApiKeyAuthoringWorkspace } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-authoring-workspace";
-import { ApiKeyAuthoringSkeleton } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
+import { NewApiKeySkeleton } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-page-skeletons";
 import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useTranslations } from "@/i18n/provider";
 
@@ -26,10 +26,10 @@ export function NewApiKeyWorkspace({ offeredActions }: { offeredActions: Action[
           {t("DashboardCustody.unableToLoadWallets")}
         </p>
         <Button type="button" size="sm" onClick={() => void wallets.mutate()}>
-          {t("Shared.apiKeyAuthoring.retry")}
+          {t("Shared.apiKeys.retry")}
         </Button>
       </div>
     );
   }
-  return <ApiKeyAuthoringSkeleton route="api-key-new" />;
+  return <NewApiKeySkeleton />;
 }

@@ -1,12 +1,12 @@
 "use client";
 
 import { ToggleSwitch } from "@sdp/ui/toggle-switch";
-import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RecordActionRow } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
+import { organizationReads } from "./organization-query-key";
 import { saveOrganizationAlertEmails } from "./organization-settings";
 
 export function OrganizationAlertEmailsSwitch({
@@ -17,7 +17,7 @@ export function OrganizationAlertEmailsSwitch({
   initialEnabled: boolean;
 }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [enabled, setEnabled] = useState(initialEnabled);
   // One key per intended value: a retried save repeats it, the other value gets a new one.
   const pendingSave = useRef<{ enabled: boolean; key: string } | null>(null);
@@ -39,8 +39,7 @@ export function OrganizationAlertEmailsSwitch({
       }
       setEnabled(result.value);
       pendingSave.current = null;
-      // The tabs remount their panels from the page's server props, so those must hold the save.
-      refreshKeepingDashboardUrl(router);
+      void invalidateReads(organizationReads);
       toast.success(
         result.value
           ? t("Shared.organizationAlertEmails.savedOn")

@@ -1,26 +1,40 @@
+"use client";
+
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { getTranslations } from "@/i18n/server";
+import { useTranslations } from "@/i18n/provider";
+import { useCurrentOrganization } from "./organization.data";
 import { OrganizationAlertEmailsSwitch } from "./organization-alert-emails-switch";
-import { loadOrganizationAlertEmails } from "./organization-settings-load";
+import {
+  SettingsLoadError,
+  SettingsRowsSkeleton,
+  useReadFailureText,
+} from "./settings-section-state";
 
 /**
  * Alert emails to the organization's admins (HOO-2299): one switch for all of them.
  * Per-type controls, when they come, go below the switch in this section.
  */
-export async function OrganizationAlertEmailsSection() {
-  const [t, alertEmails] = await Promise.all([getTranslations(), loadOrganizationAlertEmails()]);
+export function OrganizationAlertEmailsSection() {
+  const t = useTranslations();
+  const failureText = useReadFailureText();
+  const organization = useCurrentOrganization();
 
   return (
     <RecordSection id="email-alerts" title={t("Shared.organizationAlertEmails.title")}>
-      {alertEmails.ok ? (
+      {organization.data ? (
         <OrganizationAlertEmailsSwitch
-          initialEnabled={alertEmails.enabled}
-          organizationId={alertEmails.organizationId}
+          initialEnabled={organization.data.alertEmailsEnabled}
+          organizationId={organization.data.id}
+        />
+      ) : organization.error ? (
+        <SettingsLoadError
+          message={t("Shared.organizationAlertEmails.loadFailed", {
+            error: failureText(organization.error),
+          })}
+          onRetry={() => void organization.mutate()}
         />
       ) : (
-        <p className="text-body text-error" role="alert">
-          {t("Shared.organizationAlertEmails.loadFailed", { error: alertEmails.error })}
-        </p>
+        <SettingsRowsSkeleton rows={1} />
       )}
     </RecordSection>
   );

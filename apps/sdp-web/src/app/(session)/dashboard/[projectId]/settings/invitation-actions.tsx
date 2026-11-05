@@ -8,13 +8,11 @@ import {
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
 import { MoreHorizontalIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
-import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { fetchResultAnswer, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { memberReads } from "./members-query-key";
@@ -27,7 +25,6 @@ export function InvitationActions({
   email: string;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const invalidateReads = useInvalidateDashboardReads();
   const [isPending, startTransition] = useTransition();
   const [isRevoking, setIsRevoking] = useState(false);
@@ -56,7 +53,6 @@ export function InvitationActions({
 
       toast.success(t("Shared.members.revoked", { email }));
       void invalidateReads(memberReads);
-      refreshKeepingDashboardUrl(router);
     });
   };
 
