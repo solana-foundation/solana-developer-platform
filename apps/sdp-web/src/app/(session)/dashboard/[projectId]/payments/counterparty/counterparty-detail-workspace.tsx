@@ -13,7 +13,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
@@ -26,6 +25,7 @@ import {
   isInboundTransfer,
   PAYMENT_STATUS_TONE,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";

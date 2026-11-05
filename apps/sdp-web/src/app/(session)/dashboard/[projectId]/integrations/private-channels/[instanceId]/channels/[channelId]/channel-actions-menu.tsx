@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
-  PRIVATE_CHANNELS_INTEGRATION_PATH,
+  PRIVATE_CHANNELS_OVERVIEW_PATH,
   privateChannelsInstancePath,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import {
@@ -72,7 +72,7 @@ export function ChannelActionsMenu({
       if (result.ok) {
         setDeleteOpen(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
-        router.push(href(PRIVATE_CHANNELS_INTEGRATION_PATH));
+        router.push(href(PRIVATE_CHANNELS_OVERVIEW_PATH));
       } else {
         toast.error(result.message);
       }

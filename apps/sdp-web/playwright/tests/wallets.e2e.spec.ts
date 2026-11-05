@@ -194,14 +194,13 @@ test.describe
       await expect(walletCard.getByRole("link", { name: `Open ${walletLabel}` })).toBeVisible();
     });
 
-    test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
+    test("wallet workspace and detail preserve navigation", async ({ browser, page }) => {
       const { projectId, wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, {
         labelPrefix: "Wallet Routes",
       });
 
       const encodedWalletId = encodeURIComponent(wallet.walletId);
       const walletHref = projectHref(projectId, `/dashboard/wallets/${encodedWalletId}`);
-      const custodyHref = projectHref(projectId, `/dashboard/custody/${encodedWalletId}`);
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets");
       await expect(page.locator("[data-wallet-panel]").first()).toHaveAttribute(
@@ -256,12 +255,6 @@ test.describe
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
       await walletCard.getByRole("link", { name: `Open ${walletLabel}` }).click();
       await expect(page).toHaveURL(walletHref);
-      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-
-      await page.goto(custodyHref, { waitUntil: "domcontentloaded" });
-      await expect(page).toHaveURL(custodyHref);
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });

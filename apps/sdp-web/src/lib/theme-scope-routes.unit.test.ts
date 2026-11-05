@@ -16,10 +16,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/integrations/private-channels/inst_1/setup",
     "/dashboard/wallets",
     "/dashboard/wallets/setup",
-    "/dashboard/custody",
-    "/dashboard/custody/setup",
     "/dashboard/wallets/fb_wallet",
-    "/dashboard/custody/fb_wallet",
     "/dashboard/issuance",
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",
@@ -27,9 +24,6 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets/treasury-solutions",
     "/dashboard/markets/embedded-yield",
     "/dashboard/markets/embedded-yield/configure",
-    "/dashboard/markets/embedded-yield/integrate",
-    "/dashboard/markets/earn",
-    "/dashboard/markets/earn/configure",
     "/dashboard/account",
     "/dashboard/settings",
   ])("puts %s in the refresh scope", (pathname) => {
@@ -38,8 +32,6 @@ describe("themeScopeForPath", () => {
 
   it.each([
     "/dashboard/tokens",
-    "/dashboard/wallets/connections",
-    "/dashboard/wallets/switch",
     "/dashboard/wallets/fb_wallet/policy",
     "/dashboard/wallets/fb_wallet/policy/audit",
     "/dashboard/wallets/setup/extra",
@@ -51,7 +43,6 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets-archive",
     "/dashboard/markets/treasury-solutions/extra",
     "/dashboard/markets/embedded-yield/extra",
-    "/dashboard/markets/earn/integrate",
     "/dashboard/markets/dvp",
     "/dashboard/markets/dvp/create",
     "/dashboard/markets/dvp/trade_1",

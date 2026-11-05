@@ -1,13 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import {
-  PAYMENT_REQUEST_CREATE_PARAM,
-  PAYMENT_REQUEST_NEW_HREF,
-  PAYMENT_REQUEST_OPEN_PARAM,
-  paymentRequestHref,
-  paymentsPlaygroundHref,
-} from "@/lib/payments-routes";
 import { requestProjectHref } from "@/lib/sdp-api";
 import {
   loadPaymentRequestsList,
@@ -28,20 +21,6 @@ export default async function PaymentRequestsPage({
     redirect("/dashboard");
   }
   const params = await searchParams;
-  if (params.tab === "playground") {
-    // Requests no longer has a playground tab; its endpoints moved into the Payments one.
-    redirect(await requestProjectHref(paymentsPlaygroundHref("list-payment-requests")));
-  }
-  if (params[PAYMENT_REQUEST_CREATE_PARAM] === "1") {
-    // The new-request form was a dialog here; it is its own page now.
-    redirect(await requestProjectHref(PAYMENT_REQUEST_NEW_HREF));
-  }
-  const openId = params[PAYMENT_REQUEST_OPEN_PARAM];
-  if (typeof openId === "string" && openId !== "") {
-    // One request opened in a dialog here; it has its own page now.
-    redirect(await requestProjectHref(paymentRequestHref(openId)));
-  }
-
   const listState = parsePaymentRequestsListParams(params);
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {

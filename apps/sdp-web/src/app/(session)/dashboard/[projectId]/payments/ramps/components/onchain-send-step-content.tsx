@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
+import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { NewSolanaAddressForm } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
 import { isFireblocksByokWallet } from "@/app/(session)/dashboard/[projectId]/payments/fireblocks-wallet";
 import {
@@ -115,7 +116,7 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
             : t("DashboardPayments.payForm.noPrivateChannel")}
         </p>
         <Link
-          href={href("/dashboard/integrations/private-channels")}
+          href={href(PRIVATE_CHANNELS_OVERVIEW_PATH)}
           className="inline-flex items-center gap-1 text-body font-medium text-primary hover:underline"
         >
           {t("DashboardPayments.payForm.openPrivateChannels")}

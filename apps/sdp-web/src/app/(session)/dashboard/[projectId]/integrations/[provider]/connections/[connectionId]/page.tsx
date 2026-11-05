@@ -6,12 +6,12 @@ import {
   fetchConnectionListItem,
   fetchConnectionWallets,
   fetchCredentialLifecycle,
-} from "@/app/(session)/dashboard/[projectId]/custody/connections/connection-detail.data";
-import { ConnectionDetailView } from "@/app/(session)/dashboard/[projectId]/custody/connections/connection-detail-view";
+} from "@/app/(session)/dashboard/[projectId]/wallets/connections/connection-detail.data";
+import { ConnectionDetailView } from "@/app/(session)/dashboard/[projectId]/wallets/connections/connection-detail-view";
 import {
   isKnownCustodyProvider,
   providerSupportsStoredCredentialSetup,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { offersCustodyMode } from "@/lib/provider-availability";

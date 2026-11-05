@@ -8,9 +8,9 @@ const SRC = fileURLToPath(new URL("..", import.meta.url));
 const SCANNED_ROOTS = ["app/(session)/dashboard", "components"];
 
 /**
- * A dashboard sub-path written as a link or redirect target leaves the Project out: the router
- * sends it through `/dashboard?return_to=` and the shell unmounts on the way. Bare `/dashboard`
- * is the one unscoped target, the way to choose a Project (no active Organization, a left one).
+ * A dashboard sub-path written as a link or redirect target leaves the Project out, and no route
+ * answers it: the Project is the only way to reach a page. Bare `/dashboard` is the one unscoped
+ * target, the way to choose a Project (no active Organization, a left one).
  */
 const UNSCOPED_TARGET =
   /(?:href=\{?\s*|\b(?:push|replace|redirect|prefetch)\(\s*)["'`]\/dashboard\/[^"'`]*/g;

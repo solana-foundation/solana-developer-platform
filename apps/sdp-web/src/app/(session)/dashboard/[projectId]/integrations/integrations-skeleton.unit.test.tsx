@@ -1,7 +1,7 @@
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";

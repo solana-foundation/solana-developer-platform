@@ -136,8 +136,6 @@ describe("home and payments route loading states", () => {
   });
 
   it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
-    // Both pages redirect ?tab=playground to the Payments playground, so a leftover tab never
-    // swaps in a playground skeleton.
     navigationMock.tab = "playground";
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'

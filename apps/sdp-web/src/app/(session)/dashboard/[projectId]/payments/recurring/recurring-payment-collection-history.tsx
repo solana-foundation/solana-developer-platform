@@ -10,7 +10,6 @@ import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { ArrowUpRightIcon } from "lucide-react";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDate,
@@ -19,6 +18,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { PaymentsTableHeader } from "@/app/(session)/dashboard/[projectId]/payments/payments-table-header";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";

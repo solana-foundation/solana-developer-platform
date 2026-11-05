@@ -7,7 +7,7 @@ import { Label } from "@sdp/ui/label";
 import { useThemeScope } from "@sdp/ui/theme-scope";
 import { useRouter } from "next/navigation";
 import {
-  PRIVATE_CHANNELS_INTEGRATION_PATH,
+  PRIVATE_CHANNELS_OVERVIEW_PATH,
   privateChannelsInstancePath,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { WizardFrame } from "@/components/wizard-frame";
@@ -251,7 +251,7 @@ export function PrivateChannelsConnectForm({
   if (pageLayout) {
     const cancelPath = instance
       ? privateChannelsInstancePath(instance.id)
-      : PRIVATE_CHANNELS_INTEGRATION_PATH;
+      : PRIVATE_CHANNELS_OVERVIEW_PATH;
 
     if (refresh) {
       // The refresh Privacy page: one form in two sections, no step header; Test connection

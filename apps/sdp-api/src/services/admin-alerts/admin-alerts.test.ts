@@ -19,7 +19,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-import { adminAlertEmail } from "./content";
+import { type AdminAlertDetails, adminAlertEmail } from "./content";
 import { adminAlertEmailsEnabled, deliverAdminAlerts } from "./deliver";
 import {
   ADMIN_ALERT_MAX_AGE_MS,
@@ -917,5 +917,22 @@ describe("admin alert emails (HOO-2299)", () => {
       { label: "Started", value: "30 Oct 2026, 10:00 to 10:15 UTC" },
     ]);
     expect(email.content.action?.url).toBe(`${DASHBOARD}/dashboard/prj_1/payments/transactions`);
+  });
+
+  it.each<[AdminAlertDetails["project"], string]>([
+    [
+      { id: "prj_1", name: "Treasury", environment: "production" },
+      "/dashboard/prj_1/settings?tab=members",
+    ],
+    [null, "/dashboard?return_to=%2Fdashboard%2Fsettings%3Ftab%3Dmembers"],
+  ])("links a member alert about project %o to %s", (project, path) => {
+    const email = adminAlertEmail({
+      kind: "member_joined",
+      audience: "admin",
+      details: { organizationName: "Acme", project, actor: null, subject: "member@example.com" },
+      occurredAt: "2026-10-30T10:15:00.000Z",
+      dashboardOrigin: DASHBOARD,
+    });
+    expect(email.content.action?.url).toBe(`${DASHBOARD}${path}`);
   });
 });

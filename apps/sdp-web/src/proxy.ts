@@ -113,16 +113,7 @@ export const proxy = clerkMiddleware(
       });
     }
 
-    // A project-less page URL (old bookmarks, emailed links) matches no route under
-    // `[projectId]` once it is nested, so it is resolved before routing: the bare
-    // landing picks the Project and returns to the same page and query inside it.
     const { projectId } = parseDashboardPathname(req.nextUrl.pathname);
-    if (projectId === null && /^\/dashboard\/[^/]/.test(req.nextUrl.pathname)) {
-      const landingUrl = new URL("/dashboard", req.url);
-      landingUrl.searchParams.set("return_to", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-      return NextResponse.redirect(landingUrl);
-    }
-
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
     const droppedDemoCookies = demoSessionCookiesToDrop(req);
