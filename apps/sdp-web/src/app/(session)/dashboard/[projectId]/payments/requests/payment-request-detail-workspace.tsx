@@ -4,11 +4,21 @@ import { isPaymentRequestPayableAt, type PaymentRequest } from "@sdp/types/payme
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
+import { cn } from "@sdp/ui/cn";
 import { Modal } from "@sdp/ui/modal";
-import { CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
+import { playMark } from "@sdp/ui/motion";
+import { CheckIcon, CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
@@ -33,6 +43,7 @@ import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { createdRequestLinkCopied, forgetCreatedRequestLink } from "./created-request-link";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   cancelPaymentRequest,
@@ -110,30 +121,106 @@ function canceledWhy(
     : t("DashboardPayments.requestDetail.why.canceled");
 }
 
+/** The page's origin never changes while it is open, so there is nothing to subscribe to. */
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function readOrigin(): string {
+  return window.location.origin;
+}
+
+/** The server render's origin: none, so it never guesses one the browser would contradict. */
+function noOrigin(): string {
+  return "";
+}
+
+/** How long Copy link reads Copied: the design's done state, as long as the link's mark. */
+const COPIED_MS = 1400;
+
+/**
+ * Whether Copy link reads Copied: for 1.4s after `flash`, and from the first frame when the
+ * new-request page copied the link on its way here.
+ *
+ * @param copiedOnArrival - Whether the link was copied before this page opened.
+ * @returns Whether it reads Copied, and `flash`, which starts the 1.4s again.
+ */
+function useCopiedFlash(copiedOnArrival: boolean): [boolean, () => void] {
+  const [copied, setCopied] = useState(copiedOnArrival);
+  const timer = useRef<number | undefined>(undefined);
+  const flash = useCallback(() => {
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), COPIED_MS);
+  }, []);
+  useEffect(() => {
+    if (copiedOnArrival) flash();
+  }, [copiedOnArrival, flash]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return [copied, flash];
+}
+
+/** One of Copy link's two faces: the button's gap, and its icon at the button's icon size. */
+const COPY_LINK_FACE =
+  "col-start-1 row-start-1 inline-flex items-center gap-[var(--button-gap-md)] [&_svg]:size-[var(--icon-size)] [&_svg]:shrink-0";
+
+/**
+ * Copy link's icon and words, or a check and Copied once it has copied. Both faces sit in one
+ * grid cell with the other hidden, so the button keeps the wider one's width with the shown face
+ * centred in it, as the design's done state is, and the buttons beside it never move.
+ */
+function CopyLinkContent({ copied }: { copied: boolean }) {
+  const t = useTranslations();
+  return (
+    <span className="grid justify-items-center">
+      <span aria-hidden={copied} className={cn(COPY_LINK_FACE, copied && "invisible")}>
+        <CopyIcon />
+        {t("Shared.SharedComponents.copyLink")}
+      </span>
+      <span aria-hidden={!copied} className={cn(COPY_LINK_FACE, !copied && "invisible")}>
+        <CheckIcon />
+        {t("DashboardPayments.record.copied")}
+      </span>
+    </span>
+  );
+}
+
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
  * the link beside it, and the copy, share and QR download under the link. A demo request lives
  * in this browser only, so it shows no code or link that would open a page that cannot find it,
  * and its actions say so instead of handing out a link nobody can open. It shows only while the
- * request can be paid.
+ * request can be paid. Opened by the new-request page, the link is marked and Copy link reads
+ * Copied; when that copy failed, a line under the buttons says so until Copy link copies it.
  */
 function RequestPaymentLink({
   request,
   publicToken,
   symbol,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string;
   symbol: string;
+  linkCopiedOnCreate: boolean | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const demo = usePaymentsDemo();
-  // The link is on this origin; read after mount so the server render does not guess it.
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  // The link is on this origin. The server render does not guess it, so a page it rendered gets
+  // the link once hydrated; a page opened in the browser has it from its first frame, so the
+  // link and its mark never arrive a frame apart.
+  const origin = useSyncExternalStore(subscribeToNothing, readOrigin, noOrigin);
   const payLink = origin ? `${origin}/pay/${publicToken}` : "";
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
+  const [copied, flashCopied] = useCopiedFlash(linkCopiedOnCreate === true);
+  // A copy that failed on the way here is said under the buttons until Copy link copies it.
+  const [arrivalCopyFailed, setArrivalCopyFailed] = useState(linkCopiedOnCreate === false);
+  const linkRef = useRef<HTMLSpanElement>(null);
+  // Before paint, so the mark never shows a frame of the bare link first.
+  useLayoutEffect(() => {
+    if (linkCopiedOnCreate !== null && linkRef.current !== null) playMark(linkRef.current);
+  }, [linkCopiedOnCreate]);
 
   const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
 
@@ -145,10 +232,8 @@ function RequestPaymentLink({
       toast.error(t("DashboardPayments.record.copyFailed"));
       return;
     }
-    toast.success(t("DashboardPayments.requestDetail.linkCopied"), {
-      id: `request-link-${request.id}`,
-      description: t("DashboardPayments.requestDetail.linkCopiedDescription", { amount }),
-    });
+    setArrivalCopyFailed(false);
+    flashCopied();
   }
 
   // The browser's share sheet where there is one; copying stands in elsewhere.
@@ -198,7 +283,11 @@ function RequestPaymentLink({
         {demo ? (
           <p className="text-body text-secondary">{t("DashboardPayments.demo.noPayLink")}</p>
         ) : (
-          <span className="min-w-0 truncate font-mono text-body text-primary">
+          // Padded out to the mark's box and pulled back by as much, so the text stays put.
+          <span
+            ref={linkRef}
+            className="-mx-3 -my-1.5 min-w-0 truncate rounded-sm px-3 py-1.5 font-mono text-body text-primary"
+          >
             {payLink || null}
           </span>
         )}
@@ -209,12 +298,14 @@ function RequestPaymentLink({
             type="button"
             variant="default"
             size="sm"
-            iconLeft={<CopyIcon />}
             disabled={!origin}
             onClick={() => void copyLink()}
           >
-            {t("Shared.SharedComponents.copyLink")}
+            <CopyLinkContent copied={copied} />
           </Button>
+          <span className="sr-only" aria-live="polite">
+            {copied ? t("DashboardPayments.record.copied") : ""}
+          </span>
           <Button
             type="button"
             variant="outline"
@@ -236,6 +327,12 @@ function RequestPaymentLink({
             {t("DashboardPayments.requestDetail.downloadQrCode")}
           </Button>
         </div>
+        {/* Under the buttons, so clearing it moves nothing a press is aimed at. */}
+        {arrivalCopyFailed ? (
+          <p className="text-body text-secondary">
+            {t("DashboardPayments.requests.paymentLinkCopyFailed")}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -392,6 +489,12 @@ export function PaymentRequestDetailWorkspace({
 }: PaymentRequestDetailWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
+  // The new-request page's note is read once, on arrival, and dropped, so a reload or a later
+  // visit says nothing about a copy made earlier.
+  const [linkCopiedOnCreate] = useState(() =>
+    request === null ? null : createdRequestLinkCopied(request.id)
+  );
+  useEffect(forgetCreatedRequestLink, []);
 
   if (!request) {
     return (
@@ -410,6 +513,7 @@ export function PaymentRequestDetailWorkspace({
       publicToken={publicToken}
       walletName={walletName}
       canceler={canceler}
+      linkCopiedOnCreate={linkCopiedOnCreate}
     />
   );
 }
@@ -420,11 +524,14 @@ function PaymentRequestRecord({
   publicToken,
   walletName,
   canceler,
+  linkCopiedOnCreate,
 }: {
   request: PaymentRequest;
   publicToken: string | null;
   walletName: string | null;
   canceler: PaymentRequestCanceler | null;
+  /** Whether the new-request page that opened this page copied the link; null otherwise. */
+  linkCopiedOnCreate: boolean | null;
 }) {
   const request = useWatchedPaymentRequest(served);
   const router = useRouter();
@@ -487,7 +594,12 @@ function PaymentRequestRecord({
               says so, so the page stops handing it out: the server and first client render go by
               the status, then the clock decides an expiry the API has not reported yet. */}
           {publicToken && linkLive ? (
-            <RequestPaymentLink request={request} publicToken={publicToken} symbol={symbol} />
+            <RequestPaymentLink
+              request={request}
+              publicToken={publicToken}
+              symbol={symbol}
+              linkCopiedOnCreate={linkCopiedOnCreate}
+            />
           ) : null}
         </section>
 

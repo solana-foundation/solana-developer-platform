@@ -144,9 +144,9 @@ their section landing pages and searchable; `generate:ai` includes every
 published page in `llms-full.txt` whether or not it appears in the sidebar.
 API Reference is the one folder there (`reference/api`): it opens to the current
 family and group inside the reference, each operation with its method, and a
-folder closes again when the page leaves it, since the layout persists. `generate:api` writes its `meta.json` without `index`, so the
-directory page stays the folder's own row (Fumadocs makes a listed `index` a
-child instead). The sidebar scrolls the current row into view when it changes.
+folder closes again when the page leaves it, since the layout persists.
+`generate:api` writes its `meta.json` without `index`, so the directory page
+stays the folder's own row (Fumadocs makes a listed `index` a child instead). The sidebar scrolls the current row into view when it changes.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
