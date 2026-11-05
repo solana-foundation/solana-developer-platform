@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
+import type { AssetAuditEvent } from "@sdp/types/audit";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTokenActivityWindows } from "./token-activity";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
@@ -12,13 +15,16 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   </SWRConfig>
 );
 
-const event = (id: string) => ({
+const event = (id: string): AssetAuditEvent => ({
   id,
   action: "mint",
+  resourceType: "token",
+  resourceId: null,
   status: "success",
   actorType: "user",
   actorLabel: "Ada",
   createdAt: "2026-10-01T10:00:00.000Z",
+  metadata: null,
 });
 
 afterEach(() => vi.unstubAllGlobals());

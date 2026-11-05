@@ -2,15 +2,16 @@
 
 import type { TokenTransactionStatus } from "@sdp/types/tokens";
 import { renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { SWRConfig } from "swr";
+import { unstable_serialize, useSWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import { issuanceQueryKeys } from "./issuance-query-key";
 import { tokenLifecycle } from "./issuance-token-state";
 import { useLatestDeploys } from "./use-latest-deploys";
 
-const wrapper = ({ children }: { children: ReactNode }) => (
-  <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
-);
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const deploys = {
   deploying: [
@@ -24,39 +25,56 @@ const deploys = {
   ReadonlyArray<{ status: TokenTransactionStatus; createdAt: string }>
 >;
 
-/** A token's deploy transactions; none for a token the fixture does not name. */
-function deploysOf(tokenId: string) {
-  return Object.entries(deploys).find(([name]) => name === tokenId)?.[1] ?? [];
+function deployReadUrl(tokenId: string) {
+  return `/api/dashboard/issuance/tokens/${tokenId}/transactions?page=1&pageSize=5&type=deploy`;
 }
+
+const deployReadAnswers = new Map<string, ReadonlyArray<{ status: string; createdAt: string }>>(
+  Object.entries(deploys).map(([tokenId, data]) => [deployReadUrl(tokenId), data])
+);
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("useLatestDeploys", () => {
-  it("reads the latest deploy of each row with no mint, and only those", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      const id = decodeURIComponent(url.split("/tokens/")[1]?.split("/")[0] ?? "");
-      return new Response(JSON.stringify({ data: deploysOf(id) }), { status: 200 });
+  it("reads the latest deploy of each row with no mint, one request per row, under one key", async () => {
+    const fetchMock = stubDashboardFetch(({ path }) => {
+      const data = deployReadAnswers.get(path);
+      if (data === undefined) throw new Error(`Unexpected read: ${path}`);
+      return Response.json({ data });
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     const tokens = [
+      { id: "untouched", mintAddress: null, deployedAt: null, status: "pending" },
       { id: "deploying", mintAddress: null, deployedAt: null, status: "pending" },
       { id: "failed", mintAddress: null, deployedAt: null, status: "pending" },
-      { id: "untouched", mintAddress: null, deployedAt: null, status: "pending" },
       { id: "live", mintAddress: "Mint111", deployedAt: "2026-09-01T00:00:00Z", status: "active" },
     ];
-    const { result } = renderHook(() => useLatestDeploys(tokens), { wrapper });
+    const { result } = renderHook(
+      () => ({ latest: useLatestDeploys(tokens), cache: useSWRConfig().cache }),
+      { wrapper: DashboardReadsProvider }
+    );
 
-    await waitFor(() => expect(Object.keys(result.current)).toHaveLength(3));
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls.some(([url]) => url.includes("/tokens/live/"))).toBe(false);
-    expect(result.current).toEqual({ deploying: "processing", failed: "failed", untouched: null });
-    expect(tokens.map((token) => tokenLifecycle(token, result.current[token.id] ?? null))).toEqual([
-      "deploying",
-      "failed",
-      "draft",
-      "live",
-    ]);
+    await waitFor(() => expect(Object.keys(result.current.latest)).toHaveLength(3));
+    expect(sentDashboardReads(fetchMock)).toEqual(
+      ["deploying", "failed", "untouched"].map((tokenId) => ({
+        path: deployReadUrl(tokenId),
+        projectId: SANDBOX_PROJECT.id,
+        demo: null,
+      }))
+    );
+    expect(result.current.latest).toEqual({
+      deploying: "processing",
+      failed: "failed",
+      untouched: null,
+    });
+    const latestDeploysKey = issuanceQueryKeys.latestDeploys(
+      { projectId: SANDBOX_PROJECT.id, mode: "live" },
+      { tokenIds: ["deploying", "failed", "untouched"] }
+    );
+    expect([...result.current.cache.keys()]).toEqual([unstable_serialize(latestDeploysKey)]);
+    expect(
+      tokens.map((token) => tokenLifecycle(token, result.current.latest[token.id] ?? null))
+    ).toEqual(["draft", "deploying", "failed", "live"]);
   });
 
   it("reads nothing when every row is on chain", () => {
@@ -67,7 +85,7 @@ describe("useLatestDeploys", () => {
         useLatestDeploys([
           { id: "live", mintAddress: "Mint111", deployedAt: "2026-09-01T00:00:00Z" },
         ]),
-      { wrapper }
+      { wrapper: DashboardReadsProvider }
     );
     expect(result.current).toEqual({});
     expect(fetchMock).not.toHaveBeenCalled();

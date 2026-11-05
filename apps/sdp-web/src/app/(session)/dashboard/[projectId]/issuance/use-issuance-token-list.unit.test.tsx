@@ -3,20 +3,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { dashboardErrorResponse, stubDashboardFetch } from "@/test/dashboard-fetch";
 import { DEFAULT_ISSUANCE_LIST_QUERY } from "./issuance-list-query";
 import type { IssuanceTokenView } from "./issuance-token-fields";
 import { useIssuanceTokenList } from "./use-issuance-token-list";
 
-const mocks = vi.hoisted(() => ({ fetchPage: vi.fn(), replaceSearchParams: vi.fn() }));
+const mocks = vi.hoisted(() => ({ replaceSearchParams: vi.fn() }));
 
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/dashboard-url-state", () => ({
   useDashboardUrlState: () => ({ replaceSearchParams: mocks.replaceSearchParams }),
 }));
 vi.mock("@/lib/use-debounce", () => ({ useDebounce: (value: string) => value }));
-vi.mock("./issuance-tokens-client.data", () => ({
-  fetchIssuanceTokensClientPage: mocks.fetchPage,
-}));
 
 const existingToken = {
   id: "tok_existing",
@@ -56,12 +55,13 @@ function wrapper({ children }: { children: ReactNode }) {
 
 describe("useIssuanceTokenList", () => {
   beforeEach(() => {
-    mocks.fetchPage.mockReset();
     mocks.replaceSearchParams.mockReset();
   });
 
+  afterEach(() => vi.unstubAllGlobals());
+
   it("clears previous-query cards when a malformed no-match search fails", async () => {
-    mocks.fetchPage.mockRejectedValue(new Error("Unable to load tokens"));
+    stubDashboardFetch(() => dashboardErrorResponse(503, "Unable to load tokens"));
     const { result } = renderHook(
       () =>
         useIssuanceTokenList({
