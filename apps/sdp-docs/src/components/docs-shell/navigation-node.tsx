@@ -90,12 +90,14 @@ function isPlainClick(event: MouseEvent<HTMLAnchorElement>) {
 function FolderNode({ node, pathname, sectionUrl, onNavigate }: FolderNodeProps) {
   const containsPath = useMemo(() => nodeContainsPath(node, pathname), [node, pathname]);
   const [isOpen, setIsOpen] = useState(containsPath);
-  // Navigating into the folder opens it in the same render, so the page's row exists as soon as
-  // the page does (the sidebar scrolls it into view).
+  // The folder follows the page in the same render: navigating into it opens it, so the page's
+  // row exists as soon as the page does (the sidebar scrolls it into view), and leaving it closes
+  // it, so a long tree such as the API Reference stays out of the way in other sections. The
+  // layout persists across pages, so nothing else would close it.
   const [heldPath, setHeldPath] = useState(containsPath);
   if (containsPath !== heldPath) {
     setHeldPath(containsPath);
-    if (containsPath) setIsOpen(true);
+    setIsOpen(containsPath);
   }
 
   const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
