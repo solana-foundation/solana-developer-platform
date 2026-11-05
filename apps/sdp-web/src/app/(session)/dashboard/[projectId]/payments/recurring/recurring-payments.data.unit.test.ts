@@ -6,6 +6,7 @@ import { setWindowPathname } from "@/test/window-location";
 import {
   createRecurringPayment,
   fetchRecurringPaymentById,
+  recurringPaymentCounterpartyViews,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
@@ -255,6 +256,28 @@ describe("fetchRecurringPaymentById", () => {
       ok: false,
       status: null,
       error: "fetch failed",
+    });
+  });
+});
+
+describe("recurringPaymentCounterpartyViews", () => {
+  it("labels an archived recipient and leaves only failed reads to the banner (HOO-2634)", () => {
+    const counterparty = { displayName: "Acme" };
+    expect(
+      recurringPaymentCounterpartyViews(
+        [
+          { id: "cp_found", lookup: { kind: "found", counterparty } },
+          { id: "cp_archived", lookup: { kind: "missing" } },
+          { id: "cp_failed", lookup: { kind: "failed" } },
+        ],
+        "Archived counterparty"
+      )
+    ).toEqual({
+      counterparties: [
+        { id: "cp_found", displayName: "Acme" },
+        { id: "cp_archived", displayName: "Archived counterparty" },
+      ],
+      failed: 1,
     });
   });
 });
