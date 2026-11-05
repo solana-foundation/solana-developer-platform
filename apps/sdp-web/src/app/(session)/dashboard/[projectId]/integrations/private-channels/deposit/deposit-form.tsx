@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   PrivateChannelDeposit,
   PrivateChannelTokenEligibility,
@@ -14,6 +13,8 @@ import { useEffect, useReducer, useTransition } from "react";
 import { toast } from "sonner";
 import { AmountField } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-field";
 import { getAmountError } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-validation";
+import { privateChannelsMovementReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import type { PrivateChannelsCustodyWallet } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import { PRIVATE_CHANNELS_OVERVIEW_PATH } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import {
   claimMovementKey,
@@ -26,12 +27,13 @@ import {
   type WalletBalanceView,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/wallet-balances";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { createDepositAction } from "./actions";
 import { DepositProgress } from "./deposit-progress";
 
-function walletLabel(wallet: CustodyWalletSummary): string {
+function walletLabel(wallet: PrivateChannelsCustodyWallet): string {
   const short = `${wallet.publicKey.slice(0, 4)}…${wallet.publicKey.slice(-4)}`;
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
@@ -62,7 +64,7 @@ export function DepositForm({
   wallets,
   tokens,
 }: {
-  wallets: CustodyWalletSummary[];
+  wallets: PrivateChannelsCustodyWallet[];
   tokens: PrivateChannelTokenEligibility[];
 }) {
   const [state, updateState] = useReducer(depositFormReducer, {
@@ -80,6 +82,7 @@ export function DepositForm({
   const [isSubmitting, startTransition] = useTransition();
   const t = useTranslations();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const {
     walletId,
     mint,
@@ -193,6 +196,7 @@ export function DepositForm({
         movementAnswer(result)
       );
       if (result.ok) {
+        void invalidateReads(privateChannelsMovementReads);
         updateState({ deposit: result.deposit });
         toast.success(t("DashboardPrivateChannels.deposit.submitToast"));
       } else if (result.kind === "server") {

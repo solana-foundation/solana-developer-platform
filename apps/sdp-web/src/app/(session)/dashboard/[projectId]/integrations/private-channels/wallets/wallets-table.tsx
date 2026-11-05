@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type { PrivateChannelVerifiedWalletDto } from "@sdp/types/private-channels";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
@@ -14,6 +13,8 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import type { WalletChannelBalance } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import type { PrivateChannelsCustodyWallet } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import {
   formatCustodyProviderName,
   isKnownCustodyProvider,
@@ -21,15 +22,18 @@ import {
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { deleteVerifiedWalletAction, verifyWalletAction } from "./actions";
 
 interface Props {
   verifiedWallets: PrivateChannelVerifiedWalletDto[];
-  custodyWallets: CustodyWalletSummary[];
+  custodyWallets: PrivateChannelsCustodyWallet[];
   /** Keyed by wallet pubkey; entry present when the balance read succeeded. */
   channelBalances: Record<string, WalletChannelBalance>;
   loadError: boolean;
+  /** Re-reads the wallets after `loadError`. */
+  onRetry?: () => void;
   /** Detail pages manage enrollment, not balances. */
   showBalance?: boolean;
   /** Optional id used by a page-level action to open the enrollment form. */
@@ -73,6 +77,7 @@ export function WalletsTable({
   custodyWallets,
   channelBalances,
   loadError,
+  onRetry,
   showBalance = true,
   enrollTriggerId,
   canWrite,
@@ -84,6 +89,7 @@ export function WalletsTable({
   const t = useTranslations();
   const href = useProjectHref();
   const workspace = useOptionalDashboardWorkspace();
+  const invalidateReads = useInvalidateDashboardReads();
   const custodyEnabled = workspace?.flags.custody ?? true;
 
   const custodyByPubkey = new Map(custodyWallets.map((w) => [w.publicKey, w]));
@@ -98,6 +104,7 @@ export function WalletsTable({
     startTransition(async () => {
       const result = await verifyWalletAction(walletId);
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.verifySuccess", { key: shortKey(pubkey) })
         );
@@ -120,6 +127,7 @@ export function WalletsTable({
     startTransition(async () => {
       const result = await deleteVerifiedWalletAction(pubkey);
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.revokeSuccess", { key: shortKey(pubkey) })
         );
@@ -144,9 +152,16 @@ export function WalletsTable({
       </CardHeader>
       <CardContent>
         {loadError ? (
-          <p className="text-sm text-error">
-            {t("DashboardPrivateChannels.verifiedWallets.loadError")}
-          </p>
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm text-error">
+              {t("DashboardPrivateChannels.verifiedWallets.loadError")}
+            </p>
+            {onRetry ? (
+              <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
+                {t("DashboardPrivateChannels.common.retry")}
+              </Button>
+            ) : null}
+          </div>
         ) : custodyWallets.length === 0 && verifiedWallets.length === 0 ? (
           <div className="flex flex-col items-start gap-3">
             <p className="text-sm text-secondary">

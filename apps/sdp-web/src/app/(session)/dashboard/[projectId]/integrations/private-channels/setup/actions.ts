@@ -132,9 +132,8 @@ export async function connectPrivateChannelAction(
         body: JSON.stringify({ ...connectInput, confirmReactivate }),
       }
     );
-    // Connecting flips the active instance, which changes the provider detail,
-    // workspace tabs, and catalog status. Revalidate both the segment and catalog.
-    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
+    // Connecting flips the active instance, which the server-rendered catalog shows. Private
+    // Channels reads refresh through the dashboard SWR cache, invalidated by the caller.
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
@@ -174,7 +173,6 @@ export async function updatePrivateChannelAction(
         body: JSON.stringify({ ...updateInput, instanceId }),
       }
     );
-    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
@@ -193,7 +191,6 @@ export async function disconnectPrivateChannelAction(): Promise<DisconnectResult
       "/v1/private-channels/instance/disconnect",
       { method: "POST", body: "{}" }
     );
-    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels"), "layout");
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true, instance: response.instance };
   } catch (error) {
@@ -207,7 +204,6 @@ export async function deletePrivateChannelAction(): Promise<DeleteResult> {
   try {
     const client = await createSdpApiClient();
     await client.fetch<{ deleted: true }>("/v1/private-channels/instance", { method: "DELETE" });
-    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/setup"));
     revalidatePath(await requestProjectHref("/dashboard/integrations"));
     return { ok: true };
   } catch (error) {

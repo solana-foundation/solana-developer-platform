@@ -23,10 +23,12 @@ export function intersectEligibleTransferChannels(
 }
 
 /** Strict walletId + pubkey intersection prevents stale or other-user sources. */
-export function intersectVerifiedSourceWallets(
-  signableWallets: CustodyWalletSummary[],
+export function intersectVerifiedSourceWallets<
+  Wallet extends Pick<CustodyWalletSummary, "walletId" | "publicKey">,
+>(
+  signableWallets: Wallet[],
   actingUserVerifiedWallets: PrivateChannelVerifiedWalletDto[]
-): CustodyWalletSummary[] {
+): Wallet[] {
   const verified = new Set(
     actingUserVerifiedWallets.map((wallet) => `${wallet.walletId}\0${wallet.pubkey}`)
   );

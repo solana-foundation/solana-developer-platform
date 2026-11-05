@@ -20,7 +20,8 @@ export function ChannelDirectoryRow({
   channel: PrivateChannelDto;
   instanceId: string;
   instanceAddress: string;
-  walletCount: number;
+  /** `null` when the member read failed: the count is unknown, not zero. */
+  walletCount: number | null;
   tokensSummary: string;
 }) {
   const router = useRouter();
@@ -51,7 +52,9 @@ export function ChannelDirectoryRow({
         {instanceAddress}
       </TableCell>
       <TableCell className="text-secondary">
-        {t("DashboardPrivateChannels.directory.walletCount", { count: walletCount })}
+        {walletCount === null
+          ? t("DashboardPrivateChannels.overview.valueNone")
+          : t("DashboardPrivateChannels.directory.walletCount", { count: walletCount })}
       </TableCell>
       <TableCell className="text-secondary">{tokensSummary}</TableCell>
       <TableCell>

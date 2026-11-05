@@ -182,10 +182,7 @@ describe("connectPrivateChannelAction", () => {
     const request = fetchMock.mock.calls[0][1] as { body: string };
     expect(request.body).toContain('"confirmReactivate":true');
     expect(request.body).not.toContain("chainRpcUrl");
-    expect(nextCache.revalidatePath.mock.calls).toEqual([
-      [`${INTEGRATIONS_PATH}/private-channels`, "layout"],
-      [INTEGRATIONS_PATH],
-    ]);
+    expect(nextCache.revalidatePath.mock.calls).toEqual([[INTEGRATIONS_PATH]]);
   });
 
   it("requires an instance id for an otherwise valid update", async () => {
@@ -298,9 +295,7 @@ describe("connectPrivateChannelAction", () => {
       instance: existingInstance,
     });
     await expect(deletePrivateChannelAction()).resolves.toEqual({ ok: true });
-    expect(nextCache.revalidatePath).toHaveBeenCalledWith(
-      `${INTEGRATIONS_PATH}/private-channels/setup`
-    );
+    expect(nextCache.revalidatePath.mock.calls).toEqual([[INTEGRATIONS_PATH], [INTEGRATIONS_PATH]]);
   });
 
   it("returns safe failures for disconnect and delete requests", async () => {

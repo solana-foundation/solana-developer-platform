@@ -8,12 +8,14 @@ import { Label } from "@sdp/ui/label";
 import { Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { createChannelAction, deleteChannelAction } from "./actions";
 
 interface Props {
-  initialChannels: PrivateChannelDto[];
+  channels: PrivateChannelDto[];
   /** False for a read-only member: the create form and delete controls are hidden. */
   canWrite: boolean;
 }
@@ -23,7 +25,7 @@ function formatDate(iso: string, locale: string, timeZone: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(locale, { timeZone });
 }
 
-export function ChannelsManager({ initialChannels, canWrite }: Props) {
+export function ChannelsManager({ channels, canWrite }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isCreating, startCreate] = useTransition();
@@ -31,8 +33,7 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
   const t = useTranslations();
   const locale = useLocale();
   const timeZone = useTimeZone();
-
-  const channels = initialChannels;
+  const invalidateReads = useInvalidateDashboardReads();
 
   function handleCreate() {
     const trimmed = name.trim();
@@ -43,6 +44,7 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
     startCreate(async () => {
       const result = await createChannelAction({ name: trimmed, description });
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(
           t("DashboardPrivateChannels.channels.createSuccess", { name: result.channel.name })
         );
@@ -59,6 +61,7 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
     startCreate(async () => {
       const result = await deleteChannelAction(channel.id);
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(t("DashboardPrivateChannels.channels.deleteSuccess", { name: channel.name }));
       } else {
         toast.error(result.message);

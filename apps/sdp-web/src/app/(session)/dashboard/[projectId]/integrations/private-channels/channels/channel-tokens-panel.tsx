@@ -1,13 +1,15 @@
+"use client";
+
 import type { PrivateChannelTokenEligibility } from "@sdp/types/private-channels";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { TokenMark } from "@/components/token-mark";
-import { getTranslations } from "@/i18n/server";
+import { useTranslations } from "@/i18n/provider";
 
 function shorten(value: string): string {
   return value.length > 13 ? `${value.slice(0, 6)}…${value.slice(-6)}` : value;
 }
 
-export async function ChannelTokensPanel({
+export function ChannelTokensPanel({
   channelName,
   tokens,
   loadError,
@@ -16,7 +18,7 @@ export async function ChannelTokensPanel({
   tokens: PrivateChannelTokenEligibility[];
   loadError: boolean;
 }) {
-  const t = await getTranslations();
+  const t = useTranslations();
   const allowedTokens = tokens.filter((token) => token.enabled);
 
   return (

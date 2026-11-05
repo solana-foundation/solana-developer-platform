@@ -21,6 +21,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import {
   PRIVATE_CHANNELS_OVERVIEW_PATH,
   privateChannelsInstancePath,
@@ -32,6 +33,7 @@ import {
 import { DeleteConfirmationDialog } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/setup/private-channels-confirmation-dialogs";
 import { PrivateChannelsConnectForm } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/setup/private-channels-connect-form";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 export function ChannelActionsMenu({
@@ -48,6 +50,7 @@ export function ChannelActionsMenu({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDisconnecting, startDisconnecting] = useTransition();
@@ -58,6 +61,7 @@ export function ChannelActionsMenu({
     startDisconnecting(async () => {
       const result = await disconnectPrivateChannelAction();
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(t("DashboardPrivateChannels.instance.disconnectSuccess"));
         router.replace(href(privateChannelsInstancePath(result.instance.id)));
       } else {
@@ -72,7 +76,9 @@ export function ChannelActionsMenu({
       if (result.ok) {
         setDeleteOpen(false);
         toast.success(t("DashboardPrivateChannels.instance.deleteSuccess"));
+        // Leave first: this page re-reading the deleted instance would render not found.
         router.push(href(PRIVATE_CHANNELS_OVERVIEW_PATH));
+        void invalidateReads(privateChannelsReads);
       } else {
         toast.error(result.message);
       }

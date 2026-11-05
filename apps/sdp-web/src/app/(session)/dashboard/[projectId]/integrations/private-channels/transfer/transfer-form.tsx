@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
@@ -14,6 +13,8 @@ import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
 import { AmountField } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-field";
 import { getAmountError } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-validation";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import type { PrivateChannelsCustodyWallet } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import {
   claimMovementKey,
   movementAnswer,
@@ -31,6 +32,7 @@ import {
   privateChannelTransferStatusOf,
   settleWhenMovementFinal,
 } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { createTransferAction, fetchTransferRecipientsAction } from "./actions";
 import { TransferProgress } from "./transfer-progress";
@@ -54,7 +56,7 @@ type RecipientLoadState =
 interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
-  sourceWallets: CustodyWalletSummary[];
+  sourceWallets: PrivateChannelsCustodyWallet[];
   tokens: PrivateChannelTokenEligibility[];
 }
 
@@ -90,7 +92,7 @@ function shortenPubkey(pubkey: string): string {
   return `${pubkey.slice(0, 4)}…${pubkey.slice(-4)}`;
 }
 
-function walletLabel(wallet: CustodyWalletSummary): string {
+function walletLabel(wallet: PrivateChannelsCustodyWallet): string {
   const short = shortenPubkey(wallet.publicKey);
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
@@ -114,19 +116,6 @@ function toRecipientOptions(
 }
 
 export function TransferForm({ scopeKey, ...props }: TransferFormProps) {
-  const t = useTranslations();
-  if (props.channels.length === 0) {
-    return (
-      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
-    );
-  }
-  if (props.sourceWallets.length === 0) {
-    return (
-      <p className="text-sm text-secondary">
-        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
-      </p>
-    );
-  }
   return <TransferFormState key={scopeKey} {...props} />;
 }
 
@@ -182,6 +171,7 @@ function TransferFormState({
     submittedTransfer: null,
   });
   const [isSubmitting, startTransition] = useTransition();
+  const invalidateReads = useInvalidateDashboardReads();
   const recipientRequest = useRef(0);
   /**
    * Freezes every financial field for the duration of a submit. Deliberately NOT
@@ -324,6 +314,20 @@ function TransferFormState({
     );
   }
 
+  // After the progress view: a refetch that empties a list must not unmount a submitted transfer.
+  if (channels.length === 0) {
+    return (
+      <p className="text-sm text-secondary">{t("DashboardPrivateChannels.transfer.noChannels")}</p>
+    );
+  }
+  if (sourceWallets.length === 0) {
+    return (
+      <p className="text-sm text-secondary">
+        {t("DashboardPrivateChannels.transfer.noSourceWallets")}
+      </p>
+    );
+  }
+
   const amountErrorKey = showAmountError ? getAmountError(amount) : null;
   const amountError = amountErrorKey ? t(amountErrorKey) : null;
   const walletError =
@@ -400,6 +404,7 @@ function TransferFormState({
           );
         }
         if (result.ok) {
+          void invalidateReads(privateChannelsReads);
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
           if (result.transfer.status === "failed") {
             toast.error(
@@ -530,7 +535,7 @@ function TransferFields(props: {
   recipientOptions: RecipientOption[];
   recipientRequest: { current: number };
   selectedTokenSymbol: string;
-  sourceWallets: CustodyWalletSummary[];
+  sourceWallets: PrivateChannelsCustodyWallet[];
   state: TransferFormState;
   submitting: { current: boolean };
   t: Translate;

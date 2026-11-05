@@ -69,37 +69,53 @@ const EVENT_TYPE_KEYS: Record<string, MessageKey> = {
     "DashboardPrivateChannels.events.typeSpcUnreachable",
 };
 
-const EVENT_FAMILY_KEYS: Record<PrivateChannelEventFamily, MessageKey> = {
+const EVENT_FAMILY_KEYS = {
   [PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE]: "DashboardPrivateChannels.events.familyLifecycle",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER]: "DashboardPrivateChannels.events.familyMember",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER]: "DashboardPrivateChannels.events.familyTransfer",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR]: "DashboardPrivateChannels.events.familyError",
-};
+} satisfies Record<PrivateChannelEventFamily, MessageKey>;
 
-const EVENT_STATUS_KEYS: Record<PrivateChannelEventStatus, MessageKey> = {
+const EVENT_STATUS_KEYS = {
   [PRIVATE_CHANNEL_EVENT_STATUSES.PENDING]: "DashboardPrivateChannels.events.statusPending",
   [PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED]: "DashboardPrivateChannels.events.statusConfirmed",
   [PRIVATE_CHANNEL_EVENT_STATUSES.FAILED]: "DashboardPrivateChannels.events.statusFailed",
   [PRIVATE_CHANNEL_EVENT_STATUSES.STALE]: "DashboardPrivateChannels.events.statusStale",
   [PRIVATE_CHANNEL_EVENT_STATUSES.INFO]: "DashboardPrivateChannels.events.statusInfo",
-};
+} satisfies Record<PrivateChannelEventStatus, MessageKey>;
 
-export const EVENT_FAMILY_BADGE: Record<PrivateChannelEventFamily, BadgeVariant> = {
+const EVENT_FAMILY_BADGE = {
   [PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE]: "info",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR]: "danger",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER]: "default",
   [PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER]: "success",
-};
+} satisfies Record<PrivateChannelEventFamily, BadgeVariant>;
 
-export const EVENT_STATUS_BADGE: Record<PrivateChannelEventStatus, BadgeVariant> = {
+const EVENT_STATUS_BADGE = {
   [PRIVATE_CHANNEL_EVENT_STATUSES.PENDING]: "warning",
   [PRIVATE_CHANNEL_EVENT_STATUSES.CONFIRMED]: "success",
   [PRIVATE_CHANNEL_EVENT_STATUSES.FAILED]: "danger",
   [PRIVATE_CHANNEL_EVENT_STATUSES.STALE]: "warning",
   [PRIVATE_CHANNEL_EVENT_STATUSES.INFO]: "default",
-};
+} satisfies Record<PrivateChannelEventStatus, BadgeVariant>;
 
 type Translate = (key: MessageKey) => string;
+
+/** The entry for a value the API sent, which may be one this dashboard does not know yet. */
+function knownEntry<Entry>(
+  entries: Readonly<Record<string, Entry>>,
+  value: string
+): Entry | undefined {
+  return Object.hasOwn(entries, value) ? entries[value] : undefined;
+}
+
+export function eventFamilyBadge(family: string): BadgeVariant {
+  return knownEntry(EVENT_FAMILY_BADGE, family) ?? "default";
+}
+
+export function eventStatusBadge(status: string): BadgeVariant {
+  return knownEntry(EVENT_STATUS_BADGE, status) ?? "default";
+}
 
 /** `transfer.deposit.settled` → `Transfer deposit settled`. */
 function humanizeRawEventValue(value: string): string {
@@ -108,16 +124,16 @@ function humanizeRawEventValue(value: string): string {
 }
 
 export function eventTypeLabel(t: Translate, type: string): string {
-  const key = EVENT_TYPE_KEYS[type];
+  const key = knownEntry(EVENT_TYPE_KEYS, type);
   return key ? t(key) : humanizeRawEventValue(type);
 }
 
-export function eventFamilyLabel(t: Translate, family: PrivateChannelEventFamily): string {
-  const key = EVENT_FAMILY_KEYS[family];
+export function eventFamilyLabel(t: Translate, family: string): string {
+  const key = knownEntry(EVENT_FAMILY_KEYS, family);
   return key ? t(key) : humanizeRawEventValue(family);
 }
 
-export function eventStatusLabel(t: Translate, status: PrivateChannelEventStatus): string {
-  const key = EVENT_STATUS_KEYS[status];
+export function eventStatusLabel(t: Translate, status: string): string {
+  const key = knownEntry(EVENT_STATUS_KEYS, status);
   return key ? t(key) : humanizeRawEventValue(status);
 }

@@ -600,4 +600,29 @@ describe("EventsList", () => {
     expect(eventTable().getByText("No additional details")).toBeTruthy();
     expect(document.body.textContent).not.toContain("[object Object]");
   });
+
+  it("labels a family, type and status it does not know from the raw value, on the default badge", () => {
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <EventsList
+          projectId="project_test"
+          initialEvents={[
+            {
+              ...makeEvent(),
+              family: "settlement",
+              type: "settlement.batch_rolled",
+              status: "queued",
+            },
+          ]}
+          initialHasMore={false}
+          initialNextCursor={null}
+          canViewRawPayload={false}
+        />
+      </I18nProvider>
+    );
+
+    expect(eventTable().getByText("Settlement batch rolled")).toBeTruthy();
+    expect(eventTable().getByText("Settlement").closest('[data-variant="default"]')).not.toBeNull();
+    expect(eventTable().getByText("Queued").closest('[data-variant="default"]')).not.toBeNull();
+  });
 });

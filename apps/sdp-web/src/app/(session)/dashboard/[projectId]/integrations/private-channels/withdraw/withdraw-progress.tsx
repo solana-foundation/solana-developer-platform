@@ -2,18 +2,27 @@
 
 import {
   isPrivateChannelWithdrawalTerminal,
+  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
   type PrivateChannelWithdrawal,
 } from "@sdp/types/private-channels";
 import { Badge, type BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
-import useSWR from "swr";
-import { privateChannelsQueryKeys } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import { useEffect } from "react";
+import { z } from "zod";
+import {
+  privateChannelsMovementReads,
+  privateChannelsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { useTranslations } from "@/i18n/provider";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { fetchWithdrawalAction } from "./actions";
 
 const RANK: Record<PrivateChannelWithdrawal["status"], number> = {
   pending: 0,
@@ -43,6 +52,16 @@ const STAGES = [
 
 const POLL_INTERVAL_MS = 1500;
 
+const withdrawalProgressResponseSchema = z.object({
+  data: z.object({
+    amount: z.string(),
+    status: z.enum(PRIVATE_CHANNEL_TRANSACTION_STATUSES),
+    signature: z.string().nullable(),
+    settlementRef: z.string().nullable(),
+    failureReason: z.string().nullable(),
+  }),
+});
+
 export function WithdrawProgress({
   withdrawal: initial,
   onReset,
@@ -52,15 +71,13 @@ export function WithdrawProgress({
 }) {
   const cluster = useSolanaCluster();
   const t = useTranslations();
-  const { data = initial } = useSWR(
-    privateChannelsQueryKeys.withdrawal(initial.id),
-    async () => {
-      const result = await fetchWithdrawalAction(initial.id);
-      if (result === null) throw new Error("Private channel status is unavailable");
-      return result;
-    },
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
+  const response = useDashboardRead(
+    privateChannelsQueryKeys.withdrawal(scope, initial.id),
+    withdrawalProgressResponseSchema,
     {
-      fallbackData: initial,
+      fallbackData: { data: initial },
       keepPreviousData: false,
       dedupingInterval: POLL_INTERVAL_MS,
       revalidateOnMount: false,
@@ -69,9 +86,15 @@ export function WithdrawProgress({
       errorRetryCount: Infinity,
       errorRetryInterval: POLL_INTERVAL_MS,
       refreshInterval: (current) =>
-        current && isPrivateChannelWithdrawalTerminal(current.status) ? 0 : POLL_INTERVAL_MS,
+        current && isPrivateChannelWithdrawalTerminal(current.data.status) ? 0 : POLL_INTERVAL_MS,
     }
   );
+  const data = response.data?.data ?? initial;
+  const reachedTerminal = isPrivateChannelWithdrawalTerminal(data.status);
+  // Settlement moves the balances again after the submit cleared them, so they are re-read.
+  useEffect(() => {
+    if (reachedTerminal) void invalidateReads(privateChannelsMovementReads);
+  }, [invalidateReads, reachedTerminal]);
   const withdrawal = data;
 
   const rank = RANK[withdrawal.status];

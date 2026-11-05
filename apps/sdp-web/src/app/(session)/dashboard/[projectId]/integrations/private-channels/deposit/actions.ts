@@ -1,17 +1,11 @@
 "use server";
 
 import type { PrivateChannelDeposit } from "@sdp/types/private-channels";
-import { revalidatePath } from "next/cache";
 import { getAmountError } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-validation";
 import type { MessageKey } from "@/i18n/messages";
 import type { ApiAnswer } from "@/lib/idempotency";
-import { createPrivateChannelDeposit, fetchPrivateChannelDeposit } from "@/lib/private-channels";
-import {
-  createSdpApiClient,
-  extractSdpApiErrorMessage,
-  requestProjectHref,
-  sdpApiAnswer,
-} from "@/lib/sdp-api";
+import { createPrivateChannelDeposit } from "@/lib/private-channels";
+import { createSdpApiClient, extractSdpApiErrorMessage, sdpApiAnswer } from "@/lib/sdp-api";
 
 export interface CreateDepositInput {
   walletId: string;
@@ -69,7 +63,6 @@ export async function createDepositAction(input: CreateDepositInput): Promise<Cr
       },
       input.idempotencyKey
     );
-    revalidatePath(await requestProjectHref("/dashboard/integrations/private-channels/deposit"));
     return { ok: true, deposit };
   } catch (error) {
     return {
@@ -78,15 +71,5 @@ export async function createDepositAction(input: CreateDepositInput): Promise<Cr
       message: extractSdpApiErrorMessage(error),
       answer: sdpApiAnswer(error),
     };
-  }
-}
-
-/** Poll target for the progress view. Returns null on transient failures. */
-export async function fetchDepositAction(id: string): Promise<PrivateChannelDeposit | null> {
-  try {
-    const client = await createSdpApiClient();
-    return await fetchPrivateChannelDeposit(client, id);
-  } catch {
-    return null;
   }
 }
