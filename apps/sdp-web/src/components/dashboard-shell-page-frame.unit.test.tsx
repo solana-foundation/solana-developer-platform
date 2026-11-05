@@ -212,8 +212,9 @@ describe("dashboard shell page frame", () => {
       await renderAt(`${PROJECT}/integrations/privy/connections/new`, title);
 
       expect(container.querySelectorAll("aside[inert]")).toHaveLength(inertAsides);
-      const back = screen.getByRole(backRole, { name: "Privy" });
-      expect(back.hasAttribute("disabled")).toBe(backRole === "button");
+      const locked = backRole === "button";
+      const backs = screen.getAllByRole(backRole, { name: "Privy" });
+      expect(backs.map((back) => back.hasAttribute("disabled"))).toEqual([locked, locked]);
     }
   );
 

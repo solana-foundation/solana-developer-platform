@@ -3,21 +3,13 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) => (
-    <a href={href} onClick={(event: MouseEvent) => event.preventDefault()}>
-      {children}
-    </a>
-  ),
-}));
 
 import type { ConnectionsPageResult, CustodyConnectionListItem } from "./connections.data";
 import { ConnectionsList } from "./connections-list";

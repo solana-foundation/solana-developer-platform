@@ -15,7 +15,7 @@ import { I18nProvider } from "@/i18n/provider";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
 }));
@@ -259,6 +259,7 @@ describe("connection wallets", () => {
         wallets: [
           makeWallet("wal_ops", "active", "Treasury"),
           makeWallet("wal_old", "inactive", null),
+          makeWallet("wal_fees", "active", "fee_payer"),
         ],
         lifecycle: "restricted",
         canManageCustody: true,
@@ -268,6 +269,7 @@ describe("connection wallets", () => {
     expect(html).toContain('href="/dashboard/prj_test_sandbox/wallets/wal_ops"');
     expect(html).toContain("Privy · Treasury");
     expect(html).toContain("Privy · inactive");
+    expect(html).toContain("Privy · Fee payer");
     expect(html).toContain("7xKX...gAsU");
     expect(hasButton(html, "Add wallet")).toBe(true);
   });
