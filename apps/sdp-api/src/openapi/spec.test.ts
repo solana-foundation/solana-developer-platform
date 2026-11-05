@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID, CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
@@ -28,7 +28,6 @@ import {
   classifiedValues,
   hiddenValues,
   isValuePublished,
-  pruneUnpublishedValues,
   publishedModules,
 } from "./release-channel-values";
 import {
@@ -870,15 +869,20 @@ describe("OpenAPI spec", () => {
     }
   });
 
-  // Each custody provider publishes by its (provider, mode) maturity, and local
-  // signing (self-hosted only) never does. Pinned so a promotion is a visible change.
-  it("names only Privy as a custody provider on stable, and never local", () => {
+  // A custody provider publishes where the channel offers it in either mode, and
+  // local signing (self-hosted only) never does. Pinned so a promotion is a visible change.
+  it("names only Privy as a custody provider on stable, every one but local on experimental", () => {
     const stable = createPublicOpenApiDocument({ releaseChannel: "stable" });
     const serialized = JSON.stringify(stable);
     expect(CUSTODY_PROVIDERS.filter((provider) => serialized.includes(`"${provider}"`))).toEqual([
       "privy",
     ]);
-    expect(serialized).not.toMatch(/fireblocks/i);
+    // Prose too: no description names a provider stable does not offer.
+    const unpublishedLabels = CUSTODY_PROVIDERS.filter((provider) => provider !== "privy").map(
+      (provider) => CUSTODY_PROVIDER_CATALOG_BY_ID[provider].label
+    );
+    expect(unpublishedLabels.filter((label) => serialized.includes(label))).toEqual([]);
+    expect(serialized).not.toMatch(/fireblocks|coinbase/i);
     expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
 
     const paths = stable.paths;
@@ -900,49 +904,12 @@ describe("OpenAPI spec", () => {
       );
     }
     expect(JSON.stringify(createOpenApiDocument())).toContain('"local"');
-  });
 
-  it("narrows a custody field to the providers its declared mode publishes", () => {
-    type CustodyModeGate = { "x-sdp-custody-mode"?: "managed" | "byok" };
-    const field = (gate: CustodyModeGate): OpenAPIObject => ({
-      openapi: "3.0.0",
-      info: { title: "Custody gate", version: "1" },
-      paths: {
-        "/v1/x": {
-          post: {
-            responses: {},
-            requestBody: {
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      provider: {
-                        type: "string",
-                        enum: ["local", "privy", "fireblocks", "coinbase_cdp"],
-                        ...gate,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-    const providers = (gate: CustodyModeGate) =>
-      JSON.stringify(pruneUnpublishedValues(field(gate), "beta", false)).match(
-        /"enum":(\[[^\]]*\])/
-      )?.[1];
-
-    expect(providers({})).toBe('["privy","fireblocks","coinbase_cdp"]');
-    expect(providers({ "x-sdp-custody-mode": "managed" })).toBe(
-      '["privy","fireblocks","coinbase_cdp"]'
+    const experimentalCreate = getJsonSchema(
+      createPublicOpenApiDocument(EXPERIMENTAL).paths?.["/v1/wallets"]?.post?.requestBody
     );
-    expect(providers({ "x-sdp-custody-mode": "byok" })).toBe('["privy","fireblocks"]');
-    expect(JSON.stringify(pruneUnpublishedValues(field({}), "beta", false))).not.toContain(
-      "x-sdp-custody-mode"
+    expect(JSON.stringify(experimentalCreate)).toContain(
+      JSON.stringify(CUSTODY_PROVIDERS.filter((provider) => provider !== "local"))
     );
   });
 
@@ -958,14 +925,6 @@ describe("OpenAPI spec", () => {
     expect(transfer("stable")).not.toMatch(/fireblocks/i);
     expect(transfer("experimental")).toContain('"fireblocks"');
     expect(transfer("experimental")).not.toContain("x-sdp-custody-provider");
-  });
-
-  it("lists every Managed custody provider but local on experimental", () => {
-    const doc = createPublicOpenApiDocument(EXPERIMENTAL);
-    const createBody = getJsonSchema(doc.paths?.["/v1/wallets"]?.post?.requestBody);
-    expect(JSON.stringify(createBody)).toContain(
-      JSON.stringify(CUSTODY_PROVIDERS.filter((provider) => provider !== "local"))
-    );
   });
 
   // Provider availability lists every family in one response, so a channel

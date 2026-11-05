@@ -4,8 +4,13 @@ import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
+import { getDb } from "@/db/client";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { assertMoneyStartAdmitted } from "@/lib/money-admission";
+import {
+  assertMoneyStartAdmitted,
+  decideMovement,
+  readMovementFactsWith,
+} from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import { issuePaymentRequestTransaction } from "@/services/payments/payment-request-sponsorship";
@@ -21,11 +26,29 @@ const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
 /**
+ * Whether the transaction request would admit this payment now: the same
+ * decision and single read as its `assertMoneyStartAdmitted`, without the
+ * refusal event, so a suspended or deleted organization, a production request
+ * without the entitlement, or a disabled `payments.pay_request` withholds the
+ * link the wallet would then be refused (HOO-2009). Runs under the request's
+ * own money principal, set by `paymentRequestScope`.
+ */
+async function paymentMayStart(
+  env: Env,
+  scope: { organizationId: string; projectId: string }
+): Promise<boolean> {
+  const subject = { custodyWalletId: null };
+  const facts = await readMovementFactsWith(getDb(env), scope, "payments.pay_request", subject);
+  return decideMovement("payments.pay_request", facts, subject).admitted;
+}
+
+/**
  * The public view of a payment request, with the Solana Pay transaction-request link while it
  * can still be paid.
  *
  * @param c - The request context, under `paymentRequestScope`.
- * @returns The request's amount, token, recipient, status, and Solana Pay URL.
+ * @returns The request's amount, token, recipient, status, and Solana Pay URL (null while the
+ *   request cannot be paid, including while the transaction request would refuse it).
  */
 export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">) {
   const request = await findPaymentRequest(c.env, c.req.param("token"));
@@ -36,7 +59,13 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
     isPaymentRequestPayableAt(
       { status: request.status, expiresAt: request.expires_at },
       Date.now()
-    ) && request.custody_wallet_id !== null;
+    ) &&
+    request.custody_wallet_id !== null &&
+    request.project_id !== null &&
+    (await paymentMayStart(c.env, {
+      organizationId: request.organization_id,
+      projectId: request.project_id,
+    }));
 
   let solanaPayUrl: string | null = null;
   if (payable) {

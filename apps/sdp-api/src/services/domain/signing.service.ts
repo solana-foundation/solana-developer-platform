@@ -264,9 +264,9 @@ export class SigningService {
    * Refuses using a Managed custody config unless the (provider, managed) pair is
    * in the release channel, the config's project allows Managed custody
    * (Production is BYOK only) and the organization has the provider enabled.
-   * Every Managed use passes here before any decrypt or provider call: wallet
-   * creation and deletion, and the adapter every signer and public-key read
-   * builds. The channel and environment refusals keep their 403s; the
+   * Every Managed use but wallet creation passes here before any decrypt or
+   * provider call: wallet deletion, and the adapter every signer and public-key
+   * read builds. Creation calls the two halves itself, around its config lookup. The channel and environment refusals keep their 403s; the
    * entitlement refusal is a signing error.
    *
    * @param config - The Managed config about to be used.
@@ -282,8 +282,6 @@ export class SigningService {
    * release channel and the project allows Managed custody. Wallet creation runs
    * it before looking the config up, so those refusals answer with their 403s
    * whether or not a config exists.
-   *
-   * @param scope - The project and provider Managed custody is used for.
    */
   private async assertManagedModeAdmitted(
     scope: Pick<SigningConfigRecord, "organizationId" | "projectId" | "provider">

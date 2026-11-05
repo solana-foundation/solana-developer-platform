@@ -29,9 +29,8 @@ import { z } from "zod";
  * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
  * document's channel does not publish. Actions carry their owner in the
  * registry, and wallet purposes in `WALLET_PURPOSE_OWNERS`, which the dashboard
- * filters its purpose pickers by too. Custody providers publish by their
- * (provider, mode) maturity, and a field that names providers for one custody
- * mode declares it with `CUSTODY_MODE_GATE`.
+ * filters its purpose pickers by too. A custody provider publishes where the
+ * channel offers it in either custody mode.
  */
 
 export type Owner =
@@ -126,7 +125,7 @@ export function hiddenValues(): readonly string[] {
   return [...HIDDEN_VALUES];
 }
 
-/** The module or ramp provider that owns a value, for consumers that filter by channel. */
+/** The module, ramp provider or custody provider that owns a value, for consumers that filter by channel. */
 export function valueGates(): Record<string, Owner> {
   return Object.fromEntries(VALUE_OWNERS);
 }
@@ -199,7 +198,6 @@ type Context = {
   published: Published;
   inResponse: boolean;
   modules: ReadonlySet<SdpModule>;
-  releaseChannel: SdpReleaseChannel;
 };
 
 /** Schema ownership is contextual: `transferId` also names ordinary transfer rows. */
@@ -208,12 +206,6 @@ export const MODULE_GATE = "x-sdp-module";
 export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
 /** Alternate prose for a shared operation when its channel excludes a module. */
 export const DESCRIPTION_GATE = "x-sdp-description-without-module";
-/**
- * The custody mode a schema names providers for (`managed`, `byok`): inside it
- * a custody provider publishes only where the channel offers it in that mode.
- * A field without it names providers of any mode.
- */
-export const CUSTODY_MODE_GATE = "x-sdp-custody-mode";
 /** Schema ownership by one custody provider, such as its own tracking fields on a transfer. */
 export const CUSTODY_PROVIDER_GATE = "x-sdp-custody-provider";
 
@@ -221,15 +213,9 @@ const GATE_KEYS: ReadonlySet<string> = new Set([
   MODULE_GATE,
   TRANSFER_STATUS_GATE,
   DESCRIPTION_GATE,
-  CUSTODY_MODE_GATE,
   CUSTODY_PROVIDER_GATE,
 ]);
-const custodyModeGateSchema = z.enum(["managed", "byok"]).optional();
 const custodyProviderGateSchema = z.enum(CUSTODY_PROVIDERS).optional();
-
-function isCustodyProvider(value: Json): value is CustodyProvider {
-  return CUSTODY_PROVIDERS.some((provider) => provider === value);
-}
 
 const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
 const moduleGateSchema = moduleNameSchema.optional();
@@ -323,17 +309,6 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
         published(value) && !RAMP_ONLY_TRANSFER_STATUSES.some((status) => status === value),
     };
   }
-  const custodyMode = custodyModeGateSchema.parse(node[CUSTODY_MODE_GATE]);
-  if (custodyMode !== undefined) {
-    const { published, releaseChannel } = context;
-    context = {
-      ...context,
-      published: (value) =>
-        published(value) &&
-        (!isCustodyProvider(value) ||
-          isCustodyProviderPublished(releaseChannel, value, custodyMode)),
-    };
-  }
   const alternateDescription = descriptionGateSchema.parse(node[DESCRIPTION_GATE]);
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(node)) {
@@ -415,7 +390,6 @@ export function pruneUnpublishedValues(
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
     inResponse: false,
     modules,
-    releaseChannel,
   });
   if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");
   return openApiDocumentSchema.parse(pruned);
