@@ -20,6 +20,8 @@ import {
   clearOrganizationSwitch,
   requestedOrganizationSwitch,
   requestOrganizationSwitch,
+  settleOrganizationSwitch,
+  settleOrganizationSwitchOnRender,
 } from "@/contexts/requested-organization-switch";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
@@ -156,6 +158,7 @@ export function DashboardWorkspaceProvider({
       requestOrganizationSwitch(organizationId);
       try {
         await setActive({ organization: organizationId });
+        settleOrganizationSwitch(organizationId);
       } catch (error) {
         clearOrganizationSwitch();
         throw error;
@@ -171,10 +174,9 @@ export function DashboardWorkspaceProvider({
       return;
     }
     if (dashboardScopeIsFresh) {
-      // Clerk and the server agree again, on the requested organization or on
-      // one Clerk moved to since: a later mismatch is a new one, not this tab's.
+      // Clerk and the server agree again: a later mismatch is a new one.
       alignedOrganizationIdRef.current = null;
-      clearOrganizationSwitch();
+      settleOrganizationSwitchOnRender(serverDashboardCacheScope.orgId);
       return;
     }
     const requestedOrganizationId = requestedOrganizationSwitch();

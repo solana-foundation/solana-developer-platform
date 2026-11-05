@@ -262,6 +262,24 @@ describe("DashboardWorkspaceProvider project selection", () => {
     expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test_other" }]]);
   });
 
+  it("keeps a pending switch through renders that still agree on the previous organization", async () => {
+    const pending = Promise.withResolvers<undefined>();
+    clerk.setActive.mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    const view = render(<WorkspaceFixture />);
+
+    await user.click(screen.getByRole("button", { name: "Switch organization" }));
+    // Clerk has not moved yet: the page re-renders on the previous organization.
+    view.rerender(<WorkspaceFixture />);
+    await user.click(screen.getByRole("button", { name: "Increment unrelated state" }));
+    clerk.auth = { ...clerk.auth, orgId: "org_test_other" };
+    view.rerender(<WorkspaceFixture />);
+
+    await waitFor(() => expect(dashboardRouter.replace).toHaveBeenCalledWith("/dashboard"));
+    expect(clerk.setActive.mock.calls).toEqual([[{ organization: "org_test_other" }]]);
+    pending.resolve(undefined);
+  });
+
   it("forgets a switch the server never rendered once Clerk agrees with the page again", async () => {
     const user = userEvent.setup();
     const first = render(<WorkspaceFixture />);
