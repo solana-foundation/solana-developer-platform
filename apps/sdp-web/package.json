@@ -27,6 +27,7 @@
     "@flags-sdk/vercel": "1.5.2",
     "@sdp/api-catalog": "workspace:*",
     "@sdp/design-tokens": "workspace:*",
+    "@sdp/ip": "workspace:*",
     "@sdp/issuance": "workspace:*",
     "@sdp/private-channels": "workspace:*",
     "@sdp/redaction": "workspace:*",

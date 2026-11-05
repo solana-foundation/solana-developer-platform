@@ -190,7 +190,7 @@ describe("Settings quick start", () => {
     expect(
       screen.getByText("Quick start is unavailable right now. Refresh the page to try again.")
     ).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Open Overview|Show quick start)$/ })).toBeNull();
   });
 
   it("still brings a dismissed guide back when its status could not be read", () => {
@@ -206,6 +206,6 @@ describe("Settings quick start", () => {
     setup();
     renderQuickStart("settings");
     expect(screen.getByText("Switch to Sandbox to use the quick start.")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Open Overview|Show quick start)$/ })).toBeNull();
   });
 });

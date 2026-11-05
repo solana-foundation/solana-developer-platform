@@ -101,7 +101,7 @@ describe("DashboardLoadingScreen", () => {
       "Shared.dashboardShell.heliusRings"
     );
     expect(getDashboardPageConfig("/dashboard/members", t).title).toBe(
-      "Shared.dashboardShell.settings"
+      "Shared.organizationSettings.title"
     );
   });
 

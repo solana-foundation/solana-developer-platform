@@ -1,27 +1,25 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
+import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { getTranslations } from "@/i18n/server";
-import { loadOrganizationIpAllowlist } from "./organization-access-actions";
-import { OrganizationIpAllowlistForm } from "./organization-ip-allowlist-form";
+import { OrganizationIpAllowlist } from "./organization-ip-allowlist";
+import { loadOrganizationIpAllowlist } from "./organization-settings-load";
 
 /** The organization-wide IP allowlist for its API keys. */
 export async function OrganizationAccessSection() {
   const [t, allowlist] = await Promise.all([getTranslations(), loadOrganizationIpAllowlist()]);
 
+  if (allowlist.ok) {
+    return (
+      <OrganizationIpAllowlist
+        organizationId={allowlist.organizationId}
+        initialAllowedIps={allowlist.allowedIps}
+      />
+    );
+  }
   return (
-    <Card id="api-access" className="scroll-mt-6">
-      <CardHeader>
-        <CardTitle>{t("Shared.organizationAccess.title")}</CardTitle>
-        <CardDescription>{t("Shared.organizationAccess.description")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {allowlist.ok ? (
-          <OrganizationIpAllowlistForm initialAllowedIps={allowlist.allowedIps} />
-        ) : (
-          <p className="text-sm text-destructive" role="alert">
-            {t("Shared.organizationAccess.loadFailed", { error: allowlist.error })}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+    <RecordSection id="api-access" title={t("Shared.organizationAccess.title")}>
+      <p className="text-body text-error" role="alert">
+        {t("Shared.organizationAccess.loadFailed", { error: allowlist.error })}
+      </p>
+    </RecordSection>
   );
 }
