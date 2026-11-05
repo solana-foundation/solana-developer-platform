@@ -3278,12 +3278,28 @@ describe("Payments routes — recurring", () => {
       expect(await failedCollectionAttempts(activated.id)).toBe(0);
       expect(recurringExecutionCallCounts()).toEqual(calls);
 
+      // Collect and resume on the paused schedule both say what to do (HOO-2634).
+      const recipientGuidance = {
+        error: {
+          code: "CONFLICT",
+          message:
+            "Recurring payment recipient is unavailable; cancel this schedule and create a new one",
+        },
+      };
+      const collectAgain = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(collectAgain.status).toBe(409);
+      expect(await collectAgain.json()).toMatchObject(recipientGuidance);
       const resume = await app.request(
         `/v1/payments/recurring-payments/${activated.id}/resume`,
         { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
         env
       );
-      expect(resume.status).toBe(404);
+      expect(resume.status).toBe(409);
+      expect(await resume.json()).toMatchObject(recipientGuidance);
       expect((await readPaused()).status).toBe("paused");
       expect(recurringExecutionCallCounts()).toEqual(calls);
     }
