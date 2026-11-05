@@ -59,12 +59,12 @@ describe("NetworkSection", () => {
 
   it("renders every figure at its final value, read once", async () => {
     const markup = await render();
-    for (const value of ["150ms", "30+"]) {
+    for (const value of ["150ms", "30+", "200+", "1"]) {
       expect(markup).toContain(
         `<span aria-hidden="true">${value}</span><span class="sr-only">${value}</span>`
       );
     }
     expect(markup).toContain("Custody, compliance, and payment partners");
-    expect(markup.match(/<li class="[^"]*_stat_/g)).toHaveLength(2);
+    expect(markup.match(/<li class="[^"]*_stat_/g)).toHaveLength(4);
   });
 });

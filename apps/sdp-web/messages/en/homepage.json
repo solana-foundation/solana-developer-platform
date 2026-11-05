@@ -101,7 +101,9 @@
       "feedSlot": "slot {slot}",
       "stats": {
         "finality": { "value": "{count}ms", "label": "Finality with zero network bottlenecks" },
-        "partners": { "value": "{count}+", "label": "Custody, compliance, and payment partners" }
+        "partners": { "value": "{count}+", "label": "Custody, compliance, and payment partners" },
+        "currencies": { "value": "{count}+", "label": "fiat currencies, on and off ramp" },
+        "contract": { "value": "{count}", "label": "API contract: REST, OpenAPI, llms.txt" }
       }
     },
     "issuance": {

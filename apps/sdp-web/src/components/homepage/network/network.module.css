@@ -236,10 +236,8 @@
     margin: 0;
   }
 
-  /* two figures under the rails, on the first two columns; the third stays with the settlements */
   .stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 26px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

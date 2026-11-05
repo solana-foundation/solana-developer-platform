@@ -11,6 +11,8 @@ import { Rise } from "./rise";
 const STATS = [
   { key: "finality", count: 150 },
   { key: "partners", count: 30 },
+  { key: "currencies", count: 200 },
+  { key: "contract", count: 1 },
 ] as const satisfies readonly { key: string; count: number }[];
 
 /** "Sub-second finality meets enterprise throughput": the speed race and the figures behind it. */
