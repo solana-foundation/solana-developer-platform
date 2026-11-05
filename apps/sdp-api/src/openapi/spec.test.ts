@@ -828,15 +828,16 @@ describe("OpenAPI spec", () => {
     expect(serialized).not.toMatch(/fireblocks/i);
     expect(createPublicSurfaceManifest("stable").custodyProviders).toEqual(["privy"]);
 
-    const paths = stable.paths ?? {};
-    const createBody = getJsonSchema(paths["/v1/wallets"]?.post?.requestBody);
+    const paths = stable.paths;
+    expect(paths).toBeDefined();
+    const createBody = getJsonSchema(paths?.["/v1/wallets"]?.post?.requestBody);
     const managedOwner = z
       .object({ properties: z.object({ provider: z.object({ enum: z.array(z.string()) }) }) })
       .parse(z.object({ anyOf: z.array(z.unknown()) }).parse(createBody).anyOf[0]);
     expect(managedOwner.properties.provider.enum).toEqual(["privy"]);
     const initialize = z
       .object({ oneOf: z.array(z.unknown()) })
-      .parse(getJsonSchema(paths["/v1/wallets/initialize"]?.post?.requestBody));
+      .parse(getJsonSchema(paths?.["/v1/wallets/initialize"]?.post?.requestBody));
     expect(initialize.oneOf).toHaveLength(1);
     expect(JSON.stringify(initialize)).toContain('"privy"');
 
@@ -849,7 +850,8 @@ describe("OpenAPI spec", () => {
   });
 
   it("narrows a custody field to the providers its declared mode publishes", () => {
-    const field = (gate: object): OpenAPIObject => ({
+    type CustodyModeGate = { "x-sdp-custody-mode"?: "managed" | "byok" };
+    const field = (gate: CustodyModeGate): OpenAPIObject => ({
       openapi: "3.0.0",
       info: { title: "Custody gate", version: "1" },
       paths: {
@@ -876,7 +878,7 @@ describe("OpenAPI spec", () => {
         },
       },
     });
-    const providers = (gate: object) =>
+    const providers = (gate: CustodyModeGate) =>
       JSON.stringify(pruneUnpublishedValues(field(gate), "beta", false)).match(
         /"enum":(\[[^\]]*\])/
       )?.[1];
