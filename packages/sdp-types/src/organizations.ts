@@ -62,6 +62,14 @@ export function memberStatusMayMoveMoney(status: string): boolean {
   return MEMBER_STATUSES_THAT_MAY_MOVE_MONEY.some((allowed) => allowed === status);
 }
 
+/**
+ * `details.reason` on the 403 that refuses a credential of a suspended
+ * organization (HOO-2009), from an API key or a dashboard session alike, so
+ * neither blames the key nor tells a member they were never admitted. A
+ * suspension lifts; a deleted organization's keys stay REVOKED_API_KEY.
+ */
+export const ORGANIZATION_SUSPENDED_REASON = "organization_suspended";
+
 export const INVITATION_STATUSES = ["pending", "accepted", "expired", "revoked", "failed"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
 /**

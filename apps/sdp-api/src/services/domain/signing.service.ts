@@ -264,17 +264,35 @@ export class SigningService {
    * Refuses using a Managed custody config unless the (provider, managed) pair is
    * in the release channel, the config's project allows Managed custody
    * (Production is BYOK only) and the organization has the provider enabled.
-   * Every Managed use passes here before any decrypt or provider call: wallet
-   * creation and deletion, and the adapter every signer and public-key read
-   * builds. The channel and environment refusals keep their 403s; the
+   * Every Managed use but wallet creation passes here before any decrypt or
+   * provider call: wallet deletion, and the adapter every signer and public-key
+   * read builds. Creation calls the two halves itself, around its config lookup. The channel and environment refusals keep their 403s; the
    * entitlement refusal is a signing error.
    *
    * @param config - The Managed config about to be used.
    */
   private async assertManagedConfigUsable(config: SigningConfigRecord): Promise<void> {
-    const { organizationId, projectId, provider } = config;
+    await this.assertManagedModeAdmitted(config);
+    await this.assertManagedProviderEnabled(config);
+  }
+
+  /**
+   * The channel and environment half of `assertManagedConfigUsable`: refuses
+   * Managed custody for `provider` unless the (provider, managed) pair is in the
+   * release channel and the project allows Managed custody. Wallet creation runs
+   * it before looking the config up, so those refusals answer with their 403s
+   * whether or not a config exists.
+   */
+  private async assertManagedModeAdmitted(
+    scope: Pick<SigningConfigRecord, "organizationId" | "projectId" | "provider">
+  ): Promise<void> {
+    const { organizationId, projectId, provider } = scope;
     assertCustodyProviderAvailable(this.env, provider, "managed");
     await assertManagedCustodyUseAllowed(getDb(this.env), { organizationId, projectId, provider });
+  }
+
+  private async assertManagedProviderEnabled(config: SigningConfigRecord): Promise<void> {
+    const { organizationId, provider } = config;
     try {
       await assertCustodyProviderEnabled(this.env, getDb(this.env), organizationId, provider);
     } catch (error) {
@@ -1039,6 +1057,11 @@ export class SigningService {
       idempotency?: CustodyWalletIdempotency | null;
     }
   ): Promise<CustodyConfigWallet> {
+    await this.assertManagedModeAdmitted({
+      organizationId: orgId,
+      projectId,
+      provider: params.provider,
+    });
     const config = await this.configStore.findActiveByProvider(orgId, projectId, params.provider);
     if (!config) {
       throw new SigningError(
@@ -1046,8 +1069,8 @@ export class SigningService {
         "NOT_FOUND"
       );
     }
+    await this.assertManagedProviderEnabled(config);
 
-    await this.assertManagedConfigUsable(config);
     assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());

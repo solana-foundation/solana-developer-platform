@@ -8,8 +8,8 @@ import { ArrowUpRight, Copy, KeyRound, type LucideIcon, TriangleAlert, Wallet } 
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
-import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
+import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";

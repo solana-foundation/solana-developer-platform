@@ -67,10 +67,20 @@ step fades in through `useStepFade` (`src/lib`), which `WizardFrame` applies
 for every flow it frames; both it and `Modal`'s entrance come from
 `@sdp/ui/motion` and stay off under reduced motion.
 
+A flow that lands on a record says how it went on that record, not in a toast.
+A toast shown from a flow sits above its footer (`--app-toast-offset-bottom`);
+once the flow navigates away it drops to sonner's 24px corner, under the
+pointer that pressed the primary action and over the record's own actions,
+and sonner holds a hovered toast open (HOO-2615). The new-request page leaves
+`noteCreatedRequestLink` for the request's page, whose Copy link reads Copied,
+or a line under the link says the copy failed. A clipboard write of text an
+answer brings, like that link, starts inside the press with `copyPendingText`
+(`src/lib`): Safari refuses a write that starts after an `await`.
+
 Run the unit suite on Node 24.22.1, the version CI pins. On Node 26 every test
 that touches `localStorage` or `sessionStorage` fails with "Cannot read
 properties of undefined (reading 'clear')", although `engines` allows it.
 
 # Stage smoke
 
-Pull-request CI never runs the `gcp-read-only` Playwright project (`playwright/tests/gcp-read-only-*.e2e.spec.ts`). It runs after each merge against the deployed stage dashboard, with whatever design flags Vercel serves there, and a red run holds the production API and web release until a later merge goes green. A change that renames something these specs select (a link's name, a heading) updates them in the same pull request; where the two designs differ, match both.
+Pull-request CI never runs the `gcp-read-only` Playwright project (`playwright/tests/gcp-read-only-*.e2e.spec.ts`). It runs after each merge against the deployed stage dashboard, and a red run holds the production API and web release until a later merge goes green. A change that renames something these specs select (a link's name, a heading) updates them in the same pull request.

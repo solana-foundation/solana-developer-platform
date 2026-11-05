@@ -65,7 +65,6 @@ export function CreateChannelScreen({
         currentStep={0}
         progressLabel={t("DashboardPrivateChannels.directory.createStepProgress")}
         description={t("DashboardPrivateChannels.directory.createDescription")}
-        maxWidthClassName="max-w-3xl"
         footer={
           <div className="flex items-center justify-between gap-3">
             <Button

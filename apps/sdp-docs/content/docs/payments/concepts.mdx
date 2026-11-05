@@ -30,8 +30,8 @@ The rest of this section assumes transfers are submitted by SDP from a custody w
 SDP pays the network fees and recipient token-account rent on the transfers it
 signs from Privy wallets, so those wallets need the tokens they send, with no SOL
 for fees. Sponsorship limits apply; an unavailable sponsor refuses the transfer
-rather than charging the source wallet. Fireblocks submits its own transfers,
-whose fees SDP does not sponsor.
+rather than charging the source wallet. A provider that submits its own
+transfers pays their fees from its own account, and SDP does not sponsor them.
 
 ## The transfer data model
 

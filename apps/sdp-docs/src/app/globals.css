@@ -7,7 +7,7 @@
 /* next-themes puts .dark on <html>, so dark: utilities follow the theme switch, not the OS. */
 @custom-variant dark (&:is(.dark *));
 
-/* Fumadocs reads --color-fd-*. They point at the refresh palette from @sdp/design-tokens, which
+/* Fumadocs reads --color-fd-*. They point at the palette from @sdp/design-tokens, which
    switches with the .dark class on <html>, so one block covers light and dark. */
 :root {
   --color-fd-background: var(--paper);
@@ -46,7 +46,7 @@ body {
 }
 
 /* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
-   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   so put the rule colour back. Focus outlines are the ink ring at half strength, like the
    dashboard's ring-primary/50. */
 @layer base {
   * {
@@ -1107,131 +1107,11 @@ body {
   color: var(--ink);
 }
 
-.page-feedback {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-top: 3rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--rule);
-}
-
-.page-feedback--col {
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.page-feedback-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.page-feedback-label {
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  color: var(--ink-tertiary);
-  white-space: nowrap;
-}
-
-.page-feedback-thanks {
-  color: var(--ink-secondary);
-}
-
-.page-feedback-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.page-feedback-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  border: 1px solid var(--rule);
-  background: transparent;
-  color: var(--ink-tertiary);
-  cursor: pointer;
-  transition:
-    border-color var(--motion-duration-fast),
-    color var(--motion-duration-fast),
-    background var(--motion-duration-fast);
-}
-
-.page-feedback-btn:hover {
-  border-color: var(--rule-strong);
-  color: var(--ink-secondary);
-}
-
-.page-feedback-btn.is-active {
-  border-color: var(--ink);
-  color: var(--ink);
-  background: var(--wash-strongest);
-}
-
-.page-feedback-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  width: 100%;
-}
-
-.page-feedback-textarea {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  background: var(--wash);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-  transition: border-color var(--motion-duration-fast);
-  box-sizing: border-box;
-}
-
-.page-feedback-textarea::placeholder {
-  color: var(--ink-tertiary);
-}
-
-.page-feedback-textarea:focus {
-  border-color: var(--rule-strong);
-}
-
-.page-feedback-submit {
-  align-self: flex-start;
-  padding: 0.4rem 1rem;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-secondary);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition:
-    border-color var(--motion-duration-fast),
-    color var(--motion-duration-fast);
-}
-
-.page-feedback-submit:hover:not(:disabled) {
-  border-color: var(--rule-strong);
-  color: var(--ink);
-}
-
-.page-feedback-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .page-nav {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  margin-top: 1.5rem;
+  margin-top: 3rem;
 }
 
 .page-nav-prev,
@@ -2046,6 +1926,16 @@ body {
 
 .launch-home-cta-secondary:hover {
   color: var(--ink);
+}
+
+/* The missing page's actions (`app/docs/not-found.tsx`): the primary one is a button. */
+.launch-docs-not-found-actions {
+  margin-top: 28px;
+}
+
+.launch-docs-not-found-actions button {
+  border: 0;
+  cursor: pointer;
 }
 
 .launch-home-system {

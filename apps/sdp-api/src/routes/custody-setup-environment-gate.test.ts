@@ -155,6 +155,28 @@ function initialize(environment: SdpEnvironment, provider: CustodyProvider): Pro
   );
 }
 
+function createManagedWallet(
+  environment: SdpEnvironment,
+  provider: CustodyProvider,
+  idempotencyKey: string
+): Promise<Response> {
+  return Promise.resolve(
+    app.request(
+      "/v1/wallets",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${API_KEYS[environment].raw}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ provider }),
+      },
+      env
+    )
+  );
+}
+
 function submit(environment: SdpEnvironment, idempotencyKey: string): Promise<Response> {
   return Promise.resolve(
     app.request(
@@ -302,6 +324,7 @@ describe("Custody setup by project environment", () => {
     backend: env.CREDENTIAL_SECRET_STORE_BACKEND,
     encryptionKey: env.CUSTODY_ENCRYPTION_KEY,
     fingerprintPepper: env.CREDENTIAL_FINGERPRINT_PEPPER,
+    releaseChannel: env.SDP_RELEASE_CHANNEL,
   };
 
   beforeEach(async () => {
@@ -330,6 +353,7 @@ describe("Custody setup by project environment", () => {
     env.CREDENTIAL_SECRET_STORE_BACKEND = original.backend;
     env.CUSTODY_ENCRYPTION_KEY = original.encryptionKey;
     env.CREDENTIAL_FINGERPRINT_PEPPER = original.fingerprintPepper;
+    env.SDP_RELEASE_CHANNEL = original.releaseChannel;
     await clearKVStores(env);
   });
 
@@ -353,6 +377,50 @@ describe("Custody setup by project environment", () => {
       expect(await auditRows()).toEqual([]);
     }
   );
+
+  it("refuses a Managed wallet in a Production project with custody_mode_not_allowed, not a missing config", async () => {
+    const response = await createManagedWallet("production", "privy", "gate-prod-managed-wallet");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Privy Managed custody is not allowed in a production project.",
+        details: { reason: "custody_mode_not_allowed" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
+  });
+
+  it("refuses a Managed beta-provider wallet on stable with custody_provider_not_in_release_channel, not a missing config", async () => {
+    env.SDP_RELEASE_CHANNEL = "stable";
+
+    const response = await createManagedWallet("sandbox", "fireblocks", "gate-stable-fireblocks");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message:
+          "The fireblocks custody provider is not available in this release channel for managed custody.",
+        details: { reason: "custody_provider_not_in_release_channel" },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await custodyRows()).toEqual(NO_CUSTODY_ROWS);
+  });
+
+  it("answers a Managed wallet for an admitted provider with no config as not initialized", async () => {
+    const response = await createManagedWallet("sandbox", "privy", "gate-sandbox-no-config");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: { code: "NOT_FOUND", message: "Custody not initialized for provider: privy" },
+    });
+  });
 
   it("refuses Managed Privy initialization in a Sandbox project when the deployment lacks Privy credentials", async () => {
     env.PRIVY_APP_ID = undefined;

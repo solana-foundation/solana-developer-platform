@@ -4,7 +4,7 @@
 
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
 - **Tailwind v4**, imported at the top of `src/app/globals.css`; `dark:` follows the `.dark` class the theme switch sets
-- **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
+- **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's design. `globals.css` imports `tokens.css` and `theme.css`
 - **Custom CSS** in `src/app/globals.css`: shell classes use `launch-docs-*`; home sections use `launch-home-*`
 - **Lucide React** for icons
 - **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
@@ -13,7 +13,7 @@
 
 ## Fonts
 
-`src/app/layout.tsx` loads the refresh faces from `packages/sdp-design-tokens/src/assets/fonts` with `next/font/local`, as sdp-web does, under the variable names `tokens.css` reads:
+`src/app/layout.tsx` loads the design's faces from `packages/sdp-design-tokens/src/assets/fonts` with `next/font/local`, as sdp-web does, under the variable names `tokens.css` reads:
 
 | Variable      | Font                                           | Usage                                        |
 | ------------- | ---------------------------------------------- | -------------------------------------------- |
@@ -26,7 +26,7 @@ Season Sans ships 400 and 500 only, so cap `font-weight` at 500. `html` sets `fo
 
 ## Color Tokens
 
-The docs keep no palette of their own: read the refresh tokens from `packages/sdp-design-tokens/src/tokens.css`. Light values sit on `:root` and dark on `:root.dark`, so one rule covers both modes. Never hardcode a color; a missing token goes in the package.
+The docs keep no palette of their own: read the tokens from `packages/sdp-design-tokens/src/tokens.css`. Light values sit on `:root` and dark on `:root.dark`, so one rule covers both modes. Never hardcode a color; a missing token goes in the package.
 
 | Token                                           | Use for                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
@@ -44,7 +44,7 @@ The docs keep no palette of their own: read the refresh tokens from `packages/sd
 
 ### Fumadocs bridge tokens
 
-Fumadocs components read `--color-fd-*` vars. One `:root` block in `globals.css` points them at the refresh palette (`--color-fd-background: var(--paper)`, `--color-fd-card: var(--paper-card)`, …). Change colors in `@sdp/design-tokens`, never in the bridge.
+Fumadocs components read `--color-fd-*` vars. One `:root` block in `globals.css` points them at the palette (`--color-fd-background: var(--paper)`, `--color-fd-card: var(--paper-card)`, …). Change colors in `@sdp/design-tokens`, never in the bridge.
 
 ### Motion
 
@@ -104,6 +104,8 @@ for other placements; its marker, fill and border use the `--attention*` tokens.
 
 Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
 
+A guide's `<Tab>` (`tab.tsx`) stays mounted while another tab shows, hidden, so the table of contents and search can link to its headings; following such a link opens the tab. Fumadocs' `<Tabs>` reacts only to page load and `hashchange`, so the search dialog sets the hash itself for a result on the page already open (`router.push` fires none).
+
 ### CSS classes (for custom elements within pages)
 
 | Class                       | Element                                                                                                                                                  |
@@ -145,7 +147,7 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 ### Search
 
-⌘K search works out of the box: `RootProvider` (root `layout.tsx`) provides the Fumadocs search dialog + hotkey, backed by the Orama route at `src/app/api/search/route.ts` (`createFromSource(source)`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed — JSX-rendered content like `DocsHome` is not.
+⌘K search: `RootProvider` (root `layout.tsx`) provides the hotkey and `DocsSearchDialog` (`search-dialog.tsx`), Fumadocs' default dialog pointed at `docsSearchApiPath` (`/docs/api/search`, `src/lib/site.ts`), the Orama route at `src/app/docs/api/search/route.ts`. It must stay under `/docs`: platform.solana.com forwards only `/docs/*` and a few root files here, so Fumadocs' default `/api/search` reaches the dashboard's sign-in redirect and every search fails (`site-urls.test.ts` pins it). The route leaves out text that 12 or more pages repeat word for word (shared header and envelope descriptions), gives each result its breadcrumb, and ranks pages whose title (then title and description) hold the query first (`rankTitlesFirst`, `src/lib/search-rank.ts`). The sidebar header has a "Search docs" trigger button (`.launch-docs-sidebar-search`). Only `content/docs/` MDX is indexed: JSX-rendered content like `DocsHome` is not. The sitemap is `/docs/sitemap.xml` (`src/app/docs/sitemap.ts`) for the same reason; `robots.txt` names it.
 
 ---
 
@@ -204,7 +206,7 @@ the repo:
 
 ## Release Channels
 
-Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp and custody providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
 Before documenting a new ramp provider, follow
 `docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
@@ -213,7 +215,7 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
+- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers, tutorials or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<CustodyProviderTable />`, `<TutorialLinks />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
 - `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
 - A guide request that matches the public operation's example uses
   `<ApiExample operation="create-wallet" />` (or `language="ts"` / `"py"`).
@@ -253,8 +255,11 @@ keep Swagger UI for their own release channel.
   Shared OpenAPI properties declare `MODULE_GATE` when a module owns the whole
   field; `pruneUnpublishedValues` removes it and its required entry on excluded
   channels. `TRANSFER_STATUS_GATE` scopes transfer status filtering to that
-  schema. `DESCRIPTION_GATE` supplies alternate shared prose when its module
-  is excluded, preserving the full description for experimental and internal
+  schema. `CUSTODY_MODE_GATE` narrows a field to the custody providers its
+  channel offers in that mode, and `CUSTODY_PROVIDER_GATE` drops a provider's
+  own fields (Fireblocks transfer tracking) where it is not published.
+  `DESCRIPTION_GATE` supplies alternate shared prose when its module is
+  excluded, preserving the full description for experimental and internal
   documents. Keep ownership on the source schema, not in the docs generator.
   It also drives `Run in dashboard` on operation pages
   (`src/lib/playground-link.ts`): only catalogued method/path pairs get a link.
@@ -297,7 +302,7 @@ Currently unpublished: the whole Earn family, guide and API reference, until PRO
 - **Don't** hardcode colors — always use design tokens
 - **Don't** add new global layout structures — the shell is `sdp-docs-shell` → sidebar + main, keep it
 - **Don't** use Fumadocs UI components directly for layout (they're used internally); the custom shell wraps them
-- **Don't** change `--color-fd-*` tokens independently: they point at the refresh palette
+- **Don't** change `--color-fd-*` tokens independently: they point at the palette
 - **Don't** drop the `*` border rule in the base layer of `globals.css`: Tailwind's preflight resets every border to `currentColor` after Fumadocs' base layer sets it
 
 
