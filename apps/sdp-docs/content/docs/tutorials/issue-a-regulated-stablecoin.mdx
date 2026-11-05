@@ -527,10 +527,14 @@ SDP answers `400 ACCOUNT_FROZEN`. Its message carries the program's own error, `
 In production, unfreeze only after the compliance review resolves. In the sandbox you can unfreeze now:
 
 ```javascript title="unfreeze-account.js"
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
-  signingCustodyWalletId,
-  accountAddress: destinationAddress,
-});
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/unfreeze`,
+  {
+    signingCustodyWalletId,
+    accountAddress: destinationAddress,
+  },
+  { idempotencyKey: idempotencyKey("unfreeze") }
+);
 ```
 
 With the freeze cleared, the destination can receive transfers again.

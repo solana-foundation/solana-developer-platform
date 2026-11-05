@@ -54,6 +54,17 @@ test("a Kora on a chosen cluster needs its RPC URL as well as its URL", () => {
   assert.equal(errors.KORA_MAINNET_URL, undefined);
 });
 
+test("a Kora Cloud Run audience must be https, as the adapter requires", () => {
+  const errors = validateValues({
+    ...defaultValues(),
+    FEE_SPONSOR_CLUSTERS: "devnet",
+    KORA_DEVNET_URL: "https://kora.example.test",
+    KORA_DEVNET_RPC_URL: "https://devnet.rpc.example.test",
+    KORA_DEVNET_CLOUD_RUN_AUDIENCE: "http://kora.example.test",
+  });
+  assert.ok(errors.KORA_DEVNET_CLOUD_RUN_AUDIENCE);
+});
+
 test("no Kora asks for no fee payment field", () => {
   const errors = validateValues({ ...defaultValues(), FEE_SPONSOR_CLUSTERS: "" });
   assert.deepEqual(

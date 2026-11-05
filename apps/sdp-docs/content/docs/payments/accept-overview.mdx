@@ -9,7 +9,7 @@ To accept a payment, the payer sends tokens to one of your custody wallets and y
 
 In the dashboard, open **Payments** > **Requests**, click **New**, and set the amount, token, destination wallet and when the link expires. You get a link and a Solana Pay QR code that anyone can pay, and SDP pays the network fee for the payer's transaction. Each request gets its own Solana Pay reference, which SDP watches to see when the request is paid.
 
-When a request is paid, SDP records an inbound `finalized` transfer with `kind: request_deposit`, which `GET /v1/payments/transfers?direction=inbound` returns. The public API documents canceling a request (`POST /v1/payments/requests/{paymentRequestId}/cancel`), not creating one.
+When a request is paid, SDP records an inbound `finalized` transfer with `kind: request_deposit`, which `GET /v1/payments/transfers?direction=inbound` returns. Create one in the dashboard or with `POST /v1/payments/requests`, and cancel it with `POST /v1/payments/requests/{paymentRequestId}/cancel`.
 
 ## Share a wallet address
 
@@ -23,14 +23,14 @@ An observed payment's on-record keys are the wallet it landed in and its `destin
 
 ## What SDP gives you
 
-- **Payment links**: dashboard payment requests, recorded as inbound transfers once paid.
+- **Payment links**: payment requests, from the dashboard or `POST /v1/payments/requests`, recorded as inbound transfers once paid.
 - **Observed payments**: a wallet's recent on-chain activity, from `GET /v1/payments/transfers?custodyWalletId=…&includeObserved=true`. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Status reads**: `GET /v1/payments/transfers/{transferId}` for one recorded transfer. See [Verifying a payment](/docs/payments/accept-verification).
 - **Balances**: `GET /v1/payments/wallets/{walletId}/balances`, where `walletId` is the provider wallet id (`walletId` from `GET /v1/wallets`). See [Wallet balances](/docs/wallet-operations/balances).
 
 ## What SDP does not give you
 
-- **No checkout or payment-intent API**: the public API documents no object you create ahead of a payment. Match observed payments to the order records you keep.
+- **No checkout or payment-intent API**: a payment request is the only object you create ahead of a payment. Match payments to a shared wallet address against the order records you keep.
 - **No settlement webhooks**: poll for status. See [Polling cadence](/docs/payments/accept-verification#polling-cadence).
 
 ## Example: a marketplace checkout
