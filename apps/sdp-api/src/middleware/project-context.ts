@@ -101,23 +101,38 @@ async function resolvePathProjectScope(
 ): Promise<{ organizationId: string; projectId: string; environment: SdpEnvironment }> {
   // Mounted only under a `/:projectId` path, so the parameter is always present.
   const projectId = c.req.param(param) as string;
-  const organizationId = c.get("apiKey")?.organizationId ?? c.get("clerk")?.organizationId;
-  if (!organizationId) {
-    throw unauthorized("Authentication is required");
-  }
   const apiKey = c.get("apiKey");
-  if (apiKey && apiKey.projectId !== projectId) {
-    throw notFound("Project");
+  if (apiKey) {
+    if (apiKey.projectId !== projectId) {
+      throw notFound("Project");
+    }
+    const row = await getDb(c.env)
+      .prepare("SELECT id, environment FROM projects WHERE id = ? AND organization_id = ? LIMIT 1")
+      .bind(projectId, apiKey.organizationId)
+      .first<{ id: string; environment: SdpEnvironment }>();
+    if (!row) {
+      throw notFound("Project");
+    }
+    return {
+      organizationId: apiKey.organizationId,
+      projectId: row.id,
+      environment: row.environment,
+    };
   }
 
-  const row = await getDb(c.env)
-    .prepare("SELECT id, environment FROM projects WHERE id = ? AND organization_id = ? LIMIT 1")
-    .bind(projectId, organizationId)
-    .first<{ id: string; environment: SdpEnvironment }>();
-  if (!row) {
+  const clerk = c.get("clerk");
+  const organizationId = clerk?.organizationId;
+  const userId = clerk?.userId;
+  if (!organizationId || !userId) {
+    throw unauthorized("Authentication is required");
+  }
+  // The same membership rule as the header scope, so a path never reaches a
+  // project the header would refuse. 404 rather than 403, like a missing project.
+  const project = await findMemberProject(getDb(c.env), { organizationId, userId, projectId });
+  if (!project) {
     throw notFound("Project");
   }
-  return { organizationId, projectId: row.id, environment: row.environment };
+  return { organizationId, projectId: project.id, environment: project.environment };
 }
 
 async function assertProjectMembership(
