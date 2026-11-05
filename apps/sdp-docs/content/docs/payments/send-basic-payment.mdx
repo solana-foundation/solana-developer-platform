@@ -1,23 +1,21 @@
 ---
 title: Basic payment
-description: Send a single token transfer with SDP.
+description: Send one token transfer from a custody wallet to a Solana address, from the dashboard or the API.
 steps:
   - Set up the transfer
   - Execute the transfer
   - Verify the transfer
 ---
 
-SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**.
+A basic payment moves tokens from a custody wallet you control to a Solana wallet address. Send it from **Payments** in the dashboard or with `POST /v1/payments/transfers`.
 
-The `sourceCustodyWalletId` field is the exact SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`), resolved server-side from the caller's custody-wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
-
-Transfers are available through the Payments dashboard and the API.
+Pass `sourceCustodyWalletId` as the wallet's SDP `id` (`cwlt_…` from `GET /v1/wallets`). Pass `destination` as the recipient's wallet (owner) address, **not** a token account: for an SPL token, SDP derives the recipient's associated token account and creates it if it is missing.
 
 ## Prerequisites
 
-- A token balance in the source wallet
-- A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
-- An API key holding the `transfers.execute` grant whose [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the source wallet. `POST /v1/payments/transfers` requires the action at the route, and SDP checks the key, its grant and the source wallet again when it signs.
+- A custody wallet that holds the tokens you want to send, with a custody signer configured so SDP can sign for it.
+- In the dashboard: a role that can send payments, and a contact to pay. Add contacts under **Payments** > **Contacts**.
+- With the API: a key holding the `transfers.execute` grant whose [wallet access](/docs/developing-with-sdp/manage-api-keys#wallet-access) includes the source wallet. SDP checks the grant at the route and the key's access to the wallet again when it signs.
 
 ## How it works
 
@@ -31,27 +29,21 @@ Specify the source, destination, token, and amount.
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Go to **Payments** in the sidebar. The overview shows your total SDP balance, recent transactions, and **Send** / **Receive** actions.
+Go to **Payments** in the sidebar. The overview shows your **Available balance**, recent **Activity**, and the **Move money** actions.
 
-![Payments overview showing balance, Send and Receive buttons, and recent transactions](/images/tokens/transfer-confirmed.png)
+![Payments overview with the available balance, the Move money actions and recent activity](/images/payments/payments-overview.png)
 
-Click **Send** and select **Wallet transfer** to send from an SDP wallet to a Solana address.
+Click **Pay**. The **Single** tab opens on the **Details** step, "Who are you paying?". Fill in:
 
-![Send page showing the transfer options](/images/tokens/transfer-send-options.png)
+- **Contact**: the person or business you are paying.
+- **Destination**: one of the contact's Solana addresses. Click **Add a Solana address** to add one here.
+- **Source wallet**: the wallet the payment leaves from.
+- **Amount**: in whole-token units, such as `0.5`, with the token picked beside it.
+- **Memo** (optional): a note SDP stores with the transfer. It is not written on chain.
 
-On the **Enter transfer details** form, select a source wallet from the dropdown.
+![Details step with the source wallet list open](/images/payments/pay-source-wallet.png)
 
-![Transfer details form with source wallet dropdown open](/images/tokens/transfer-form-source.png)
-
-Fill in:
-
-- **Source** — a wallet you control in SDP
-- **Amount** — human-readable units (e.g., `0.5`)
-- **Asset** — select from your deployed tokens
-- **Destination address** — any valid Solana wallet address
-- **Memo** — optional note recorded onchain
-
-![Transfer details form with all fields filled in](/images/tokens/transfer-form-filled.png)
+![Details step with every field filled in](/images/payments/pay-details-filled.png)
 
 </Tab>
 <Tab value="API">
@@ -62,13 +54,11 @@ Build the request body:
 const body = {
   sourceCustodyWalletId: "cwlt_123",    // `id` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
-  token: "9aBCd...4eEf",               // onchain mint address
-  amount: "100.00",                    // human-readable units
+  token: "9aBCd...4eEf",               // mint address, SOL, or a symbol such as USDC
+  amount: "100.00",                    // whole-token units, as a string
   memo: "Payment for invoice #1234",
 };
 ```
-
-`token` is the token's on-chain mint address, not an SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
 
 </Tab>
 </Tabs>
@@ -84,9 +74,9 @@ Submit the transfer. SDP signs with the source custody wallet and submits the tr
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Review** to see the transfer summary, then **Confirm** to submit.
+Click **Continue to review**, check the **Review transfer** summary, then click **Send transfer**.
 
-The transfer status updates to `Confirmed` once the transaction is finalized.
+The page waits while Solana finalizes the transfer, then shows the outcome: **Transfer sent** with its status and signature, **Transfer submitted** while it is still settling, or **Transfer failed** with the reason.
 
 </Tab>
 <Tab value="API">
@@ -128,7 +118,7 @@ const response = await fetch(
   }
 );
 const { data } = await response.json();
-// data.transfer.id, data.transfer.status — transfer record under the `transfer` envelope key
+// data.transfer is the transfer record: id, status, signature
 ```
 </Tab>
 <Tab value="Java">
@@ -151,6 +141,8 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
+A successful request waits for finality and returns the transfer at `finalized`. A `processing` answer means it is still settling: don't send it again, read it instead (step 3).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -159,27 +151,25 @@ HttpRequest request = HttpRequest.newBuilder()
 
 <Step number={3} title="Verify the transfer">
 
-Confirm the transfer completed and balances updated.
+Check that the transfer settled.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The transfer appears in **Payments** history with a `confirmed` status and an onchain transaction signature.
+Click **View on explorer** to open the transaction on Solana Explorer. The transfer also appears under **Payments** > **Transactions** with its status, such as **Finalized**.
 
-![Payments overview showing confirmed inbound transaction](/images/tokens/transfer-confirmed.png)
-
-Click the record to see full details including the Solana Explorer link.
+Click a row to open the transaction's record, which has its own **View on explorer** link.
 
 </Tab>
 <Tab value="API">
 
 ```typescript title="verify-transfer.ts"
-// data.transfer.status    — "confirmed"
-// data.transfer.signature — onchain tx signature
+// data.transfer.status: "finalized" once Solana finalizes the transaction
+// data.transfer.signature: the transaction signature
 ```
 
-Poll status for async confirmations:
+If the response said `processing`, read the transfer until it settles:
 
 <ApiExample operation="get-payment-transfer" />
 
@@ -193,7 +183,7 @@ Poll status for async confirmations:
 
 ## Pay a counterparty
 
-When `destination` is a saved counterparty's Solana address, pass that account's ID as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it.
+When `destination` is a saved counterparty's Solana address, pass that account's id (`cpacct_…`) as `counterpartyAccountId`. SDP ties the transfer to the counterparty, as it does for a [transfer batch](/docs/payments/send-payouts#native-transfer-batches) recipient: the transfer carries `counterpartyId`, and `GET /v1/payments/transfers?counterpartyId=` lists it. The dashboard's Pay flow does this for you.
 
 The account must be an active `crypto_wallet` account in the same project, and
 `destination` must be its address. An unknown or inactive account returns `404`,
@@ -226,6 +216,6 @@ See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries-fo
 
 ## Related
 
-- [Payment with memo](/docs/payments/send-payment-with-memo) — using the `memo` field to carry order references
-- [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound flows
-- [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality
+- [Payment with memo](/docs/payments/send-payment-with-memo): carry an order reference in `memo`.
+- [Payouts and disbursements](/docs/payments/send-payouts): pay many recipients in one batch.
+- [Verifying a payment](/docs/payments/accept-verification): transfer statuses and finality.

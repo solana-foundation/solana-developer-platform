@@ -1,50 +1,26 @@
 ---
 title: External Co-Signers
-description: Host provider-specific signing automation outside the default self-hosted SDP stack.
+description: Host provider-specific signing services outside the default self-hosted SDP stack.
 ---
 
-Some signing providers need an operator-managed co-signer or automation process
-in addition to the SDP API. Run those processes outside the default self-hosted
-SDP stack.
-
-`infra/self-hosted/compose.yml` is intentionally unchanged by default. It starts
-the SDP API, web app, docs app, database, cache, and migrations. Provider
-co-signers are separate operational services because they usually have their own
-secret handling, identity, ingress, and availability requirements.
+Some signing providers need a co-signer or automation process that you run beside the SDP API. Run it outside `compose.yml`, which starts only SDP's own services: a co-signer has its own secrets, identity, ingress, and availability needs.
 
 ## Production pattern
 
-Use a managed container service such as Google Cloud Run, or the equivalent in
-your cloud, for provider-specific co-signer runtimes.
+Run each co-signer on a managed container service, such as Google Cloud Run or your cloud's equivalent.
 
-- Use the provider- or operator-supplied co-signer image and runtime.
-- Store co-signer secrets in a cloud secret manager, not in the SDP compose file.
-- Run the co-signer with a dedicated service account that can read only the
-  secrets it needs.
-- Configure ingress and invoker IAM for the provider flow. Prefer private or
-  authenticated ingress when the provider does not require a public callback.
-- Set `minScale` to `1` when callback latency or provider availability matters;
-  use scale-to-zero only when cold starts are acceptable.
-- Keep development, staging, and production co-signers separated by provider
-  account, cloud project, service account, and secrets.
-- Alert on failed signing attempts, container restarts, authentication failures,
-  and stale or expired key material.
+- Use the image and runtime the provider or your operator team supplies.
+- Store co-signer secrets in a cloud secret manager, never in the SDP `.env`.
+- Give the co-signer a dedicated service account that can read only the secrets it needs.
+- Set ingress and invoker IAM for the provider's flow. Keep ingress private or authenticated unless the provider needs a public callback.
+- Keep at least one instance running (`minScale: 1` on Cloud Run) when callback latency or availability matters. Scale to zero only when cold starts are acceptable.
+- Separate development, staging, and production co-signers by provider account, cloud project, service account, and secrets.
+- Alert on failed signing attempts, container restarts, authentication failures, and stale or expired key material.
 
-## Utila readiness
+## Utila
 
-Utila is the motivating future provider for this pattern. When Utila signer
-support lands, the co-signer should be hosted as an external operator service,
-for example on Cloud Run, while SDP keeps its API, web, docs, database, and cache
-inside the normal self-hosted stack.
+SDP signs with Utila directly: select `utila` in the configurator and fill in its `UTILA_*` credentials. SDP submits each transaction to Utila and polls until it's signed, up to `UTILA_MAX_POLL_ATTEMPTS` times every `UTILA_POLL_INTERVAL_MS` (60 tries, a second apart, by default). Like the local signer, Utila needs a per-organization activation.
 
-This page does not make Utila a live SDP signing provider. Do not set
-`SIGNING_PROVIDER=utila` until the Utila signer integration explicitly adds that
-provider option and the required runtime configuration.
+`UTILA_DESIGNATED_SIGNERS` lists the Utila users asked to sign each transaction. Left empty, it's the service account itself.
 
-Operator scaffolding for a Utila Cloud Run deployment lives in
-`infra/utila/cloud-run/`.
-
-That scaffold is intended to host the co-signer endpoint before Utila becomes a
-default self-hosted service. Operators can deploy their own co-signer image,
-protect the endpoint with Cloud Run IAM or runtime-level request verification,
-and pass the resulting service URL and token into a custom SDP Utila integration.
+If your Utila setup runs an automated co-signer, host it outside the stack. `infra/utila/cloud-run/` in the repository has Cloud Run scaffolding for one: a service template and a deploy script for an image you supply.
