@@ -16,7 +16,7 @@ A wallet transfer, sent or received, has one of these statuses:
 | `finalized` | The block is finalized. Irreversible. |
 | `failed` | The transfer never reached the network, or the network rejected it. The recipient was not paid; `error` says why. |
 
-`POST /v1/payments/transfers` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes.
+`POST /v1/payments/transfers` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes, unless it is waiting on a custody approval.
 
 Inbound payments differ. A paid payment request is recorded at `finalized`. An observed row (from `includeObserved=true`) shows `confirmed` or `failed` and never `finalized`, because SDP rebuilds it from chain history on each read. Check its finality yourself; see [Independent verification](#independent-verification).
 

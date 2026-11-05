@@ -73,13 +73,15 @@ docker compose up -d
 
 Open `http://localhost:3000`, sign in through Clerk, and create an organization when prompted. SDP creates it with you as its admin, along with a sandbox project and a production project.
 
-If requests fail after sign-in, check the API logs:
+If requests fail after sign-in, read the failing request's `401` response. `Clerk token missing organization` means the session token lacks the `org_id` claim, and `Clerk token has no usable email claim` means its `email` claim is wrong: fix the session token customization.
+
+If Clerk's webhook deliveries fail, check the API logs:
 
 ```bash title="Terminal"
 docker compose logs -f sdp-api
 ```
 
-`Clerk token missing organization` means the session token lacks the `org_id` claim, and `Clerk token has no usable email claim` means its `email` claim is wrong: fix the session token customization. `Invalid webhook signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret.
+`webhooks: refused a Clerk webhook with an invalid signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret. Clerk's delivery log shows the same refusal as `Invalid webhook signature`.
 
 </Step>
 
