@@ -29,6 +29,7 @@ describe("dashboard workspace tab URL state", () => {
     "/dashboard/payments/counterparty",
     "/dashboard/payments/requests",
     "/dashboard/settings",
+    "/dashboard/integrations/private-channels/overview",
   ])("clears a leaked playground tab on %s", (pathname) => {
     expect(
       shouldClearDashboardTabAfterPathnameChange({
@@ -54,17 +55,6 @@ describe("dashboard workspace tab URL state", () => {
         tab: "overview",
       })
     ).toBe(true);
-  });
-
-  it("keeps the playground tab when landing on the private channels overview", () => {
-    // A cross-route jump from a sibling sub-page arrives here carrying tab=playground.
-    expect(
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname: "/dashboard/integrations/private-channels/members",
-        pathname: "/dashboard/integrations/private-channels/overview",
-        tab: "playground",
-      })
-    ).toBe(false);
   });
 
   it.each(["custody", "ramps", "compliance", "privacy"])(
