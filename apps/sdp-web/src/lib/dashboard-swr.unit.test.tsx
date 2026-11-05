@@ -8,6 +8,7 @@ import { z } from "zod";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import {
   dashboardDataResponse,
+  readsOf,
   sentDashboardReads,
   sentDashboardRequests,
   stubDashboardFetch,
@@ -39,10 +40,6 @@ const WALLETS_KEY = dashboardRequestKey(SCOPE, "/api/dashboard/wallets");
 const COUNTERPARTIES_KEY = dashboardRequestKey(SCOPE, "/api/dashboard/counterparty");
 const LABEL_KEY = ["wallet-activity", "wal_test_1"] as const;
 const amountSchema = z.object({ data: z.object({ amount: z.number() }) });
-
-function readsOf(fetchMock: Mock<typeof fetch>, path: string): number {
-  return sentDashboardReads(fetchMock).filter((read) => read.path === path).length;
-}
 
 function stubCountingReads(): Mock<typeof fetch> {
   const fetchMock = stubDashboardFetch(({ path }) =>

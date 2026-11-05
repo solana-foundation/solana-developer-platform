@@ -5,18 +5,22 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { dashboardRequestUrl } from "@/lib/dashboard-request-key";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import {
   dashboardDataResponse,
   dashboardErrorResponse,
+  readsOf,
   type SentDashboardRequest,
   sentDashboardRequests,
   stubDashboardFetch,
 } from "@/test/dashboard-fetch";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { renderBesideReads } from "@/test/dashboard-reads";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation } from "@/test/window-location";
 import { MemberActions } from "./member-actions";
+import { membersQueryKeys } from "./members-query-key";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -28,18 +32,27 @@ function mutations(fetchMock: Parameters<typeof sentDashboardRequests>[0]): Sent
   return sentDashboardRequests(fetchMock).filter((request) => request.method !== "GET");
 }
 
-const MEMBERS_TAB_URL = `/dashboard/${SANDBOX_PROJECT.id}/settings?tab=members`;
+const MEMBERS_DIRECTORY = membersQueryKeys.directory(
+  { projectId: SANDBOX_PROJECT.id, mode: "live" },
+  { page: 1 }
+);
+
+function actions(memberId: string, role: OrganizationRole) {
+  return (
+    <MemberActions
+      memberId={memberId}
+      label="Teammate"
+      role={role}
+      isSelf={false}
+      isLastAdmin={false}
+    />
+  );
+}
 
 function row(memberId: string, role: OrganizationRole) {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <MemberActions
-        memberId={memberId}
-        label="Teammate"
-        role={role}
-        isSelf={false}
-        isLastAdmin={false}
-      />
+      {actions(memberId, role)}
     </I18nProvider>
   );
 }
@@ -87,21 +100,17 @@ describe("MemberActions role change", () => {
     expect(keys[0]).toEqual(expect.any(String));
     expect(keys[1]).toBe(keys[0]);
     expect(new Set(keys).size).toBe(3);
-    expect(dashboardRouter.replace).not.toHaveBeenCalled();
   });
 
-  it("re-reads the page at the live URL after a change, keeping the Members tab", async () => {
-    window.history.replaceState(null, "", MEMBERS_TAB_URL);
-    stubDashboardFetch(() => dashboardDataResponse(200, {}));
+  it("re-reads the members after a change", async () => {
+    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, {}));
     const user = userEvent.setup();
-    render(row("mem_test_1", "member"));
+    renderBesideReads(actions("mem_test_1", "member"), [MEMBERS_DIRECTORY]);
 
     await user.click(screen.getByRole("button", { name: "Actions for Teammate" }));
     await user.click(await screen.findByRole("menuitem", { name: "Make admin" }));
 
-    await waitFor(() =>
-      expect(dashboardRouter.replace).toHaveBeenCalledWith(MEMBERS_TAB_URL, { scroll: false })
-    );
+    await waitFor(() => expect(readsOf(fetchMock, dashboardRequestUrl(MEMBERS_DIRECTORY))).toBe(2));
   });
 });
 
@@ -164,16 +173,17 @@ describe("MemberActions removal", () => {
     );
   });
 
-  it("lists the member's keys once they load, then removes and re-reads the Members tab", async () => {
-    window.history.replaceState(null, "", MEMBERS_TAB_URL);
+  it("lists the member's keys once they load, then removes and re-reads the members", async () => {
     const keysAnswer = Promise.withResolvers<Response>();
-    const fetchMock = stubDashboardFetch(({ method }) =>
-      method === "GET"
-        ? keysAnswer.promise.then((response) => response.clone())
-        : new Response(null, { status: 204 })
+    const fetchMock = stubDashboardFetch(({ method, path }) =>
+      path === dashboardRequestUrl(MEMBERS_DIRECTORY)
+        ? dashboardDataResponse(200, {})
+        : method === "GET"
+          ? keysAnswer.promise.then((response) => response.clone())
+          : new Response(null, { status: 204 })
     );
     const user = userEvent.setup();
-    render(row("mem_test_removed", "member"));
+    renderBesideReads(actions("mem_test_removed", "member"), [MEMBERS_DIRECTORY]);
 
     const dialog = await openRemoval(user);
     expect(dialog.getByText("Checking the API keys this member created…")).toBeTruthy();
@@ -196,11 +206,8 @@ describe("MemberActions removal", () => {
     expect(dialog.queryByText("Checking the API keys this member created…")).toBeNull();
     await user.click(dialog.getByRole("button", { name: "Remove member" }));
 
-    await waitFor(() =>
-      expect(dashboardRouter.replace).toHaveBeenCalledWith(MEMBERS_TAB_URL, { scroll: false })
-    );
-    expect(sentDashboardRequests(fetchMock).map(({ method, path }) => [method, path])).toEqual([
-      ["GET", "/api/dashboard/members/mem_test_removed/api-keys"],
+    await waitFor(() => expect(readsOf(fetchMock, dashboardRequestUrl(MEMBERS_DIRECTORY))).toBe(2));
+    expect(mutations(fetchMock).map(({ method, path }) => [method, path])).toEqual([
       ["DELETE", "/api/dashboard/members/mem_test_removed"],
     ]);
   });

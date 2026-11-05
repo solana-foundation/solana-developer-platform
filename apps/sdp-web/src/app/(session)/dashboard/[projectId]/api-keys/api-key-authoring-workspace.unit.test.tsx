@@ -2,11 +2,16 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { isModuleInReleaseChannel, SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { membersQueryKeys } from "@/app/(session)/dashboard/[projectId]/settings/members-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { type DashboardKeyScope, dashboardRequestUrl } from "@/lib/dashboard-request-key";
+import { dashboardDataResponse, readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { renderBesideReads } from "@/test/dashboard-reads";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
   type ApiKeyAuthoringExistingKey,
@@ -14,6 +19,7 @@ import {
   grantableActionsInChannel,
 } from "./api-key-authoring";
 import { ApiKeyAuthoringWorkspace } from "./api-key-authoring-workspace";
+import { apiKeysQueryKeys } from "./api-keys-query-key";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -75,6 +81,7 @@ async function openAccessStep() {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("ApiKeyAuthoringWorkspace permissions", () => {
@@ -151,6 +158,43 @@ describe("ApiKeyAuthoringWorkspace permissions", () => {
 
     const execute = screen.getByRole("checkbox", { name: "Execute on Transfers" });
     expect(execute).toHaveProperty("checked", true);
+  });
+
+  it("re-reads the keys and members' key lists after a save", async () => {
+    vi.mocked(saveApiKeyAuthoringAction).mockResolvedValue({ ok: true, message: "saved" });
+    const scope: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
+    const keyReads = [
+      apiKeysQueryKeys.list(scope),
+      membersQueryKeys.memberApiKeys(scope, { memberId: "mem_test_1" }),
+    ];
+    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, {}));
+    const user = userEvent.setup();
+    renderBesideReads(
+      <ApiKeyAuthoringWorkspace
+        mode="edit"
+        wallets={WALLETS}
+        offeredActions={STABLE_ACTIONS}
+        initialKey={{
+          id: "key_1",
+          name: "Payouts",
+          environment: "sandbox",
+          grants: ["transfers.execute"],
+          expiresAt: null,
+          walletScope: "all",
+          walletIds: [],
+          allowedIps: null,
+        }}
+      />,
+      keyReads
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(keyReads.map((key) => readsOf(fetchMock, dashboardRequestUrl(key)))).toEqual([2, 2])
+    );
   });
 
   it("keeps wallet access on the access step", async () => {

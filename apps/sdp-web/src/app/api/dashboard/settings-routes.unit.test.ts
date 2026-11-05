@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as sdpApi from "@/lib/sdp-api";
+import { GET as apiKey } from "./api-keys/[keyId]/route";
+import { GET as apiKeys } from "./api-keys/route";
 import { GET as memberApiKeys } from "./members/[memberId]/api-keys/route";
 import { PATCH as changeMemberRole, DELETE as removeMember } from "./members/[memberId]/route";
 import { DELETE as revokeInvitation } from "./members/invitations/[invitationId]/route";
 import { POST as inviteMember } from "./members/invite/route";
 import { DELETE as leaveOrganization } from "./members/me/route";
+import { GET as members } from "./members/route";
 import { POST as notifyMainnetAccess } from "./organizations/[organizationId]/mainnet-access/notify/route";
-import { POST as requestMainnetAccess } from "./organizations/[organizationId]/mainnet-access/route";
+import {
+  GET as mainnetAccess,
+  POST as requestMainnetAccess,
+} from "./organizations/[organizationId]/mainnet-access/route";
 import { PATCH as updateOrganization } from "./organizations/[organizationId]/route";
 
 const memberParams = { params: Promise.resolve({ memberId: "mem_test/1" }) };
@@ -17,8 +23,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Settings dashboard routes", () => {
+describe("Settings and API key dashboard routes", () => {
   it.each<[string, (request: Request) => Promise<Response>, string]>([
+    ["route.dashboard.members", (request) => members(request), "/v1/members?page=2&pageSize=25"],
+    ["route.dashboard.api-keys", (request) => apiKeys(request), "/v1/api-keys?page=2&pageSize=25"],
+    [
+      "route.dashboard.api-keys.get",
+      (request) => apiKey(request, { params: Promise.resolve({ keyId: "key_test/1" }) }),
+      "/v1/api-keys/key_test%2F1",
+    ],
     [
       "route.dashboard.members.api-keys",
       (request) => memberApiKeys(request, memberParams),
@@ -48,6 +61,11 @@ describe("Settings dashboard routes", () => {
       "/v1/organizations/org_test%2F1",
     ],
     [
+      "route.dashboard.organizations.mainnet-access",
+      (request) => mainnetAccess(request, organizationParams),
+      "/v1/organizations/org_test%2F1/mainnet-access",
+    ],
+    [
       "route.dashboard.organizations.mainnet-access.request",
       (request) => requestMainnetAccess(request, organizationParams),
       "/v1/organizations/org_test%2F1/mainnet-access",
@@ -57,14 +75,19 @@ describe("Settings dashboard routes", () => {
       (request) => notifyMainnetAccess(request, organizationParams),
       "/v1/organizations/org_test%2F1/mainnet-access/notify",
     ],
-  ])("%s proxies to its sdp-api path, the id encoded", async (traceSource, handle, path) => {
-    const proxy = vi
-      .spyOn(sdpApi, "proxyToSdpApi")
-      .mockResolvedValue(NextResponse.json({ data: {} }));
-    const request = new Request("https://dashboard.example.com/api/dashboard/settings");
+  ])(
+    "%s proxies to its sdp-api path, ids encoded and a list's query kept",
+    async (traceSource, handle, path) => {
+      const proxy = vi
+        .spyOn(sdpApi, "proxyToSdpApi")
+        .mockResolvedValue(NextResponse.json({ data: {} }));
+      const request = new Request(
+        "https://dashboard.example.com/api/dashboard/settings?page=2&pageSize=25"
+      );
 
-    await handle(request);
+      await handle(request);
 
-    expect(proxy).toHaveBeenCalledWith({ request, traceSource, path });
-  });
+      expect(proxy).toHaveBeenCalledWith({ request, traceSource, path });
+    }
+  );
 });

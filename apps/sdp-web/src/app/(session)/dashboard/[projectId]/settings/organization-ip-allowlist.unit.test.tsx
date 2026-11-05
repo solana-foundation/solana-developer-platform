@@ -2,11 +2,15 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { dashboardRequestUrl } from "@/lib/dashboard-request-key";
+import { dashboardDataResponse, readsOf, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { renderBesideReads } from "@/test/dashboard-reads";
 import { EnglishI18n } from "@/test/i18n";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation } from "@/test/window-location";
 import { OrganizationIpAllowlist } from "./organization-ip-allowlist";
+import { organizationQueryKeys } from "./organization-query-key";
 import * as organizationSettings from "./organization-settings";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -45,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   restoreWindowLocation();
 });
 
@@ -73,12 +78,20 @@ describe("OrganizationIpAllowlist", () => {
     expect(saveButton()).toHaveProperty("disabled", false);
   });
 
-  it("saves the tags and shows the list as the API returned it", async () => {
+  it("saves the tags, shows the list as the API returned it, and re-reads the organization", async () => {
     const save = vi
       .spyOn(organizationSettings, "saveOrganizationIpAllowlist")
       .mockResolvedValue({ ok: true, value: ["2001:db8::1", "198.51.100.0/24"] });
+    const currentOrganization = organizationQueryKeys.current({
+      projectId: SANDBOX_PROJECT.id,
+      mode: "live",
+    });
+    const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, {}));
     const user = userEvent.setup();
-    const field = renderAllowlist([]);
+    renderBesideReads(<OrganizationIpAllowlist organizationId="org_sdp" initialAllowedIps={[]} />, [
+      currentOrganization,
+    ]);
+    const field = screen.getByRole("textbox", { name: "Allowed IP addresses" });
 
     await user.type(field, "198.51.100.7/24 2001:DB8::1{Enter}");
     await user.click(saveButton());
@@ -90,10 +103,12 @@ describe("OrganizationIpAllowlist", () => {
       expect.any(String)
     );
     expect(shownTags()).toEqual(["Remove 2001:db8::1", "Remove 198.51.100.0/24"]);
-    expect(dashboardRouter.replace).toHaveBeenCalledWith(SECURITY_TAB_URL, { scroll: false });
+    await waitFor(() =>
+      expect(readsOf(fetchMock, dashboardRequestUrl(currentOrganization))).toBe(2)
+    );
   });
 
-  it("keeps the tags and the page after a refused save", async () => {
+  it("keeps the tags after a refused save", async () => {
     vi.spyOn(organizationSettings, "saveOrganizationIpAllowlist").mockResolvedValue({
       ok: false,
       error: "upstream unavailable",
@@ -106,7 +121,6 @@ describe("OrganizationIpAllowlist", () => {
 
     await waitFor(() => expect(field.hasAttribute("disabled")).toBe(false));
     expect(shownTags()).toEqual(["Remove 203.0.113.10"]);
-    expect(dashboardRouter.replace).not.toHaveBeenCalled();
   });
 
   it("splits pasted lines into one tag each", async () => {
