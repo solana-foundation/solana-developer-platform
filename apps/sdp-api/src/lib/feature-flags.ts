@@ -121,18 +121,8 @@ export function isHeliusRingsEnabled(
   );
 }
 
-export function isMarketsEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
-  return isModuleAvailable(env, "markets", SDP_RAMP_PROVIDER_MATURITY);
-}
-
-// Earn and DvP are Markets sub-modules: each requires Markets in the release channel
-// and its own maturity. Callers must not add a second markets check.
 export function isEarnEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
-  return isMarketsEnabled(env) && isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY);
-}
-
-export function isDvpEnabled(env: Pick<Env, "SDP_RELEASE_CHANNEL">): boolean {
-  return isMarketsEnabled(env) && isModuleAvailable(env, "dvp", SDP_RAMP_PROVIDER_MATURITY);
+  return isModuleAvailable(env, "earn", SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**

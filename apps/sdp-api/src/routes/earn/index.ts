@@ -1,7 +1,6 @@
 import { type Context, Hono, type Next } from "hono";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
-import { isEarnEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -98,17 +97,6 @@ import {
 
 export const earnRoutes = new Hono<{ Bindings: Env }>();
 const earn = new Hono<{ Bindings: Env }>();
-
-// The release channel gates the whole family; isEarnEnabled owns the Markets
-// hierarchy, so no separate markets check belongs here.
-async function requireEarnFeature(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!isEarnEnabled(c.env)) {
-    throw new AppError("FORBIDDEN", "Earn is not enabled for this environment");
-  }
-  await next();
-}
-
-earnRoutes.use("*", requireEarnFeature);
 
 const earnProjectContextOptions = {
   allowUnentitledProduction: (c: Context<{ Bindings: Env }>) =>
