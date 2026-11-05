@@ -11,7 +11,7 @@ import { setPageRequest } from "@/test/request-project";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => import("@/test/next-cache"));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
 }));
