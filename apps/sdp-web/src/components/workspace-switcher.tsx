@@ -153,7 +153,7 @@ export function WorkspaceSwitcher({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const { organization: activeOrg, isLoaded: isOrganizationLoaded } = useOrganization();
-  const { userMemberships, setActive, isLoaded } = useOrganizationList({
+  const { userMemberships, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
   const {
@@ -163,6 +163,7 @@ export function WorkspaceSwitcher({
     sdpEnvironment,
     selectedProjectId,
     selectProject,
+    switchOrganization,
     isProjectSwitching,
   } = useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -186,16 +187,16 @@ export function WorkspaceSwitcher({
   const organizationName = activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization");
 
   /** Makes another organization active; picking the current one does nothing. */
-  const switchOrganization = (organizationId: string) => {
+  const pickOrganization = (organizationId: string) => {
     const isActive = organizationId === activeOrg?.id;
-    if (!isSwitching && !isActive && setActive) {
+    if (!isSwitching && !isActive) {
       setOrganizationSwitching(true);
       onOrganizationSwitchingChange?.(true);
       const finishSwitch = () => {
         setOrganizationSwitching(false);
         onOrganizationSwitchingChange?.(false);
       };
-      void setActive({ organization: organizationId }).then(finishSwitch, () => {
+      void switchOrganization(organizationId).then(finishSwitch, () => {
         toast.error(t("Shared.SharedComponents.changeOrganizationFailed"));
         finishSwitch();
       });
@@ -266,7 +267,7 @@ export function WorkspaceSwitcher({
           activeOrganizationId={activeOrg?.id}
           isLoaded={isLoaded}
           disabled={isSwitching}
-          onSwitch={switchOrganization}
+          onSwitch={pickOrganization}
         />
         {activeOrg && environmentProjects.length > 0 ? (
           <>

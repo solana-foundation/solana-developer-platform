@@ -93,6 +93,8 @@ beforeEach(() => {
       typeof workspaceContext.useDashboardWorkspace
     >["flags"],
     selectProject: mocks.selectProject,
+    // The provider's switch: it records the request, then asks Clerk.
+    switchOrganization: (organization: string) => mocks.setActive({ organization }),
   }));
   unlinkedState();
 });

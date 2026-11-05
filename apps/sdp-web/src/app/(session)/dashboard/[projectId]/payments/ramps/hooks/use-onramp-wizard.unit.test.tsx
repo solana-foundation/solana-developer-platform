@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
 import type { RenderHookResult } from "@testing-library/react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -34,9 +35,16 @@ vi.mock("sonner", () => ({
     success: mocks.toastSuccess,
   },
 }));
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ orgId: "org-test", userId: "user-test" }),
-}));
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    orgId: "org-test",
+    userId: "user-test",
+  }));
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TRANSFER_ID = "xfr_moonpay_wizard";
