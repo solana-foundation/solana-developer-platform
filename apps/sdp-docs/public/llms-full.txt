@@ -35660,10 +35660,14 @@ SDP answers `400 ACCOUNT_FROZEN`. Its message carries the program's own error, `
 In production, unfreeze only after the compliance review resolves. In the sandbox you can unfreeze now:
 
 ```javascript title="unfreeze-account.js"
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
-  signingCustodyWalletId,
-  accountAddress: destinationAddress,
-});
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/unfreeze`,
+  {
+    signingCustodyWalletId,
+    accountAddress: destinationAddress,
+  },
+  { idempotencyKey: idempotencyKey("unfreeze") }
+);
 ```
 
 With the freeze cleared, the destination can receive transfers again.
@@ -35762,7 +35766,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 - Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
-- Payment requests: `POST /v1/payments/requests/{paymentRequestId}/cancel`
+- Payment requests: `POST /v1/payments/requests` and `POST /v1/payments/requests/{paymentRequestId}/cancel`
 
 **Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing, so it does not read the key.
 
@@ -36885,7 +36889,7 @@ To accept a payment, the payer sends tokens to one of your custody wallets and y
 
 In the dashboard, open **Payments** > **Requests**, click **New**, and set the amount, token, destination wallet and when the link expires. You get a link and a Solana Pay QR code that anyone can pay, and SDP pays the network fee for the payer's transaction. Each request gets its own Solana Pay reference, which SDP watches to see when the request is paid.
 
-When a request is paid, SDP records an inbound `finalized` transfer with `kind: request_deposit`, which `GET /v1/payments/transfers?direction=inbound` returns. The public API documents canceling a request (`POST /v1/payments/requests/{paymentRequestId}/cancel`), not creating one.
+When a request is paid, SDP records an inbound `finalized` transfer with `kind: request_deposit`, which `GET /v1/payments/transfers?direction=inbound` returns. Create one in the dashboard or with `POST /v1/payments/requests`, and cancel it with `POST /v1/payments/requests/{paymentRequestId}/cancel`.
 
 ## Share a wallet address
 
@@ -36899,14 +36903,14 @@ An observed payment's on-record keys are the wallet it landed in and its `destin
 
 ## What SDP gives you
 
-- **Payment links**: dashboard payment requests, recorded as inbound transfers once paid.
+- **Payment links**: payment requests, from the dashboard or `POST /v1/payments/requests`, recorded as inbound transfers once paid.
 - **Observed payments**: a wallet's recent on-chain activity, from `GET /v1/payments/transfers?custodyWalletId=…&includeObserved=true`. See [Indexing and reconciliation](/docs/payments/accept-indexing).
 - **Status reads**: `GET /v1/payments/transfers/{transferId}` for one recorded transfer. See [Verifying a payment](/docs/payments/accept-verification).
 - **Balances**: `GET /v1/payments/wallets/{walletId}/balances`, where `walletId` is the provider wallet id (`walletId` from `GET /v1/wallets`). See [Wallet balances](/docs/wallet-operations/balances).
 
 ## What SDP does not give you
 
-- **No checkout or payment-intent API**: the public API documents no object you create ahead of a payment. Match observed payments to the order records you keep.
+- **No checkout or payment-intent API**: a payment request is the only object you create ahead of a payment. Match payments to a shared wallet address against the order records you keep.
 - **No settlement webhooks**: poll for status. See [Polling cadence](/docs/payments/accept-verification#polling-cadence).
 
 ## Example: a marketplace checkout
@@ -36946,7 +36950,7 @@ A wallet transfer, sent or received, has one of these statuses:
 | `finalized` | The block is finalized. Irreversible. |
 | `failed` | The transfer never reached the network, or the network rejected it. The recipient was not paid; `error` says why. |
 
-`POST /v1/payments/transfers` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes.
+`POST /v1/payments/transfers` waits for finality, so a successful request usually answers `finalized`. If the wait runs out, it answers `processing`, and SDP moves the transfer to `confirmed`, `finalized` or `failed` as the chain settles. A `processing` transfer that never got a `signature` fails after 5 minutes, unless it is waiting on a custody approval.
 
 Inbound payments differ. A paid payment request is recorded at `finalized`. An observed row (from `includeObserved=true`) shows `confirmed` or `failed` and never `finalized`, because SDP rebuilds it from chain history on each read. Check its finality yourself; see [Independent verification](#independent-verification).
 
@@ -37229,7 +37233,7 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
-    "counterpartyId": "cp_...",
+    "counterpartyId": "cpty_...",
     "destinationCustodyWalletId": "cwlt_...",
     "assetRail": "usdc.solana",
     "fiatCurrency": "USD",
@@ -37249,7 +37253,7 @@ const response = await fetch(
     },
     body: JSON.stringify({
       provider: "moonpay",
-      counterpartyId: "cp_...",
+      counterpartyId: "cpty_...",
       destinationCustodyWalletId: "cwlt_...",
       assetRail: "usdc.solana",
       fiatCurrency: "USD",
@@ -37270,7 +37274,7 @@ response = requests.post(
     headers={"Authorization": "Bearer sf_..."},
     json={
         "provider": "moonpay",
-        "counterpartyId": "cp_...",
+        "counterpartyId": "cpty_...",
         "destinationCustodyWalletId": "cwlt_...",
         "assetRail": "usdc.solana",
         "fiatCurrency": "USD",
@@ -38932,13 +38936,15 @@ docker compose up -d
 
 Open `http://localhost:3000`, sign in through Clerk, and create an organization when prompted. SDP creates it with you as its admin, along with a sandbox project and a production project.
 
-If requests fail after sign-in, check the API logs:
+If requests fail after sign-in, read the failing request's `401` response. `Clerk token missing organization` means the session token lacks the `org_id` claim, and `Clerk token has no usable email claim` means its `email` claim is wrong: fix the session token customization.
+
+If Clerk's webhook deliveries fail, check the API logs:
 
 ```bash title="Terminal"
 docker compose logs -f sdp-api
 ```
 
-`Clerk token missing organization` means the session token lacks the `org_id` claim, and `Clerk token has no usable email claim` means its `email` claim is wrong: fix the session token customization. `Invalid webhook signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret.
+`webhooks: refused a Clerk webhook with an invalid signature` means `CLERK_WEBHOOK_SECRET` doesn't match the endpoint's signing secret. Clerk's delivery log shows the same refusal as `Invalid webhook signature`.
 
 </Step>
 
@@ -39235,10 +39241,10 @@ The API and migrations wait for Postgres to report healthy before they start. If
 
 ## Dashboard sign-in fails
 
-Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER` against your Clerk application, and that the keys belong to the instance (development or production) you mean to use. Then look for these in the API logs:
+Most sign-in failures are Clerk configuration. Check `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `CLERK_ISSUER` against your Clerk application, and that the keys belong to the instance (development or production) you mean to use. Then look for these messages:
 
-- `Clerk token missing organization` or `Clerk token has no usable email claim`: the session token lacks the claims in the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
-- `Clerk session refused: not issued to the dashboard`: `FRONTEND_URL` isn't the origin the dashboard loads from. With `ENVIRONMENT=production`, the API accepts only sessions issued to that origin.
+- `Clerk token missing organization` or `Clerk token has no usable email claim`, in the failing request's `401` response: the session token lacks the claims in the [Clerk setup guide](https://github.com/solana-foundation/solana-developer-platform/blob/main/apps/sdp-api/docs/self-hosting/clerk-setup.md).
+- `Clerk session refused: not issued to the dashboard`, in the API logs: `FRONTEND_URL` isn't the origin the dashboard loads from. With `ENVIRONMENT=production`, the API accepts only sessions issued to that origin.
 
 ## The local signer isn't offered
 
