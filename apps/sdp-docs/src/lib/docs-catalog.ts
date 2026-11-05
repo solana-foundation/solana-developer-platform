@@ -46,7 +46,7 @@ export const DOCS_MODULES: readonly ModuleEntry[] = [
   {
     module: "payments",
     name: "Payments",
-    summary: "Move funds onchain — transfers, batches, recurring payments, and payment requests",
+    summary: "Move funds onchain: transfers, batches, recurring payments, and payment requests",
     capability: "Payments, transfers, and recurring payments",
   },
   {
@@ -142,7 +142,7 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
     sandbox: "✓ (shared credentials)",
     deliveryMode: "session_widget",
     bestFor: "Widget/session-embedded onramp UI; onramp only.",
-    notes: "No separate sandbox credentials — supply a Stripe test-mode secret key.",
+    notes: "No separate sandbox credentials: supply a Stripe test-mode secret key.",
   },
 ];
 

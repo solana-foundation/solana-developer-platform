@@ -24,25 +24,27 @@ A failed request returns an error status and this body. The health checks are th
 | Status | Means | Common codes |
 | --- | --- | --- |
 | `400` | The request is malformed or fails validation. | `BAD_REQUEST`, `IDEMPOTENCY_KEY_REQUIRED` |
-| `401` | The API key is missing, invalid, expired or revoked. | `UNAUTHORIZED`, `INVALID_API_KEY` |
-| `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
+| `401` | The API key is missing, invalid, expired, or revoked. | `UNAUTHORIZED`, `INVALID_API_KEY`, `EXPIRED_API_KEY`, `REVOKED_API_KEY` |
+| `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key or its organization doesn't allow (`details.reason` is `ip_not_allowed`). | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
 | `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
-| `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
-| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the signing provider refused the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
+| `409` | The request conflicts with the resource's state, or an earlier request with the same idempotency key is still running or never recorded its outcome. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT`, `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` |
+| `413` | The request body is larger than 1 MB. | `PAYLOAD_TOO_LARGE` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, the transaction fee sponsor rejected the transaction, or the wallet's policy at its custody provider refused to sign it. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED`, `CUSTODY_POLICY_REFUSED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
-| `502` | Solana RPC answered with an error SDP could not use, or the custody provider failed or timed out while signing. | `SOLANA_RPC_ERROR`, `CUSTODY_ERROR` |
-| `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `RPC_UNAVAILABLE` |
+| `502` | Solana RPC or a provider answered, but with something SDP couldn't use, or the custody provider failed or timed out while signing. | `SOLANA_RPC_ERROR`, `PROVIDER_RESPONSE_INVALID`, `CUSTODY_ERROR` |
+| `503` | SDP, or a provider it depends on, is unavailable for now, or a provider isn't configured for the project's environment. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `PROVIDER_NOT_CONFIGURED`, `RPC_UNAVAILABLE` |
 
 Each operation's page lists its statuses and shows a success example. The OpenAPI spec carries every response schema.
 
 ## Retrying
 
-- `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
-- `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider; review the policy there or change the request before you send it again.
+- `400`, `401`, `403`, `404`, `413`, and `422`: fix the request before you send it again.
+- `422 CUSTODY_POLICY_REFUSED`: the wallet's policy at its custody provider refused to sign. The message names the provider. Review the policy there, or change the request, before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
-- `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix; quote `meta.requestId` when you report one.
+- `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`: final for that key. Read the resource with `GET` to see whether the request ran, then send it again with a new key.
+- `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix. Quote `meta.requestId` when you report one.
 - `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
 
 [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
