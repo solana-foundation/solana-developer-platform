@@ -145,7 +145,7 @@ export function WalletActivityTable({
   const outgoing = t("DashboardCustody.outgoing");
   const detailsLabel = t("DashboardCustody.walletActivityDetails");
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table
         className="min-w-[47.5rem] rounded-none border-0 [&_table]:table-fixed"
         data-wallet-activity-table

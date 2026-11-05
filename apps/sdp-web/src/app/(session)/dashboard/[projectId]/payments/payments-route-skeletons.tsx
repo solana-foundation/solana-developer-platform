@@ -94,11 +94,7 @@ function ListToolbarSkeleton() {
 function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
   const columns = LIST_SKELETON_COLUMNS[variant];
   return (
-    <div
-      className="overflow-x-auto refresh:-mx-3"
-      data-loading-table
-      data-loading-table-variant={variant}
-    >
+    <div className="overflow-x-auto -mx-3" data-loading-table data-loading-table-variant={variant}>
       <Table
         className={cn(
           "rounded-none border-0",
@@ -251,7 +247,7 @@ const RECENT_DEPOSIT_CELL_SKELETONS = [
 /** A wallet's recent deposits while they load: the settled table's columns, header and rows. */
 export function RecentDepositsTableSkeleton() {
   return (
-    <Table className="table-fixed rounded-none border-0 refresh:-mx-3" data-loading-recent-deposits>
+    <Table className="table-fixed rounded-none border-0 -mx-3" data-loading-recent-deposits>
       <colgroup>
         {RECENT_DEPOSIT_COLUMN_WIDTHS.map((width) => (
           <col key={width} className={width} />

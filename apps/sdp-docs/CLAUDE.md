@@ -4,7 +4,7 @@
 
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
 - **Tailwind v4**, imported at the top of `src/app/globals.css`; `dark:` follows the `.dark` class the theme switch sets
-- **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
+- **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's design. `globals.css` imports `tokens.css` and `theme.css`
 - **Custom CSS** in `src/app/globals.css`: shell classes use `launch-docs-*`; home sections use `launch-home-*`
 - **Lucide React** for icons
 - **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
@@ -13,7 +13,7 @@
 
 ## Fonts
 
-`src/app/layout.tsx` loads the refresh faces from `packages/sdp-design-tokens/src/assets/fonts` with `next/font/local`, as sdp-web does, under the variable names `tokens.css` reads:
+`src/app/layout.tsx` loads the design's faces from `packages/sdp-design-tokens/src/assets/fonts` with `next/font/local`, as sdp-web does, under the variable names `tokens.css` reads:
 
 | Variable      | Font                                           | Usage                                        |
 | ------------- | ---------------------------------------------- | -------------------------------------------- |
@@ -26,7 +26,7 @@ Season Sans ships 400 and 500 only, so cap `font-weight` at 500. `html` sets `fo
 
 ## Color Tokens
 
-The docs keep no palette of their own: read the refresh tokens from `packages/sdp-design-tokens/src/tokens.css`. Light values sit on `:root` and dark on `:root.dark`, so one rule covers both modes. Never hardcode a color; a missing token goes in the package.
+The docs keep no palette of their own: read the tokens from `packages/sdp-design-tokens/src/tokens.css`. Light values sit on `:root` and dark on `:root.dark`, so one rule covers both modes. Never hardcode a color; a missing token goes in the package.
 
 | Token                                           | Use for                                                                    |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
@@ -44,7 +44,7 @@ The docs keep no palette of their own: read the refresh tokens from `packages/sd
 
 ### Fumadocs bridge tokens
 
-Fumadocs components read `--color-fd-*` vars. One `:root` block in `globals.css` points them at the refresh palette (`--color-fd-background: var(--paper)`, `--color-fd-card: var(--paper-card)`, …). Change colors in `@sdp/design-tokens`, never in the bridge.
+Fumadocs components read `--color-fd-*` vars. One `:root` block in `globals.css` points them at the palette (`--color-fd-background: var(--paper)`, `--color-fd-card: var(--paper-card)`, …). Change colors in `@sdp/design-tokens`, never in the bridge.
 
 ### Motion
 
@@ -297,7 +297,7 @@ Currently unpublished: the whole Earn family, guide and API reference, until PRO
 - **Don't** hardcode colors — always use design tokens
 - **Don't** add new global layout structures — the shell is `sdp-docs-shell` → sidebar + main, keep it
 - **Don't** use Fumadocs UI components directly for layout (they're used internally); the custom shell wraps them
-- **Don't** change `--color-fd-*` tokens independently: they point at the refresh palette
+- **Don't** change `--color-fd-*` tokens independently: they point at the palette
 - **Don't** drop the `*` border rule in the base layer of `globals.css`: Tailwind's preflight resets every border to `currentColor` after Fumadocs' base layer sets it
 
 

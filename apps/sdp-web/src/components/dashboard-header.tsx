@@ -3,14 +3,7 @@
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
-import {
-  ArrowDownIcon,
-  ArrowLeftIcon,
-  ChevronLeftIcon,
-  DownloadIcon,
-  MenuIcon,
-  PlusIcon,
-} from "lucide-react";
+import { ArrowDownIcon, ChevronLeftIcon, DownloadIcon, MenuIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -94,7 +87,7 @@ export type DashboardHeaderActionConfig = {
 // The refresh header's action is 34px from md, 2px under the shared small button; on a phone,
 // where it sits alone under the title, the design draws it 38px with 16px sides.
 const HEADER_ACTION_SIZE_CLASS =
-  "refresh:[--button-height-md:2.125rem] max-md:refresh:[--button-height-md:2.375rem] max-md:refresh:[--button-padding-x-md:1rem]";
+  "[--button-height-md:2.125rem] max-md:[--button-height-md:2.375rem] max-md:[--button-padding-x-md:1rem]";
 
 /** The saved file's name, off a Content-Disposition header. */
 function attachmentFilename(header: string | null): string | null {
@@ -244,14 +237,13 @@ export function HeaderBackAction({
   return (
     <Link
       href={projectHref(href)}
-      // Refresh: the chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:-ml-1.5 refresh:h-5 refresh:gap-1.5"
+      // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+      className="inline-flex items-center rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary -ml-1.5 h-5 gap-1.5"
     >
-      <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
-      <ChevronLeftIcon className="hidden size-4 refresh:block" />
+      <ChevronLeftIcon className="size-4 block" />
       <span
         className={[
-          "text-[13px] leading-[18px] font-medium refresh:text-body refresh:leading-5 refresh:font-normal",
+          "text-body leading-5 font-normal",
           compactOnMobile ? "hidden sm:inline" : "",
         ].join(" ")}
       >
@@ -428,10 +420,10 @@ export function StandardDashboardTopBar({
   above?: ReactNode;
 }) {
   return (
-    // Refresh: the row is exactly the title's height, so the 24px to the tabs is measured from
+    // The row is exactly the title's height, so the 24px to the tabs is measured from
     // the title itself and a taller page action centres on it.
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 refresh:min-h-0 refresh:items-center"
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 min-h-0 items-center"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>

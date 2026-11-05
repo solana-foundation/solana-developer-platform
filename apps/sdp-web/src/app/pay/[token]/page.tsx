@@ -1,4 +1,3 @@
-import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
@@ -120,10 +119,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   });
 
   return (
-    <main
-      {...refreshThemeProps}
-      className="flex min-h-screen items-center justify-center bg-surface px-4 py-12"
-    >
+    <main className="flex min-h-screen items-center justify-center bg-surface px-4 py-12">
       {publicApiBaseUrl ? (
         <PayStatusWatch
           statusUrl={`${publicApiBaseUrl}/pay/${encodeURIComponent(token)}`}

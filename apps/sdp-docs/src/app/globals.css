@@ -7,7 +7,7 @@
 /* next-themes puts .dark on <html>, so dark: utilities follow the theme switch, not the OS. */
 @custom-variant dark (&:is(.dark *));
 
-/* Fumadocs reads --color-fd-*. They point at the refresh palette from @sdp/design-tokens, which
+/* Fumadocs reads --color-fd-*. They point at the palette from @sdp/design-tokens, which
    switches with the .dark class on <html>, so one block covers light and dark. */
 :root {
   --color-fd-background: var(--paper);
@@ -46,7 +46,7 @@ body {
 }
 
 /* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
-   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   so put the rule colour back. Focus outlines are the ink ring at half strength, like the
    dashboard's ring-primary/50. */
 @layer base {
   * {

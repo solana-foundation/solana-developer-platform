@@ -370,12 +370,12 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const memo = fields.memo.trim();
   return (
     <>
-      <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
-        <p className="text-3xl font-semibold tracking-tight text-primary refresh:text-amount refresh:font-medium">
+      <div className="flex flex-col gap-0.5 border-b border-border-default items-start pb-6">
+        <p className="tracking-tight text-primary text-amount font-medium">
           {fields.amount === "" ? "0" : fields.amount}{" "}
           {selectedAsset === null ? fields.asset : selectedAsset.label}
         </p>
-        <p className="text-sm text-tertiary refresh:text-body refresh:text-secondary">
+        <p className="text-body text-secondary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
             counterparty:
               counterpartyName === ""
@@ -424,7 +424,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
 function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const { transferResult } = wizard;
   const summary = (
-    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5 refresh:rounded-none refresh:bg-transparent refresh:p-0">
+    <section className="w-full space-y-4 rounded-none bg-transparent p-0">
       <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
     </section>
   );

@@ -2,7 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { SDP_TERMS_PATH } from "@sdp/types/site";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { SIGN_IN_PATH, SIGN_UP_PATH } from "@/lib/clerk-config";
+import { SIGN_IN_PATH, SIGN_UP_PATH, signInHref } from "@/lib/clerk-config";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
@@ -95,9 +95,7 @@ export function demoSessionCookiesToDrop(req: NextRequest): string[] {
 }
 
 function getUnauthenticatedUrl(req: NextRequest): string {
-  const signInUrl = new URL(SIGN_IN_PATH, req.url);
-  signInUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
-  return signInUrl.toString();
+  return new URL(signInHref(`${req.nextUrl.pathname}${req.nextUrl.search}`), req.url).toString();
 }
 
 export const proxy = clerkMiddleware(

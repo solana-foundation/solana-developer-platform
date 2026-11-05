@@ -85,7 +85,7 @@ export function RecurringPaymentRunHistory({
   }
 
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[820px] table-fixed rounded-none border-0" data-schedule-runs>
         <colgroup>
           <col className="w-[13%]" />

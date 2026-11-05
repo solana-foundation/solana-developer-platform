@@ -21,7 +21,7 @@ export function EarnFlowStepper({
 
   return (
     <WizardStepProgress
-      className="mr-8 mb-6 refresh:w-auto"
+      className="mr-8 mb-6 w-auto"
       currentStep={currentStep}
       data-earn-flow-step={steps[currentStep]}
       progressLabel={t("DashboardEarn.deposit.stepProgress", {

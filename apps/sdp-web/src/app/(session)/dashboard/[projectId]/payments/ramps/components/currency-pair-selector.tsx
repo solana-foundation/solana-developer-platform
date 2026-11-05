@@ -1,11 +1,10 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { useThemeScope } from "@sdp/ui/theme-scope";
-import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import {
   formatCurrencyAmount,
@@ -22,20 +21,16 @@ import { AmountBalanceReadout } from "./amount-balance-readout";
 import { useRampSelection } from "./ramp-selection-context";
 
 /**
- * The fiat side of the pair. `hideLabel` is for the select beside the amount: on a refresh
- * surface the design draws it as a 96px unit picker under the amount's own label.
+ * The fiat side of the pair. `hideLabel` is for the select beside the amount: the design draws it
+ * as a 96px unit picker under the amount's own label.
  */
 function FiatCombobox({ hideLabel = false }: { hideLabel?: boolean }) {
   const t = useTranslations();
-  const refresh = useThemeScope() === "refresh";
   const { direction, fiatCurrencies, selectedPair, onFiatCurrencyChange } = useRampSelection();
   // The design's unit picker reads "USD", not a flag and code; the list keeps the currency name.
   const currencyOptions = useMemo(
-    () =>
-      refresh
-        ? fiatCurrencyOptions(fiatCurrencies).map((option) => ({ ...option, label: option.value }))
-        : fiatCurrencyOptions(fiatCurrencies),
-    [fiatCurrencies, refresh]
+    () => fiatCurrencyOptions(fiatCurrencies).map((option) => ({ ...option, label: option.value })),
+    [fiatCurrencies]
   );
   return (
     <Combobox
@@ -163,32 +158,24 @@ function WalletCombobox() {
           : t("DashboardPayments.ramps.selectSourceWallet")
       }
       searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
-      icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
       isLoading={walletsLoading}
     />
   );
 }
 
 export function CurrencyPairSelector() {
-  const refresh = useThemeScope() === "refresh";
   const { direction, showWallet } = useRampSelection();
   const isOfframp = direction === "offramp";
 
   return (
-    <div className="flex flex-col gap-4 refresh:gap-6">
-      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px] refresh:gap-3 refresh:sm:grid-cols-[minmax(0,1fr)_96px]">
+    <div className="flex flex-col gap-6">
+      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_96px]">
         <RampAmountField />
-        {isOfframp ? <AssetCombobox hideLabel={refresh} /> : <FiatCombobox hideLabel={refresh} />}
+        {isOfframp ? <AssetCombobox hideLabel /> : <FiatCombobox hideLabel />}
       </div>
 
-      {/* A refresh surface stacks the wallet and the asset full width, one question per row. */}
-      <div
-        className={
-          showWallet
-            ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px] refresh:gap-6 refresh:sm:grid-cols-1"
-            : "grid gap-4 refresh:gap-6"
-        }
-      >
+      {/* The wallet and the asset stack full width, one question per row. */}
+      <div className={cn("grid gap-6", showWallet && "sm:grid-cols-1")}>
         {showWallet ? <WalletCombobox /> : null}
         {isOfframp ? <FiatCombobox /> : <AssetCombobox />}
       </div>

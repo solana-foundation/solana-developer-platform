@@ -4,7 +4,6 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import type * as React from "react";
 import { cn } from "./cn";
-import { useThemeScopeAttributes } from "./theme-scope";
 
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
@@ -22,11 +21,9 @@ function DropdownMenuContent({
   align = "end",
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
-  const themeScopeAttributes = useThemeScopeAttributes();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
-        {...themeScopeAttributes}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         align={align}
@@ -181,11 +178,9 @@ function DropdownMenuSubContent({
   className,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
-  const themeScopeAttributes = useThemeScopeAttributes();
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.SubContent
-        {...themeScopeAttributes}
         data-slot="dropdown-menu-sub-content"
         className={cn(
           "z-50 min-w-44 overflow-hidden rounded-[var(--select-popup-radius)] border border-[var(--select-popup-border)] bg-[var(--select-popup-bg)] p-1.5 shadow-[var(--select-popup-shadow)]",

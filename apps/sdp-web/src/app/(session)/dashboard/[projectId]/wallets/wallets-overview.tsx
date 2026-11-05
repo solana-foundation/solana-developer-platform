@@ -268,10 +268,7 @@ function WalletsList({
 }) {
   const t = useTranslations();
   return (
-    <Table
-      className="min-w-0 rounded-none border-0 refresh:-mx-3 [&_table]:table-fixed"
-      data-wallet-list
-    >
+    <Table className="min-w-0 rounded-none border-0 -mx-3 [&_table]:table-fixed" data-wallet-list>
       <TableHeader>
         <TableRow>
           <TableHead className="w-[32%]">{t("DashboardCustody.wallet")}</TableHead>

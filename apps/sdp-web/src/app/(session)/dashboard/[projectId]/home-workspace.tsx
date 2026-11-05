@@ -506,7 +506,7 @@ function RecentActivity({
         <p className="mt-4 text-body text-tertiary">{emptyMessage}</p>
       ) : (
         <TooltipProvider>
-          <Table className="mt-3 min-w-0 rounded-none border-0 refresh:-mx-3 [&_table]:table-fixed">
+          <Table className="mt-3 min-w-0 rounded-none border-0 -mx-3 [&_table]:table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[15%]">{t("Shared.homeWorkspace.time")}</TableHead>

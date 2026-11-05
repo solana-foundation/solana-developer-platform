@@ -15,7 +15,7 @@ export function UserAvatar({
       <img
         src={imageUrl}
         alt=""
-        className={cn("size-7 shrink-0 rounded-full object-cover refresh:size-8", className)}
+        className={cn("shrink-0 rounded-full object-cover size-8", className)}
         aria-hidden="true"
       />
     );
@@ -23,7 +23,7 @@ export function UserAvatar({
   return (
     <span
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-on-primary refresh:size-8 refresh:text-meta refresh:font-medium",
+        "flex shrink-0 items-center justify-center rounded-full bg-primary text-on-primary size-8 text-meta font-medium",
         className
       )}
     >

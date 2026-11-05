@@ -4,7 +4,6 @@ import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { useThemeScope } from "@sdp/ui/theme-scope";
 import { useRouter } from "next/navigation";
 import {
   PRIVATE_CHANNELS_OVERVIEW_PATH,
@@ -28,11 +27,11 @@ interface Props {
 }
 
 /**
- * The refresh Privacy page's footer: Test connection on the left; Cancel and the commit
- * (Connect, or Update once connected) on the right. A commit that cannot run yet is drawn
+ * The Privacy page's footer: Test connection on the left; Cancel and the commit (Connect, or
+ * Update once connected) on the right. A commit that cannot run yet is drawn
  * outlined, as the design does.
  */
-function RefreshSetupFooter({
+function SetupFooter({
   onTest,
   testing,
   onCancel,
@@ -77,7 +76,7 @@ function RefreshSetupFooter({
   );
 }
 
-/** The embedded and legacy layouts' buttons: Test connection, then Connect or Update. */
+/** The embedded layout's buttons: Test connection, then Connect or Update. */
 function ActionButtons({
   showTestAction,
   form,
@@ -133,7 +132,6 @@ export function PrivateChannelsConnectForm({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
-  const refresh = useThemeScope() === "refresh";
   const form = useConnectForm({ initialInstance, stayOnPageAfterConnect, onSuccess });
   const {
     instance,
@@ -180,7 +178,7 @@ export function PrivateChannelsConnectForm({
 
   const programFields = (
     <>
-      <div className="grid gap-2 sm:grid-cols-2 refresh:gap-6 refresh:sm:grid-cols-1">
+      <div className="grid gap-6 sm:grid-cols-1">
         <TextField
           id="escrow-program-id"
           label={t("DashboardPrivateChannels.instance.escrowProgramId")}
@@ -253,77 +251,44 @@ export function PrivateChannelsConnectForm({
       ? privateChannelsInstancePath(instance.id)
       : PRIVATE_CHANNELS_OVERVIEW_PATH;
 
-    if (refresh) {
-      // The refresh Privacy page: one form in two sections, no step header; Test connection
-      // on the footer's left, the commit on its right.
-      return (
-        <WizardFrame
-          steps={[{ label: t("DashboardPrivateChannels.instance.setupStepLabel"), title: "" }]}
-          currentStep={0}
-          progressLabel={t("DashboardPrivateChannels.instance.setupStepProgress")}
-          hideProgress
-          footer={
-            <RefreshSetupFooter
-              onTest={showTestAction ? runTest : undefined}
-              testing={isTesting}
-              onCancel={() => router.push(href(cancelPath))}
-              commit={
-                initiallyConnected
-                  ? { kind: "update", working: isUpdating, onClick: runUpdate }
-                  : { kind: "connect", working: isConnecting, onClick: () => runConnect(false) }
-              }
-              canCommit={isValid}
-              busy={busy}
-            />
-          }
-        >
-          <div className="space-y-12">
-            <section className="space-y-6">
-              <h2 className="text-body font-medium text-primary">
-                {t("DashboardPrivateChannels.instance.endpointsSection")}
-              </h2>
-              {endpointFields}
-            </section>
-            <section className="space-y-6">
-              <h2 className="text-body font-medium text-primary">
-                {t("DashboardPrivateChannels.instance.programsSection")}
-              </h2>
-              {programFields}
-            </section>
-            {formErrorAlert}
-          </div>
-          {confirmationDialogs}
-        </WizardFrame>
-      );
-    }
-
+    // The Privacy page: one form in two sections, no step header; Test connection on the
+    // footer's left, the commit on its right.
     return (
       <WizardFrame
-        steps={[
-          {
-            label: t("DashboardPrivateChannels.instance.setupStepLabel"),
-            title: t("DashboardPrivateChannels.instance.setupDetailsTitle"),
-          },
-        ]}
+        steps={[{ label: t("DashboardPrivateChannels.instance.setupStepLabel"), title: "" }]}
         currentStep={0}
         progressLabel={t("DashboardPrivateChannels.instance.setupStepProgress")}
-        description={t("DashboardPrivateChannels.instance.setupDetailsDescription")}
-        maxWidthClassName="max-w-3xl"
+        hideProgress
         footer={
-          <div className="flex items-center justify-between gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => router.push(href(cancelPath))}
-              disabled={busy}
-            >
-              {t("DashboardPrivateChannels.common.cancel")}
-            </Button>
-            <div className="flex items-center gap-3">{actionButtons}</div>
-          </div>
+          <SetupFooter
+            onTest={showTestAction ? runTest : undefined}
+            testing={isTesting}
+            onCancel={() => router.push(href(cancelPath))}
+            commit={
+              initiallyConnected
+                ? { kind: "update", working: isUpdating, onClick: runUpdate }
+                : { kind: "connect", working: isConnecting, onClick: () => runConnect(false) }
+            }
+            canCommit={isValid}
+            busy={busy}
+          />
         }
       >
-        <div className="grid gap-6 px-1 py-1">{fields}</div>
+        <div className="space-y-12">
+          <section className="space-y-6">
+            <h2 className="text-body font-medium text-primary">
+              {t("DashboardPrivateChannels.instance.endpointsSection")}
+            </h2>
+            {endpointFields}
+          </section>
+          <section className="space-y-6">
+            <h2 className="text-body font-medium text-primary">
+              {t("DashboardPrivateChannels.instance.programsSection")}
+            </h2>
+            {programFields}
+          </section>
+          {formErrorAlert}
+        </div>
         {confirmationDialogs}
       </WizardFrame>
     );

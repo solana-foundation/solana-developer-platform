@@ -92,7 +92,7 @@ function PaymentRequestsTable({
 }) {
   const t = useTranslations();
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
         <PaymentsTableHeader
           columns={[
