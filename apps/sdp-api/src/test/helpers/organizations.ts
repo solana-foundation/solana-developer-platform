@@ -1,5 +1,5 @@
 import type { OrganizationStatus } from "@sdp/types/organizations";
-import type { DatabaseClient } from "@/db/client";
+import type { DatabaseClient, PreparedStatement } from "@/db/client";
 
 export interface OrganizationCreator {
   id: string;
@@ -25,7 +25,14 @@ export async function seedOrganization(
   db: DatabaseClient,
   organization: SeededOrganization
 ): Promise<void> {
-  await db.batch([
+  await db.batch(organizationStatements(db, organization));
+}
+
+export function organizationStatements(
+  db: DatabaseClient,
+  organization: SeededOrganization
+): PreparedStatement[] {
+  return [
     db
       .prepare("INSERT INTO users (id, email) VALUES (?, ?) ON CONFLICT (id) DO NOTHING")
       .bind(organization.creator.id, organization.creator.email),
@@ -43,7 +50,7 @@ export async function seedOrganization(
         organization.settings === undefined ? null : organization.settings,
         organization.creator.id
       ),
-  ]);
+  ];
 }
 
 function onConflictClause(organization: SeededOrganization): string {

@@ -1,6 +1,6 @@
 import type { OrganizationRole } from "@sdp/types/roles";
 import type { DatabaseClient } from "@/db/client";
-import { seedOrganization } from "@/test/helpers/organizations";
+import { organizationStatements } from "@/test/helpers/organizations";
 
 export interface SeededOrganizationMember {
   memberId: string;
@@ -24,15 +24,17 @@ export async function seedOrganizationMembers(
 ): Promise<void> {
   const { organization, members } = input;
   const [creator] = members;
-  await db.batch(members.map((member) => userStatement(db, member)));
-  await seedOrganization(db, {
-    id: organization.id,
-    name: organization.slug,
-    slug: organization.slug,
-    status: "active",
-    creator: { id: creator.userId, email: creator.email },
-  });
-  await db.batch(members.map((member) => membershipStatement(db, organization.id, member)));
+  await db.batch([
+    ...members.map((member) => userStatement(db, member)),
+    ...organizationStatements(db, {
+      id: organization.id,
+      name: organization.slug,
+      slug: organization.slug,
+      status: "active",
+      creator: { id: creator.userId, email: creator.email },
+    }),
+    ...members.map((member) => membershipStatement(db, organization.id, member)),
+  ]);
 }
 
 /** Seeds users and their active memberships of an organization already seeded. */
