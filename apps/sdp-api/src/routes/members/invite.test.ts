@@ -1,4 +1,4 @@
-import { INVITATION_STATUSES } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, INVITEE_NOT_ALLOWED_REASON } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES } from "@sdp/types/roles";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -343,6 +343,28 @@ describe("POST /v1/members/invite", () => {
       { action: "invite", status: "success", clerk_code: null },
       { action: "invite", status: "failure", clerk_code: "form_param_format_invalid" },
     ]);
+  });
+
+  it("fails the claimed invitation and answers 400 when Clerk's restrictions do not admit the address", async () => {
+    clerk.answer({
+      status: 403,
+      body: { errors: [{ code: "not_allowed_access", long_message: "Clerk says no" }] },
+    });
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        message: "This email address is not allowed to join",
+        details: { reason: INVITEE_NOT_ALLOWED_REASON },
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    const rows = await invitationRows();
+    expect(rows.map((row) => row.status)).toEqual(["failed"]);
+    expect(clerk.requests).toEqual([clerkCreateRequest(rows[0].id)]);
   });
 
   it("adopts the Clerk invitation tagged with its id when Clerk answers 5xx to the create", async () => {
