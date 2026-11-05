@@ -85,8 +85,19 @@ export const TOKEN_LIFECYCLE_WHY: Record<TokenLifecycle, MessageKey> = {
   revoked: "DashboardIssuance.newDesign.state.revokedWhy",
 };
 
-/** "Sep 2, 2026", the design's day format. */
-export function formatTokenDay(iso: string | null | undefined, locale: string): string | null {
+/**
+ * "Sep 2, 2026", the design's day format, the day it was in the viewer's zone.
+ *
+ * @param iso - ISO timestamp.
+ * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone`, so the server and the browser agree.
+ * @returns The formatted day, or null for a missing or invalid timestamp.
+ */
+export function formatTokenDay(
+  iso: string | null | undefined,
+  locale: string,
+  timeZone: string
+): string | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
   if (Number.isNaN(time)) return null;
@@ -94,13 +105,22 @@ export function formatTokenDay(iso: string | null | undefined, locale: string): 
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone,
   }).format(time);
 }
 
-/** The day and, apart, the time: "Sep 13, 2026" over "3:00 PM". */
+/**
+ * The day and, apart, the time: "Sep 13, 2026" over "3:00 PM", in the viewer's zone.
+ *
+ * @param iso - ISO timestamp.
+ * @param locale - Formatting locale.
+ * @param timeZone - The viewer's zone, from `useTimeZone`, so the server and the browser agree.
+ * @returns The day and the time, or null for a missing or invalid timestamp.
+ */
 export function formatTokenMoment(
   iso: string | null | undefined,
-  locale: string
+  locale: string,
+  timeZone: string
 ): { day: string; time: string } | null {
   if (!iso) return null;
   const time = new Date(iso).getTime();
@@ -110,7 +130,10 @@ export function formatTokenMoment(
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone,
     }).format(time),
-    time: new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(time),
+    time: new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone }).format(
+      time
+    ),
   };
 }

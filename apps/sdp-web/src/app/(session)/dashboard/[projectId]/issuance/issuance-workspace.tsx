@@ -22,6 +22,7 @@ import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import type {
   IssuanceDateFilter,
@@ -498,6 +499,7 @@ function IssuanceTokenRow({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const state = tokenLifecycle(token, latestDeploy);
   const deployed = Boolean(token.deployedAt);
   // A ticker that only repeats the name adds nothing beside it.
@@ -530,7 +532,7 @@ function IssuanceTokenRow({
           )}
         </span>
         <span className="text-body text-primary tabular-nums">
-          {formatTokenDay(deployed ? token.deployedAt : token.createdAt, locale) ?? "—"}
+          {formatTokenDay(deployed ? token.deployedAt : token.createdAt, locale, timeZone) ?? "—"}
         </span>
       </span>
     </Link>
