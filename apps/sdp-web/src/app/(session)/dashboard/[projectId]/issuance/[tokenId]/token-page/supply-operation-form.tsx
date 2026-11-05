@@ -30,15 +30,27 @@ function readSupplyOperation(ops: Ops, action: FundManagementModalAction, t: Tra
     : ops.burnValidationErrors.source;
   const signer = ops.getActionSignerProps(action);
   const signerWallets = signer?.signerWallets ?? [];
-  const needsSigner = signerWallets.length > 1 && !form.signingWalletId;
+  // With several possible signers the form asks which one signs and keeps the picker once one
+  // is chosen, so the choice stays readable and changeable; the action waits for a choice.
+  const chooseSigner = signerWallets.length > 1;
   const blocked =
     !address.trim() ||
     !form.amount.trim() ||
     Boolean(ops.fundManagementDisabledReasons[action]) ||
     Boolean(signer?.signerUnavailableReason) ||
     Boolean(getSignerWalletUnavailableReason(signerWallets, form.signingWalletId, t)) ||
-    needsSigner;
-  return { mint, form, address, errors, addressError, signer, signerWallets, needsSigner, blocked };
+    (chooseSigner && !form.signingWalletId);
+  return {
+    mint,
+    form,
+    address,
+    errors,
+    addressError,
+    signer,
+    signerWallets,
+    chooseSigner,
+    blocked,
+  };
 }
 
 /** Writes a field of the mint form (its destination) or the burn form (its source). */
@@ -62,8 +74,8 @@ function updateSupplyForm(ops: Ops, mint: boolean, patch: SupplyPatch) {
 
 /**
  * Mint or burn opened in place under the issued supply, as the design draws it: the address,
- * the amount and a memo, then the action and Cancel. The default signer signs; a picker shows
- * only when the token has several signers and none is set. Burning says it cannot be undone.
+ * the amount and a memo, then the action and Cancel. The only possible signer signs; with
+ * several, a picker asks which and keeps showing the choice. Burning says it cannot be undone.
  */
 export function SupplyOperationForm({
   token,
@@ -73,8 +85,17 @@ export function SupplyOperationForm({
   const t = useTranslations();
   const locale = useLocale();
   const id = useId();
-  const { mint, form, address, errors, addressError, signer, signerWallets, needsSigner, blocked } =
-    readSupplyOperation(ops, action, t);
+  const {
+    mint,
+    form,
+    address,
+    errors,
+    addressError,
+    signer,
+    signerWallets,
+    chooseSigner,
+    blocked,
+  } = readSupplyOperation(ops, action, t);
   const update = (patch: SupplyPatch) => updateSupplyForm(ops, mint, patch);
   const walletsListId = `${id}-wallets`;
 
@@ -87,7 +108,7 @@ export function SupplyOperationForm({
         if (!blocked) ops.submitFundManagementAction(action);
       }}
     >
-      {needsSigner && signer ? (
+      {chooseSigner && signer ? (
         <TokenSignerSelect
           signerWallets={signerWallets}
           signerWalletId={form.signingWalletId}
@@ -173,7 +194,8 @@ function readLockSupply(ops: Ops, t: Translate) {
   const needsMint = !ops.lockSupplyMinted && /[1-9]/.test(remaining);
   const { destination, signingWalletId } = ops.lockSupplyForm;
   const signer = ops.lockSupplySignerSelection;
-  const needsSigner = signer.wallets.length > 1 && !signingWalletId;
+  // As for mint and burn, the picker stays once a signer is chosen.
+  const chooseSigner = signer.wallets.length > 1;
   const destinationInvalid =
     needsMint && destination.trim().length > 0 && !isValidSolanaAddressInput(destination);
   const blocked =
@@ -187,7 +209,7 @@ function readLockSupply(ops: Ops, t: Translate) {
     destination,
     signingWalletId,
     signer,
-    needsSigner,
+    chooseSigner,
     destinationInvalid,
     blocked,
   };
@@ -214,7 +236,7 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
     destination,
     signingWalletId,
     signer,
-    needsSigner,
+    chooseSigner,
     destinationInvalid,
     blocked,
   } = readLockSupply(ops, t);
@@ -229,7 +251,7 @@ export function LockSupplyForm({ ops }: Pick<TokenTabProps, "ops">) {
         if (!blocked) void ops.handleLockSupply();
       }}
     >
-      {needsSigner ? (
+      {chooseSigner ? (
         <TokenSignerSelect
           signerWallets={signer.wallets}
           signerWalletId={signingWalletId}

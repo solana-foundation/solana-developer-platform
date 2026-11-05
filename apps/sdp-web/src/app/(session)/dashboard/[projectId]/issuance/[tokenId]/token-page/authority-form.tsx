@@ -35,13 +35,15 @@ function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate, custom: b
   const canRemove = !row.removalDisabledReason;
   const signer = ops.authorityModalSignerSelection;
   const signerWalletId = ops.authorityModalSignerWalletId;
-  const needsSigner = signer.wallets.length > 1 && !signerWalletId;
+  // With several wallets holding the authority the form asks which one signs, and the picker
+  // stays once one is chosen so the choice can be read and changed.
+  const chooseSigner = signer.wallets.length > 1;
   const signerReason =
     signer.unavailableReason ?? getSignerWalletUnavailableReason(signer.wallets, signerWalletId, t);
   const invalidAddress = custom && Boolean(next) && !isValidSolanaAddressInput(next);
   const blocked =
     next === current ||
-    needsSigner ||
+    (chooseSigner && !signerWalletId) ||
     Boolean(signerReason) ||
     (!next && (custom || !canRemove)) ||
     invalidAddress;
@@ -51,7 +53,7 @@ function readAuthorityForm(ops: Ops, row: PermissionRow, t: Translate, custom: b
     next,
     external,
     canRemove,
-    needsSigner,
+    chooseSigner,
     signerReason,
     custom,
     invalidAddress,
@@ -112,7 +114,7 @@ export function AuthorityForm({ ops }: Pick<TokenTabProps, "ops">) {
       }
       onCancel={ops.handleAuthorityModalClose}
       signer={
-        state.needsSigner ? (
+        state.chooseSigner ? (
           <TokenSignerSelect
             signerWallets={ops.authorityModalSignerSelection.wallets}
             signerWalletId={ops.authorityModalSignerWalletId}
@@ -271,7 +273,7 @@ function AuthorityFormNotes({
   state: AuthorityFormState;
 }) {
   const t = useTranslations();
-  const { next, custom, canRemove, current, signerReason, needsSigner } = state;
+  const { next, custom, canRemove, current, signerReason, chooseSigner } = state;
   return (
     <>
       {ops.authorityWalletsError ? (
@@ -281,7 +283,10 @@ function AuthorityFormNotes({
       {!next && !custom && canRemove && current ? (
         <p className="text-body text-warning">{getNoneConfirmationCopy(row, t).impact}</p>
       ) : null}
-      {signerReason && !needsSigner ? <p className="text-meta text-error">{signerReason}</p> : null}
+      {/* The picker spells out its own signer problem. */}
+      {signerReason && !chooseSigner ? (
+        <p className="text-meta text-error">{signerReason}</p>
+      ) : null}
     </>
   );
 }
