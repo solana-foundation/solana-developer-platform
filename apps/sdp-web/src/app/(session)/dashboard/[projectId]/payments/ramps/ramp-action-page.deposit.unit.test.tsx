@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as workspaceContext from "@/contexts/dashboard-workspace-context";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import * as urlState from "@/lib/dashboard-url-state";
+import { stubClerkSession } from "@/test/clerk";
 import {
   dashboardDataResponse,
   dashboardErrorResponse,
@@ -50,7 +52,46 @@ const ACTIVE_INSTANCE = {
   authUrl: "https://auth.test",
 };
 
+const MOONPAY_ON = { moonpay: { entitled: true, configured: true, enabled: true } };
+
 type ProviderAccessAnswer = "granted" | "failed";
+
+function Workspace({ compliance, children }: { compliance: boolean; children: ReactNode }) {
+  return (
+    <EnglishDashboardReads>
+      <workspaceContext.DashboardWorkspaceProvider
+        scopeRefreshFallback={null}
+        dashboardAccess={resolveDashboardAccess("admin")}
+        flags={{
+          assetProfiles: false,
+          compliance,
+          custody: true,
+          dvp: false,
+          earn: false,
+          heliusRings: false,
+          issuance: false,
+          markets: false,
+          payments: true,
+          privateChannels: false,
+          releaseChannel: "experimental",
+          ramps: true,
+        }}
+        serverDashboardCacheScope={{ orgId: "org_test", userId: "user_test" }}
+        projects={[]}
+      >
+        {children}
+      </workspaceContext.DashboardWorkspaceProvider>
+    </EnglishDashboardReads>
+  );
+}
+
+function WithoutCompliance({ children }: { children: ReactNode }) {
+  return <Workspace compliance={false}>{children}</Workspace>;
+}
+
+function WithCompliance({ children }: { children: ReactNode }) {
+  return <Workspace compliance>{children}</Workspace>;
+}
 
 let instanceAnswer: () => Response;
 
@@ -59,10 +100,7 @@ function stubReads(access: ProviderAccessAnswer) {
     if (path === PROVIDER_ACCESS_PATH) {
       return access === "granted"
         ? dashboardDataResponse(200, {
-            providers: {
-              ramps: { moonpay: { entitled: true, configured: true, enabled: true } },
-              earn: {},
-            },
+            providers: { ramps: MOONPAY_ON, earn: {} },
           })
         : dashboardErrorResponse(503, "Provider access is unavailable");
     }
@@ -86,6 +124,7 @@ function openPayByBank() {
 }
 
 beforeEach(() => {
+  stubClerkSession();
   resetDashboardNavigation();
   instanceAnswer = () => dashboardErrorResponse(503, "Instance is unavailable");
   vi.spyOn(rampsOffered, "useRampsOffered").mockReturnValue(true);
@@ -95,8 +134,9 @@ beforeEach(() => {
   vi.spyOn(onrampRail, "OnrampRail").mockImplementation(() => <div>onramp</div>);
   vi.spyOn(offrampRail, "OfframpRail").mockImplementation(() => <div>offramp</div>);
   vi.spyOn(onchainSendRail, "OnchainSendRail").mockImplementation(
-    ({ onPayByBank, privateSend }) => (
+    ({ onPayByBank, privateSend, rampProviderAccess }) => (
       <div>
+        <p>{`access:${JSON.stringify(rampProviderAccess)}`}</p>
         <p>{`bank:${onPayByBank !== undefined}`}</p>
         <p>{`private:${JSON.stringify(privateSend)}`}</p>
       </div>
@@ -115,14 +155,14 @@ describe("deposit for a read-only member", () => {
   it("keeps a member's provider tab on the on-ramp", async () => {
     stubReads("granted");
     arrange({ canWrite: true, tab: "provider" });
-    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: EnglishDashboardReads });
+    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: WithoutCompliance });
     expect(await screen.findByText("onramp")).toBeTruthy();
   });
 
   it("shows a viewer the address even on the provider tab", async () => {
     stubReads("granted");
     arrange({ canWrite: false, tab: "provider" });
-    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: EnglishDashboardReads });
+    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: WithoutCompliance });
     expect(await screen.findByText("address panel")).toBeTruthy();
     expect(screen.queryByText("onramp")).toBeNull();
   });
@@ -133,11 +173,31 @@ describe("deposit where the channel runs no Ramps", () => {
     stubReads("granted");
     vi.spyOn(rampsOffered, "useRampsOffered").mockReturnValue(false);
     arrange({ canWrite: true, tab: "provider" });
-    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: EnglishDashboardReads });
+    render(<PaymentsActionPage {...DEPOSIT} />, { wrapper: WithoutCompliance });
     expect(await screen.findByText("address panel")).toBeTruthy();
     expect(screen.queryByText("onramp")).toBeNull();
     expect(screen.queryByText(NO_PROVIDER)).toBeNull();
   });
+});
+
+describe("where Ramps does not run", () => {
+  it.each<[boolean, number, string]>([
+    [false, 0, "null"],
+    [true, 1, JSON.stringify(MOONPAY_ON)],
+  ])(
+    "reads provider access only for Compliance (Compliance on: %s)",
+    async (compliance, reads, access) => {
+      const fetchMock = stubReads("granted");
+      vi.spyOn(rampsOffered, "useRampsOffered").mockReturnValue(false);
+      arrange({ canWrite: true, tab: null });
+      render(<PaymentsActionPage {...PAY} />, {
+        wrapper: compliance ? WithCompliance : WithoutCompliance,
+      });
+
+      expect(await screen.findByText(`access:${access}`)).toBeTruthy();
+      expect(readsOf(fetchMock, PROVIDER_ACCESS_PATH)).toBe(reads);
+    }
+  );
 });
 
 describe("provider access", () => {
@@ -154,7 +214,7 @@ describe("provider access", () => {
       if (props.mode === "send") {
         openPayByBank();
       }
-      render(<PaymentsActionPage {...props} />, { wrapper: EnglishDashboardReads });
+      render(<PaymentsActionPage {...props} />, { wrapper: WithoutCompliance });
 
       expect(screen.queryByText(shown)).toBeNull();
       expect(await screen.findByText(shown)).toBeTruthy();
@@ -182,7 +242,7 @@ describe("Pay's private send status", () => {
     const fetchMock = stubReads("granted");
     arrange({ canWrite: true, tab: null });
     render(<PaymentsActionPage {...PAY} privateChannelsEnabled={enabled} />, {
-      wrapper: EnglishDashboardReads,
+      wrapper: WithoutCompliance,
     });
 
     expect(await screen.findByText(`private:${status}`)).toBeTruthy();

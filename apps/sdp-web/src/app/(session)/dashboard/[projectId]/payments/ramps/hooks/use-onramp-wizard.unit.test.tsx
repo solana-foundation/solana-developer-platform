@@ -6,13 +6,17 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { dashboardRequestUrl } from "@/lib/dashboard-request-key";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { stubClerkSession } from "@/test/clerk";
+import { readsOf } from "@/test/dashboard-fetch";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -41,6 +45,12 @@ beforeEach(() => {
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TRANSFER_ID = "xfr_moonpay_wizard";
+const WALLETS_URL = dashboardRequestUrl(
+  sharedReadQueryKeys.walletSummaries(
+    { projectId: SANDBOX_PROJECT.id, mode: "live" },
+    { includeBalances: true }
+  )
+);
 
 const WALLET: PaymentsDashboardWallet = {
   id: "wallet-moonpay",
@@ -290,6 +300,37 @@ describe("useOnrampWizard — demo funding simulation", () => {
     );
     expect(calls).toHaveLength(1);
     expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ transferId: TRANSFER_ID });
+  });
+
+  it("reads the wallets again once the simulated funding lands", async () => {
+    demoMode = true;
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await driveToTransferStatus(rendered);
+    const walletReads = readsOf(fetchMock, WALLETS_URL);
+
+    await act(async () => {
+      await rendered.result.current.simulateCurrentQuote();
+    });
+
+    await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 1));
+  });
+});
+
+describe("useOnrampWizard cancel", () => {
+  it("reads the wallets again before it leaves a canceled transfer", async () => {
+    let walletReadsAtExit: number | null = null;
+    const onExit = vi.fn(() => {
+      walletReadsAtExit = readsOf(fetchMock, WALLETS_URL);
+    });
+    const rendered = renderHook(() => useOnrampWizard({ ...PROPS, onExit }), { wrapper });
+    await driveToTransferStatus(rendered);
+    expect(rendered.result.current.onTransactionStage).toBe(true);
+    const walletReads = readsOf(fetchMock, WALLETS_URL);
+
+    await act(async () => rendered.result.current.handleSecondary());
+
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+    expect(walletReadsAtExit).toBe(walletReads + 1);
   });
 });
 

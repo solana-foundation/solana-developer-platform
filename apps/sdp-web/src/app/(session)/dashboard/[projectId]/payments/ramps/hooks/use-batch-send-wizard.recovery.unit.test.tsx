@@ -59,6 +59,7 @@ const alice: CounterpartyAccountSummary = {
 /** What the batch POST answers next: a lost answer, a refusal, or the recorded batch. */
 let nextSend: () => Promise<Response>;
 let nextEstimate: () => Response;
+let nextRetry: () => Promise<Response>;
 const fetchMock = vi.fn<typeof fetch>();
 
 const recordedBatch = () =>
@@ -140,6 +141,7 @@ beforeEach(() => {
   window.localStorage.clear();
   resetTransferBatchIdempotencyStateForTests();
   nextSend = async () => recordedBatch();
+  nextRetry = async () => recordedBatch();
   nextEstimate = () =>
     Response.json({
       data: {
@@ -171,7 +173,7 @@ beforeEach(() => {
       return nextSend();
     }
     if (url === `${BATCH_PATH}/batch_1/retry` && init?.method === "POST") {
-      return recordedBatch();
+      return nextRetry();
     }
     return Response.json({ data: {} });
   });
@@ -289,31 +291,38 @@ describe("useBatchSendWizard estimate", () => {
 });
 
 describe("useBatchSendWizard after money moves", () => {
-  it("reads the wallets again after a send and after a retry, and leaves the recipients alone", async () => {
-    nextSend = async () =>
-      Response.json({
-        data: {
-          batch: {
-            id: "batch_1",
-            status: "partially_failed",
-            recipientCount: 1,
-            transactionCount: 1,
+  it.each([
+    ["a retry", async () => recordedBatch()],
+    ["a retry whose answer was lost", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ])(
+    "reads the wallets again after a send and after %s, and leaves the recipients alone",
+    async (_retry, retryAnswer) => {
+      nextRetry = retryAnswer;
+      nextSend = async () =>
+        Response.json({
+          data: {
+            batch: {
+              id: "batch_1",
+              status: "partially_failed",
+              recipientCount: 1,
+              transactionCount: 1,
+            },
+            recipients: [{ id: "rcpt_alice", status: "failed" }],
+            transfers: [],
           },
-          recipients: [{ id: "rcpt_alice", status: "failed" }],
-          transfers: [],
-        },
-      });
-    const { result } = renderWizard();
-    await openReview(result);
-    const walletReads = readsOf(fetchMock, WALLETS_URL);
-    const recipientReads = readsOf(fetchMock, RECIPIENTS_URL);
+        });
+      const { result } = renderWizard();
+      await openReview(result);
+      const walletReads = readsOf(fetchMock, WALLETS_URL);
+      const recipientReads = readsOf(fetchMock, RECIPIENTS_URL);
 
-    await act(async () => result.current.handlePrimary());
-    await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 1));
-    expect(result.current.failedRecipientCount).toBe(1);
-    await act(async () => result.current.retryFailedRecipients());
-    await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 2));
+      await act(async () => result.current.handlePrimary());
+      await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 1));
+      expect(result.current.failedRecipientCount).toBe(1);
+      await act(async () => result.current.retryFailedRecipients());
+      await waitFor(() => expect(readsOf(fetchMock, WALLETS_URL)).toBe(walletReads + 2));
 
-    expect(readsOf(fetchMock, RECIPIENTS_URL)).toBe(recipientReads);
-  });
+      expect(readsOf(fetchMock, RECIPIENTS_URL)).toBe(recipientReads);
+    }
+  );
 });
