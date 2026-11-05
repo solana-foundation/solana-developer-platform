@@ -500,6 +500,21 @@ describe("POST /internal/dashboard/custody/provider-credentials", () => {
     });
   });
 
+  it("answers an unknown replacement Connection with 404 before contacting Privy", async () => {
+    const providerFetch = vi.spyOn(globalThis, "fetch");
+    const { app, token } = buildApp();
+
+    const response = await replace(app, token, "cconn_unknown_replacement_target", {
+      projectId: PROJECT_ID,
+      key: "replacement-unknown-connection",
+      body: VALID_BODY,
+    });
+
+    expect(response.status).toBe(404);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(await getDomainCounts()).toEqual({ credentials: 0, connections: 0, wallets: 0 });
+  });
+
   it("keeps a committed submission replayable when its audit outcome cannot be persisted", async () => {
     const completeCritical = vi
       .spyOn(AuditService.prototype, "completeCritical")
