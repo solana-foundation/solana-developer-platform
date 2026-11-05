@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "@/playwright/env";
 import { resolveClerkTestIdentity } from "@/playwright/support/clerk-admin";
+import { recordClerkSession } from "@/playwright/support/clerk-sessions";
 import { provisionLinkedOrgProjects } from "@/playwright/support/local-dashboard-bootstrap";
 
 declare global {
@@ -163,6 +164,7 @@ test.describe
         const page = await context.newPage();
         await page.goto(`${env.baseURL}/sign-in`);
         await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
+        await recordClerkSession(page);
         await page.goto(`${env.baseURL}/dashboard`);
         await expect(page.getByRole("button", { name: "Account menu" })).toBeVisible();
         await expectContacts(page, primaryProject, contactA, contactB);
@@ -335,6 +337,7 @@ test.describe
     }, testInfo) => {
       await page.goto("/sign-in");
       await clerk.signIn({ page, emailAddress: env.clerkTestEmail });
+      await recordClerkSession(page);
       await page.goto("/dashboard");
       await expectContacts(page, primaryProject, contactA, contactB);
       await expect
