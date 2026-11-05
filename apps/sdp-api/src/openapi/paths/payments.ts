@@ -1087,7 +1087,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "simulateSandboxTransfer",
     description:
       "Sandbox-only, and unavailable for every ramp provider SDP integrates: none offers a simulated pay-in, so a transfer that passes the checks below gets `400`. To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.\n\n" +
-      "The checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.",
+      "After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -1096,12 +1096,11 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         content: jsonContent(simulateSandboxTransferRequestSchema),
       },
     },
-    // No 2xx: the handler has no provider to simulate with since BVNK's removal.
     responses: {
       ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500, 503]),
       400: {
         description:
-          "No ramp provider SDP integrates offers a simulated pay-in, or the transfer isn't an on-ramp.",
+          "An invalid body, a transfer that isn't an on-ramp, or one that passes every check: no ramp provider SDP integrates offers a simulated pay-in.",
         content: jsonContent(errorResponseSchema),
       },
     },
