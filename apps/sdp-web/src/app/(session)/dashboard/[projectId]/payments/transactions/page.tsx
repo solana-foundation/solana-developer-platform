@@ -23,8 +23,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   const { orgId } = await auth();
   if (!orgId) redirect("/dashboard");
 
-  const params = await searchParams;
-  const flags = await getDashboardFlags();
+  const [params, flags] = await Promise.all([searchParams, getDashboardFlags()]);
   const modules = enabledTransactionModules(flags);
   const filters = parseTransactionFilters(params, modules);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
