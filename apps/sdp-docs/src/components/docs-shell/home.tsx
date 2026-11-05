@@ -38,6 +38,9 @@ const RAMP_PARTNERS = {
   stripe: { name: "Stripe", logo: "stripe" },
 } as const satisfies Record<RampProviderId, Partner>;
 const PUBLISHED_RAMP_PROVIDERS = new Set(publicSurface.rampProviders);
+const PUBLISHED_CUSTODY_PROVIDERS: ReadonlySet<CustodyProvider> = new Set(
+  publicSurface.custodyProviders
+);
 
 const RPC_PARTNERS = {
   default: null,
@@ -125,7 +128,7 @@ const NEXT_PATHS = [
 /** A concise start page with one product model and one route to first success. */
 export function DocsHome() {
   const custodyPartners = CUSTODY_PROVIDERS.filter((provider) =>
-    publicSurface.custodyProviders.includes(provider)
+    PUBLISHED_CUSTODY_PROVIDERS.has(provider)
   ).flatMap((provider) => {
     const partner = CUSTODY_PARTNERS[provider];
     return partner ? [partner] : [];
