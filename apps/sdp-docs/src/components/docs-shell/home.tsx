@@ -7,7 +7,6 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
 } from "@sdp/types/provider-access";
-import { isCustodyProviderInReleaseChannel } from "@sdp/types/release-channels";
 import Image from "next/image";
 import Link from "next/link";
 import { isModulePublished, publicSurface } from "@/lib/release-channel";
@@ -125,10 +124,8 @@ const NEXT_PATHS = [
 
 /** A concise start page with one product model and one route to first success. */
 export function DocsHome() {
-  const custodyPartners = CUSTODY_PROVIDERS.filter(
-    (provider) =>
-      isCustodyProviderInReleaseChannel(publicSurface.releaseChannel, provider, "managed") ||
-      isCustodyProviderInReleaseChannel(publicSurface.releaseChannel, provider, "byok")
+  const custodyPartners = CUSTODY_PROVIDERS.filter((provider) =>
+    publicSurface.custodyProviders.includes(provider)
   ).flatMap((provider) => {
     const partner = CUSTODY_PARTNERS[provider];
     return partner ? [partner] : [];
