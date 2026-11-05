@@ -69,7 +69,7 @@ With `custodyWalletId` and `includeObserved=true`, the list adds what the wallet
 
 For a customer's direct payment, the on-record keys are the receiving wallet and `destination`: observed rows carry no memo or reference. Give each order its own receiving wallet (see [Accept payments](/docs/payments/accept-overview#match-payments-to-orders)), then for each open order:
 
-1. **Read** the wallet's inbound activity: `GET /v1/payments/transfers?custodyWalletId=<cwlt_…>&includeObserved=true&direction=inbound`.
+1. **Read** every page of the wallet's inbound activity, while `meta.hasMore` is `true`: `GET /v1/payments/transfers?custodyWalletId=<cwlt_…>&includeObserved=true&direction=inbound&pageSize=100`.
 2. **Match** a transfer whose `token` and `amount` fit the order.
 3. **Check finality**: observed rows stop at `confirmed`, so check with Solana RPC (`getSignatureStatuses`) that the `signature` is `finalized` before any irreversible step.
 4. **Apply** the payment once: mark the order paid, store the `signature`, and start downstream work (email, shipment, ledger entry).
@@ -84,27 +84,33 @@ A worker that checks each open order's wallet on every tick:
 <Tabs items={["TypeScript"]}>
 <Tab value="TypeScript">
 ```typescript title="reconcile-tick.ts"
-// Observed reads have their own quota (30 a minute per API key),
-// so keep the open orders polled per minute under it.
+// Observed reads have their own quota (30 a minute per API key), and each
+// page is one read, so keep the pages polled per minute under it.
 async function reconcileTick(openOrders: Order[]) {
-  for (const order of openOrders) {
-    const url = new URL("https://api.solana.com/v1/payments/transfers");
-    url.searchParams.set("custodyWalletId", order.custodyWalletId);
-    url.searchParams.set("includeObserved", "true");
-    url.searchParams.set("direction", "inbound");
+  orders: for (const order of openOrders) {
+    for (let page = 1; ; page++) {
+      const url = new URL("https://api.solana.com/v1/payments/transfers");
+      url.searchParams.set("custodyWalletId", order.custodyWalletId);
+      url.searchParams.set("includeObserved", "true");
+      url.searchParams.set("direction", "inbound");
+      url.searchParams.set("pageSize", "100");
+      url.searchParams.set("page", String(page));
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${process.env.SDP_API_KEY}` },
-    });
-    if (res.status === 429) return; // over the quota: resume after Retry-After
-    const { data } = await res.json();
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${process.env.SDP_API_KEY}` },
+      });
+      if (res.status === 429) return; // over the quota: resume after Retry-After
+      const { data, meta } = await res.json();
 
-    for (const tr of data) {
-      if (tr.status === "failed" || (await alreadyApplied(tr.id))) continue;
-      if (tr.token !== order.mint || !sameAmount(tr.amount, order.amount)) continue;
-      // Observed rows stop at "confirmed": check finality with your own RPC.
-      if (!(await isFinalized(tr.signature))) continue;
-      await markOrderPaid(order, tr); // stores tr.id and tr.signature
+      for (const tr of data) {
+        if (tr.status === "failed" || (await alreadyApplied(tr.id))) continue;
+        if (tr.token !== order.mint || !sameAmount(tr.amount, order.amount)) continue;
+        // Observed rows stop at "confirmed": check finality with your own RPC.
+        if (!(await isFinalized(tr.signature))) continue;
+        await markOrderPaid(order, tr); // stores tr.id and tr.signature
+        continue orders; // paid: apply it once, then move to the next order
+      }
+      if (!meta.hasMore) break;
     }
   }
 }
