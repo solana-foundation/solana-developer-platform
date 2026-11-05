@@ -3,11 +3,17 @@
 import {
   isInFlightTokenTransactionStatus,
   isLandedTokenTransactionStatus,
-  type TokenTransaction,
+  TOKEN_TRANSACTION_STATUSES,
 } from "@sdp/types/tokens";
 import { useEffect, useMemo, useRef } from "react";
-import useSWR, { useSWRConfig } from "swr";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { z } from "zod";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { issuanceQueryKeys } from "./issuance-query-key";
 import type { DeployAttemptStatus } from "./issuance-token-state";
 
@@ -30,14 +36,17 @@ const inFlight = (status: DeployAttemptStatus | null | undefined) =>
 const landed = (status: DeployAttemptStatus | null | undefined) =>
   status ? isLandedTokenTransactionStatus(status) : false;
 
+const deployTransactionsResponseSchema = z.object({
+  data: z.array(z.object({ createdAt: z.string(), status: z.enum(TOKEN_TRANSACTION_STATUSES) })),
+});
+
+type DeployTransaction = z.infer<typeof deployTransactionsResponseSchema>["data"][number];
+
 /** One token's latest deploy transaction status; null when it has none or the read failed. */
-async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus | null> {
+async function readLatestDeploy(key: DashboardRequestKey): Promise<DeployAttemptStatus | null> {
   try {
-    const result = await dashboardFetch<{ data?: TokenTransaction[] }>(
-      `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/transactions?type=deploy&page=1&pageSize=5`
-    );
-    if (!result.ok) return null;
-    const latest = (result.data.data ?? []).reduce<TokenTransaction | null>(
+    const body = await readDashboardRequest(key, deployTransactionsResponseSchema);
+    const latest = body.data.reduce<DeployTransaction | null>(
       (newest, transaction) =>
         newest === null || transaction.createdAt > newest.createdAt ? transaction : newest,
       null
@@ -46,6 +55,21 @@ async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus |
   } catch {
     return null;
   }
+}
+
+async function readLatestDeploys(key: DashboardRequestKey): Promise<LatestDeploys> {
+  const scope = { projectId: key[0], mode: key[1] };
+  const joinedTokenIds = key[3]?.tokenIds;
+  if (typeof joinedTokenIds !== "string") {
+    throw new Error("The latest-deploys read was given a key without token ids");
+  }
+  const tokenIds = joinedTokenIds.split(",");
+  const statuses = await Promise.all(
+    tokenIds.map((tokenId) =>
+      readLatestDeploy(issuanceQueryKeys.latestDeployOf(scope, { tokenId }))
+    )
+  );
+  return Object.fromEntries(tokenIds.map((id, index) => [id, statuses[index] ?? null]));
 }
 
 /**
@@ -58,7 +82,8 @@ async function fetchLatestDeploy(tokenId: string): Promise<DeployAttemptStatus |
  * @returns Each undeployed row's latest deploy status, by token id.
  */
 export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDeploys {
-  const { mutate } = useSWRConfig();
+  const { projectId, mode } = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
   const ids = useMemo(
     () =>
       tokens
@@ -67,12 +92,9 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
         .sort(),
     [tokens]
   );
-  const { data } = useSWR(
-    ids.length > 0 ? issuanceQueryKeys.latestDeploys({ tokenIds: ids }) : null,
-    async ([, tokenIds]) => {
-      const statuses = await Promise.all(tokenIds.map(fetchLatestDeploy));
-      return Object.fromEntries(tokenIds.map((id, index) => [id, statuses[index] ?? null]));
-    },
+  const { data } = useDashboardSWR(
+    ids.length > 0 ? issuanceQueryKeys.latestDeploys({ projectId, mode }, { tokenIds: ids }) : null,
+    readLatestDeploys,
     {
       keepPreviousData: true,
       revalidateOnFocus: false,
@@ -88,8 +110,8 @@ export function useLatestDeploys(tokens: readonly UndeployedToken[]): LatestDepl
     const fresh = ids.filter((id) => landed(data[id]) && !refreshedFor.current.has(id));
     if (fresh.length === 0) return;
     for (const id of fresh) refreshedFor.current.add(id);
-    void mutate(issuanceQueryKeys.isTokensKey);
-  }, [data, ids, mutate]);
+    void invalidateReads(issuanceQueryKeys.isTokensKey);
+  }, [data, ids, invalidateReads]);
 
   return data ?? {};
 }

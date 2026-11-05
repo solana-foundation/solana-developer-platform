@@ -1,23 +1,23 @@
 "use client";
 import type { Token, TokenAllowlistEntry } from "@sdp/types/tokens";
-import useSWR, { useSWRConfig } from "swr";
-import { fetchTokenAuthorityWallets } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-authority-wallets.data";
+import { z } from "zod";
+import { readTokenAuthorityWallets } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/token-authority-wallets.data";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import { useTranslations } from "@/i18n/provider";
-import { isTokenAllowlistKey } from "./allowlist-cache";
-import { fetchFrozenAccountsTotal } from "./frozen-accounts.data";
-import { isTokenTransactionsKey } from "./transactions-cache";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 
-// Shared cache keys and TTLs keep operational data coherent after mutations.
-const TOKEN_FROZEN_ACCOUNTS_KEY = "token-frozen-accounts";
+const frozenAccountsTotalResponseSchema = z.object({
+  total: z.number().int().nonnegative(),
+});
 
-function isTokenFrozenAccountsKey(key: unknown, tokenId: string): boolean {
-  return Array.isArray(key) && key[0] === TOKEN_FROZEN_ACCOUNTS_KEY && key[1] === tokenId;
-}
-
-function requestErrorMessage(error: unknown, fallback: string): string | null {
-  if (!error) return null;
-  return error instanceof Error ? error.message : fallback;
+function requestErrorMessage(error: Error | undefined, fallback: string): string | null {
+  if (error === undefined) return null;
+  return error.message === "" ? fallback : error.message;
 }
 
 export function useTokenOperationData({
@@ -28,14 +28,17 @@ export function useTokenOperationData({
   shouldLoadAuthorityWallets: boolean;
 }) {
   const t = useTranslations();
-  const { mutate: globalMutate } = useSWRConfig();
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
   const {
     data: authorityWalletsData,
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
-  } = useSWR(
-    shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
+  } = useDashboardSWR(
+    shouldLoadAuthorityWallets
+      ? issuanceQueryKeys.authorityWallets(scope, { tokenId: token.id })
+      : null,
+    readTokenAuthorityWallets,
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -49,12 +52,12 @@ export function useTokenOperationData({
   const authorityWalletsLoading =
     shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsError;
   const {
-    data: frozenAccountsTotal,
+    data: frozenAccountsData,
     error: frozenAccountsRequestError,
     isLoading: frozenAccountsLoading,
-  } = useSWR(
-    token.mintAddress ? ([TOKEN_FROZEN_ACCOUNTS_KEY, token.id] as const) : null,
-    ([, tokenId]: readonly [string, string]) => fetchFrozenAccountsTotal(tokenId),
+  } = useDashboardRead(
+    token.mintAddress ? issuanceQueryKeys.frozenAccounts(scope, { tokenId: token.id }) : null,
+    frozenAccountsTotalResponseSchema,
     { revalidateOnFocus: true, revalidateIfStale: true }
   );
 
@@ -65,11 +68,11 @@ export function useTokenOperationData({
     // The control-list search/labels fetch lives inside ControlListEntries with
     // its own SWR keys; refresh every cached page + labels facet for this token
     // so add/remove is reflected there and in the count.
-    await globalMutate((key) => isTokenAllowlistKey(key, token.id));
+    await invalidateReads(issuanceQueryKeys.isTokenAllowlistKey(token.id));
     // TokenTransactionsBrowser owns its own paged/filtered SWR keys; refresh them
     // so a mint/burn/etc. shows up in the transactions list right away.
-    await globalMutate((key) => isTokenTransactionsKey(key, token.id));
-    await globalMutate((key) => isTokenFrozenAccountsKey(key, token.id));
+    await invalidateReads(issuanceQueryKeys.isTokenTransactionsKey(token.id));
+    await invalidateReads(issuanceQueryKeys.isTokenFrozenAccountsKey(token.id));
   };
   const authorityWallets =
     authorityWalletsError !== null || authorityWalletsData === undefined
@@ -90,7 +93,7 @@ export function useTokenOperationData({
       t("DashboardIssuance.controlLists.loadError")
     ),
     frozenAccountsLoading,
-    frozenAccountsTotal: frozenAccountsTotal ?? 0,
+    frozenAccountsTotal: frozenAccountsData?.total ?? 0,
     revalidateAfterSuccess,
   };
 }

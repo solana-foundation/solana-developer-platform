@@ -3,15 +3,20 @@
 import type { AssetAuditActorType, AssetAuditEvent, AssetAuditStatus } from "@sdp/types/audit";
 import type { StatusTone } from "@sdp/ui/status-text";
 import { useState } from "react";
-import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
 import {
   type AssetAuditHistory,
-  fetchAssetAuditHistory,
+  readAssetAuditHistory,
 } from "@/app/(session)/dashboard/[projectId]/issuance/[tokenId]/asset-profile/asset-audit.data";
 import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  type DashboardReadError,
+  useDashboardKeyScope,
+  useDashboardSWR,
+} from "@/lib/dashboard-swr";
 import { usePagedList } from "@/lib/use-paged-list";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -26,16 +31,10 @@ export interface TokenActivityQuery {
 
 /** One page of the token's audit history: what was done to it, by whom, and how it went. */
 export function useTokenActivity(tokenId: string, query: TokenActivityQuery) {
-  return useSWR<AssetAuditHistory, Error>(
-    issuanceQueryKeys.tokenActivity({ tokenId, ...query }),
-    () =>
-      fetchAssetAuditHistory(tokenId, {
-        page: query.page,
-        pageSize: query.pageSize,
-        action: query.action ?? null,
-        status: query.status ?? null,
-        actorType: query.actorType ?? null,
-      }),
+  const scope = useDashboardKeyScope();
+  return useDashboardSWR(
+    issuanceQueryKeys.tokenActivity(scope, { tokenId, ...query }),
+    readAssetAuditHistory,
     { keepPreviousData: true, revalidateOnFocus: true }
   );
 }
@@ -54,30 +53,24 @@ export function useTokenActivityWindows(
   tokenId: string,
   filters: Omit<TokenActivityQuery, "page" | "pageSize">
 ) {
+  const scope = useDashboardKeyScope();
+  // An infinite list: invalidation predicates never match it, so it refreshes only through
+  // its own bound `mutate` (`retry`, `loadOlder`).
   const { data, error, size, setSize, isValidating, mutate } = useSWRInfinite<
     AssetAuditHistory,
-    Error
+    DashboardReadError,
+    (index: number, previous: AssetAuditHistory | null) => DashboardRequestKey | null
   >(
     (index, previous) =>
       previous && !previous.hasMore
         ? null
-        : issuanceQueryKeys.tokenActivity({
+        : issuanceQueryKeys.tokenActivity(scope, {
             tokenId,
             page: index + 1,
             pageSize: TOKEN_ACTIVITY_WINDOW,
             ...filters,
           }),
-    (key) => {
-      const page = issuanceQueryKeys.tokenActivityPage(key);
-      if (page === null) throw new Error("The activity read was given a key that is not a window");
-      return fetchAssetAuditHistory(tokenId, {
-        page,
-        pageSize: TOKEN_ACTIVITY_WINDOW,
-        action: filters.action ?? null,
-        status: filters.status ?? null,
-        actorType: filters.actorType ?? null,
-      });
-    },
+    readAssetAuditHistory,
     { revalidateOnFocus: true, revalidateFirstPage: true }
   );
   const events = data?.flatMap((window) => window.events) ?? [];

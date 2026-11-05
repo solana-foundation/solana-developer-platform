@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import { useSWRConfig } from "swr";
+import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
 import {
@@ -15,8 +16,8 @@ import {
 import { issuanceQueryKeys } from "./issuance-query-key";
 import type { IssuanceTokenView } from "./issuance-token-fields";
 import {
-  fetchIssuanceTokensClientPage,
   type IssuanceTokensClientPage,
+  readIssuanceTokensPage,
 } from "./issuance-tokens-client.data";
 import { getPageCount, getPageSummary } from "./pagination.utils";
 
@@ -78,6 +79,7 @@ const ISSUANCE_UNFILTERED_QUERY: IssuanceListQuery = {
  * surfaced, so the click that follows fetches for real and reports its own error.
  */
 function useAdjacentPagePrefetch() {
+  const { projectId, mode } = useDashboardKeyScope();
   const { mutate: writeCache } = useSWRConfig();
   // Pages already in the cache, per result set. Filters changing means a
   // different list, so the page numbers collected under the old one are dropped.
@@ -104,17 +106,16 @@ function useAdjacentPagePrefetch() {
 
       // Claimed before the request goes out so two renders can't both fetch it.
       markCached(target);
-      void fetchIssuanceTokensClientPage(target)
-        .then((result) =>
-          writeCache(issuanceQueryKeys.tokens({ query: target }), result, { revalidate: false })
-        )
+      const targetKey = issuanceQueryKeys.tokens({ projectId, mode }, { query: target });
+      void readIssuanceTokensPage(targetKey)
+        .then((result) => writeCache(targetKey, result, { revalidate: false }))
         .catch(() => {
           if (cachedRef.current.resultSet === resultSet) {
             cachedRef.current.pages.delete(page);
           }
         });
     },
-    [markCached, writeCache]
+    [markCached, mode, projectId, writeCache]
   );
 
   return { markCached, prefetch };
@@ -169,6 +170,7 @@ export function useIssuanceTokenList({
   initialTotal,
 }: UseIssuanceTokenListOptions): UseIssuanceTokenListResult {
   const { replaceSearchParams } = useDashboardUrlState();
+  const { projectId, mode } = useDashboardKeyScope();
   const { mutate: writeCache } = useSWRConfig();
   const { markCached, prefetch } = useAdjacentPagePrefetch();
   const [query, setQuery] = useState<IssuanceListQuery>(initialQuery);
@@ -222,11 +224,11 @@ export function useIssuanceTokenList({
     [initialQuery.page, initialQuery.pageSize, initialTokens, initialTotal]
   );
 
-  const { data, error, isLoading, isValidating } = useSWR(
+  const { data, error, isLoading, isValidating } = useDashboardSWR(
     // The key is the query itself — no timestamp in it, so relative date filters
     // stay cacheable and repeat requests dedupe.
-    issuanceQueryKeys.tokens({ query }),
-    ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
+    issuanceQueryKeys.tokens({ projectId, mode }, { query }),
+    readIssuanceTokensPage,
     {
       // The server already rendered this exact page; don't re-fetch on mount.
       fallbackData: isSameIssuanceListQuery(query, initialQuery) ? initialPage : undefined,
@@ -248,10 +250,12 @@ export function useIssuanceTokenList({
   // one, so the back arrow appeared to do nothing at all. Seeding the cache makes
   // the first page an ordinary hit like every other page that has been visited.
   useEffect(() => {
-    void writeCache(issuanceQueryKeys.tokens({ query: initialQuery }), initialPage, {
-      revalidate: false,
-    });
-  }, [initialPage, initialQuery, writeCache]);
+    void writeCache(
+      issuanceQueryKeys.tokens({ projectId, mode }, { query: initialQuery }),
+      initialPage,
+      { revalidate: false }
+    );
+  }, [initialPage, initialQuery, mode, projectId, writeCache]);
 
   // SWR's keepPreviousData is useful while a request is in flight, but a failed
   // query must never leave rows from the previous query on screen. Those cards
@@ -339,7 +343,7 @@ export function useIssuanceTokenList({
     // lands rather than handing over to nothing for a frame.
     isSearchPending:
       search.trim() !== query.search || (isLoadingNewResults && Boolean(query.search)),
-    errorMessage: error ? (error instanceof Error ? error.message : String(error)) : null,
+    errorMessage: error === undefined ? null : error.message,
   };
 }
 
@@ -349,9 +353,10 @@ export function useIssuanceTokenList({
  * fetches once the playground tab is actually open.
  */
 export function useIssuancePlaygroundTokens(enabled: boolean): IssuanceTokenView[] | null {
-  const { data } = useSWR(
-    enabled ? issuanceQueryKeys.tokens({ query: ISSUANCE_UNFILTERED_QUERY }) : null,
-    ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
+  const scope = useDashboardKeyScope();
+  const { data } = useDashboardSWR(
+    enabled ? issuanceQueryKeys.tokens(scope, { query: ISSUANCE_UNFILTERED_QUERY }) : null,
+    readIssuanceTokensPage,
     { revalidateOnFocus: false, keepPreviousData: true }
   );
 

@@ -29,15 +29,18 @@ import {
   useId,
   useState,
 } from "react";
-import useSWR from "swr";
+import { issuanceQueryKeys } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-query-key";
 import {
   getPageCount,
   getPageSummary,
 } from "@/app/(session)/dashboard/[projectId]/issuance/pagination.utils";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardKeyScope, useDashboardRead, useDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";
-import { fetchTokenAllowlistLabels, fetchTokenAllowlistPage } from "./asset-profile/allowlist.data";
-import { TOKEN_ALLOWLIST_KEY, TOKEN_ALLOWLIST_LABELS_KEY } from "./asset-profile/allowlist-cache";
+import {
+  readTokenAllowlistPage,
+  tokenAllowlistLabelsResponseSchema,
+} from "./asset-profile/allowlist.data";
 import { TokenActionCard } from "./token-action-card";
 import { ActionField } from "./token-action-field";
 import { TokenDisabledActionTooltip } from "./token-disabled-action-tooltip";
@@ -878,6 +881,7 @@ function ControlListEntries({
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
+  const scope = useDashboardKeyScope();
   const [query, setQuery] = useState("");
   const [labelFilter, setLabelFilter] = useState(ALL_LABELS);
   const [page, setPage] = useState(1);
@@ -886,18 +890,19 @@ function ControlListEntries({
   // Distinct labels for the whole control list, fetched server-side so the
   // filter covers every entry rather than just the loaded page. The response
   // also provides the unfiltered count rendered above the list.
-  const { data: labelsData, error: labelsError } = useSWR(
-    [TOKEN_ALLOWLIST_LABELS_KEY, tokenId] as const,
-    ([, id]: readonly [string, string]) => fetchTokenAllowlistLabels(id),
+  const { data: labelsData, error: labelsError } = useDashboardRead(
+    issuanceQueryKeys.tokenAllowlistLabels(scope, { tokenId }),
+    tokenAllowlistLabelsResponseSchema,
     { revalidateOnFocus: true, revalidateIfStale: true }
   );
   const labels = labelsData?.labels ?? [];
   const totalEntries = labelsData?.total ?? 0;
-  const countErrorMessage = labelsError
-    ? labelsError instanceof Error
-      ? labelsError.message
-      : t("DashboardIssuance.controlLists.loadError")
-    : null;
+  const countErrorMessage =
+    labelsError === undefined
+      ? null
+      : labelsError.message === ""
+        ? t("DashboardIssuance.controlLists.loadError")
+        : labelsError.message;
 
   // Fall back to "all" if the selected label vanished (its last entry removed).
   const activeLabel =
@@ -911,15 +916,15 @@ function ControlListEntries({
   const searchParam = debouncedQuery.length > 0 ? debouncedQuery : null;
   const labelParam = activeLabel !== ALL_LABELS && activeLabel.length > 0 ? activeLabel : null;
 
-  const { data, error, isLoading, isValidating } = useSWR(
-    [TOKEN_ALLOWLIST_KEY, tokenId, searchParam ?? "", labelParam ?? "", page] as const,
-    () =>
-      fetchTokenAllowlistPage(tokenId, {
-        page,
-        pageSize: CONTROL_LIST_PAGE_SIZE,
-        search: searchParam,
-        label: labelParam,
-      }),
+  const { data, error, isLoading, isValidating } = useDashboardSWR(
+    issuanceQueryKeys.tokenAllowlist(scope, {
+      tokenId,
+      page,
+      pageSize: CONTROL_LIST_PAGE_SIZE,
+      search: searchParam,
+      label: labelParam,
+    }),
+    readTokenAllowlistPage,
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true }
   );
 
@@ -941,11 +946,12 @@ function ControlListEntries({
       setPage(pageCount);
     }
   }, [page, pageCount]);
-  const errorMessage = error
-    ? error instanceof Error
-      ? error.message
-      : t("DashboardIssuance.controlLists.loadError")
-    : null;
+  const errorMessage =
+    error === undefined
+      ? null
+      : error.message === ""
+        ? t("DashboardIssuance.controlLists.loadError")
+        : error.message;
 
   return (
     <div
