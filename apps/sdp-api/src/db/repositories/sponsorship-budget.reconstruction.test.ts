@@ -11,6 +11,7 @@ import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
 import { env } from "@/test/helpers/env";
+import { organizationCreator, seedOrganization } from "@/test/helpers/organizations";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { flushWorkerRedis } from "@/test/mocks/kv";
 import {
@@ -23,7 +24,6 @@ const ORG_A = "org_budget_rebuild_a";
 const ORG_B = "org_budget_rebuild_b";
 const PROJECT_A = "prj_budget_rebuild_a";
 const PROJECT_B = "prj_budget_rebuild_b";
-const USER_ID = "usr_budget_rebuild";
 const HOUR_BUCKET = "2026-08-03T10:00:00.000Z";
 const DAY_BUCKET = "2026-08-03T00:00:00.000Z";
 
@@ -80,31 +80,26 @@ describe("sponsorship budget window reconstruction", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.execute("TRUNCATE sponsorship_budget_reservations");
-    for (const [organizationId, slug] of [
-      [ORG_A, "budget-rebuild-a"],
-      [ORG_B, "budget-rebuild-b"],
+    for (const [organizationId, slug, projectId] of [
+      [ORG_A, "budget-rebuild-a", PROJECT_A],
+      [ORG_B, "budget-rebuild-b", PROJECT_B],
     ] as const) {
-      await db.execute(
-        "INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
-        [organizationId, organizationId, slug]
-      );
+      const creator = organizationCreator(organizationId);
+      await seedOrganization(db, {
+        id: organizationId,
+        name: organizationId,
+        slug,
+        status: "active",
+        creator,
+        onConflict: "do-nothing",
+      });
+      await seedDefaultProjects(db, {
+        organizationId,
+        createdBy: creator.id,
+        members: [],
+        ids: { sandbox: projectId, production: `${projectId}_production` },
+      });
     }
-    await db.execute(
-      "INSERT INTO users (id, email) VALUES (?, 'budget-rebuild@example.test') ON CONFLICT (id) DO NOTHING",
-      [USER_ID]
-    );
-    await seedDefaultProjects(db, {
-      organizationId: ORG_A,
-      createdBy: USER_ID,
-      members: [],
-      ids: { sandbox: PROJECT_A, production: `${PROJECT_A}_production` },
-    });
-    await seedDefaultProjects(db, {
-      organizationId: ORG_B,
-      createdBy: USER_ID,
-      members: [],
-      ids: { sandbox: PROJECT_B, production: `${PROJECT_B}_production` },
-    });
 
     // Org A has 5 lamports in flight; org B has 10 settled and 3 in flight.
     await repository.createReservation(reservation("rsv_rebuild_a_live", ORG_A, PROJECT_A, 5));
