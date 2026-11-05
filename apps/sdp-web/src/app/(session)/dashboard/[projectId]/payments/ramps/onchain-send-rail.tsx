@@ -74,10 +74,8 @@ export interface OnchainSendRailProps extends RailProps {
 }
 
 export function OnchainSendRail({
-  wallets,
-  walletsError,
   issuedTokenSymbolsByMint,
-  counterpartiesResult,
+  counterparties,
   counterpartyId,
   counterpartyName,
   methodLabel,
@@ -90,8 +88,6 @@ export function OnchainSendRail({
 }: OnchainSendRailProps) {
   const t = useTranslations();
   const wizard = useOnchainSendWizard({
-    wallets,
-    walletsError,
     issuedTokenSymbolsByMint,
     counterpartyId,
     onExit,
@@ -100,8 +96,13 @@ export function OnchainSendRail({
   // cannot be completed. Only where the flow picks its own contact, only before it has moved
   // on, and only once the live wallets (with balances) are in, so a loading pass never shows it.
   const emptyReason =
-    contact && wizard.stepIndex === 0 && !wizard.walletsLoading && wizard.liveWalletsError === null
-      ? payEmptyReason(counterpartiesResult.data.length > 0, hasFundedWallet(wizard.liveWallets))
+    contact &&
+    wizard.stepIndex === 0 &&
+    !wizard.walletsLoading &&
+    wizard.liveWalletsError === null &&
+    !counterparties.loading &&
+    counterparties.result.ok
+      ? payEmptyReason(counterparties.result.data.length > 0, hasFundedWallet(wizard.liveWallets))
       : null;
   if (emptyReason !== null) {
     return <PayEmptyState reason={emptyReason} onExit={onCancel ?? onExit} />;

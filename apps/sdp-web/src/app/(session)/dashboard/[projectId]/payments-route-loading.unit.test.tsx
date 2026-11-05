@@ -1,12 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
+import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 import DashboardLoading from "./(home)/loading";
-import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
-import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
-import CounterpartyLoading from "./payments/counterparty/loading";
-import DepositLoading from "./payments/deposit/loading";
-import PaymentsLoading from "./payments/loading";
-import PayLoading from "./payments/pay/loading";
 import {
   CounterpartyDirectorySkeleton,
   PaymentRequestsPageSkeleton,
@@ -16,26 +12,17 @@ import {
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
 } from "./payments/payments-route-skeletons";
-import RecurringPaymentDetailLoading from "./payments/recurring/[recurringPaymentId]/loading";
-import RecurringPaymentCreateLoading from "./payments/recurring/create/loading";
-import RecurringPaymentsLoading from "./payments/recurring/loading";
-import PaymentRequestsLoading from "./payments/requests/loading";
-import PaymentRequestCreateLoading from "./payments/requests/new/loading";
-import TransactionsLoading from "./payments/transactions/loading";
-
-const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
 
 vi.mock("next/navigation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/navigation")>();
   return {
     ...actual,
     useRouter: () => ({ push: () => undefined }),
-    useSearchParams: () =>
-      new URLSearchParams(navigationMock.tab ? { tab: navigationMock.tab } : undefined),
+    useSearchParams: () => new URLSearchParams(),
   };
 });
 
-const EXPECTED_ROUTE_LAYOUTS = [
+const EXPECTED_ROUTE_LAYOUTS: DashboardLoadingRoute[] = [
   "home",
   "payments-overview",
   "payments-transactions",
@@ -51,31 +38,16 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "recurring-payment-detail",
 ];
 
+function renderRouteLoading(route: DashboardLoadingRoute): string {
+  const Loading = resolvePageLoadingComponent(route);
+  return renderToStaticMarkup(<Loading />);
+}
+
 function renderAuthenticatedLoadingStates(): string {
-  return renderToStaticMarkup(
-    <>
-      <DashboardLoading />
-      <PaymentsLoading />
-      <PayLoading />
-      <DepositLoading />
-      <PaymentRequestsLoading />
-      <PaymentRequestCreateLoading />
-      <TransactionsLoading />
-      <CounterpartyLoading />
-      <CounterpartyCreateLoading />
-      <CounterpartyDetailLoading />
-      <RecurringPaymentsLoading />
-      <RecurringPaymentCreateLoading />
-      <RecurringPaymentDetailLoading />
-    </>
-  );
+  return EXPECTED_ROUTE_LAYOUTS.map(renderRouteLoading).join("");
 }
 
 describe("home and payments route loading states", () => {
-  afterEach(() => {
-    navigationMock.tab = null;
-  });
-
   it("gives every scoped route a geometry-specific loading boundary", () => {
     const markup = renderAuthenticatedLoadingStates();
 
@@ -98,7 +70,7 @@ describe("home and payments route loading states", () => {
     const listCases = [
       {
         layout: "payments-transactions",
-        markup: renderToStaticMarkup(<TransactionsLoading />),
+        markup: renderRouteLoading("payments-transactions"),
         columns: ["status", "type", "amount", "contact", "wallet", "created"],
         // Its table drops three columns on a phone, so it only scrolls from md up.
         minWidth: "md:min-w-[47.5rem]",
@@ -133,17 +105,6 @@ describe("home and payments route loading states", () => {
       expect(markup).toContain(minWidth);
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
-  });
-
-  it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
-    navigationMock.tab = "playground";
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
-      'data-loading-layout="counterparty-directory"'
-    );
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
-      'data-loading-layout="payment-requests"'
-    );
-    navigationMock.tab = null;
   });
 
   it("opens the schedule wizard on its payment step", () => {
@@ -200,7 +161,7 @@ describe("home and payments route loading states", () => {
   });
 
   it("keeps the recurring list loader contained at a 390px viewport", () => {
-    const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
+    const markup = renderRouteLoading("recurring-payments");
 
     // The Schedules list scrolls sideways inside its column, like the other Payments lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');

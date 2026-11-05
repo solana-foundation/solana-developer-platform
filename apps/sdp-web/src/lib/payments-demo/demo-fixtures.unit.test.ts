@@ -2,10 +2,8 @@ import type {
   Counterparty,
   CounterpartyAccount,
   ListCounterpartiesResponse,
-  ListCounterpartyProviderAccountsResponse,
 } from "@sdp/types/counterparties";
 import type {
-  CounterpartyAccountSummary,
   PaymentRecurringPayment,
   PaymentRequest,
   PaymentSubscriptionCollectionAttempt,
@@ -16,16 +14,15 @@ import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access"
 import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
-  type UnifiedTransaction,
 } from "@sdp/types/unified-transactions";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import CounterpartyDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/counterparty/[counterpartyId]/page";
 import {
-  fetchCounterparties,
-  fetchCounterparty,
-} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import CounterpartyPage from "@/app/(session)/dashboard/[projectId]/payments/counterparty/page";
+  counterpartiesPageResponseSchema,
+  counterpartyAccountsResponseSchema,
+  counterpartyProviderAccountsResponseSchema,
+  counterpartyResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
 import {
   normalizeAggregateBalances,
   resolveTotalBalance,
@@ -38,52 +35,53 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
-  fetchTransferBatches,
-  fetchTransferBatchRecipients,
+  paymentsWalletsResponseSchema,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { summarizeBatch } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
-  fetchAllCounterparties,
-  fetchBatchRecipients,
-  fetchCounterpartyAccounts,
-  fetchTransfers,
-  fetchWalletAggregate,
-  fetchWallets,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
-import RecurringPaymentDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/recurring/[recurringPaymentId]/page";
-import RecurringPaymentsPage from "@/app/(session)/dashboard/[projectId]/payments/recurring/page";
+  projectCounterpartyAccountsResponseSchema,
+  transferBatchListResponseSchema,
+  transferBatchResponseSchema,
+  transferListResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-read-schemas";
+import { fetchBatchRecipients } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import {
-  fetchRecurringPaymentCollectionAttempts,
-  fetchRecurringPayments,
-  getRecurringPayment,
-  listRecurringPayments,
+  collectionAttemptsEnvelopeSchema,
+  recurringPaymentEnvelopeSchema,
+  recurringPaymentsListEnvelopeSchema,
 } from "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments.data";
-import PaymentRequestDetailRoute from "@/app/(session)/dashboard/[projectId]/payments/requests/[requestId]/page";
-import PaymentRequestsPage from "@/app/(session)/dashboard/[projectId]/payments/requests/page";
-import { fetchPaymentRequests } from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
-import TransactionsPage from "@/app/(session)/dashboard/[projectId]/payments/transactions/page";
 import {
-  fetchTransactionsPageFromDashboard,
-  transactionsApiQuery,
-} from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-page.data";
+  paymentRequestDetailResponseSchema,
+  paymentRequestsListResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-page.data";
+import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
+import { transactionsPageResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-page.data";
 import { parseTransactionFilters } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
 import { GET as counterpartyAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/accounts/route";
 import { GET as providerAccountsGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/provider-accounts/route";
+import { GET as counterpartyGET } from "@/app/api/dashboard/counterparty/[counterpartyId]/route";
 import { GET as projectAccountsGET } from "@/app/api/dashboard/counterparty/accounts/route";
 import { GET as counterpartiesGET } from "@/app/api/dashboard/counterparty/route";
+import { GET as collectionAttemptsGET } from "@/app/api/dashboard/payments/recurring-payments/[recurringPaymentId]/collection-attempts/route";
 import { GET as recurringPaymentGET } from "@/app/api/dashboard/payments/recurring-payments/[recurringPaymentId]/route";
 import { GET as recurringPaymentsGET } from "@/app/api/dashboard/payments/recurring-payments/route";
+import { GET as paymentRequestGET } from "@/app/api/dashboard/payments/requests/[paymentRequestId]/route";
+import { GET as paymentRequestsGET } from "@/app/api/dashboard/payments/requests/route";
 import { GET as transactionsGET } from "@/app/api/dashboard/payments/transactions/route";
+import { GET as transferBatchGET } from "@/app/api/dashboard/payments/transfers/batch/[batchId]/route";
+import { GET as transferBatchesGET } from "@/app/api/dashboard/payments/transfers/batch/route";
 import { GET as transfersGET } from "@/app/api/dashboard/payments/transfers/route";
 import { GET as aggregateGET } from "@/app/api/dashboard/wallets/aggregate/route";
 import { GET as walletsGET } from "@/app/api/dashboard/wallets/route";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
+import type { DashboardKeyScope } from "@/lib/dashboard-request-key";
+import { readDashboardRequest } from "@/lib/dashboard-swr";
 import { paymentsDemoBody } from "./demo-fixtures";
 
 /*
- * Every demo body goes through the parsers the Payments screens use: the server pages and data
- * functions read it through a fake `request` that answers from the fixtures, and the client
- * fetchers reach it through the real dashboard API routes, whose SDP API proxy is the fixtures.
+ * Every demo body goes through the parsers the Payments screens use: the server data functions
+ * read it through a fake `request` that answers from the fixtures, and the screens' reads reach it
+ * through the real dashboard API routes, whose SDP API proxy is the fixtures.
  */
 
 // The pages render on the new design, with the Demo switch on; the flags themselves read Vercel
@@ -168,46 +166,10 @@ vi.mock("@/i18n/server", () => ({
   getTranslations: async () => (key: string) => key,
   getRequestLocale: async () => "en",
 }));
-// The screens themselves are client components; the tests read the props the pages hand them.
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-workspace",
-  () => ({
-    CounterpartyWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace",
-  () => ({
-    CounterpartyDetailWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/requests/payment-requests-workspace",
-  () => ({
-    PaymentRequestsWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payments-workspace",
-  () => ({
-    RecurringPaymentsWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace",
-  () => ({
-    RecurringPaymentDetailWorkspace: () => null,
-  })
-);
-vi.mock(
-  "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-workspace",
-  () => ({
-    TransactionsWorkspace: () => null,
-  })
-);
 
 const NOW = harness.state.now;
-const t = ((key: string) => key) as Parameters<typeof fetchRecurringPayments>[1];
+const t = ((key: string) => key) as Parameters<typeof fetchBatchRecipients>[1];
+const DEMO: DashboardKeyScope = { projectId: "prj_test_sandbox", mode: "demo" };
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{86,88}$/;
 
@@ -217,7 +179,9 @@ const BFF_ROUTES: Record<string, RouteHandler> = {
   wallets: walletsGET,
   "wallets/aggregate": aggregateGET,
   "payments/transfers": transfersGET,
+  "payments/transfers/batch": transferBatchesGET,
   "payments/transactions": transactionsGET,
+  "payments/requests": paymentRequestsGET,
   counterparty: counterpartiesGET,
   "counterparty/accounts": projectAccountsGET,
   "payments/recurring-payments": recurringPaymentsGET,
@@ -233,27 +197,31 @@ async function dashboardRouteFetch(input: RequestInfo | URL, init?: RequestInit)
   const route = new URL(request.url).pathname.split("/").filter(Boolean).slice(2);
   const handler = BFF_ROUTES[route.join("/")];
   if (handler) return handler(request);
-  const [collection, second, id, child] = route;
+  const [collection, second, id, child] = route.map(decodeURIComponent);
+  if (collection === "counterparty" && second && id === undefined) {
+    return counterpartyGET(request, { params: Promise.resolve({ counterpartyId: second }) });
+  }
   if (collection === "counterparty" && second && id === "accounts") {
     return counterpartyAccountsGET(request, {
-      params: Promise.resolve({ counterpartyId: decodeURIComponent(second) }),
+      params: Promise.resolve({ counterpartyId: second }),
     });
   }
   if (collection === "counterparty" && second && id === "provider-accounts") {
-    return providerAccountsGET(request, {
-      params: Promise.resolve({ counterpartyId: decodeURIComponent(second) }),
-    });
+    return providerAccountsGET(request, { params: Promise.resolve({ counterpartyId: second }) });
+  }
+  if (collection === "payments" && second === "requests" && id && !child) {
+    return paymentRequestGET(request, { params: Promise.resolve({ paymentRequestId: id }) });
+  }
+  if (collection === "payments" && second === "transfers" && id === "batch" && child) {
+    return transferBatchGET(request, { params: Promise.resolve({ batchId: child }) });
   }
   if (collection === "payments" && second === "recurring-payments" && id && !child) {
-    return recurringPaymentGET(request, {
-      params: Promise.resolve({ recurringPaymentId: decodeURIComponent(id) }),
-    });
+    return recurringPaymentGET(request, { params: Promise.resolve({ recurringPaymentId: id }) });
+  }
+  if (collection === "payments" && second === "recurring-payments" && id && child) {
+    return collectionAttemptsGET(request, { params: Promise.resolve({ recurringPaymentId: id }) });
   }
   throw new Error(`No dashboard route for ${href}`);
-}
-
-function propsOf<T>(element: unknown): T {
-  return (element as { props: T }).props;
 }
 
 function demoData<T>(path: string, now: Date = NOW): T {
@@ -448,27 +416,43 @@ describe("Payments overview", () => {
 
   it("counts contacts, open requests and active schedules", async () => {
     const [contacts, requests, schedules] = await Promise.all([
-      fetchCounterparties(harness.request, { page: 1, pageSize: 1 }),
-      fetchPaymentRequests(harness.request, { pageSize: 1, status: "awaiting_payment" }),
-      fetchRecurringPayments(harness.request, t, { page: 1, pageSize: 1, status: "active" }),
+      readDashboardRequest(
+        sharedReadQueryKeys.counterparties(DEMO, { page: 1, pageSize: 1 }),
+        counterpartiesPageResponseSchema
+      ),
+      readDashboardRequest(
+        paymentsQueryKeys.paymentRequests(DEMO, {
+          page: 1,
+          pageSize: 1,
+          status: "awaiting_payment",
+        }),
+        paymentRequestsListResponseSchema
+      ),
+      readDashboardRequest(
+        paymentsQueryKeys.recurringPayments(DEMO, { page: 1, pageSize: 1, status: "active" }),
+        recurringPaymentsListEnvelopeSchema
+      ),
     ]);
-    expect(contacts).toMatchObject({ ok: true, total: 7 });
-    expect(contacts.data).toHaveLength(1);
-    expect(requests).toMatchObject({ ok: true, total: 3 });
-    expect(requests.data[0]?.status).toBe("awaiting_payment");
-    expect(schedules.ok && schedules.data.total).toBe(2);
-    expect(schedules.ok && schedules.data.recurringPayments).toHaveLength(1);
+    expect(contacts.data.total).toBe(7);
+    expect(contacts.data.counterparties).toHaveLength(1);
+    expect(requests.data.total).toBe(3);
+    expect(requests.data.paymentRequests[0]?.status).toBe("awaiting_payment");
+    expect(schedules.data.total).toBe(2);
+    expect(schedules.data.recurringPayments).toHaveLength(1);
   });
 
   it("lists recent transfers and batches", async () => {
-    const [transfers, batches, tokens, wallets] = await Promise.all([
+    const [transfers, tokens, wallets, batches] = await Promise.all([
       fetchPaymentTransfers(harness.request, 5, {
         includeObserved: false,
         types: ["transfer", "onramp", "offramp"],
       }),
-      fetchTransferBatches(harness.request, 5),
       fetchPaymentsIssuedTokenSymbols(harness.request),
       fetchPaymentsWallets(harness.request, { view: "summary" }),
+      readDashboardRequest(
+        paymentsQueryKeys.recentTransferBatches(DEMO, { pageSize: 5 }),
+        transferBatchListResponseSchema
+      ),
     ]);
     expect(transfers.ok).toBe(true);
     expect(transfers.data).toHaveLength(5);
@@ -483,14 +467,15 @@ describe("Payments overview", () => {
     expect(wallets.ok).toBe(true);
     expect(wallets.data?.every((wallet) => wallet.balances === undefined)).toBe(true);
 
-    expect(batches.ok).toBe(true);
     expect(batches.data).toHaveLength(2);
     const summaries = [];
-    for (const batch of batches.data ?? []) {
-      const recipients = await fetchTransferBatchRecipients(harness.request, batch.id);
-      expect(recipients.ok).toBe(true);
-      expect(recipients.data).toHaveLength(batch.recipientCount);
-      summaries.push(summarizeBatch(batch, recipients.data).key);
+    for (const batch of batches.data) {
+      const detail = await readDashboardRequest(
+        paymentsQueryKeys.transferBatch(DEMO, batch.id),
+        transferBatchResponseSchema
+      );
+      expect(detail.data.recipients).toHaveLength(batch.recipientCount);
+      summaries.push(summarizeBatch(batch, detail.data.recipients).key);
     }
     expect(summaries).toEqual([
       "DashboardPayments.batchSummary.allSettled",
@@ -509,21 +494,31 @@ describe("Payments overview", () => {
     expect(isNewestFirst(result.data ?? [])).toBe(true);
   });
 });
-
 describe("Transactions", () => {
-  it("renders the page with varied rows tied to demo contacts and wallets", async () => {
-    const props = propsOf<{
-      initialResult: { transactions: UnifiedTransaction[]; nextCursor: string | null };
-      wallets: { id: string }[];
-      counterparties: { id: string; name: string }[];
-    }>(await TransactionsPage({ searchParams: Promise.resolve({}) }));
-    const rows = props.initialResult.transactions;
+  const filters = parseTransactionFilters({}, UNIFIED_TRANSACTION_MODULES);
+
+  it("lists varied rows tied to demo contacts and wallets", async () => {
+    const [page, wallets, contacts] = await Promise.all([
+      readDashboardRequest(
+        paymentsQueryKeys.transactions(DEMO, filters),
+        transactionsPageResponseSchema
+      ),
+      readDashboardRequest(
+        sharedReadQueryKeys.walletSummaries(DEMO, { includeBalances: false }),
+        paymentsWalletsResponseSchema
+      ),
+      readDashboardRequest(
+        sharedReadQueryKeys.counterparties(DEMO, { page: 1, pageSize: 100 }),
+        counterpartiesPageResponseSchema
+      ),
+    ]);
+    const rows = page.data.transactions;
     expect(rows.length).toBeGreaterThanOrEqual(16);
-    expect(props.initialResult.nextCursor).toBeNull();
+    expect(page.data.nextCursor).toBeNull();
     expect(isNewestFirst(rows)).toBe(true);
     const contract = UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments;
-    const walletIds = props.wallets.map((wallet) => wallet.id);
-    const contactIds = props.counterparties.map((contact) => contact.id);
+    const walletIds = wallets.data.wallets.map((wallet) => wallet.id);
+    const contactIds = contacts.data.counterparties.map((contact) => contact.id);
     for (const row of rows) {
       expect(row.module).toBe("payments");
       expect(row.moduleId).toBe(row.id);
@@ -553,202 +548,198 @@ describe("Transactions", () => {
   });
 
   it("pages with cursors and filters through the dashboard route", async () => {
-    const filters = parseTransactionFilters({ pageSize: "10" }, UNIFIED_TRANSACTION_MODULES);
-    const first = await fetchTransactionsPageFromDashboard(transactionsApiQuery(filters));
+    const readPage = async (query: Record<string, string>) =>
+      (
+        await readDashboardRequest(
+          paymentsQueryKeys.transactions(
+            DEMO,
+            parseTransactionFilters(query, UNIFIED_TRANSACTION_MODULES)
+          ),
+          transactionsPageResponseSchema
+        )
+      ).data;
+    const first = await readPage({ pageSize: "10" });
     expect(first.transactions).toHaveLength(10);
     expect(first.nextCursor).not.toBeNull();
-    const second = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery({ ...filters, cursor: first.nextCursor ?? undefined })
-    );
+    const second = await readPage({ pageSize: "10", cursor: first.nextCursor ?? "" });
     expect(second.transactions).toHaveLength(10);
     const seen = new Set(first.transactions.map((row) => row.id));
     expect(second.transactions.some((row) => seen.has(row.id))).toBe(false);
 
     const [target] = first.transactions;
-    const searched = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(
-        parseTransactionFilters({ search: target?.id ?? "" }, UNIFIED_TRANSACTION_MODULES)
-      )
-    );
+    const searched = await readPage({ search: target?.id ?? "" });
     expect(searched.transactions.map((row) => row.id)).toEqual([target?.id]);
 
-    const failed = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(
-        parseTransactionFilters(
-          { module: "payments", status: "failed" },
-          UNIFIED_TRANSACTION_MODULES
-        )
-      )
-    );
+    const failed = await readPage({ module: "payments", status: "failed" });
     expect(failed.transactions.length).toBeGreaterThan(0);
     expect(failed.transactions.every((row) => row.status === "failed")).toBe(true);
 
-    const earn = await fetchTransactionsPageFromDashboard(
-      transactionsApiQuery(parseTransactionFilters({ module: "earn" }, UNIFIED_TRANSACTION_MODULES))
-    );
-    expect(earn).toEqual({ transactions: [], nextCursor: null });
+    expect(await readPage({ module: "earn" })).toEqual({ transactions: [], nextCursor: null });
   });
 });
 
 describe("Contacts", () => {
-  it("renders the list with every contact's saved address", async () => {
-    const props = propsOf<{
-      counterparties: Counterparty[];
-      total: number;
-      accounts: CounterpartyAccountSummary[];
-      accountsTotal: number;
-    }>(await CounterpartyPage());
-    expect(props.total).toBe(7);
-    expect(props.counterparties).toHaveLength(7);
-    expect(props.accountsTotal).toBe(7);
-    expect(new Set(props.accounts.map((account) => account.counterpartyId))).toEqual(
-      new Set(props.counterparties.map((contact) => contact.id))
+  it("lists every contact with its saved address", async () => {
+    const [contacts, addresses] = await Promise.all([
+      readDashboardRequest(
+        sharedReadQueryKeys.counterparties(DEMO, { page: 1, pageSize: 100 }),
+        counterpartiesPageResponseSchema
+      ),
+      readDashboardRequest(
+        paymentsQueryKeys.projectCounterpartyAccounts(DEMO, { page: 1, pageSize: 100 }),
+        projectCounterpartyAccountsResponseSchema
+      ),
+    ]);
+    const { counterparties, total } = contacts.data;
+    expect(total).toBe(7);
+    expect(counterparties).toHaveLength(7);
+    expect(addresses.data.total).toBe(7);
+    expect(new Set(addresses.data.accounts.map((account) => account.counterpartyId))).toEqual(
+      new Set(counterparties.map((contact) => contact.id))
     );
-    for (const account of props.accounts) expect(account.address).toMatch(BASE58_ADDRESS);
-    expect(new Set(props.counterparties.map((contact) => contact.entityType))).toEqual(
+    for (const account of addresses.data.accounts) expect(account.address).toMatch(BASE58_ADDRESS);
+    expect(new Set(counterparties.map((contact) => contact.entityType))).toEqual(
       new Set(["business", "individual"])
     );
-    expect(props.counterparties.filter((contact) => contact.externalId).length).toBeGreaterThan(1);
-    expect(isNewestFirst(props.counterparties)).toBe(true);
+    expect(counterparties.filter((contact) => contact.externalId).length).toBeGreaterThan(1);
+    expect(isNewestFirst(counterparties)).toBe(true);
   });
 
   it("pages the list", async () => {
-    const page = await fetchCounterparties(harness.request, { page: 2, pageSize: 5 });
-    expect(page).toMatchObject({ ok: true, total: 7 });
-    expect(page.data).toHaveLength(2);
+    const page = await readDashboardRequest(
+      sharedReadQueryKeys.counterparties(DEMO, { page: 2, pageSize: 5 }),
+      counterpartiesPageResponseSchema
+    );
+    expect(page.data.total).toBe(7);
+    expect(page.data.counterparties).toHaveLength(2);
   });
 
   it.each(demoContacts().map((contact) => [contact.displayName, contact.id]))(
-    "renders %s's detail with an account and transfers",
+    "reads %s's detail with an account and transfers",
     async (_name, counterpartyId) => {
-      const detail = propsOf<{ children: unknown }>(
-        await CounterpartyDetailRoute({ params: Promise.resolve({ counterpartyId }) })
-      );
-      const props = propsOf<{
-        counterparty: Counterparty;
-        initialAccounts: CounterpartyAccount[];
-        initialTransfers: PaymentTransferSummary[];
-      }>(detail.children);
-      expect(props.counterparty.id).toBe(counterpartyId);
-      expect(props.initialAccounts).toHaveLength(1);
-      expect(props.initialAccounts[0]?.details.address).toMatch(BASE58_ADDRESS);
-      expect(props.initialTransfers.length).toBeGreaterThan(0);
-      for (const transfer of props.initialTransfers) {
+      const [contact, accounts, transfers, providerAccounts] = await Promise.all([
+        readDashboardRequest(
+          paymentsQueryKeys.counterparty(DEMO, counterpartyId),
+          counterpartyResponseSchema
+        ),
+        readDashboardRequest(
+          paymentsQueryKeys.counterpartyAccounts(DEMO, counterpartyId),
+          counterpartyAccountsResponseSchema
+        ),
+        readDashboardRequest(
+          paymentsQueryKeys.counterpartyTransfers(DEMO, { counterpartyId, pageSize: 25 }),
+          transferListResponseSchema
+        ),
+        readDashboardRequest(
+          paymentsQueryKeys.counterpartyProviderAccounts(DEMO, counterpartyId),
+          counterpartyProviderAccountsResponseSchema
+        ),
+      ]);
+      expect(contact.data.counterparty.id).toBe(counterpartyId);
+      expect(accounts.data.accounts).toHaveLength(1);
+      expect(accounts.data.accounts[0]?.details.address).toMatch(BASE58_ADDRESS);
+      expect(transfers.data.length).toBeGreaterThan(0);
+      for (const transfer of transfers.data) {
         expect(transfer.counterpartyId).toBe(counterpartyId);
-        expect(typeof transfer.rampsMemo).toBe("object");
       }
-
-      const providerAccounts = await dashboardFetch<{
-        data: ListCounterpartyProviderAccountsResponse;
-      }>(`/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`);
-      expect(providerAccounts.ok).toBe(true);
-      // No provider holds an account for a demo contact.
-      expect(providerAccounts.ok && providerAccounts.data.data.accounts).toEqual([]);
+      expect(providerAccounts.data.accounts).toEqual([]);
     }
   );
 });
 
 describe("Requests", () => {
-  it("renders the list across every status", async () => {
-    const props = propsOf<{
-      initialPaymentRequests: PaymentRequest[];
-      total: number;
-      initialError: string | undefined;
-    }>(await PaymentRequestsPage({ searchParams: Promise.resolve({}) }));
-    expect(props.initialError).toBeUndefined();
-    expect(props.total).toBe(props.initialPaymentRequests.length);
-    expect(props.initialPaymentRequests.length).toBeGreaterThanOrEqual(6);
-    expect(new Set(props.initialPaymentRequests.map((request) => request.status))).toEqual(
+  it("lists every status, and opens each request on a demo wallet", async () => {
+    const [list, wallets] = await Promise.all([
+      readDashboardRequest(
+        paymentsQueryKeys.paymentRequests(DEMO, { page: 1, pageSize: 100, status: null }),
+        paymentRequestsListResponseSchema
+      ),
+      readDashboardRequest(
+        sharedReadQueryKeys.walletSummaries(DEMO, { includeBalances: false }),
+        paymentsWalletsResponseSchema
+      ),
+    ]);
+    const requests = list.data.paymentRequests;
+    expect(list.data.total).toBe(requests.length);
+    expect(requests.length).toBeGreaterThanOrEqual(6);
+    expect(new Set(requests.map((request) => request.status))).toEqual(
       new Set(["awaiting_payment", "paid", "expired", "canceled"])
     );
-    for (const request of props.initialPaymentRequests) {
+    expect(isNewestFirst(requests)).toBe(true);
+    const walletIds = wallets.data.wallets.map((wallet) => wallet.id);
+    for (const request of requests) {
       expect(request.lifecycle[0]?.status).toBe("awaiting_payment");
-    }
-    expect(isNewestFirst(props.initialPaymentRequests)).toBe(true);
-  });
-
-  it("opens each request's page on a demo wallet", async () => {
-    const { initialPaymentRequests } = propsOf<{ initialPaymentRequests: PaymentRequest[] }>(
-      await PaymentRequestsPage({ searchParams: Promise.resolve({}) })
-    );
-    for (const request of initialPaymentRequests) {
-      const detail = propsOf<{ children: unknown }>(
-        await PaymentRequestDetailRoute({ params: Promise.resolve({ requestId: request.id }) })
+      const detail = await readDashboardRequest(
+        paymentsQueryKeys.paymentRequest(DEMO, request.id),
+        paymentRequestDetailResponseSchema
       );
-      const props = propsOf<{
-        request: PaymentRequest | null;
-        walletName: string | null;
-        canceler: { name: string | null } | null;
-      }>(detail.children);
-      expect(props.request?.id).toBe(request.id);
-      expect(props.walletName).not.toBeNull();
-      // A canceled request names the demo's own member, read from the demo, not the real org.
-      expect(props.canceler?.name ?? null).toBe(request.status === "canceled" ? "Ops team" : null);
+      expect(detail.data.id).toBe(request.id);
+      expect(walletIds).toContain(detail.data.walletId);
     }
   });
 });
 
 describe("Schedules", () => {
-  it("renders the list with every contact resolved", async () => {
-    const props = propsOf<{ children: unknown }>(
-      await RecurringPaymentsPage({ searchParams: Promise.resolve({}) })
+  it("lists every schedule with its contact", async () => {
+    const list = await readDashboardRequest(
+      paymentsQueryKeys.recurringPayments(DEMO, { page: 1, pageSize: 25, status: null }),
+      recurringPaymentsListEnvelopeSchema
     );
-    const workspace = propsOf<{
-      initialRecurringPayments: PaymentRecurringPayment[];
-      total: number;
-      wallets: PaymentsDashboardWallet[];
-      counterparties: { id: string; displayName: string }[];
-      lookupError: string | undefined;
-    }>(props.children);
-    expect(workspace.total).toBe(4);
-    expect(workspace.lookupError).toBeUndefined();
-    expect(workspace.counterparties).toHaveLength(4);
-    expect(new Set(workspace.initialRecurringPayments.map((schedule) => schedule.status))).toEqual(
+    const schedules = list.data.recurringPayments;
+    expect(list.data.total).toBe(4);
+    expect(new Set(schedules.map((schedule) => schedule.status))).toEqual(
       new Set(["active", "pending_activation", "canceled"])
     );
-    expect(
-      new Set(workspace.initialRecurringPayments.map((schedule) => schedule.periodHours))
-    ).toEqual(new Set([168, 720]));
-
-    const active = propsOf<{ children: unknown }>(
-      await RecurringPaymentsPage({ searchParams: Promise.resolve({ status: "active" }) })
-    );
-    expect(propsOf<{ total: number }>(active.children).total).toBe(2);
+    expect(new Set(schedules.map((schedule) => schedule.periodHours))).toEqual(new Set([168, 720]));
+    for (const counterpartyId of new Set(schedules.map((schedule) => schedule.counterpartyId))) {
+      const contact = await readDashboardRequest(
+        paymentsQueryKeys.counterparty(DEMO, counterpartyId),
+        counterpartyResponseSchema
+      );
+      expect(contact.data.counterparty.id).toBe(counterpartyId);
+    }
   });
 
   it.each(demoSchedules().map((schedule) => [schedule.id, schedule.status]))(
-    "renders %s (%s) with its wallet, contact account and collection history",
+    "reads %s (%s) with its wallet, contact account and collection history",
     async (recurringPaymentId, status) => {
-      const props = propsOf<{
-        recurringPayment: PaymentRecurringPayment;
-        wallet: PaymentsDashboardWallet | null;
-        counterpartyAccounts: CounterpartyAccount[];
-        counterpartyLabel: string;
-        collectionAttempts: PaymentSubscriptionCollectionAttempt[];
-        collectionAttemptsTotal: number;
-        collectionAttemptsError: string | undefined;
-      }>(await RecurringPaymentDetailRoute({ params: Promise.resolve({ recurringPaymentId }) }));
-      const contact = await fetchCounterparty(
-        harness.request,
-        props.recurringPayment.counterpartyId
-      );
-      expect(props.recurringPayment.id).toBe(recurringPaymentId);
-      expect(props.wallet?.id).toBe(props.recurringPayment.sourceCustodyWalletId);
-      expect(props.counterpartyLabel).toBe(contact?.displayName);
-      expect(props.counterpartyAccounts.map((account) => account.id)).toEqual([
-        props.recurringPayment.counterpartyAccountId,
+      const [schedule, wallets, attempts] = await Promise.all([
+        readDashboardRequest(
+          paymentsQueryKeys.recurringPayment(DEMO, recurringPaymentId),
+          recurringPaymentEnvelopeSchema
+        ),
+        readDashboardRequest(
+          sharedReadQueryKeys.walletSummaries(DEMO, { includeBalances: true }),
+          paymentsWalletsResponseSchema
+        ),
+        readDashboardRequest(
+          paymentsQueryKeys.recurringPaymentCollectionAttempts(DEMO, recurringPaymentId),
+          collectionAttemptsEnvelopeSchema
+        ),
       ]);
-      expect(WELL_KNOWN_TOKEN_BY_MINT.get(props.recurringPayment.token)?.symbol).toBe("USDC");
-      expect(props.collectionAttemptsError).toBeUndefined();
-      expect(props.collectionAttemptsTotal).toBe(props.collectionAttempts.length);
+      const { recurringPayment } = schedule.data;
+      const accounts = await readDashboardRequest(
+        paymentsQueryKeys.counterpartyAccounts(DEMO, recurringPayment.counterpartyId),
+        counterpartyAccountsResponseSchema
+      );
+      expect(recurringPayment.id).toBe(recurringPaymentId);
+      expect(wallets.data.wallets.map((wallet) => wallet.id)).toContain(
+        recurringPayment.sourceCustodyWalletId
+      );
+      expect(accounts.data.accounts.map((account) => account.id)).toEqual([
+        recurringPayment.counterpartyAccountId,
+      ]);
+      expect(WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token)?.symbol).toBe("USDC");
+      const { collectionAttempts, total } = attempts.data;
+      expect(total).toBe(collectionAttempts.length);
       if (status === "pending_activation") {
-        expect(props.recurringPayment.subscriptionId).toBeNull();
-        expect(props.collectionAttempts).toEqual([]);
+        expect(recurringPayment.subscriptionId).toBeNull();
+        expect(collectionAttempts).toEqual([]);
       } else {
-        expect(props.collectionAttempts.length).toBeGreaterThan(1);
+        expect(collectionAttempts.length).toBeGreaterThan(1);
       }
       if (status === "active") {
-        expect(Date.parse(props.recurringPayment.nextCollectionDueAt ?? "")).toBeGreaterThan(
+        expect(Date.parse(recurringPayment.nextCollectionDueAt ?? "")).toBeGreaterThan(
           NOW.getTime()
         );
       }
@@ -756,43 +747,43 @@ describe("Schedules", () => {
   );
 
   it("shows a failed collection with a readable reason, then its retry", async () => {
-    const result = await fetchRecurringPaymentCollectionAttempts(
-      harness.request,
-      "demo_rp_kai_weekly",
-      t
+    const attempts = await readDashboardRequest(
+      paymentsQueryKeys.recurringPaymentCollectionAttempts(DEMO, "demo_rp_kai_weekly"),
+      collectionAttemptsEnvelopeSchema
     );
-    expect(result.ok).toBe(true);
-    const attempts = result.ok ? result.data.collectionAttempts : [];
-    const failed = attempts.find((attempt) => attempt.status === "failed");
+    const { collectionAttempts } = attempts.data;
+    const failed = collectionAttempts.find((attempt) => attempt.status === "failed");
     expect(failed?.error).toMatch(/balance too low/);
     expect(failed?.transferId).toBeNull();
-    const retry = attempts.find((attempt) => attempt.metadata.source === "retry");
+    const retry = collectionAttempts.find((attempt) => attempt.metadata.source === "retry");
     expect(retry).toMatchObject({ status: "confirmed", metadata: { error: failed?.error } });
-  });
-
-  it("loads the client list and detail through the dashboard routes", async () => {
-    const list = await listRecurringPayments({ page: 1, pageSize: 25, status: "active" }, t);
-    expect(list.total).toBe(2);
-    const [first] = list.recurringPayments;
-    const detail = await getRecurringPayment(first?.id ?? "", undefined, t);
-    expect(detail).toEqual(first);
   });
 });
 
 describe("Pay and Deposit", () => {
   it("offers wallets with balances and contacts with their accounts", async () => {
-    const wallets = await fetchWallets({ includeBalances: true }, t);
-    expect(wallets).toHaveLength(3);
-    expect(wallets.every((wallet) => (wallet.balances?.length ?? 0) > 0)).toBe(true);
-    expect((await fetchWalletAggregate(t)).walletCount).toBe(3);
+    const wallets = await readDashboardRequest(
+      sharedReadQueryKeys.walletSummaries(DEMO, { includeBalances: true }),
+      paymentsWalletsResponseSchema
+    );
+    expect(wallets.data.wallets).toHaveLength(3);
+    expect(wallets.data.wallets.every((wallet) => (wallet.balances?.length ?? 0) > 0)).toBe(true);
 
-    const contacts = await fetchAllCounterparties();
-    expect(contacts.ok).toBe(true);
-    expect(contacts.data).toHaveLength(7);
-    for (const contact of contacts.data) {
-      const accounts = await fetchCounterpartyAccounts(contact.id, t);
-      expect(accounts).toHaveLength(1);
-      expect(accounts[0]).toMatchObject({ accountKind: "crypto_wallet", status: "active" });
+    const contacts = await readDashboardRequest(
+      paymentsQueryKeys.allCounterparties(DEMO),
+      counterpartiesPageResponseSchema
+    );
+    expect(contacts.data.counterparties).toHaveLength(7);
+    for (const contact of contacts.data.counterparties) {
+      const accounts = await readDashboardRequest(
+        paymentsQueryKeys.counterpartyAccounts(DEMO, contact.id),
+        counterpartyAccountsResponseSchema
+      );
+      expect(accounts.data.accounts).toHaveLength(1);
+      expect(accounts.data.accounts[0]).toMatchObject({
+        accountKind: "crypto_wallet",
+        status: "active",
+      });
     }
 
     const recipients = await fetchBatchRecipients({ page: 1, pageSize: 25 }, t);
@@ -807,12 +798,19 @@ describe("Pay and Deposit", () => {
   });
 
   it("shows each wallet's recent inbound deposits, observed ones included", async () => {
-    const wallets = await fetchWallets({ includeBalances: true }, t);
-    for (const wallet of wallets) {
-      const deposits = await fetchTransfers(
-        { pageSize: 5, custodyWalletId: wallet.id, direction: "inbound", includeObserved: true },
-        t
-      );
+    const wallets = await readDashboardRequest(
+      sharedReadQueryKeys.walletSummaries(DEMO, { includeBalances: true }),
+      paymentsWalletsResponseSchema
+    );
+    const depositsOf = async (custodyWalletId: string) =>
+      (
+        await readDashboardRequest(
+          paymentsQueryKeys.walletDeposits(DEMO, { custodyWalletId, pageSize: 5 }),
+          transferListResponseSchema
+        )
+      ).data;
+    for (const wallet of wallets.data.wallets) {
+      const deposits = await depositsOf(wallet.id);
       expect(deposits.length).toBeGreaterThan(0);
       expect(deposits.length).toBeLessThanOrEqual(5);
       expect(isNewestFirst(deposits)).toBe(true);
@@ -821,17 +819,17 @@ describe("Pay and Deposit", () => {
         expect(deposit.destination).toBe(wallet.publicKey);
       }
     }
-    const treasury = await fetchTransfers(
-      { pageSize: 5, custodyWalletId: wallets[0]?.id, direction: "inbound", includeObserved: true },
-      t
-    );
+    const treasury = await depositsOf(wallets.data.wallets[0]?.id ?? "");
     expect(treasury).toHaveLength(5);
     expect(treasury.some((deposit) => deposit.custodyWalletId === null)).toBe(true);
   });
 
   it("merges every wallet's transfers when the route has no direct filter", async () => {
-    const transfers = await fetchTransfers({ pageSize: 10 }, t);
-    expect(transfers).toHaveLength(10);
-    expect(isNewestFirst(transfers)).toBe(true);
+    const transfers = await readDashboardRequest(
+      paymentsQueryKeys.dashboardTransfers(DEMO, { pageSize: 10 }),
+      transferListResponseSchema
+    );
+    expect(transfers.data).toHaveLength(10);
+    expect(isNewestFirst(transfers.data)).toBe(true);
   });
 });

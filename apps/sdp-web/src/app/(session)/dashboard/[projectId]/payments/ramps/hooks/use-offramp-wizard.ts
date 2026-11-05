@@ -1,21 +1,18 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type {
-  PaymentOfframpQuoteRequest,
-  PaymentTransferSummary,
-  RampCryptoDeposit,
-} from "@sdp/types/payments";
+import type { PaymentOfframpQuoteRequest, RampCryptoDeposit } from "@sdp/types/payments";
 import { address } from "@solana/kit";
 import { BanknoteIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useMemo } from "react";
-import useSWR from "swr";
 import useSWRMutation from "swr/mutation";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  moneyMovementReads,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   type CreateTransferInput,
   createTransfer,
-  fetchTransferById,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { submitOfframpDeposit } from "@/app/(session)/dashboard/[projectId]/payments/ramps/offramp-deposit";
 import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
@@ -36,10 +33,12 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
+import { useTransferRecord } from "./use-transfer-record";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OfframpStepId = "WALLET" | "WITHDRAW" | "MEMO" | "COMPLETE" | "REQUIREMENTS";
@@ -82,6 +81,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
   const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
+  const invalidateReads = useInvalidateDashboardReads();
   const {
     trigger: triggerCreateTransfer,
     data: onchainSendResult,
@@ -130,19 +130,9 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     },
   });
 
-  const transferStatusKey = wizard.quoteTransferId
-    ? paymentsQueryKeys.offrampTransferStatus({ transferId: wizard.quoteTransferId })
-    : null;
-  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
-    transferStatusKey,
-    ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
-    {
-      // A fresh function each render re-arms SWR's timer with the latest transfer.
-      refreshInterval: (transfer) => rampTransferPollInterval(transfer),
-      // The interval keeps it current; a focus read on top only doubles the calls.
-      revalidateOnFocus: false,
-      dedupingInterval: 2_000,
-    }
+  const { data: transferStatus, isValidating: transferStatusLoading } = useTransferRecord(
+    wizard.quoteTransferId ?? null,
+    rampTransferPollInterval
   );
 
   // The hosted provider can report a deposit address while payment is pending.
@@ -221,6 +211,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
       triggerCreateTransfer,
       t
     );
+    void invalidateReads(moneyMovementReads);
   };
 
   // The amount hint turns red over the balance; the step must not continue past it either.

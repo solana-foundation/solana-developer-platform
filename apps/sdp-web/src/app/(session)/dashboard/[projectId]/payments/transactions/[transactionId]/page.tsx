@@ -1,14 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterparty } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
-import { fetchIssuedTokensByMintWhenIssuanceEnabled } from "@/app/(session)/dashboard/[projectId]/payments/issued-tokens.server";
-import { fetchTransactionDetail } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-detail.data";
 import { TransactionDetailWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/transactions/transaction-detail-workspace";
-import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
-import { requestProjectHref } from "@/lib/sdp-api";
-
-export const dynamic = "force-dynamic";
+import { issuance } from "@/flags";
 
 export default async function TransactionDetailRoute({
   params,
@@ -20,48 +13,11 @@ export default async function TransactionDetailRoute({
     redirect("/dashboard");
   }
 
-  const { transactionId } = await params;
+  const [{ transactionId }, issuanceEnabled] = await Promise.all([params, issuance()]);
 
-  return withDashboardPageTrace(
-    "dashboard.payments.transaction.detail.page",
-    async ({ trace, apiClient }) => {
-      const [detail, issuedTokensByMint] = await Promise.all([
-        trace.step("fetch_transaction_detail", () =>
-          fetchTransactionDetail(apiClient, transactionId)
-        ),
-        trace.step("fetch_issued_tokens", () =>
-          fetchIssuedTokensByMintWhenIssuanceEnabled(apiClient.request)
-        ),
-      ]);
-      // The ledger row carries the contact's id; its name comes from the contact itself, so an
-      // older or archived contact still names the page. A missing contact keeps the id.
-      const counterpartyId = detail.status === "found" ? detail.transaction.counterpartyId : null;
-      const counterpartyName =
-        counterpartyId === null
-          ? null
-          : await trace.step(
-              "fetch_counterparty",
-              async () =>
-                (await fetchCounterparty(apiClient.request, counterpartyId))?.displayName ?? null
-            );
-
-      trace.log({ status: detail.status });
-
-      if (detail.status === "not_found") {
-        redirect(await requestProjectHref(PAYMENT_TRANSACTIONS_HREF));
-      }
-
-      return (
-        <div className="flex h-full min-h-0 w-full flex-col">
-          <TransactionDetailWorkspace
-            transaction={detail.status === "found" ? detail.transaction : null}
-            transfer={detail.status === "found" ? detail.transfer : null}
-            issuedTokensByMint={issuedTokensByMint}
-            counterpartyName={counterpartyName}
-            error={detail.status === "error" ? detail.error : undefined}
-          />
-        </div>
-      );
-    }
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <TransactionDetailWorkspace transactionId={transactionId} issuanceEnabled={issuanceEnabled} />
+    </div>
   );
 }

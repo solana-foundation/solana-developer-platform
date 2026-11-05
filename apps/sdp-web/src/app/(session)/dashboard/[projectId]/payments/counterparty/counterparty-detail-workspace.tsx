@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
@@ -25,6 +26,17 @@ import {
   isInboundTransfer,
   PAYMENT_STATUS_TONE,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import {
+  counterpartyReads,
+  paymentsQueryKeys,
+  paymentTransferReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  transferListResponseSchema,
+  transferPageResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-read-schemas";
+import { RecordLoadError } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { CounterpartyDetailSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -32,10 +44,26 @@ import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import {
+  type DashboardRequestKey,
+  dashboardRequestKey,
+  readsUnderPath,
+} from "@/lib/dashboard-request-key";
+import {
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { SETTLED_PAYOUT_STATUSES } from "./counterparty-detail.data";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts";
+import {
+  counterpartyAccountsResponseSchema,
+  counterpartyResponseSchema,
+} from "./counterparty-read-schemas";
 import { TransferDetailModal } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
@@ -303,14 +331,19 @@ function SavedAddresses({
   addAddressButton: ReactNode;
 }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   if (accounts.length === 0 && read === null) {
     return (
       <ListEmptyState
         message={t("DashboardPayments.counterparty.detail.addressesLoadFailed")}
         description={t("DashboardPayments.counterparty.detail.addressesLoadFailedDescription")}
         action={
-          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void invalidateReads(counterpartyDetailReads)}
+          >
             {t("Shared.SharedComponents.retry")}
           </Button>
         }
@@ -468,7 +501,7 @@ function RecentPayments({
   onSelect: (transfer: PaymentTransferSummary) => void;
 }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   if (transfers.length > 0) return <PaymentsTable transfers={transfers} onSelect={onSelect} />;
   if (failed) {
     return (
@@ -476,7 +509,12 @@ function RecentPayments({
         message={t("DashboardPayments.counterparty.detail.paymentsLoadFailed")}
         description={t("DashboardPayments.counterparty.detail.paymentsLoadFailedDescription")}
         action={
-          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void invalidateReads(counterpartyDetailReads)}
+          >
             {t("Shared.SharedComponents.retry")}
           </Button>
         }
@@ -512,6 +550,7 @@ export function CounterpartyDetailWorkspace({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const providerAccounts = useCounterpartyProviderAccounts(counterparty.id, {
     enabled: rampsEnabled,
   });
@@ -541,6 +580,12 @@ export function CounterpartyDetailWorkspace({
       position: "bottom-right",
     });
     router.push(href("/dashboard/payments/counterparty"));
+    // This page's own reads are left alone: refetched while it is still on screen, the deleted
+    // contact would answer 404 and flash not-found before the list replaces it.
+    const ownReads = readsUnderPath(
+      `/api/dashboard/counterparty/${encodeURIComponent(counterparty.id)}`
+    );
+    void invalidateReads((key) => counterpartyReads(key) && !ownReads(key));
   }
 
   const addAddressButton = canWrite ? (
@@ -648,5 +693,117 @@ export function CounterpartyDetailWorkspace({
         />
       )}
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** What a contact's page reads: the contact, its addresses and accounts, and its transfers. */
+function counterpartyDetailReads(key: DashboardRequestKey): boolean {
+  return counterpartyReads(key) || paymentTransferReads(key);
+}
+
+/** A contact's settled payouts up to the key's `cap`; a page that fails ends the read there. */
+async function readCounterpartyPayouts(
+  key: DashboardRequestKey
+): Promise<{ payouts: PaymentTransferSummary[]; total: number; complete: boolean }> {
+  const { cap, ...params } = key[3] ?? {};
+  const scope = { projectId: key[0], mode: key[1] };
+  const pageKey = (page: number) => dashboardRequestKey(scope, key[2], { ...params, page });
+  const first = await readDashboardRequest(pageKey(1), transferPageResponseSchema);
+  const total = Math.max(first.meta.total, first.data.length);
+  const pages = Math.ceil(Math.min(total, Number(cap)) / Number(params.pageSize));
+  const rest = await Promise.allSettled(
+    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+      readDashboardRequest(pageKey(index + 2), transferPageResponseSchema)
+    )
+  );
+  // Keep what was read up to the first failed page: the pages are newest first, so that is
+  // still the latest payouts, and `total` says how many more there are.
+  const failedAt = rest.findIndex((result) => result.status === "rejected");
+  const read = (failedAt === -1 ? rest : rest.slice(0, failedAt)).flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : []
+  );
+  const seen = new Set<string>();
+  const payouts = [first, ...read]
+    .flatMap((body) => body.data)
+    .filter((transfer) => {
+      if (seen.has(transfer.id)) return false;
+      seen.add(transfer.id);
+      return true;
+    })
+    .slice(0, Number(cap));
+  return { payouts, total: Math.max(total, payouts.length), complete: failedAt === -1 };
+}
+
+const COUNTERPARTY_TRANSFERS_PAGE_SIZE = 50;
+
+/** A contact's page: the contact, then its addresses, payments and payouts, each read alone. */
+export function CounterpartyDetailRoute({
+  counterpartyId,
+  rampsEnabled,
+}: {
+  counterpartyId: string;
+  /** Whether provider-owned fiat accounts are available in this deployment. */
+  rampsEnabled: boolean;
+}) {
+  const t = useTranslations();
+  const scope = useDashboardKeyScope();
+  const contact = useDashboardRead(
+    paymentsQueryKeys.counterparty(scope, counterpartyId),
+    counterpartyResponseSchema
+  );
+  const accounts = useDashboardRead(
+    paymentsQueryKeys.counterpartyAccounts(scope, counterpartyId),
+    counterpartyAccountsResponseSchema
+  );
+  const transfers = useDashboardRead(
+    paymentsQueryKeys.counterpartyTransfers(scope, {
+      counterpartyId,
+      pageSize: COUNTERPARTY_TRANSFERS_PAGE_SIZE,
+    }),
+    transferListResponseSchema
+  );
+  const payouts = useDashboardSWR(
+    paymentsQueryKeys.counterpartyPayouts(scope, {
+      counterpartyId,
+      statuses: SETTLED_PAYOUT_STATUSES,
+    }),
+    readCounterpartyPayouts
+  );
+  if (contact.error?.status === 404) {
+    return <ProjectNotFound />;
+  }
+  if (contact.error !== undefined) {
+    return (
+      <DashboardWorkspaceOverviewPanel>
+        <RecordLoadError
+          title={t("DashboardPayments.counterparty.detail.loadFailedTitle")}
+          description={t("DashboardPayments.counterparty.detail.loadFailedDescription")}
+          onRetry={() => void contact.mutate()}
+        />
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+  const settled = [accounts, transfers, payouts].every(
+    (read) => read.data !== undefined || read.error !== undefined
+  );
+  if (contact.data === undefined || !settled) {
+    return <CounterpartyDetailSkeleton />;
+  }
+  const accountsBody = accounts.data?.data;
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <CounterpartyDetailWorkspace
+        counterparty={contact.data.data.counterparty}
+        initialAccounts={accountsBody?.accounts ?? []}
+        accountsTotal={Math.max(accountsBody?.total ?? 0, accountsBody?.accounts.length ?? 0)}
+        accountsFailed={accounts.error !== undefined}
+        initialTransfers={transfers.data?.data ?? []}
+        transfersFailed={transfers.error !== undefined}
+        payouts={payouts.data?.payouts ?? []}
+        payoutsTotal={payouts.data?.total ?? 0}
+        payoutsFailed={payouts.data === undefined || !payouts.data.complete}
+        rampsEnabled={rampsEnabled}
+      />
+    </div>
   );
 }

@@ -17,3 +17,11 @@ export function CounterpartyMenuLoading({ overview }: { overview: CounterpartyMe
     </div>
   );
 }
+
+export function PaymentRequestsListLoading() {
+  return <CounterpartyMenuLoading overview="payment-requests" />;
+}
+
+export function CounterpartyDirectoryLoading() {
+  return <CounterpartyMenuLoading overview="counterparty-directory" />;
+}

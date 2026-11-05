@@ -126,12 +126,10 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
 }
 
 const railProps: RailProps = {
-  wallets: [],
-  walletsError: null,
   issuedTokenSymbolsByMint: {},
   enabledRampProviders: ["moonpay"],
   rampProviderAccess: null,
-  counterpartiesResult: { ok: true, data: [] },
+  counterparties: { result: { ok: true, data: [] }, loading: false, retry: noop, addCreated: noop },
   selectedCounterparty: null,
   counterpartyId: "cpty",
   counterpartyName: "Ada Trading",

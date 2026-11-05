@@ -1,8 +1,19 @@
+import { getTranslations } from "@/i18n/server";
 import { dashboardJson } from "@/lib/dashboard-response";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function GET(request: Request, context: { params: Promise<{ walletId: string }> }) {
-  const { walletId } = await context.params;
+  // Next hands the segment over still percent-encoded, and the path below encodes it again.
+  let walletId: string;
+  try {
+    walletId = decodeURIComponent((await context.params).walletId);
+  } catch {
+    const t = await getTranslations();
+    return dashboardJson(
+      { error: { message: t("DashboardCustody.invalidWalletId") } },
+      { status: 400 }
+    );
+  }
   const incoming = new URL(request.url).searchParams;
   const minimumSlot = incoming.get("minimumSlot");
   if (

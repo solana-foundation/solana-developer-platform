@@ -95,10 +95,10 @@ beforeEach(() => {
   window.sessionStorage.clear();
   fetchMock.mockReset().mockImplementation(async (input) => {
     const url = String(input);
-    if (url === "/api/dashboard/wallets?view=summary&includeBalances=true")
+    if (url === "/api/dashboard/wallets?includeBalances=true&view=summary")
       return Response.json({ data: { wallets } });
     if (url === "/api/dashboard/counterparty/cpty_test/accounts?pageSize=100")
-      return Response.json({ data: { accounts: [account] } });
+      return Response.json({ data: { accounts: [account], total: 1, page: 1, pageSize: 100 } });
     if (url.startsWith("/api/dashboard/fireblocks/destination?"))
       return Response.json({ data: { state: "approved", assetId: "SOL_TEST" } });
     if (url.startsWith("/api/dashboard/fireblocks/policy?"))
@@ -118,8 +118,6 @@ describe("Fireblocks payment selection", () => {
     const { result } = renderHook(
       () =>
         useOnchainSendWizard({
-          wallets,
-          walletsError: null,
           issuedTokenSymbolsByMint: {},
           counterpartyId: account.counterpartyId,
           onExit: vi.fn(),
@@ -127,6 +125,7 @@ describe("Fireblocks payment selection", () => {
       { wrapper }
     );
     await waitFor(() => expect(result.current.accountsLoading).toBe(false));
+    await waitFor(() => expect(result.current.liveWallets).toHaveLength(wallets.length));
     act(() => {
       result.current.setField("accountId", account.id);
       result.current.setField("amount", "0.01");

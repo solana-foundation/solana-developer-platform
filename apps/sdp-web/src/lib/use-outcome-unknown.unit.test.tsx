@@ -3,11 +3,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import useSWR, { SWRConfig } from "swr";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  isCounterpartyReadKey,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { SANDBOX_PROJECT } from "@/test/projects";
+import type { DashboardKeyScope } from "./dashboard-request-key";
 import { type OutcomeUnknownLists, useOutcomeUnknownRefresh } from "./use-outcome-unknown";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const SCOPE: DashboardKeyScope = { projectId: SANDBOX_PROJECT.id, mode: "live" };
 
 beforeEach(() => {
   resetDashboardNavigation();
@@ -24,8 +31,8 @@ function renderLists(lists: OutcomeUnknownLists) {
   const unrelated = vi.fn(async () => ["transfer"]);
   const hook = renderHook(
     () => {
-      useSWR(paymentsQueryKeys.actionCounterparties(), counterparties);
-      useSWR(paymentsQueryKeys.transactions({ query: "" }), unrelated);
+      useSWR(paymentsQueryKeys.allCounterparties(SCOPE), counterparties);
+      useSWR(paymentsQueryKeys.recentTransferBatches(SCOPE, { pageSize: 5 }), unrelated);
       return useOutcomeUnknownRefresh(lists);
     },
     { wrapper }
@@ -35,9 +42,7 @@ function renderLists(lists: OutcomeUnknownLists) {
 
 describe("useOutcomeUnknownRefresh", () => {
   it("revalidates only the action's own lists, and refreshes the page", async () => {
-    const { hook, counterparties, unrelated } = renderLists(
-      paymentsQueryKeys.isCounterpartyListKey
-    );
+    const { hook, counterparties, unrelated } = renderLists(isCounterpartyReadKey);
     await waitFor(() => expect(unrelated).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(counterparties).toHaveBeenCalledTimes(1));
 

@@ -1,33 +1,34 @@
+"use client";
+
 import type {
   PaymentsDashboardWallet,
   PaymentTransferBatch,
   PaymentTransferRecipient,
   PaymentTransferSummary,
 } from "@sdp/types/payments";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { StatusText, type StatusTone } from "@sdp/ui/status-text";
 import { ArrowDownIcon, Link2Icon, ReceiptTextIcon, Repeat2Icon } from "lucide-react";
 import Link from "next/link";
-import { Fragment, Suspense } from "react";
-import { loadOrganizationProviderAccess } from "@/app/(session)/dashboard/[projectId]/payments/payments-provider-access.server";
+import { Fragment, useMemo } from "react";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
-import { getEnabledRampProviders, isRampsEnabled } from "@/flags/ramps";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
-import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
-import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { projectHref } from "@/lib/dashboard-project-path";
-import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
-import { createTimedTrace } from "@/lib/request-tracing";
-import { requestMemberRole, requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
-import { fetchCounterparties } from "./counterparty/counterparty-page.data";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
 import {
-  fetchIssuedTokenSymbolsWhenIssuanceEnabled,
-  fetchIssuedTokensByMintWhenIssuanceEnabled,
-} from "./issued-tokens.server";
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+} from "@/lib/dashboard-swr";
+import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { PaymentsActivityPanels } from "./payments-activity-panels";
 import {
   PAYMENT_COMMAND_ACTION_DESTINATIONS,
@@ -59,13 +60,6 @@ import {
   statusMessageKey,
 } from "./payments-overview.utils";
 import {
-  fetchPaymentsAggregate,
-  fetchPaymentsWallets,
-  fetchPaymentTransfers,
-  fetchTransferBatches,
-  fetchTransferBatchRecipients,
-} from "./payments-page.data";
-import {
   ACTIVITY_KIND_MESSAGE_KEYS,
   activityKind,
   formatDecimalAmount,
@@ -75,27 +69,75 @@ import {
   rampFiatSide,
   summarizeBatch,
 } from "./payments-presentation";
-import { fetchRecurringPayments } from "./recurring/recurring-payments.data";
-import { fetchPaymentRequests } from "./requests/payment-requests-page.data";
+import { paymentsQueryKeys } from "./payments-query-key";
+import {
+  transferBatchListResponseSchema,
+  transferBatchResponseSchema,
+  transferListResponseSchema,
+} from "./payments-read-schemas";
+import { recurringPaymentsListEnvelopeSchema } from "./recurring/recurring-payments.data";
+import { paymentRequestsListResponseSchema } from "./requests/payment-requests-page.data";
+import {
+  useCounterparties,
+  useIssuedTokens,
+  useOrganizationProviderAccess,
+  useWalletAggregate,
+  useWalletSummaries,
+} from "./shared-reads";
 import { UnpricedHoldingsHint } from "./unpriced-holdings-hint";
 
-type ApiClientPromise = Promise<{ request: SdpApiClient["request"] }>;
-type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type Translate = ReturnType<typeof useTranslations>;
 
 const ACTIVITY_ROW_COUNT = 5;
 
-async function MoveMoneyActions() {
-  const [t, projectId, role, rampsOffered] = await Promise.all([
-    getTranslations(),
-    requestProjectId(),
-    requestMemberRole(),
-    isRampsEnabled(),
-  ]);
+/** What the deployment runs, as the page's flags and release channel say. */
+export interface PaymentsCommandCenterModules {
+  /** Ramps offered here (`isRampsEnabled`): the Pay and Deposit lines name fiat. */
+  rampsOffered: boolean;
+  /** The release channel runs Ramps: activity lists ramps beside transfers. */
+  rampsInReleaseChannel: boolean;
+  complianceInReleaseChannel: boolean;
+  issuanceEnabled: boolean;
+  /** The ramp providers the channel-capped flags leave on (`getEnabledRampProviders`). */
+  enabledRampProviders: readonly RampProviderId[];
+}
+
+interface RecentBatch {
+  batch: PaymentTransferBatch;
+  recipients: readonly PaymentTransferRecipient[];
+}
+
+/** The recent batches and each one's recipients, which turn "partially failed" into "1 of 8 failed". */
+async function readRecentBatches(key: DashboardRequestKey): Promise<RecentBatch[]> {
+  const scope = { projectId: key[0], mode: key[1] };
+  const list = await readDashboardRequest(key, transferBatchListResponseSchema);
+  return Promise.all(
+    list.data.map(async (batch) => {
+      const detail = await readDashboardRequest(
+        paymentsQueryKeys.transferBatch(scope, batch.id),
+        transferBatchResponseSchema
+      );
+      return { batch, recipients: detail.data.recipients };
+    })
+  );
+}
+
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  const t = useTranslations();
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+      {t("Shared.SharedComponents.retry")}
+    </Button>
+  );
+}
+
+function MoveMoneyActions({ modules }: { modules: PaymentsCommandCenterModules }) {
+  const t = useTranslations();
+  const projectHref = useProjectHref();
   // Every tile starts a payment; a read-only member has none to start.
-  if (!resolveDashboardAccess(role).capabilities.canWrite) {
+  if (!useCanWrite()) {
     return null;
   }
-  const complianceInChannel = isModuleInDeploymentReleaseChannel("compliance");
   return (
     <section
       className="grid min-w-0 grid-cols-2 content-start gap-2"
@@ -103,25 +145,30 @@ async function MoveMoneyActions() {
       data-payments-overview-section="actions"
     >
       <ActionTile
-        href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.pay)}
+        href={projectHref(PAYMENT_COMMAND_ACTION_DESTINATIONS.pay)}
         icon={ReceiptTextIcon}
         label={t("DashboardPayments.pay")}
-        description={t(payLineKey({ ramps: rampsOffered, compliance: complianceInChannel }))}
+        description={t(
+          payLineKey({
+            ramps: modules.rampsOffered,
+            compliance: modules.complianceInReleaseChannel,
+          })
+        )}
       />
       <ActionTile
-        href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.deposit)}
+        href={projectHref(PAYMENT_COMMAND_ACTION_DESTINATIONS.deposit)}
         icon={ArrowDownIcon}
         label={t("DashboardPayments.deposit")}
-        description={t(depositLineKey(rampsOffered))}
+        description={t(depositLineKey(modules.rampsOffered))}
       />
       <ActionTile
-        href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.request)}
+        href={projectHref(PAYMENT_COMMAND_ACTION_DESTINATIONS.request)}
         icon={Link2Icon}
         label={t("DashboardPayments.newDesign.commandCenter.requestPayment")}
         description={t("DashboardPayments.newDesign.commandCenter.requestPaymentDescription")}
       />
       <ActionTile
-        href={projectHref(projectId, PAYMENT_COMMAND_ACTION_DESTINATIONS.schedule)}
+        href={projectHref(PAYMENT_COMMAND_ACTION_DESTINATIONS.schedule)}
         icon={Repeat2Icon}
         label={t("DashboardPayments.commandCenter.schedule")}
         description={t("DashboardPayments.newDesign.commandCenter.scheduleDescription")}
@@ -130,41 +177,38 @@ async function MoveMoneyActions() {
   );
 }
 
-async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
-  const [{ request }, t, locale] = await Promise.all([
-    apiClientPromise,
-    getTranslations(),
-    getRequestLocale(),
-  ]);
-  const trace = createTimedTrace("dashboard.payments.overview.balance");
-  const [result, issuedTokensByMint] = await Promise.all([
-    trace.step("fetch_aggregate", () => fetchPaymentsAggregate(request)),
-    trace.step("fetch_issued_token_symbols", () =>
-      fetchIssuedTokensByMintWhenIssuanceEnabled(request)
-    ),
-  ]);
-  trace.log({
-    ok: result.ok,
-    requestCount: 2,
-    responseBytes: new TextEncoder().encode(JSON.stringify(result.data ?? null)).byteLength,
-  });
+function AvailableBalance({ issuanceEnabled }: { issuanceEnabled: boolean }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const aggregate = useWalletAggregate();
+  const issuedTokens = useIssuedTokens(issuanceEnabled);
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens.data ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens.data]
+  );
+  if (aggregate.data === undefined && aggregate.error === undefined) {
+    return <PaymentsBalanceSkeleton />;
+  }
   const heading = (
     <h2 className="text-meta text-secondary">
       {t("DashboardPayments.commandCenter.availableBalance")}
     </h2>
   );
-  if (!result.ok || !result.data) {
+  if (aggregate.data === undefined) {
     return (
       <section className="min-w-0" data-payments-overview-section="balance">
         {heading}
         <p className="mt-3 text-body text-tertiary">
           {t("DashboardPayments.commandCenter.balanceUnavailable")}
         </p>
+        <div className="mt-3">
+          <RetryButton onRetry={() => void aggregate.mutate()} />
+        </div>
       </section>
     );
   }
 
-  const aggregateBalances = result.data.balances ?? [];
+  const aggregateBalances = aggregate.data.balances;
   const balances = normalizeAggregateBalances(aggregateBalances);
   const topBalances = selectTopAggregateBalanceRows(balances, {}).slice(0, 3);
   // The aggregate answered, so no rows at all means nothing is held: $0.00, not a missing total.
@@ -234,66 +278,58 @@ function countLabel(t: Translate, key: string, count: number | null): string {
 }
 
 /**
- * How many ramp providers the organization has enabled. Null where the dashboard offers no
- * ramp provider (stable runs no Ramps), whose two reads are then skipped, or where access can't
- * be read.
- */
-async function loadRampProviderCount(rampsOffered: boolean): Promise<number | null> {
-  if (!rampsOffered) return null;
-  const [providerAccess, enabledRampProviders] = await Promise.all([
-    loadOrganizationProviderAccess(),
-    getEnabledRampProviders(),
-  ]);
-  if (providerAccess === null) return null;
-  return Object.values(
-    filterEnabledRampProviderAccess(providerAccess.rampProviderAccess, enabledRampProviders)
-  ).filter((access) => access.entitled && access.configured && access.enabled).length;
-}
-
-/**
  * The one-line census under the balance: contacts, open requests, active schedules and
  * enabled providers. Each count links to where it is managed; a core count that failed to load
  * reads "—" rather than a misleading zero, and providers drop out where no ramp provider is
  * offered or their availability can't be read at all.
  */
-async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
-  const [{ request }, t, projectId, rampsOffered] = await Promise.all([
-    apiClientPromise,
-    getTranslations(),
-    requestProjectId(),
-    isRampsEnabled(),
-  ]);
-  const trace = createTimedTrace("dashboard.payments.overview.summary");
-  const [counterparties, requests, recurring, providerCount] = await trace.step(
-    "fetch_summary_counts",
-    () =>
-      Promise.all([
-        fetchCounterparties(request, { page: 1, pageSize: 1 }),
-        fetchPaymentRequests(request, { pageSize: 1, status: "awaiting_payment" }),
-        fetchRecurringPayments(request, t, { page: 1, pageSize: 1, status: "active" }),
-        loadRampProviderCount(rampsOffered),
-      ])
+function PaymentsSummaryLine({ modules }: { modules: PaymentsCommandCenterModules }) {
+  const t = useTranslations();
+  const providerAccess = useOrganizationProviderAccess();
+  // Null where the dashboard offers no ramp provider (stable runs no Ramps), or where access
+  // can't be read: the count drops out rather than read as none.
+  const providerCount =
+    !modules.rampsOffered || providerAccess.data === undefined
+      ? null
+      : Object.values(
+          filterEnabledRampProviderAccess(providerAccess.data.ramps, modules.enabledRampProviders)
+        ).filter((access) => access.entitled && access.configured && access.enabled).length;
+  const projectHref = useProjectHref();
+  const scope = useDashboardKeyScope();
+  const contacts = useCounterparties({ page: 1, pageSize: 1 });
+  const openRequests = useDashboardRead(
+    paymentsQueryKeys.paymentRequests(scope, { page: 1, pageSize: 1, status: "awaiting_payment" }),
+    paymentRequestsListResponseSchema
   );
-  trace.log({
-    ok: counterparties.ok || requests.ok || recurring.ok || providerCount !== null,
-    requestCount: rampsOffered ? 4 : 3,
-  });
+  const schedules = useDashboardRead(
+    paymentsQueryKeys.recurringPayments(scope, { page: 1, pageSize: 1, status: "active" }),
+    recurringPaymentsListEnvelopeSchema
+  );
+  const counts = [contacts, openRequests, schedules];
+  const providerAccessPending =
+    modules.rampsOffered && providerAccess.data === undefined && providerAccess.error === undefined;
+  if (
+    providerAccessPending ||
+    counts.every((read) => read.data === undefined && read.error === undefined)
+  ) {
+    return <PaymentsSummarySkeleton />;
+  }
   const base = "DashboardPayments.commandCenter.summary";
   const items = [
     {
       key: "contacts",
       href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.contacts,
-      count: counterparties.ok ? counterparties.total : null,
+      count: contacts.data === undefined ? null : contacts.data.total,
     },
     {
       key: "openRequests",
       href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.openRequests,
-      count: requests.ok ? requests.total : null,
+      count: openRequests.data === undefined ? null : openRequests.data.data.total,
     },
     {
       key: "schedules",
       href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.schedules,
-      count: recurring.ok ? recurring.data.total : null,
+      count: schedules.data === undefined ? null : schedules.data.data.total,
     },
     ...(providerCount === null
       ? []
@@ -305,6 +341,7 @@ async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: Api
           },
         ]),
   ];
+  const failedCounts = counts.filter((read) => read.error !== undefined);
   return (
     <section
       className="mt-10 border-t border-border-default pt-6"
@@ -319,10 +356,7 @@ async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: Api
                 ·
               </span>
             ) : null}
-            <Link
-              href={projectHref(projectId, item.href)}
-              className="transition-colors hover:text-primary"
-            >
+            <Link href={projectHref(item.href)} className="transition-colors hover:text-primary">
               <span className="text-field font-medium text-primary tabular-nums">
                 {item.count ?? "—"}
               </span>{" "}
@@ -331,6 +365,15 @@ async function PaymentsSummaryLine({ apiClientPromise }: { apiClientPromise: Api
           </Fragment>
         ))}
       </p>
+      {failedCounts.length > 0 ? (
+        <div className="mt-3">
+          <RetryButton
+            onRetry={() => {
+              for (const read of failedCounts) void read.mutate();
+            }}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -384,12 +427,14 @@ function ActivityList({
   rows,
   empty,
   unavailable,
+  onRetry,
   viewAll,
 }: {
   rows: readonly Parameters<typeof ActivityRow>[0][] | null;
   /** The design's empty state: what would show here, and the one way on from it. */
   empty: { title: string; description: string; actionLabel: string };
   unavailable: string;
+  onRetry: () => void;
   viewAll: { href: string; label: string };
 }) {
   if (rows !== null && rows.length === 0) {
@@ -409,7 +454,10 @@ function ActivityList({
   return (
     <>
       {rows === null ? (
-        <p className="py-8 text-body text-tertiary">{unavailable}</p>
+        <div className="flex flex-col items-start gap-3 py-8">
+          <p className="text-body text-tertiary">{unavailable}</p>
+          <RetryButton onRetry={onRetry} />
+        </div>
       ) : (
         <ul>
           {rows.map((row) => (
@@ -440,12 +488,12 @@ function transferRow(
     t: Translate;
     locale: string;
     timeZone: string;
-    projectId: string;
+    projectHref: (path: string) => string;
     walletsById: ReadonlyMap<string, PaymentsDashboardWallet>;
     issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
   }
 ): Parameters<typeof ActivityRow>[0] {
-  const { t, locale, timeZone, projectId, walletsById, issuedTokenSymbolsByMint } = context;
+  const { t, locale, timeZone, projectHref, walletsById, issuedTokenSymbolsByMint } = context;
   const counterparty = resolveCommandCenterCounterparty(transfer);
   const direction =
     transfer.direction === "inbound" || transfer.direction === "outbound"
@@ -474,10 +522,7 @@ function transferRow(
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS[activityKind(transfer)]);
   const detail = [kind, wallet, transfer.amount ? fiat : null].filter(Boolean).join(" · ");
   return {
-    href: projectHref(
-      projectId,
-      `/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`
-    ),
+    href: projectHref(`/dashboard/payments/transactions?search=${encodeURIComponent(transfer.id)}`),
     name: counterparty.length > 24 ? shortenAddress(counterparty) : counterparty,
     detail,
     status: {
@@ -496,17 +541,17 @@ function batchRow(
     t: Translate;
     locale: string;
     timeZone: string;
-    projectId: string;
+    projectHref: (path: string) => string;
     walletsById: ReadonlyMap<string, PaymentsDashboardWallet>;
     issuedTokenSymbolsByMint: Readonly<Record<string, string>>;
   }
 ): Parameters<typeof ActivityRow>[0] {
-  const { t, locale, timeZone, projectId, walletsById, issuedTokenSymbolsByMint } = context;
+  const { t, locale, timeZone, projectHref, walletsById, issuedTokenSymbolsByMint } = context;
   const summary = summarizeBatch(batch, recipients);
   const wallet = walletName(walletsById, batch.sourceCustodyWalletId);
   const kind = t(ACTIVITY_KIND_MESSAGE_KEYS.batch);
   return {
-    href: projectHref(projectId, PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches),
+    href: projectHref(PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches),
     name:
       batch.externalId ??
       t("DashboardPayments.commandCenter.batchFallbackName", { id: batch.id.slice(-6) }),
@@ -522,46 +567,39 @@ function batchRow(
   };
 }
 
-async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromise }) {
-  const [{ request }, t, locale, timeZone, projectId] = await Promise.all([
-    apiClientPromise,
-    getTranslations(),
-    getRequestLocale(),
-    getRequestTimeZone(),
-    requestProjectId(),
-  ]);
-  const trace = createTimedTrace("dashboard.payments.overview.activity");
-  const [transfers, batches, issuedTokenSymbols, wallets] = await Promise.all([
-    trace.step("fetch_recent_transfers", () =>
-      fetchPaymentTransfers(request, ACTIVITY_ROW_COUNT, {
-        includeObserved: false,
-        types: activityTransferTypes(isModuleInDeploymentReleaseChannel("ramps")),
-      })
-    ),
-    trace.step("fetch_recent_batches", () => fetchTransferBatches(request, ACTIVITY_ROW_COUNT)),
-    fetchIssuedTokenSymbolsWhenIssuanceEnabled(request),
-    fetchPaymentsWallets(request, { view: "summary" }),
-  ]);
-  // Recipient counts turn "partially failed" into "1 of 8 failed". Best effort: a batch whose
-  // recipients fail to load falls back to its own status.
-  const recipientsByBatch = await trace.step("fetch_batch_recipients", () =>
-    Promise.all(
-      (batches.data ?? []).map((batch) => fetchTransferBatchRecipients(request, batch.id))
-    )
+function Activity({ modules }: { modules: PaymentsCommandCenterModules }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
+  const projectHref = useProjectHref();
+  const scope = useDashboardKeyScope();
+  const transfers = useDashboardRead(
+    paymentsQueryKeys.recentTransfers(scope, {
+      pageSize: ACTIVITY_ROW_COUNT,
+      types: activityTransferTypes(modules.rampsInReleaseChannel),
+    }),
+    transferListResponseSchema
   );
-  trace.log({
-    ok: transfers.ok || batches.ok,
-    requestCount: 4 + recipientsByBatch.length,
-    resultCount: (transfers.data?.length ?? 0) + (batches.data?.length ?? 0),
-  });
+  const batches = useDashboardSWR(
+    paymentsQueryKeys.recentTransferBatches(scope, { pageSize: ACTIVITY_ROW_COUNT }),
+    readRecentBatches
+  );
+  const issuedTokens = useIssuedTokens(modules.issuanceEnabled);
+  const wallets = useWalletSummaries({ includeBalances: false });
+  if (
+    (transfers.data === undefined && transfers.error === undefined) ||
+    (batches.data === undefined && batches.error === undefined)
+  ) {
+    return <PaymentsActivitySkeleton />;
+  }
   const context = {
     t,
     locale,
     timeZone,
-    projectId,
+    projectHref,
     walletsById: new Map((wallets.data ?? []).map((wallet) => [wallet.id, wallet])),
     issuedTokenSymbolsByMint: Object.fromEntries(
-      (issuedTokenSymbols.data ?? []).map((token) => [token.mintAddress, token.symbol])
+      (issuedTokens.data ?? []).map((token) => [token.mintAddress, token.symbol])
     ),
   };
   const unavailable = t("DashboardPayments.commandCenter.activityUnavailable");
@@ -576,9 +614,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
         transfers={
           <ActivityList
             rows={
-              transfers.ok
-                ? (transfers.data ?? []).map((transfer) => transferRow(transfer, context))
-                : null
+              transfers.data === undefined
+                ? null
+                : transfers.data.data.map((transfer) => transferRow(transfer, context))
             }
             empty={{
               title: t("DashboardPayments.commandCenter.noTransfersTitle"),
@@ -586,8 +624,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
               actionLabel: t("DashboardPayments.commandCenter.openTransactions"),
             }}
             unavailable={unavailable}
+            onRetry={() => void transfers.mutate()}
             viewAll={{
-              href: projectHref(projectId, PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.transfers),
+              href: projectHref(PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.transfers),
               label: t("DashboardPayments.viewAllTransactions"),
             }}
           />
@@ -595,11 +634,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
         batches={
           <ActivityList
             rows={
-              batches.ok
-                ? (batches.data ?? []).map((batch, index) =>
-                    batchRow(batch, recipientsByBatch[index]?.data, context)
-                  )
-                : null
+              batches.data === undefined
+                ? null
+                : batches.data.map(({ batch, recipients }) => batchRow(batch, recipients, context))
             }
             empty={{
               title: t("DashboardPayments.commandCenter.noBatchesTitle"),
@@ -607,8 +644,9 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
               actionLabel: t("DashboardPayments.commandCenter.openTransactions"),
             }}
             unavailable={unavailable}
+            onRetry={() => void batches.mutate()}
             viewAll={{
-              href: projectHref(projectId, PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches),
+              href: projectHref(PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches),
               label: t("DashboardPayments.commandCenter.viewAllBatches"),
             }}
           />
@@ -618,27 +656,17 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
   );
 }
 
-export function PaymentsCommandCenter({
-  apiClientPromise,
-}: {
-  apiClientPromise: ApiClientPromise;
-}) {
+export function PaymentsCommandCenter({ modules }: { modules: PaymentsCommandCenterModules }) {
   return (
     <div className="flex min-w-0 flex-col gap-16" data-payments-command-center>
       <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
         <div className="min-w-0">
-          <Suspense fallback={<PaymentsBalanceSkeleton />}>
-            <AvailableBalance apiClientPromise={apiClientPromise} />
-          </Suspense>
-          <Suspense fallback={<PaymentsSummarySkeleton />}>
-            <PaymentsSummaryLine apiClientPromise={apiClientPromise} />
-          </Suspense>
+          <AvailableBalance issuanceEnabled={modules.issuanceEnabled} />
+          <PaymentsSummaryLine modules={modules} />
         </div>
-        <MoveMoneyActions />
+        <MoveMoneyActions modules={modules} />
       </div>
-      <Suspense fallback={<PaymentsActivitySkeleton />}>
-        <Activity apiClientPromise={apiClientPromise} />
-      </Suspense>
+      <Activity modules={modules} />
     </div>
   );
 }

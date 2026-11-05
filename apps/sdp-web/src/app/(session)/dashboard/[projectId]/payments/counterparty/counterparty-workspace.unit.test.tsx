@@ -1,11 +1,16 @@
+// @vitest-environment jsdom
+
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CounterpartyAccountSummary } from "@sdp/types/payments";
 import type { OrganizationRole } from "@sdp/types/roles";
-import { act, type ReactNode } from "react";
-import type { Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { counterpartyReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
+import { stubDashboardFetch } from "@/test/dashboard-fetch";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
 import { filterDirectory } from "./counterparty-directory-filter";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
 
@@ -114,60 +119,77 @@ describe("filterDirectory", () => {
   });
 });
 
-describe("CounterpartyWorkspace address filter", () => {
-  let environment: EnvironmentReturn;
-  let root: Root;
-  let container: HTMLDivElement;
+const directory = { contacts: [withAddress, withoutAddress], addressesFail: false };
 
-  beforeAll(async () => {
-    environment = await builtinEnvironments.jsdom.setup(globalThis, {
-      jsdom: { url: "http://localhost" },
+function serveDirectory() {
+  return stubDashboardFetch(({ path }) => {
+    if (path.startsWith("/api/dashboard/counterparty/accounts?")) {
+      return directory.addressesFail
+        ? Response.json({ error: { message: "unavailable" } }, { status: 503 })
+        : Response.json({ data: { accounts: [savedAccount], total: 1, page: 1, pageSize: 100 } });
+    }
+    return Response.json({
+      data: {
+        counterparties: directory.contacts,
+        total: directory.contacts.length,
+        page: 1,
+        pageSize: 100,
+      },
     });
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   });
-  afterEach(async () => {
-    if (root !== undefined) await act(async () => root.unmount());
-    container?.remove();
-  });
-  afterAll(async () => {
-    vi.unstubAllGlobals();
-    await environment.teardown(globalThis);
-  });
+}
 
-  function workspace(accountsFailed: boolean) {
-    return (
-      <CounterpartyWorkspace
-        counterparties={[withAddress, withoutAddress]}
-        total={2}
-        accounts={accountsFailed ? [] : [savedAccount]}
-        accountsFailed={accountsFailed}
-      />
-    );
-  }
+function ReadContactsAgain() {
+  const invalidateReads = useInvalidateDashboardReads();
+  return (
+    <button type="button" onClick={() => void invalidateReads(counterpartyReads)}>
+      read contacts again
+    </button>
+  );
+}
 
-  function visibleNames() {
-    return [...container.querySelectorAll("[data-counterparty-directory-table] tbody tr")].map(
-      (row) => row.textContent ?? ""
-    );
-  }
+async function renderDirectory() {
+  serveDirectory();
+  const view = render(
+    <DashboardReadsProvider>
+      <CounterpartyWorkspace />
+      <ReadContactsAgain />
+    </DashboardReadsProvider>
+  );
+  await waitFor(() =>
+    expect(document.querySelector('[data-loading-layout="counterparty-directory"]')).toBeNull()
+  );
+  return view.container;
+}
 
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  access.role = "member";
+  directory.contacts = [withAddress, withoutAddress];
+  directory.addressesFail = false;
+});
+
+describe("CounterpartyWorkspace address filter", () => {
   it("stops applying a selected address filter once a refresh hides it", async () => {
-    container = document.createElement("div");
-    document.body.append(container);
-    const { createRoot } = await import("react-dom/client");
-    root = createRoot(container);
-    await act(async () => root.render(workspace(false)));
+    const container = await renderDirectory();
+    const visibleNames = () =>
+      [...container.querySelectorAll("[data-counterparty-directory-table] tbody tr")].map(
+        (row) => row.textContent ?? ""
+      );
 
     const hasAddress = container.querySelector<HTMLButtonElement>('[data-filter-option="with"]');
     if (hasAddress === null) throw new Error("Expected the address filter to be offered");
-    await act(async () => hasAddress.click());
+    act(() => hasAddress.click());
     expect(visibleNames()).toHaveLength(1);
     expect(visibleNames()[0]).toContain("Has Wallet");
 
-    // A refresh whose saved-address read fails: the same mounted list, new props.
-    await act(async () => root.render(workspace(true)));
+    directory.addressesFail = true;
+    act(() => screen.getByRole("button", { name: "read contacts again" }).click());
 
-    expect(container.querySelector('[data-filter-section="address"]')).toBeNull();
+    await waitFor(() =>
+      expect(container.querySelector('[data-filter-section="address"]')).toBeNull()
+    );
     expect(container.textContent).not.toContain("DashboardPayments.counterparty.noMatches");
     const names = visibleNames();
     expect(names).toHaveLength(2);
@@ -176,45 +198,20 @@ describe("CounterpartyWorkspace address filter", () => {
 });
 
 describe("CounterpartyWorkspace for a read-only member", () => {
-  let environment: EnvironmentReturn;
-  let root: Root;
-  let container: HTMLDivElement;
-
-  beforeAll(async () => {
-    environment = await builtinEnvironments.jsdom.setup(globalThis, {
-      jsdom: { url: "http://localhost" },
-    });
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  });
-  afterEach(async () => {
-    access.role = "member";
-    if (root !== undefined) await act(async () => root.unmount());
-    container?.remove();
-  });
-  afterAll(async () => {
-    vi.unstubAllGlobals();
-    await environment.teardown(globalThis);
-  });
-
   async function renderEmptyDirectory(role: OrganizationRole) {
     access.role = role;
-    container = document.createElement("div");
-    document.body.append(container);
-    const { createRoot } = await import("react-dom/client");
-    root = createRoot(container);
-    await act(async () =>
-      root.render(<CounterpartyWorkspace counterparties={[]} total={0} accounts={[]} />)
-    );
+    directory.contacts = [];
+    return renderDirectory();
   }
 
   it("offers a member the first contact from the empty directory", async () => {
-    await renderEmptyDirectory("member");
+    const container = await renderEmptyDirectory("member");
     expect(container.querySelector('a[href$="/payments/counterparty/create"]')).not.toBeNull();
   });
 
   it("offers a viewer no contact to add", async () => {
     expect(resolveDashboardAccess("viewer").capabilities.canWrite).toBe(false);
-    await renderEmptyDirectory("viewer");
+    const container = await renderEmptyDirectory("viewer");
     expect(container.textContent).toContain("DashboardPayments.counterparty.noContacts");
     expect(container.querySelector('a[href$="/payments/counterparty/create"]')).toBeNull();
     expect(container.textContent).not.toContain("DashboardPayments.counterparty.addContact");

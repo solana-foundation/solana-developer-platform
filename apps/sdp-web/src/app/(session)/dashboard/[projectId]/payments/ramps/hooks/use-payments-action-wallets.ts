@@ -1,43 +1,28 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import useSWR from "swr";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import { fetchWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useTranslations } from "@/i18n/provider";
 
-/**
- * Loads payment action wallets with live balances while preserving the initial server wallet state.
- */
-export function usePaymentsActionWallets(
-  wallets: PaymentsDashboardWallet[],
-  walletsError: string | null
-): {
+/** The Project's wallets with live balances, for the payment flows' wallet pickers. */
+export function usePaymentsActionWallets(): {
   liveWallets: PaymentsDashboardWallet[];
   walletsLoading: boolean;
   liveWalletsError: string | null;
+  retryWallets: () => void;
 } {
   const t = useTranslations();
-  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
-    paymentsQueryKeys.actionWallets(),
-    () => fetchWallets({ includeBalances: true }, t),
-    {
-      fallbackData: wallets.length > 0 ? wallets : undefined,
-    }
-  );
-  const liveWallets = swrWallets ?? wallets;
-  const walletsLoading = swrWallets === undefined && !walletsFetchError;
-  const liveWalletsError = walletsFetchError
-    ? walletsFetchError instanceof Error
-      ? walletsFetchError.message
-      : t("DashboardPayments.requestFailed")
-    : swrWallets === undefined
-      ? walletsError
-      : null;
-
+  const { data, error, mutate } = useWalletSummaries({ includeBalances: true });
   return {
-    liveWallets,
-    walletsLoading,
-    liveWalletsError,
+    liveWallets: data ?? [],
+    walletsLoading: data === undefined && error === undefined,
+    liveWalletsError:
+      error === undefined
+        ? null
+        : t("DashboardPayments.page.walletApiError", {
+            status: error.status,
+            error: error.code ?? t("DashboardPayments.page.unknownError"),
+          }),
+    retryWallets: () => void mutate(),
   };
 }

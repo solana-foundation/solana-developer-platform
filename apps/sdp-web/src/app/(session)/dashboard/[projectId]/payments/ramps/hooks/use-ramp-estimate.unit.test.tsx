@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
+import {
+  dashboardDataResponse,
+  sentDashboardReads,
+  sentDashboardRequests,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { SANDBOX_PROJECT } from "@/test/projects";
 import { useRampEstimate } from "./use-ramp-estimate";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -24,6 +34,49 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("ramp estimate request", () => {
+  it.each([
+    {
+      direction: "onramp",
+      demo: false,
+      body: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: "100" },
+    },
+    {
+      direction: "offramp",
+      demo: true,
+      body: { assetRail: "usdc.solana", fiatCurrency: "USD", cryptoAmount: "100" },
+    },
+  ] as const)(
+    "posts the $direction amount under the tab's Project and mode (demo: $demo)",
+    async ({ direction, demo, body }) => {
+      const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, { estimates: [] }));
+      renderHook(
+        () =>
+          useRampEstimate({
+            direction,
+            selectedPair: { fiatCurrency: "USD", assetRail: "usdc.solana" },
+            amount: "100",
+            enabled: true,
+          }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <PaymentsDemoProvider value={demo}>{wrapper({ children })}</PaymentsDemoProvider>
+          ),
+        }
+      );
+
+      const path = `/api/dashboard/payments/ramps/${direction}/estimate`;
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      expect(sentDashboardRequests(fetchMock)).toEqual([
+        { path, method: "POST", idempotencyKey: null, body },
+      ]);
+      expect(sentDashboardReads(fetchMock)).toEqual([
+        { path, projectId: SANDBOX_PROJECT.id, demo: demo ? "1" : null },
+      ]);
+    }
+  );
 });
 
 describe("ramp estimate identity", () => {

@@ -1,27 +1,40 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types/counterparties";
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
-import useSWR, { preload } from "swr";
+import { preload } from "swr";
+import { counterpartyAccountsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
+import {
+  type CounterpartyOptions,
+  useAllCounterparties,
+} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-all-counterparties";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
-  type CounterpartiesResult,
-  counterpartyListComplete,
-  fetchAllCounterparties,
-  fetchCounterpartyAccounts,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
-import { useCanWrite } from "@/contexts/dashboard-workspace-context";
+  PaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import {
+  useIssuedTokens,
+  useOrganizationProviderAccess,
+  usePrivateChannelInstance,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
+import { useCanWrite, useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest, useDashboardKeyScope } from "@/lib/dashboard-swr";
 import {
   replaceDashboardSearchParams,
   useDashboardSearchParam,
   useDashboardTab,
 } from "@/lib/dashboard-url-state";
-import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
+import {
+  filterEnabledRampProviderAccess,
+  hasEnabledRampProvider,
+  type RampProviderAccess,
+} from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { BatchSendRail } from "./batch-send-rail";
 import { DepositAddressPanel } from "./components/deposit-address-panel";
@@ -37,26 +50,21 @@ import { useRampsOffered } from "./use-ramps-offered";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
-  issuedTokenSymbolsByMint: Record<string, string>;
-  enabledComplianceProviders: ComplianceProviderId[];
+  /** The ramp providers the channel-capped flags leave on (`getEnabledRampProviders`). */
   enabledRampProviders: RampProviderId[];
-  rampProviderAccess: RampProviderAccess | null;
-  counterpartiesResult: CounterpartiesResult;
-  /** Pay only: whether the project can send privately, for the details step's notice. */
-  privateSend?: PrivateSendStatus | null;
+  /** Whether Issuance is on, so its tokens can name balances. */
+  issuanceEnabled: boolean;
+  /** Pay only: whether Private Channels is on, so the details step can say whether it sends privately. */
+  privateChannelsEnabled?: boolean;
 }
 
 type WizardStep = { label: string; title: string };
 
 export interface RailProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
-  counterpartiesResult: CounterpartiesResult;
+  counterparties: CounterpartyOptions;
   selectedCounterparty: Counterparty | null;
   counterpartyId: string;
   counterpartyName: string;
@@ -65,15 +73,59 @@ export interface RailProps {
   onExit: () => void;
 }
 
+/** The organization's ramp provider access, as the flows read it. */
+interface ProviderAccessState {
+  /** Null when the read failed or was skipped: no access, so the provider flows stay off. */
+  rampProviderAccess: RampProviderAccess | null;
+  /** The read has answered (or was never needed). */
+  settled: boolean;
+}
+
 /**
- * Pay and Deposit. The header's tabs pick the variant (Pay: Single / Batch; Deposit: Solana
- * address / Card or bank through a provider). Each flow opens on one details step with the
- * contact inside it; a single payment can hand off to a bank payout, and a deposit to an
- * address needs no contact at all.
+ * Pay and Deposit. Provider access serves only Ramps (the fiat rails) and Compliance (address
+ * screening), so where neither runs here it is not read at all.
  */
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
+  const rampsOffered = useRampsOffered();
+  const complianceRuns = useDashboardWorkspace().flags.compliance;
+  return rampsOffered || complianceRuns ? (
+    <PaymentsActionPageWithProviderAccess {...props} />
+  ) : (
+    <PaymentsActionFlows {...props} providerAccess={{ rampProviderAccess: null, settled: true }} />
+  );
+}
+
+function PaymentsActionPageWithProviderAccess(props: PaymentsActionPageProps) {
+  const providerAccess = useOrganizationProviderAccess();
+  return (
+    <PaymentsActionFlows
+      {...props}
+      providerAccess={{
+        // A failed read is no access: the provider flows stay off rather than open on a guess.
+        rampProviderAccess:
+          providerAccess.data === undefined
+            ? null
+            : filterEnabledRampProviderAccess(
+                providerAccess.data.ramps,
+                props.enabledRampProviders
+              ),
+        settled: providerAccess.data !== undefined || providerAccess.error !== undefined,
+      }}
+    />
+  );
+}
+
+/**
+ * The header's tabs pick the variant (Pay: Single / Batch; Deposit: Solana address / Card or
+ * bank through a provider). Each flow opens on one details step with the contact inside it; a
+ * single payment can hand off to a bank payout, and a deposit to an address needs no contact.
+ */
+function PaymentsActionFlows({
+  providerAccess,
+  ...props
+}: PaymentsActionPageProps & { providerAccess: ProviderAccessState }) {
   const t = useTranslations();
-  const { mode, rampProviderAccess } = props;
+  const { mode } = props;
   const router = useRouter();
   const href = useProjectHref();
   const tab = useDashboardTab();
@@ -89,17 +141,25 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const payByBank = useDashboardSearchParam("method") === "bank" && counterpartyId !== "";
   const exitToPayments = () => router.push(href("/dashboard/payments"));
 
-  const { data: counterpartiesResult } = useSWR(
-    paymentsQueryKeys.actionCounterparties(),
-    fetchAllCounterparties,
-    {
-      fallbackData: props.counterpartiesResult,
-      // The server read the first page: reuse it when it holds every contact, and
-      // finish loading a larger directory here.
-      revalidateIfStale: !counterpartyListComplete(props.counterpartiesResult),
-    }
+  const scope = useDashboardKeyScope();
+  const counterparties = useAllCounterparties();
+  const liveCounterparties = counterparties.result;
+  const issuedTokens = useIssuedTokens(props.issuanceEnabled);
+  const issuedTokenSymbolsByMint = useMemo(
+    () =>
+      Object.fromEntries(
+        (issuedTokens.data ?? []).map((token) => [token.mintAddress, token.symbol])
+      ),
+    [issuedTokens.data]
   );
-  const liveCounterparties = counterpartiesResult ?? props.counterpartiesResult;
+  const { rampProviderAccess } = providerAccess;
+  const instance = usePrivateChannelInstance(props.privateChannelsEnabled === true);
+  const privateSend: PrivateSendStatus | null = !props.privateChannelsEnabled
+    ? null
+    : instance.data === undefined && instance.error === undefined
+      ? null
+      : // A failed read counts as not connected.
+        { enabled: true, connected: instance.data?.isActive === true };
 
   const selectCounterparty = (id: string) => {
     setCounterpartyId(id);
@@ -107,8 +167,8 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     if (!id) {
       return;
     }
-    void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId: id }), () =>
-      fetchCounterpartyAccounts(id, t)
+    void preload(paymentsQueryKeys.counterpartyAccounts(scope, id), (key: DashboardRequestKey) =>
+      readDashboardRequest(key, counterpartyAccountsResponseSchema)
     );
   };
 
@@ -133,12 +193,10 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const counterpartyName = selectedCounterparty ? selectedCounterparty.displayName : "";
 
   const railProps: RailProps = {
-    wallets: props.wallets,
-    walletsError: props.walletsError,
-    issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
+    issuedTokenSymbolsByMint,
     enabledRampProviders: props.enabledRampProviders,
     rampProviderAccess,
-    counterpartiesResult: liveCounterparties,
+    counterparties,
     selectedCounterparty,
     counterpartyId,
     counterpartyName,
@@ -146,7 +204,18 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     preSteps: [],
     onExit: exitToPayments,
   };
-  const contact = { counterpartiesResult: liveCounterparties, onChange: selectCounterparty };
+  const contact = {
+    counterpartiesResult: liveCounterparties,
+    loading: counterparties.loading,
+    onRetry: counterparties.retry,
+    onChange: selectCounterparty,
+  };
+
+  // Which flows open (an address, or a provider's) waits on provider access where Ramps runs, so
+  // the page never opens one flow and swaps to the other.
+  if (rampsOffered && !providerAccess.settled) {
+    return mode === "send" ? <PaymentsPayPageSkeleton /> : <PaymentsDepositPageSkeleton />;
+  }
 
   if (mode === "send") {
     return (
@@ -155,7 +224,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
         method={effectiveMethod}
         railProps={railProps}
         contact={contact}
-        privateSend={props.privateSend ?? null}
+        privateSend={privateSend}
         fiatEnabled={fiatEnabled}
         onPayByBank={() => replaceDashboardSearchParams({ method: "bank" })}
         onLeaveBank={() => replaceDashboardSearchParams({ method: null })}
@@ -199,8 +268,6 @@ function PayFlow({
   if (tab === "batch") {
     return (
       <BatchSendRail
-        wallets={railProps.wallets}
-        walletsError={railProps.walletsError}
         issuedTokenSymbolsByMint={railProps.issuedTokenSymbolsByMint}
         onExit={railProps.onExit}
       />
@@ -251,11 +318,7 @@ function DepositFlow({ tab, method, railProps, contact, fiatEnabled }: FlowProps
   if (!canWrite || method === "onchain") {
     // The address tab needs no contact: anyone can send to a wallet address.
     return tabColumn(
-      <DepositAddressPanel
-        wallets={railProps.wallets}
-        walletsError={railProps.walletsError}
-        issuedTokenSymbolsByMint={railProps.issuedTokenSymbolsByMint}
-      />
+      <DepositAddressPanel issuedTokenSymbolsByMint={railProps.issuedTokenSymbolsByMint} />
     );
   }
 

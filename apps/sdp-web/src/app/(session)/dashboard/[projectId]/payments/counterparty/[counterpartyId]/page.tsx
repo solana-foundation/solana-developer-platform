@@ -1,17 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import {
-  fetchCounterpartyDetail,
-  fetchCounterpartyPayouts,
-} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail.data";
-import { CounterpartyDetailWorkspace } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace";
+import { CounterpartyDetailRoute } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-detail-workspace";
 import { isRampsEnabled } from "@/flags/ramps";
-import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { requestProjectHref } from "@/lib/sdp-api";
 
-export const dynamic = "force-dynamic";
-
-export default async function CounterpartyDetailRoute({
+export default async function CounterpartyDetailPage({
   params,
 }: {
   params: Promise<{ counterpartyId: string }>;
@@ -21,52 +13,7 @@ export default async function CounterpartyDetailRoute({
     redirect("/dashboard");
   }
 
-  const { counterpartyId } = await params;
+  const [{ counterpartyId }, rampsEnabled] = await Promise.all([params, isRampsEnabled()]);
 
-  return withDashboardPageTrace(
-    "dashboard.counterparty.detail.page",
-    async ({ trace, apiClient }) => {
-      const [detail, payouts, rampsEnabled] = await Promise.all([
-        trace.step("fetch_counterparty_detail", () =>
-          fetchCounterpartyDetail(apiClient.request, counterpartyId)
-        ),
-        trace.step("fetch_counterparty_payouts", () =>
-          fetchCounterpartyPayouts(apiClient.request, counterpartyId)
-        ),
-        isRampsEnabled(),
-      ]);
-
-      trace.log({
-        ok: detail.counterparty !== null,
-        accounts: detail.accounts.length,
-        accountsFailed: detail.accountsFailed,
-        transfers: detail.transfers.length,
-        transfersFailed: detail.transfersFailed,
-        payouts: payouts.data.length,
-        payoutsTotal: payouts.total,
-        payoutsFailed: !payouts.ok,
-      });
-
-      if (!detail.counterparty) {
-        redirect(await requestProjectHref("/dashboard/payments/counterparty"));
-      }
-
-      return (
-        <div className="flex h-full min-h-0 w-full flex-col">
-          <CounterpartyDetailWorkspace
-            counterparty={detail.counterparty}
-            initialAccounts={detail.accounts}
-            accountsTotal={detail.accountsTotal}
-            accountsFailed={detail.accountsFailed}
-            initialTransfers={detail.transfers}
-            transfersFailed={detail.transfersFailed}
-            payouts={payouts.data}
-            payoutsTotal={payouts.total}
-            payoutsFailed={!payouts.ok}
-            rampsEnabled={rampsEnabled}
-          />
-        </div>
-      );
-    }
-  );
+  return <CounterpartyDetailRoute counterpartyId={counterpartyId} rampsEnabled={rampsEnabled} />;
 }

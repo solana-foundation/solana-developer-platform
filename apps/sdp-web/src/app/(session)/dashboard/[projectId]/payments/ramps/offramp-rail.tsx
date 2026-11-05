@@ -84,11 +84,9 @@ function offrampOnboardingState(_wizard: OfframpWizard) {
 }
 
 export function OfframpRail({
-  wallets,
-  walletsError,
   enabledRampProviders,
   rampProviderAccess,
-  counterpartiesResult,
+  counterparties,
   selectedCounterparty,
   counterpartyId,
   counterpartyName,
@@ -98,11 +96,9 @@ export function OfframpRail({
 }: RailProps) {
   const t = useTranslations();
   const wizard = useOfframpWizard({
-    wallets,
-    walletsError,
     enabledRampProviders,
     rampProviderAccess,
-    counterpartiesResult,
+    counterparties,
     selectedCounterparty,
     initialCounterpartyId: counterpartyId,
     onExit,

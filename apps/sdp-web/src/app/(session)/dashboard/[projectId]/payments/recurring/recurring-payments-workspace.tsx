@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
+import { useCounterpartyLookups } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-counterparty-lookups";
 import {
   formatDisplayAmount,
   resolveTokenByMint,
@@ -26,19 +27,28 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { formatDate } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { RecurringPaymentsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
+import {
+  useIssuedTokens,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
   type RecurringPaymentsListState,
+  recurringPaymentCounterpartyViews,
+  recurringPaymentsListEnvelopeSchema,
 } from "./recurring-payments.data";
 import {
   formatPeriodHours,
@@ -166,10 +176,13 @@ function useRecurringPaymentLabels({
   issuedTokensByMint,
   wallets,
   counterparties,
+  counterpartiesLoading,
 }: {
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   wallets: RecurringPaymentWalletView[];
   counterparties: RecurringPaymentCounterpartyView[];
+  /** The names for this page are still being read: a missing one is loading, not unavailable. */
+  counterpartiesLoading: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -194,9 +207,10 @@ function useRecurringPaymentLabels({
   };
   const getCounterpartyLabel = (recurringPayment: PaymentRecurringPayment) => {
     const counterparty = counterpartyById.get(recurringPayment.counterpartyId);
-    return counterparty === undefined
-      ? t("DashboardPayments.recurring.counterpartyUnavailable")
-      : counterparty.displayName;
+    if (counterparty !== undefined) return counterparty.displayName;
+    return counterpartiesLoading
+      ? t("DashboardPayments.recurring.counterpartyLoading")
+      : t("DashboardPayments.recurring.counterpartyUnavailable");
   };
   const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
     formatDisplayAmount(
@@ -219,8 +233,8 @@ function useRecurringPaymentLabels({
 
 type RecurringPaymentLabels = ReturnType<typeof useRecurringPaymentLabels>;
 
-/** The list could not be read: the panel says so, with the API's reason. */
-function RecurringPaymentsLoadError({ error }: { error: string }) {
+/** The list could not be read: the panel says so, and offers to read it again. */
+function RecurringPaymentsLoadError({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations();
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -229,7 +243,9 @@ function RecurringPaymentsLoadError({ error }: { error: string }) {
         className="rounded-card border border-error-border bg-error-bg p-4 text-body text-error"
       >
         <p className="font-medium">{t("DashboardPayments.newDesign.recurring.unableToLoad")}</p>
-        <p className="mt-1">{error}</p>
+        <Button type="button" variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+          {t("Shared.SharedComponents.retry")}
+        </Button>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );
@@ -438,38 +454,73 @@ function RecurringPaymentsTable({
   );
 }
 
-interface RecurringPaymentsWorkspaceProps {
-  initialRecurringPayments: PaymentRecurringPayment[];
-  total: number;
-  listState: RecurringPaymentsListState;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  initialError?: string;
-  lookupError?: string;
-  wallets: RecurringPaymentWalletView[];
-  counterparties: RecurringPaymentCounterpartyView[];
-}
-
 /**
- * The Schedules list. The status filter and the page live in the URL and load on the server;
- * search runs here over the loaded page, because the API has none.
+ * The Schedules list. The status filter and the page live in the URL and are what the list
+ * reads; search runs here over the loaded page, because the API has none.
  */
 export function RecurringPaymentsWorkspace({
-  initialRecurringPayments,
-  total,
   listState,
-  issuedTokensByMint,
-  initialError,
-  lookupError,
-  wallets,
-  counterparties,
-}: RecurringPaymentsWorkspaceProps) {
+  issuanceEnabled,
+}: {
+  listState: RecurringPaymentsListState;
+  /** Whether Issuance is on, so its tokens can name the amounts. */
+  issuanceEnabled: boolean;
+}) {
   const t = useTranslations();
   const [query, setQuery] = useState("");
   const { applyListParams, isPending } = useRecurringListParams();
-  const labels = useRecurringPaymentLabels({ issuedTokensByMint, wallets, counterparties });
+  const scope = useDashboardKeyScope();
+  const list = useDashboardRead(
+    paymentsQueryKeys.recurringPayments(scope, listState),
+    recurringPaymentsListEnvelopeSchema,
+    { keepPreviousData: true }
+  );
+  const recurringPayments = list.data?.data.recurringPayments;
+  const total = list.data?.data.total ?? 0;
+  const wallets = useWalletSummaries({ includeBalances: true });
+  const issuedTokens = useIssuedTokens(issuanceEnabled);
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens.data ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens.data]
+  );
+  const lookups = useCounterpartyLookups(
+    recurringPayments?.map((recurringPayment) => recurringPayment.counterpartyId)
+  );
+  const counterpartyViews = useMemo(
+    () =>
+      recurringPaymentCounterpartyViews(
+        lookups.data ?? [],
+        t("DashboardPayments.recurring.counterpartyArchived")
+      ),
+    [lookups.data, t]
+  );
+  const labels = useRecurringPaymentLabels({
+    issuedTokensByMint,
+    wallets: wallets.data ?? [],
+    counterparties: counterpartyViews.counterparties,
+    counterpartiesLoading: lookups.isLoading,
+  });
+  const lookupError =
+    wallets.error === undefined && counterpartyViews.failed === 0 && lookups.error === undefined
+      ? undefined
+      : [
+          wallets.error === undefined ? null : t("DashboardPayments.recurring.walletsUnavailable"),
+          counterpartyViews.failed === 0 && lookups.error === undefined
+            ? null
+            : t("DashboardPayments.recurring.someCounterpartiesUnavailable"),
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+  if (list.error !== undefined) {
+    return <RecurringPaymentsLoadError onRetry={() => void list.mutate()} />;
+  }
+  if (recurringPayments === undefined) {
+    return <RecurringPaymentsPageSkeleton />;
+  }
 
   const needle = query.trim().toLowerCase();
-  const visibleRecurringPayments = initialRecurringPayments.filter((recurringPayment) => {
+  const visibleRecurringPayments = recurringPayments.filter((recurringPayment) => {
     if (!needle) {
       return true;
     }
@@ -482,10 +533,6 @@ export function RecurringPaymentsWorkspace({
       .toLowerCase()
       .includes(needle);
   });
-
-  if (initialError) {
-    return <RecurringPaymentsLoadError error={initialError} />;
-  }
 
   if (total === 0 && listState.status === null) {
     return <RecurringPaymentsEmpty />;

@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MessageKey } from "@/i18n/messages";
 
 const mocks = vi.hoisted(() => ({ proxyToSdpApi: vi.fn() }));
 vi.mock("@/lib/sdp-api", () => mocks);
+vi.mock("@/i18n/server", async () => {
+  const { getMessages } = await import("@/i18n/messages");
+  const { translate } = await import("@/i18n/translate");
+  return {
+    getTranslations: async () => (key: MessageKey) => translate(getMessages("en"), key),
+  };
+});
 
 import { GET } from "./route";
 
@@ -18,6 +26,22 @@ describe("wallet balance confirmation context", () => {
         path: "/v1/payments/wallets/wallet%2Fone/balances?minimumSlot=101",
       })
     );
+  });
+  it("encodes a segment Next hands over still encoded only once", async () => {
+    await GET(new Request("https://dashboard.example.test/balances"), {
+      params: Promise.resolve({ walletId: "wallet%2Fone" }),
+    });
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/v1/payments/wallets/wallet%2Fone/balances" })
+    );
+  });
+  it("refuses a malformed wallet id before forwarding", async () => {
+    const response = await GET(new Request("https://dashboard.example.test/balances"), {
+      params: Promise.resolve({ walletId: "wallet%E0%A4%A" }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { message: "Invalid wallet ID." } });
+    expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
   });
   it.each(["-1", "01", "1.5", "9007199254740992", "1&minimumSlot=2"])(
     "rejects invalid minimumSlot %s before forwarding",

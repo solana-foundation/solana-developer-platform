@@ -3,10 +3,10 @@
 import type { RampDirection, RampProviderEstimateResult } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { useMemo } from "react";
-import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import { fetchRampEstimates } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import { readRampEstimates } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import type { SelectedRampPair } from "@/lib/ramps";
 import { useDebounce } from "@/lib/use-debounce";
 
@@ -37,25 +37,17 @@ export function useRampEstimate({
   const hasAmount = enabled && currentAmount.length > 0 && /[1-9]/.test(currentAmount);
   const isDebouncing = currentAmount !== debouncedAmount;
 
-  const { data, isValidating } = useSWR(
+  const scope = useDashboardKeyScope();
+  const { data, isValidating } = useDashboardSWR(
     hasAmount && !isDebouncing
-      ? paymentsQueryKeys.rampEstimate({
+      ? paymentsQueryKeys.rampEstimate(scope, {
           direction,
           fiatCurrency: selectedPair.fiatCurrency,
           assetRail: selectedPair.assetRail,
           amount: debouncedAmount,
         })
       : null,
-    () =>
-      fetchRampEstimates(
-        {
-          direction,
-          assetRail: selectedPair.assetRail,
-          fiatCurrency: selectedPair.fiatCurrency,
-          amount: debouncedAmount,
-        },
-        t
-      ),
+    (key) => readRampEstimates(key, t),
     reuseCached
       ? { keepPreviousData: false, revalidateIfStale: false, revalidateOnFocus: false }
       : { keepPreviousData: false }

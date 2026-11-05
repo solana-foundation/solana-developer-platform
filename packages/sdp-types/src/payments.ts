@@ -13,7 +13,11 @@ import {
   PRIVATE_CHANNEL_TRANSACTION_STATUSES,
   type PrivateChannelTransferStatus,
 } from "./private-channels";
-import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
+import {
+  PERSISTED_RAMP_PROVIDERS,
+  type PersistedRampProviderId,
+  type RampProviderId,
+} from "./provider-access";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
@@ -1810,3 +1814,168 @@ export type PaymentRampQuote =
       publishableKey: string;
       redirectUrl?: string;
     });
+
+// ─── Response schemas ────────────────────────────────────────────────────────
+// Each parses a record as reads return it and is checked against its interface above.
+
+export const moonpayRampSettlementSchema = z.object({
+  provider: z.literal("moonpay"),
+  status: z.enum(["completed", "failed"]),
+  transactionId: z.string(),
+  baseCurrencyCode: z.string(),
+  baseCurrencyAmount: z.number(),
+  quoteCurrencyCode: z.string(),
+  quoteCurrencyAmount: z.number(),
+  feeAmount: z.number(),
+  extraFeeAmount: z.number(),
+  networkFeeAmount: z.number(),
+  areFeesIncluded: z.boolean(),
+  usdRate: z.number(),
+  cryptoTransactionId: z.string().optional(),
+  failureReason: z.string().optional(),
+}) satisfies z.ZodType<MoonpayRampSettlement>;
+
+export const rampCryptoDepositSchema = z.object({
+  destinationAddress: z.string(),
+  amount: z.string(),
+}) satisfies z.ZodType<RampCryptoDeposit>;
+
+export const rampFiatPayoutSchema = z.object({
+  amount: z.string(),
+  currency: z.string(),
+  reportedAt: z.string().optional(),
+}) satisfies z.ZodType<RampFiatPayout>;
+
+export const rampDeliveryMismatchSchema = z.object({
+  reason: z.enum(RAMP_DELIVERY_MISMATCH_REASONS),
+  checkedAt: z.string(),
+  reportedAmount: z.string().optional(),
+  observedAmount: z.string().optional(),
+}) satisfies z.ZodType<RampDeliveryMismatch>;
+
+// unified-transactions reads this module's statuses at load, so its kinds can't be imported as a
+// value here; this copy must name every kind and no other.
+const TRANSFER_KINDS = {
+  pay: "pay",
+  confidential_pay: "confidential_pay",
+  batch_pay: "batch_pay",
+  recurring_pay: "recurring_pay",
+  deposit: "deposit",
+  request_deposit: "request_deposit",
+  onramp: "onramp",
+  offramp: "offramp",
+} as const satisfies { [Kind in PaymentTransactionKind]: Kind };
+
+export const paymentTransferSummarySchema = z.object({
+  id: z.string().min(1),
+  custodyWalletId: z.string().min(1).nullable(),
+  providerWalletId: z.string().min(1),
+  status: z.enum(PAYMENT_TRANSFER_STATUSES),
+  signature: z.string().nullable(),
+  error: z.string().nullable().optional(),
+  type: z.enum(PAYMENT_TRANSFER_TYPES).optional(),
+  kind: z.enum(TRANSFER_KINDS).optional(),
+  direction: z.string().optional(),
+  source: z.string().optional(),
+  destination: z.string().optional(),
+  token: z.string().optional(),
+  amount: z.string().optional(),
+  memo: z.string().optional(),
+  rampsMemo: z.record(z.string(), z.string()),
+  provider: z.enum(PERSISTED_RAMP_PROVIDERS).optional(),
+  counterpartyId: z.string().optional(),
+  counterpartyDisplayName: z.string().optional(),
+  providerReference: z.string().optional(),
+  fireblocks: z
+    .object({
+      transactionId: z.string().nullable(),
+      status: z.string(),
+      subStatus: z.string().nullable(),
+    })
+    .optional(),
+  deliveryMode: z.enum(["manual_instructions", "hosted", "session_widget"]).optional(),
+  fiatCurrency: z.string().optional(),
+  fiatAmount: z.string().optional(),
+  settlement: moonpayRampSettlementSchema.optional(),
+  cryptoDeposit: rampCryptoDepositSchema.optional(),
+  fiatPayout: rampFiatPayoutSchema.optional(),
+  deliveryMismatch: rampDeliveryMismatchSchema.optional(),
+  confirmedAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+}) satisfies z.ZodType<PaymentTransferSummary>;
+
+export const paymentTransferBatchSchema = z.object({
+  id: z.string().min(1),
+  organizationId: z.string(),
+  projectId: z.string(),
+  externalId: z.string().nullable(),
+  sourceCustodyWalletId: z.string().nullable(),
+  sourceProviderWalletId: z.string(),
+  sourceAddress: z.string(),
+  token: z.string(),
+  status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES),
+  totalAmount: z.string().nullable(),
+  recipientCount: z.number().int().nonnegative(),
+  transactionCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) satisfies z.ZodType<PaymentTransferBatch>;
+
+export const paymentTransferRecipientSchema = z.object({
+  id: z.string().min(1),
+  batchId: z.string(),
+  transferId: z.string().nullable(),
+  externalId: z.string().nullable(),
+  counterpartyId: z.string(),
+  counterpartyAccountId: z.string(),
+  destination: z.string(),
+  amount: z.string(),
+  status: z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) satisfies z.ZodType<PaymentTransferRecipient>;
+
+export const paymentRequestSchema = z.object({
+  id: z.string().min(1),
+  organizationId: z.string(),
+  projectId: z.string().nullable(),
+  walletId: z.string(),
+  destinationAddress: z.string(),
+  token: z.string(),
+  amount: z.string(),
+  reference: z.string(),
+  status: z.enum(PAYMENT_REQUEST_STATUSES),
+  expiresAt: z.string().nullable(),
+  fulfilledByTransferId: z.string().nullable(),
+  paidLate: z.boolean(),
+  lastCheckedAt: z.string().nullable().optional(),
+  canceledByApiKeyId: z.string().nullable(),
+  canceledByUserId: z.string().nullable(),
+  canceledAt: z.string().nullable(),
+  lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}) satisfies z.ZodType<PaymentRequest>;
+
+export const counterpartyAccountSummarySchema = z.object({
+  counterpartyId: z.string(),
+  counterpartyAccountId: z.string(),
+  name: z.string(),
+  address: z.string(),
+  label: z.string().nullable(),
+}) satisfies z.ZodType<CounterpartyAccountSummary>;
+
+export const paymentTransferBatchEstimateSchema = z.object({
+  recipientCount: z.number().int().nonnegative(),
+  transactionCount: z.number().int().nonnegative(),
+  estimatedFees: z.object({
+    networkFeeLamports: z.string(),
+    priorityFeeLamports: z.string(),
+    tokenAccountRentLamports: z.string(),
+    sponsored: z.boolean(),
+  }),
+  warnings: z.array(paymentTransferBatchEstimateWarningSchema),
+}) satisfies z.ZodType<PaymentTransferBatchEstimate>;

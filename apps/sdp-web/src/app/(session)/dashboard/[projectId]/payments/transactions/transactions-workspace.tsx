@@ -7,28 +7,29 @@ import {
   type UnifiedTransactionModule,
 } from "@sdp/types/unified-transactions";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@sdp/ui/filter-menu";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
 import { XIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import useSWR from "swr";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { TransactionsResultsSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import {
+  useCounterparties,
+  useIssuedTokens,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import { replaceDashboardSearchParams } from "@/lib/dashboard-url-state";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { TransactionContext } from "./transaction-filters-context";
-import {
-  fetchTransactionsPageFromDashboard,
-  type TransactionsPageResult,
-  transactionsApiQuery,
-} from "./transactions-page.data";
+import { transactionsPageResponseSchema } from "./transactions-page.data";
 import {
   DEFAULT_TRANSACTION_PAGE_SIZE,
   parseTransactionModule,
@@ -38,19 +39,44 @@ import {
 } from "./transactions-query";
 import { TransactionsResults } from "./transactions-results";
 
-export interface TransactionWalletOption {
-  id: string;
-  label: string | null;
-  publicKey: string;
-}
-
-export interface TransactionCounterpartyOption {
-  id: string;
-  name: string;
-}
-
 /** The two ends of the Date filter's range, as transaction query keys. */
 const DATE_BOUNDS = ["from", "to"] as const;
+
+// The filter menu offers, and the Contact column names, the first page of contacts at the
+// API's maximum page size; a contact beyond it still filters by id from a deep link.
+const CONTACT_OPTION_PAGE = { page: 1, pageSize: 100 } as const;
+
+/**
+ * A filter whose options come from a read: its options once the read lands, a loading line
+ * before, and the failure with a retry when it fails. `null` reads nothing (Issuance off).
+ */
+function FilterOptionsRead({
+  read,
+  children,
+}: {
+  read: { data: unknown; error: unknown; mutate: () => unknown } | null;
+  children: ReactNode;
+}) {
+  const t = useTranslations();
+  if (read === null || read.data !== undefined) return children;
+  if (read.error === undefined) {
+    return (
+      <p className="p-2 text-meta text-tertiary">
+        {t("DashboardPayments.transactions.filterOptionsLoading")}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-2 p-2">
+      <p className="text-meta text-secondary">
+        {t("DashboardPayments.transactions.filterOptionsFailed")}
+      </p>
+      <Button type="button" variant="outline" size="sm" onClick={() => void read.mutate()}>
+        {t("DashboardPayments.transactions.retry")}
+      </Button>
+    </div>
+  );
+}
 
 /** "module:kind" for one kind, "module:" for every kind in a module. */
 function typeOptionValue(filters: Pick<TransactionFilters, "module" | "kind">) {
@@ -92,18 +118,13 @@ function TransactionSearch({
 
 export function TransactionsWorkspace({
   initialFilters,
-  initialResult,
-  issuedTokensByMint,
-  wallets,
-  counterparties,
+  issuanceEnabled,
   modules,
   paymentKinds,
 }: {
   initialFilters: TransactionFilters;
-  initialResult: TransactionsPageResult;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  wallets: readonly TransactionWalletOption[];
-  counterparties: readonly TransactionCounterpartyOption[];
+  /** Whether Issuance is on: only then do its tokens label rows and join the Token filter. */
+  issuanceEnabled: boolean;
   /** The modules the dashboard shows (`enabledTransactionModules`); the Type filter offers only these. */
   modules: readonly UnifiedTransactionModule[];
   /** The Payments kinds this deployment can record (`enabledPaymentTransactionKinds`). */
@@ -111,8 +132,8 @@ export function TransactionsWorkspace({
 }) {
   const t = useTranslations();
   const cluster = useSolanaCluster();
+  const scope = useDashboardKeyScope();
   const [filters, setFilters] = useState(initialFilters);
-  const [initialQuery] = useState(() => transactionsApiQuery(initialFilters));
 
   const navigate = useCallback((next: TransactionFilters) => {
     setFilters(next);
@@ -124,16 +145,28 @@ export function TransactionsWorkspace({
     [filters, navigate]
   );
 
-  const apiQuery = transactionsApiQuery(filters);
-  const { data, error, isValidating } = useSWR<TransactionsPageResult, Error>(
-    paymentsQueryKeys.transactions({ query: apiQuery }),
-    ([, query]: readonly [string, string]) => fetchTransactionsPageFromDashboard(query),
-    {
-      fallbackData: apiQuery === initialQuery ? initialResult : undefined,
-      revalidateOnMount: false,
-      keepPreviousData: true,
-      revalidateOnFocus: false,
-    }
+  const { data, error, isValidating, mutate } = useDashboardRead(
+    paymentsQueryKeys.transactions(scope, filters),
+    transactionsPageResponseSchema,
+    { keepPreviousData: true, revalidateOnFocus: false }
+  );
+  const walletsRead = useWalletSummaries({ includeBalances: false });
+  const contactsRead = useCounterparties(CONTACT_OPTION_PAGE);
+  const issuedTokensRead = useIssuedTokens(issuanceEnabled);
+  const wallets = walletsRead.data;
+  const contactsPage = contactsRead.data;
+  const issuedTokens = issuedTokensRead.data;
+  const counterparties = useMemo(
+    () =>
+      (contactsPage?.counterparties ?? []).map((counterparty) => ({
+        id: counterparty.id,
+        name: counterparty.displayName,
+      })),
+    [contactsPage]
+  );
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens]
   );
 
   const commitSearch = (value: string) => {
@@ -150,7 +183,7 @@ export function TransactionsWorkspace({
     () => new Map(counterparties.map((counterparty) => [counterparty.id, counterparty.name])),
     [counterparties]
   );
-  const walletOptions = wallets.map((wallet) => ({
+  const walletOptions = (wallets ?? []).map((wallet) => ({
     value: wallet.id,
     label: wallet.label ?? shortenAddress(wallet.publicKey),
   }));
@@ -230,12 +263,14 @@ export function TransactionsWorkspace({
       label: t("DashboardPayments.transactions.filterWallet"),
       value: labelOf(walletOptions, filters.custodyWalletId),
       content: (
-        <FilterMenuOptions
-          value={filters.custodyWalletId}
-          anyLabel={anyLabel}
-          options={walletOptions}
-          onChange={(value) => update({ custodyWalletId: value })}
-        />
+        <FilterOptionsRead read={walletsRead}>
+          <FilterMenuOptions
+            value={filters.custodyWalletId}
+            anyLabel={anyLabel}
+            options={walletOptions}
+            onChange={(value) => update({ custodyWalletId: value })}
+          />
+        </FilterOptionsRead>
       ),
     },
     {
@@ -243,12 +278,14 @@ export function TransactionsWorkspace({
       label: t("DashboardPayments.transactions.filterToken"),
       value: labelOf(tokenOptions, filters.token),
       content: (
-        <FilterMenuOptions
-          value={filters.token}
-          anyLabel={anyLabel}
-          options={tokenOptions}
-          onChange={(value) => update({ token: value })}
-        />
+        <FilterOptionsRead read={issuanceEnabled ? issuedTokensRead : null}>
+          <FilterMenuOptions
+            value={filters.token}
+            anyLabel={anyLabel}
+            options={tokenOptions}
+            onChange={(value) => update({ token: value })}
+          />
+        </FilterOptionsRead>
       ),
     },
     {
@@ -260,15 +297,17 @@ export function TransactionsWorkspace({
           : (counterpartyNames.get(filters.counterpartyId) ??
             shortenAddress(filters.counterpartyId)),
       content: (
-        <FilterMenuOptions
-          value={filters.counterpartyId}
-          anyLabel={anyLabel}
-          options={counterparties.map((counterparty) => ({
-            value: counterparty.id,
-            label: counterparty.name,
-          }))}
-          onChange={(value) => update({ counterpartyId: value })}
-        />
+        <FilterOptionsRead read={contactsRead}>
+          <FilterMenuOptions
+            value={filters.counterpartyId}
+            anyLabel={anyLabel}
+            options={counterparties.map((counterparty) => ({
+              value: counterparty.id,
+              label: counterparty.name,
+            }))}
+            onChange={(value) => update({ counterpartyId: value })}
+          />
+        </FilterOptionsRead>
       ),
     },
     {
@@ -369,13 +408,17 @@ export function TransactionsWorkspace({
         {error !== undefined ? (
           <ListEmptyState
             message={t("DashboardPayments.transactions.loadFailed")}
-            description={error.message}
+            action={
+              <Button variant="outline" onClick={() => void mutate()}>
+                {t("DashboardPayments.transactions.retry")}
+              </Button>
+            }
           />
         ) : data === undefined ? (
           <TransactionsResultsSkeleton />
         ) : (
           <TransactionsResults
-            result={data}
+            result={data.data}
             issuedTokensByMint={issuedTokensByMint}
             counterpartyNames={counterpartyNames}
           />

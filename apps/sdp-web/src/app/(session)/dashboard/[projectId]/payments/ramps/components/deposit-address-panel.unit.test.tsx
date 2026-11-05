@@ -27,6 +27,7 @@ const signingDisabledWallet: PaymentsDashboardWallet = {
   walletId: "privy_receiving",
   publicKey: "4Nd1mYw5Uu7Tq2K8c3JfYb5sXz9Pq3L6vR2hG8aF1eDk",
   label: "Receiving",
+  custodyConfigId: "cc_test",
   isRuntimeExecutionAllowed: false,
 };
 
@@ -51,14 +52,7 @@ describe("DepositAddressPanel", () => {
         : Response.json({ data: { wallets: [signingDisabledWallet] } })
     );
 
-    render(
-      <DepositAddressPanel
-        wallets={[signingDisabledWallet]}
-        walletsError={null}
-        issuedTokenSymbolsByMint={{}}
-      />,
-      { wrapper }
-    );
+    render(<DepositAddressPanel issuedTokenSymbolsByMint={{}} />, { wrapper });
 
     expect(await screen.findByText(signingDisabledWallet.publicKey)).toBeTruthy();
     expect(screen.getAllByText("Receiving").length).toBeGreaterThan(0);
@@ -70,14 +64,7 @@ describe("DepositAddressPanel", () => {
         : Response.json({ data: { wallets: [signingDisabledWallet] } })
     );
 
-    render(
-      <DepositAddressPanel
-        wallets={[signingDisabledWallet]}
-        walletsError={null}
-        issuedTokenSymbolsByMint={{}}
-      />,
-      { wrapper }
-    );
+    render(<DepositAddressPanel issuedTokenSymbolsByMint={{}} />, { wrapper });
 
     expect(await screen.findByText(signingDisabledWallet.publicKey)).toBeTruthy();
     expect(screen.getByText("Watching for deposits")).toBeTruthy();
@@ -91,14 +78,7 @@ describe("DepositAddressPanel", () => {
         : Response.json({ data: { wallets: [signingDisabledWallet] } })
     );
 
-    render(
-      <DepositAddressPanel
-        wallets={[signingDisabledWallet]}
-        walletsError={null}
-        issuedTokenSymbolsByMint={{}}
-      />,
-      { wrapper }
-    );
+    render(<DepositAddressPanel issuedTokenSymbolsByMint={{}} />, { wrapper });
 
     expect(await screen.findByText("· nothing yet")).toBeTruthy();
   });
@@ -106,10 +86,9 @@ describe("DepositAddressPanel", () => {
   it("draws the route's deposit skeleton while its wallets load", () => {
     vi.stubGlobal("fetch", () => new Promise<Response>(() => {}));
 
-    const { container } = render(
-      <DepositAddressPanel wallets={[]} walletsError={null} issuedTokenSymbolsByMint={{}} />,
-      { wrapper }
-    );
+    const { container } = render(<DepositAddressPanel issuedTokenSymbolsByMint={{}} />, {
+      wrapper,
+    });
 
     expect(container.querySelectorAll("[data-loading-deposit-address]")).toHaveLength(1);
   });

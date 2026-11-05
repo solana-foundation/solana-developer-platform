@@ -51,6 +51,8 @@ const baseWizard = {
   sourceWalletHint: null,
   cryptoAccounts: [],
   accountsLoading: false,
+  accountsError: false,
+  retryAccounts: vi.fn(),
   counterpartyId: "cpty_test",
   selectedWallet: null,
   selectedAccount: null,
@@ -124,6 +126,22 @@ describe("OnchainSendStepContent", () => {
     await user.click(screen.getByRole("button", { name: "Add a Solana address" }));
 
     expect(setAddAccountOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("says the contact's addresses failed to load under the destination, with Retry", async () => {
+    const user = userEvent.setup();
+    const retryAccounts = vi.fn();
+    renderStep({ ...baseWizard, accountsError: true, retryAccounts });
+
+    const destination = screen.getByRole("button", {
+      name: "Destination",
+      description: "Couldn't load this contact's addresses.",
+    });
+    expect(destination.textContent).toContain("Select a destination");
+    expect(screen.queryByText("No Solana address on file")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(retryAccounts).toHaveBeenCalledOnce();
   });
 
   it("shows all detail controls and the available balance", () => {

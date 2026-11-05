@@ -3,15 +3,18 @@
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SWRConfig, useSWRConfig } from "swr";
+import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type CounterpartyRequirementsParams,
-  paymentsQueryKeys,
+  counterpartyRequirementsReads,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useCounterpartyRequirements } from "./use-counterparty-requirements";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 interface HeldRequest {
   url: string;
@@ -105,11 +108,9 @@ function wrapper({ children }: { children: ReactNode }) {
 
 function usePurgeHarness(params: CounterpartyRequirementsParams) {
   const requirements = useCounterpartyRequirements(params);
-  const { mutate } = useSWRConfig();
+  const invalidateReads = useInvalidateDashboardReads();
   const purgeRequirements = () => {
-    void mutate(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
-      revalidate: true,
-    });
+    void invalidateReads(counterpartyRequirementsReads);
   };
   return { requirements, purgeRequirements };
 }

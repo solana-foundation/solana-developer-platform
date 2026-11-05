@@ -8,7 +8,10 @@ import { Label } from "@sdp/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
 import { SOLANA_ADDRESS } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-create-schemas";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  counterpartyReads,
+  isCounterpartyReadKey,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   getHighRiskProviders,
   runComplianceCheck,
@@ -17,6 +20,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { useAddressScreeningEnabled } from "./use-address-screening";
@@ -58,7 +62,8 @@ export function NewSolanaAddressForm({
   className,
 }: NewSolanaAddressFormProps) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
+  const notice = useOutcomeUnknownNotice(isCounterpartyReadKey);
+  const invalidateReads = useInvalidateDashboardReads();
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +98,7 @@ export function NewSolanaAddressForm({
       setError(result.error);
       return;
     }
+    void invalidateReads(counterpartyReads);
     const account = result.data?.data?.account;
     toast.success(t("DashboardPayments.counterparty.addressAdded"));
     if (account) {

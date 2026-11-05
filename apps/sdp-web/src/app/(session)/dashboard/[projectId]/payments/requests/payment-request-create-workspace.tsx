@@ -18,6 +18,14 @@ import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import {
+  isPaymentRequestReadKey,
+  paymentRequestReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { RecordLoadError } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { PaymentRequestCreateSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -25,6 +33,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { copyPendingText } from "@/lib/copy-pending-text";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -250,12 +259,6 @@ function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: st
   );
 }
 
-interface PaymentRequestCreateWorkspaceProps {
-  wallets: PaymentsDashboardWallet[];
-  /** Why the wallets could not be read, when they could not. */
-  walletsError: string | null;
-}
-
 /**
  * New request, as its own page: the amount and token, the wallet it lands in, when the link stops
  * working, and the request read back as a sentence. Creating it copies the link and opens the
@@ -264,20 +267,34 @@ interface PaymentRequestCreateWorkspaceProps {
  * The API matches a payment to its request by the link's reference, not by who sent it, so a
  * request names no payer: anyone holding the link can pay it.
  */
-export function PaymentRequestCreateWorkspace({
-  wallets,
-  walletsError,
-}: PaymentRequestCreateWorkspaceProps) {
-  if (!walletsError && wallets.length === 0) {
+export function PaymentRequestCreateWorkspace() {
+  const t = useTranslations();
+  const { data: wallets, error, mutate } = useWalletSummaries({ includeBalances: false });
+  if (error !== undefined) {
+    return (
+      <DashboardWorkspaceOverviewPanel>
+        <RecordLoadError
+          title={t("DashboardPayments.requests.walletsLoadFailedTitle")}
+          description={t("DashboardPayments.requests.walletsLoadFailedDescription")}
+          onRetry={() => void mutate()}
+        />
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+  if (wallets === undefined) {
+    return <PaymentRequestCreateSkeleton />;
+  }
+  if (wallets.length === 0) {
     return <NoWalletState />;
   }
-  return <PaymentRequestCreateForm wallets={wallets} walletsError={walletsError} />;
+  return <PaymentRequestCreateForm wallets={wallets} />;
 }
 
 /** The new request's form and its create, once there is a wallet to be paid into. */
-function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreateWorkspaceProps) {
+function PaymentRequestCreateForm({ wallets }: { wallets: readonly PaymentsDashboardWallet[] }) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice(null);
+  const invalidateReads = useInvalidateDashboardReads();
+  const notice = useOutcomeUnknownNotice(isPaymentRequestReadKey);
   const locale = useLocale();
   const router = useRouter();
   const projectHref = useProjectHref();
@@ -346,6 +363,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
       if (!res.ok) {
         // The earlier attempt may have created it: show the list to check.
         if (notice(fetchResultAnswer(res))) {
+          void invalidateReads(paymentRequestReads);
           router.push(projectHref(PAYMENT_REQUESTS_HREF));
           return;
         }
@@ -353,6 +371,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
         return;
       }
       setLinkCreated(true);
+      void invalidateReads(paymentRequestReads);
       created = res.data?.data;
     } finally {
       setSubmitting(false);
@@ -382,11 +401,6 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           void create();
         }}
       >
-        {walletsError ? (
-          <p role="alert" className="text-body text-error">
-            {walletsError}
-          </p>
-        ) : null}
         <div className="grid gap-6 sm:grid-cols-2">
           <AmountField amount={amount} onChange={setAmount} />
           <Combobox

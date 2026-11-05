@@ -3,6 +3,7 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
@@ -127,13 +128,14 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
 function destinationPlaceholder(
   hasContact: boolean,
   optionCount: number,
-  accountsLoading: boolean,
+  accountsSettled: boolean,
   t: Translate
 ): string {
   if (!hasContact) {
     return t("DashboardPayments.payForm.selectContactFirst");
   }
-  return optionCount === 0 && !accountsLoading
+  // Only a read that answered can say the contact has no address; a failed one says so below.
+  return optionCount === 0 && accountsSettled
     ? t("DashboardPayments.payForm.noDestinations")
     : t("DashboardPayments.payForm.selectDestination");
 }
@@ -199,6 +201,8 @@ function DestinationFields({
     fields,
     setField,
     accountsLoading,
+    accountsError,
+    retryAccounts,
     counterpartyId,
     addAccountOpen,
     setAddAccountOpen,
@@ -222,13 +226,23 @@ function DestinationFields({
           placeholder={destinationPlaceholder(
             hasContact,
             destinationOptions.length,
-            accountsLoading,
+            !accountsLoading && !accountsError,
             t
           )}
           searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
           isLoading={hasContact && accountsLoading}
           disabled={!hasContact || destinationOptions.length === 0}
+          validationError={
+            hasContact && accountsError
+              ? t("DashboardPayments.payForm.destinationsLoadFailed")
+              : undefined
+          }
         />
+        {hasContact && accountsError ? (
+          <Button type="button" variant="outline" size="sm" onClick={retryAccounts}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        ) : null}
         {addingAddress ? (
           <NewSolanaAddressForm
             key={counterpartyId}

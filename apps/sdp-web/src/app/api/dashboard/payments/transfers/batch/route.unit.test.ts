@@ -8,7 +8,7 @@ vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: mocks.proxyToSdpApi,
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 describe("POST /api/dashboard/payments/transfers/batch", () => {
   beforeEach(() => {
@@ -34,6 +34,27 @@ describe("POST /api/dashboard/payments/transfers/batch", () => {
       request,
       traceSource: "route.dashboard.payments.transfers.batch.post",
       path: "/v1/payments/transfer-batches",
+    });
+  });
+});
+
+describe("GET /api/dashboard/payments/transfers/batch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
+  });
+
+  it("lists the Project's batches from the SDP API with the page asked for", async () => {
+    const request = new Request(
+      "https://dashboard.example.test/api/dashboard/payments/transfers/batch?page=1&pageSize=5"
+    );
+
+    await GET(request);
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith({
+      request,
+      traceSource: "route.dashboard.payments.transfers.batch.list",
+      path: "/v1/payments/transfer-batches?page=1&pageSize=5",
     });
   });
 });

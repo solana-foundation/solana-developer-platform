@@ -5,6 +5,7 @@ import type {
   PaymentTransferBatchStatus,
 } from "@sdp/types/payments";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
@@ -488,6 +489,8 @@ function ContactsPicker({ wizard }: { wizard: BatchSendWizard }) {
     pageCount,
     setPage,
     recipientsLoading,
+    recipientsError,
+    retryRecipients,
     pageRecipients,
     recipientTotal,
   } = wizard;
@@ -520,6 +523,15 @@ function ContactsPicker({ wizard }: { wizard: BatchSendWizard }) {
       >
         {recipientsLoading ? (
           <ContactsPickerSkeleton />
+        ) : recipientsError ? (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <p className="text-center text-sm text-tertiary">
+              {t("DashboardPayments.batchSend.recipientsLoadFailed")}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={retryRecipients}>
+              {t("Shared.SharedComponents.retry")}
+            </Button>
+          </div>
         ) : pageRecipients.length === 0 ? (
           <p className="py-6 text-center text-sm text-tertiary">
             {recipientTotal === 0

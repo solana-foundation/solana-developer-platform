@@ -9,12 +9,8 @@ import type {
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import {
-  fetchTransferById,
-  simulateSandboxTransfer,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+import { moneyMovementReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { simulateSandboxTransfer } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import {
@@ -32,10 +28,12 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
+import { useTransferRecord } from "./use-transfer-record";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OnrampStepId = "DEPOSIT" | "MEMO" | "REVIEW" | "PROVIDER" | "REQUIREMENTS";
@@ -105,6 +103,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const demo = usePaymentsDemo();
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
@@ -166,19 +165,9 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     ...memoSummaryDetails(t, wizard.memoRows),
   ];
 
-  const transferStatusKey = wizard.quoteTransferId
-    ? paymentsQueryKeys.onrampTransferStatus({ transferId: wizard.quoteTransferId })
-    : null;
-  const { data: transferStatus, isValidating: transferStatusLoading } = useSWR(
-    transferStatusKey,
-    ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
-    {
-      // A fresh function each render re-arms SWR's timer with the latest transfer.
-      refreshInterval: (transfer) => rampTransferPollInterval(transfer),
-      // The interval keeps it current; a focus read on top only doubles the calls.
-      revalidateOnFocus: false,
-      dedupingInterval: 2_000,
-    }
+  const { data: transferStatus, isValidating: transferStatusLoading } = useTransferRecord(
+    wizard.quoteTransferId ?? null,
+    rampTransferPollInterval
   );
 
   const showCompleteScreen = transferStatus?.status === "completed";
@@ -206,6 +195,8 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
     try {
       await simulateSandboxTransfer({ transferId }, t);
+      // The simulated funding credits the wallet, so balances change with the transfer.
+      void invalidateReads(moneyMovementReads);
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,

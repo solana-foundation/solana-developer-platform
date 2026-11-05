@@ -15,7 +15,10 @@ import {
   type BasicsData,
   basicsSchema,
 } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-create-schemas";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  counterpartyReads,
+  isCounterpartyReadKey,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   getHighRiskProviders,
   runComplianceCheck,
@@ -23,6 +26,7 @@ import {
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
@@ -70,7 +74,8 @@ export function CounterpartyCreateProvider({
   const router = useRouter();
   const href = useProjectHref();
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
+  const notice = useOutcomeUnknownNotice(isCounterpartyReadKey);
+  const invalidateReads = useInvalidateDashboardReads();
 
   const resolveValidationMessage = useMemo(
     () => (message: string) =>
@@ -92,14 +97,14 @@ export function CounterpartyCreateProvider({
   // the directory.
   const complete = useCallback(
     (created: Counterparty) => {
+      void invalidateReads(counterpartyReads);
       if (onCreated) {
         onCreated(created);
         return;
       }
-      router.refresh();
       router.push(href("/dashboard/payments/counterparty"));
     },
-    [onCreated, router, href]
+    [invalidateReads, onCreated, router, href]
   );
 
   // Saves the address on the contact just created. A failure keeps the form open on it (the

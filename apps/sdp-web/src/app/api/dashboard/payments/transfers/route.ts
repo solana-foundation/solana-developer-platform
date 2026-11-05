@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     "providerReference",
     "category",
     "counterpartyId",
+    "type",
   ].some((param) => url.searchParams.has(param));
 
   if (hasDirectTransferFilter) {

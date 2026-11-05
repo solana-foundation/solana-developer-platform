@@ -22,8 +22,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CounterpartyDirectoryLoading } from "@/app/(session)/dashboard/[projectId]/payments/counterparty-menu-loading";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { formatDate } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { counterpartyReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
@@ -35,6 +37,7 @@ import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   type AddressFilter,
@@ -42,6 +45,10 @@ import {
   filterDirectory,
 } from "./counterparty-directory-filter";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
+import {
+  useCounterpartyAddressDirectory,
+  useCounterpartyDirectory,
+} from "./use-counterparty-directory";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -65,13 +72,11 @@ interface CounterpartyWorkspaceProps {
   counterparties: Counterparty[];
   /** The directory's full size; more than `counterparties.length` when the load was capped. */
   total: number;
-  /** True when the directory could not be read, so an empty list is not an empty directory. */
-  directoryFailed?: boolean;
   accounts: CounterpartyAccountSummary[];
   /** The project's saved account count; more than `accounts.length` when that load was capped. */
-  accountsTotal?: number;
-  /** True when the saved addresses could not all be read, so a missing one may just be unread. */
-  accountsFailed?: boolean;
+  accountsTotal: number;
+  /** True when the saved addresses could not be read, so a missing one may just be unread. */
+  accountsFailed: boolean;
 }
 
 function EmptyDirectory() {
@@ -101,16 +106,15 @@ function EmptyDirectory() {
 }
 
 /** The directory could not be read: say so rather than offer to add a first contact. */
-function DirectoryLoadFailed() {
+function DirectoryLoadFailed({ onRetry }: { onRetry: () => void }) {
   const t = useTranslations();
-  const router = useRouter();
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
       <ListEmptyState
         message={t("DashboardPayments.counterparty.directoryLoadFailed")}
         description={t("DashboardPayments.counterparty.directoryLoadFailedDescription")}
         action={
-          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
             {t("Shared.SharedComponents.retry")}
           </Button>
         }
@@ -382,16 +386,38 @@ function CounterpartyRow({
  * directory (up to a cap) with every saved Solana address (up to its own cap) once, and
  * searches, filters and pages it here. When either cap cut the load short, the list says so.
  */
-export function CounterpartyWorkspace({
+export function CounterpartyWorkspace() {
+  const directory = useCounterpartyDirectory();
+  const addresses = useCounterpartyAddressDirectory();
+  if (directory.error !== undefined) {
+    return <DirectoryLoadFailed onRetry={() => void directory.mutate()} />;
+  }
+  if (
+    directory.data === undefined ||
+    (addresses.data === undefined && addresses.error === undefined)
+  ) {
+    return <CounterpartyDirectoryLoading />;
+  }
+  return (
+    <CounterpartyDirectoryView
+      counterparties={directory.data.counterparties}
+      total={directory.data.total}
+      accounts={addresses.data?.accounts ?? []}
+      accountsTotal={addresses.data?.total ?? 0}
+      accountsFailed={addresses.error !== undefined}
+    />
+  );
+}
+
+function CounterpartyDirectoryView({
   counterparties: initialCounterparties,
   total,
-  directoryFailed = false,
   accounts,
-  accountsTotal = accounts.length,
-  accountsFailed = false,
+  accountsTotal,
+  accountsFailed,
 }: CounterpartyWorkspaceProps) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   // Contacts whose delete is in flight or done, hidden until the refreshed directory drops them.
   // The rows themselves always come from the props, so a refresh lands in the list.
   const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -461,11 +487,11 @@ export function CounterpartyWorkspace({
     toast.success(t("DashboardPayments.counterparty.deleted", { name: target.displayName }), {
       position: "bottom-right",
     });
-    router.refresh();
+    void invalidateReads(counterpartyReads);
   }
 
   if (initialCounterparties.length === 0) {
-    return directoryFailed ? <DirectoryLoadFailed /> : <EmptyDirectory />;
+    return <EmptyDirectory />;
   }
 
   return (
