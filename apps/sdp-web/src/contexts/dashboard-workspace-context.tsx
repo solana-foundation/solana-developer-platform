@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Project } from "@sdp/types/projects";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,11 @@ import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
+import {
+  clearOrganizationSwitch,
+  requestedOrganizationSwitch,
+  requestOrganizationSwitch,
+} from "@/lib/requested-organization-switch";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
@@ -43,6 +48,8 @@ type DashboardWorkspaceContextValue = {
   issuanceTab: IssuanceWorkspaceTab;
   isProjectSwitching: boolean;
   selectProject: (projectId: string) => void;
+  /** Makes another organization active and lands on its Project (the bare `/dashboard`). */
+  switchOrganization: (organizationId: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -73,6 +80,7 @@ export function DashboardWorkspaceProvider({
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
+  const { setActive } = useClerk();
   const router = useRouter();
   const pathname = useDashboardPathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
@@ -143,17 +151,76 @@ export function DashboardWorkspaceProvider({
     [router]
   );
 
-  // An Organization switched in Clerk leaves this URL naming the previous
-  // Organization's Project; the bare landing resolves the new one's.
+  const switchOrganization = useCallback(
+    async (organizationId: string) => {
+      requestOrganizationSwitch(organizationId);
+      try {
+        await setActive({ organization: organizationId });
+      } catch (error) {
+        clearOrganizationSwitch();
+        throw error;
+      }
+    },
+    [setActive]
+  );
+
+  // The organization this tab re-activated to match its URL, so it asks once.
+  const alignedOrganizationIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!auth.isLoaded || dashboardScopeIsFresh) {
+    if (!auth.isLoaded) {
       return;
     }
-
-    startProjectSwitchTransition(() => {
-      router.replace("/dashboard");
+    if (dashboardScopeIsFresh) {
+      // Clerk and the server agree again: a later mismatch is a new one.
+      alignedOrganizationIdRef.current = null;
+      if (requestedOrganizationSwitch() === serverDashboardCacheScope.orgId) {
+        clearOrganizationSwitch();
+      }
+      return;
+    }
+    const requestedOrganizationId = requestedOrganizationSwitch();
+    const isOwnSwitch =
+      requestedOrganizationId !== null && liveDashboardCacheScope.orgId === requestedOrganizationId;
+    if (
+      liveWorkspaceIsMissing ||
+      isOwnSwitch ||
+      liveDashboardCacheScope.userId !== serverDashboardCacheScope.userId
+    ) {
+      // An Organization switched in this tab, another person signing in, or a
+      // session that ended leaves this URL naming a Project they no longer see;
+      // the bare landing resolves theirs. A tab without focus may land before
+      // Clerk writes the new session cookie, so it lands again until the server
+      // renders the requested organization.
+      startProjectSwitchTransition(() => {
+        router.replace("/dashboard");
+      });
+      return;
+    }
+    const serverOrganizationId = serverDashboardCacheScope.orgId;
+    if (alignedOrganizationIdRef.current === serverOrganizationId) {
+      return;
+    }
+    // Clerk loaded another organization than the one this URL rendered. Clerk's
+    // backend records an organization only when it is made active in a focused
+    // tab, so a switch made without focus, or another tab's, comes back on the
+    // next load. The URL decides (HOO-2622): Clerk follows the organization it
+    // rendered, and Clerk refreshes the page once it is active.
+    alignedOrganizationIdRef.current = serverOrganizationId;
+    setActive({ organization: serverOrganizationId }).catch((error: unknown) => {
+      console.error("Could not make the page's organization active", error);
+      startProjectSwitchTransition(() => {
+        router.replace("/dashboard");
+      });
     });
-  }, [auth.isLoaded, dashboardScopeIsFresh, router]);
+  }, [
+    auth.isLoaded,
+    dashboardScopeIsFresh,
+    liveWorkspaceIsMissing,
+    liveDashboardCacheScope,
+    serverDashboardCacheScope,
+    router,
+    setActive,
+  ]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
@@ -196,6 +263,7 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       issuanceTab,
       selectProject,
+      switchOrganization,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -214,6 +282,7 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       issuanceTab,
       selectProject,
+      switchOrganization,
       setSidebarOpen,
       toggleSidebar,
     ]

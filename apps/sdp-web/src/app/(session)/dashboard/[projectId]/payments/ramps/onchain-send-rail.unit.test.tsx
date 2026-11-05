@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -14,7 +15,16 @@ import type { RailProps } from "./ramp-action-page";
 
 const mocks = vi.hoisted(() => ({ wizard: null as OnchainSendWizard | null }));
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    orgId: "org_test",
+    userId: "user_test",
+  }));
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./hooks/use-onchain-send-wizard")>()),

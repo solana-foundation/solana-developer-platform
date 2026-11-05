@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -12,7 +13,16 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { useTokenOperationData } from "./use-token-operation-data";
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    orgId: "org_test",
+    userId: "user_test",
+  }));
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const wallet: PaymentsDashboardWallet = {

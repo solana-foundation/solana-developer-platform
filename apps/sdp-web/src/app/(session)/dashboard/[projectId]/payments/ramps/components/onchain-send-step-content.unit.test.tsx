@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OnchainSendWizard } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
@@ -12,7 +13,16 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
-vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ orgId: "org_test", userId: "user_test" }) }));
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    orgId: "org_test",
+    userId: "user_test",
+  }));
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const labeledWallet: PaymentsDashboardWallet = {

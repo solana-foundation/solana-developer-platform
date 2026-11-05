@@ -76,7 +76,12 @@ beforeEach(() => {
   mocks.setActive.mockResolvedValue(undefined);
   vi.mocked(vi.spyOn(workspaceContext, "useDashboardWorkspace"), {
     partial: true,
-  }).mockImplementation(() => ({ ...mocks.workspace, selectProject: mocks.selectProject }));
+  }).mockImplementation(() => ({
+    ...mocks.workspace,
+    selectProject: mocks.selectProject,
+    // The provider's switch: it records the request, then asks Clerk.
+    switchOrganization: (organization: string) => mocks.setActive({ organization }),
+  }));
 });
 
 afterEach(() => {

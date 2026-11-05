@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import * as clerkSdk from "@clerk/nextjs";
 import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -14,9 +15,17 @@ import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { useBatchSendWizard } from "./use-batch-send-wizard";
 
-vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
-}));
+beforeEach(() => {
+  vi.mocked(vi.spyOn(clerkSdk, "useAuth"), { partial: true }).mockImplementation(() => ({
+    isLoaded: false,
+    orgId: null,
+    userId: null,
+  }));
+  // The workspace provider reads setActive to keep Clerk on the page's organization.
+  vi.mocked(vi.spyOn(clerkSdk, "useClerk"), { partial: true }).mockImplementation(() => ({
+    setActive: async () => undefined,
+  }));
+});
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
