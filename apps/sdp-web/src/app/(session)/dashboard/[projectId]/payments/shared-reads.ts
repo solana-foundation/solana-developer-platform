@@ -1,6 +1,7 @@
 "use client";
 
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
+import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import type { SWRConfiguration } from "swr";
 import { z } from "zod";
 import { ISSUANCE_MAX_PAGE_SIZE } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-list-query";
@@ -60,6 +61,37 @@ const issuedTokensPageSchema = z.object({
   ),
   total: z.number().int().nonnegative(),
   hasMore: z.boolean(),
+});
+
+const providerAvailabilityEntrySchema = z.object({
+  entitled: z.boolean(),
+  configured: z.boolean(),
+  enabled: z.boolean(),
+});
+
+/** Keys the API adds before this deployment knows them are dropped, never fatal to the read. */
+function knownProviderEntries<const Ids extends readonly [string, ...string[]]>(providerIds: Ids) {
+  const knownIds = z.enum(providerIds);
+  return z.record(z.string(), providerAvailabilityEntrySchema).transform((entries) => {
+    const known: Partial<Record<Ids[number], z.infer<typeof providerAvailabilityEntrySchema>>> = {};
+    for (const [providerId, entry] of Object.entries(entries)) {
+      const parsedId = knownIds.safeParse(providerId);
+      if (parsedId.success) {
+        known[parsedId.data] = entry;
+      }
+    }
+    return known;
+  });
+}
+
+const organizationProviderAccessResponseSchema = z.object({
+  data: z.object({
+    providers: z.object({
+      // Narrowed by the release channel where it is used (`filterEnabledRampProviderAccess`).
+      ramps: z.record(z.string(), providerAvailabilityEntrySchema),
+      earn: knownProviderEntries(EARN_PROVIDERS),
+    }),
+  }),
 });
 
 export interface IssuedTokenSymbol {
@@ -140,4 +172,17 @@ export function useIssuedTokens(enabled: boolean) {
     enabled ? sharedReadQueryKeys.issuedTokens(scope, { pageSize: ISSUANCE_MAX_PAGE_SIZE }) : null,
     readAllIssuedTokens
   );
+}
+
+/**
+ * The organization's ramp and Earn provider access, one read every module shares. A failed read is
+ * no access: callers disable the actions it gates.
+ */
+export function useOrganizationProviderAccess() {
+  const scope = useDashboardKeyScope();
+  const response = useDashboardRead(
+    sharedReadQueryKeys.organizationProviderAccess(scope),
+    organizationProviderAccessResponseSchema
+  );
+  return { ...response, data: response.data?.data.providers };
 }
