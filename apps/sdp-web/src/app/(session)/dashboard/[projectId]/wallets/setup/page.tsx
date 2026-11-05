@@ -63,7 +63,7 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     redirect("/dashboard");
   }
 
-  const trace = createTimedTrace("dashboard.custody.setup.page");
+  const trace = createTimedTrace("dashboard.wallets.setup.page");
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialProvider = parseProvider(getSearchParamValue(resolvedSearchParams, "provider"));
 
@@ -81,8 +81,8 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
 
   const { organizationClient, projectClient } = await trace.step("create_sdp_api_clients", () =>
     createRequestScopedSdpApiClients({
-      organizationTraceContext: trace.childContext("dashboard.custody.setup.org.api"),
-      projectTraceContext: trace.childContext("dashboard.custody.setup.api"),
+      organizationTraceContext: trace.childContext("dashboard.wallets.setup.org.api"),
+      projectTraceContext: trace.childContext("dashboard.wallets.setup.api"),
     })
   );
   const onboarding = await trace.step("fetch_onboarding_status", () =>
