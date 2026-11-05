@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { Input } from "@sdp/ui/input";
@@ -12,11 +11,14 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { createPrincipalAction } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/members/actions";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import type { PrivateChannelsCustodyWallet } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import { verifyWalletAction } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/wallets/actions";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
@@ -25,15 +27,16 @@ function shortKey(publicKey: string): string {
   return publicKey.length > 12 ? `${publicKey.slice(0, 4)}…${publicKey.slice(-4)}` : publicKey;
 }
 
-function walletLabel(wallet: CustodyWalletSummary): string {
+function walletLabel(wallet: PrivateChannelsCustodyWallet): string {
   const name = wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet");
   return `${name} (${shortKey(wallet.publicKey)})`;
 }
 
-export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary[] }) {
+export function PrincipalCreatePage({ wallets }: { wallets: PrivateChannelsCustodyWallet[] }) {
   const router = useRouter();
   const t = useTranslations();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
   const [name, setName] = useState("");
@@ -60,6 +63,7 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
         }
         principalId = principalResult.value.id;
         setCreatedPrincipalId(principalId);
+        void invalidateReads(privateChannelsReads);
       }
 
       const walletResult = await verifyWalletAction(walletId, principalId);
@@ -68,11 +72,11 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
         return;
       }
 
+      void invalidateReads(privateChannelsReads);
       toast.success(
         t("DashboardPrivateChannels.members.createSuccessWithWallet", { name: trimmedName })
       );
       router.push(href(PRINCIPALS_PATH));
-      router.refresh();
     });
   };
 

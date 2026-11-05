@@ -8,12 +8,16 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { createChannelAction } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/channels/actions";
+import { PrivateChannelsInstanceGate } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-instance-gate";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import { PrivateChannelsSetupSkeleton } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-route-skeletons";
 import {
   privateChannelPath,
   privateChannelsInstancePath,
 } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 type InstanceSummary = Pick<PrivateChannelInstance, "gatewayUrl" | "escrowInstanceAddr">;
@@ -22,7 +26,18 @@ function shorten(value: string): string {
   return value.length > 19 ? `${value.slice(0, 8)}…${value.slice(-8)}` : value;
 }
 
-export function CreateChannelScreen({
+export function CreateChannelScreen({ instanceId }: { instanceId: string }) {
+  return (
+    <PrivateChannelsInstanceGate
+      match={{ instanceId, requireActive: true }}
+      skeleton={<PrivateChannelsSetupSkeleton />}
+    >
+      {(instance) => <CreateChannelForm instanceId={instanceId} instance={instance} />}
+    </PrivateChannelsInstanceGate>
+  );
+}
+
+function CreateChannelForm({
   instanceId,
   instance,
 }: {
@@ -30,6 +45,7 @@ export function CreateChannelScreen({
   instance: InstanceSummary;
 }) {
   const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const t = useTranslations();
   const href = useProjectHref();
   const [name, setName] = useState("");
@@ -46,6 +62,7 @@ export function CreateChannelScreen({
         toast.error(result.message);
         return;
       }
+      void invalidateReads(privateChannelsReads);
       toast.success(
         t("DashboardPrivateChannels.channels.createSuccess", { name: result.channel.name })
       );

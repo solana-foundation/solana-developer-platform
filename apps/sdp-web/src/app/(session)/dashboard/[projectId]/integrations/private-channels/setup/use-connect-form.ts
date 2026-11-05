@@ -10,8 +10,10 @@ import type {
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   type ConnectPrivateChannelResult,
@@ -101,6 +103,7 @@ export function useConnectForm({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
+  const invalidateReads = useInvalidateDashboardReads();
   const { instance, values, errors, formError, reactivatePrompt } = state;
 
   const initiallyConnected = initialInstance?.isActive === true;
@@ -127,9 +130,8 @@ export function useConnectForm({
       });
       toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
       onSuccess?.();
-      if (stayOnPageAfterConnect) {
-        router.refresh();
-      } else {
+      void invalidateReads(privateChannelsReads);
+      if (!stayOnPageAfterConnect) {
         // Match other integrations: successful setup returns to the provider detail.
         router.push(href(privateChannelsInstancePath(result.instance.id)));
       }
@@ -155,6 +157,7 @@ export function useConnectForm({
         instance: result.activeInstance,
         values: toValues(result.activeInstance),
       });
+      void invalidateReads(privateChannelsReads);
       toast.error(result.message);
       return;
     }
@@ -213,7 +216,7 @@ export function useConnectForm({
         });
         toast.success(t("DashboardPrivateChannels.instance.updateSuccess"));
         onSuccess?.();
-        router.refresh();
+        void invalidateReads(privateChannelsReads);
         return;
       }
       if (result.kind === "validation") {

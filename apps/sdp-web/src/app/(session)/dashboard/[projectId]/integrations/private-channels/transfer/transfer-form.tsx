@@ -1,6 +1,5 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type {
   PrivateChannelMembershipChannelDto,
   PrivateChannelTokenEligibility,
@@ -14,6 +13,8 @@ import { useEffect, useMemo, useReducer, useRef, useTransition } from "react";
 import { toast } from "sonner";
 import { AmountField } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-field";
 import { getAmountError } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/amount-validation";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import type { PrivateChannelsCustodyWallet } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-reads";
 import {
   claimMovementKey,
   movementAnswer,
@@ -31,6 +32,7 @@ import {
   privateChannelTransferStatusOf,
   settleWhenMovementFinal,
 } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { createTransferAction, fetchTransferRecipientsAction } from "./actions";
 import { TransferProgress } from "./transfer-progress";
@@ -54,7 +56,7 @@ type RecipientLoadState =
 interface TransferFormProps {
   channels: PrivateChannelMembershipChannelDto[];
   scopeKey: string;
-  sourceWallets: CustodyWalletSummary[];
+  sourceWallets: PrivateChannelsCustodyWallet[];
   tokens: PrivateChannelTokenEligibility[];
 }
 
@@ -90,7 +92,7 @@ function shortenPubkey(pubkey: string): string {
   return `${pubkey.slice(0, 4)}…${pubkey.slice(-4)}`;
 }
 
-function walletLabel(wallet: CustodyWalletSummary): string {
+function walletLabel(wallet: PrivateChannelsCustodyWallet): string {
   const short = shortenPubkey(wallet.publicKey);
   return wallet.label ? `${wallet.label} (${short})` : short;
 }
@@ -182,6 +184,7 @@ function TransferFormState({
     submittedTransfer: null,
   });
   const [isSubmitting, startTransition] = useTransition();
+  const invalidateReads = useInvalidateDashboardReads();
   const recipientRequest = useRef(0);
   /**
    * Freezes every financial field for the duration of a submit. Deliberately NOT
@@ -400,6 +403,7 @@ function TransferFormState({
           );
         }
         if (result.ok) {
+          void invalidateReads(privateChannelsReads);
           updateState({ submittedTransfer: { transfer: result.transfer, ...submittedLabels } });
           if (result.transfer.status === "failed") {
             toast.error(
@@ -530,7 +534,7 @@ function TransferFields(props: {
   recipientOptions: RecipientOption[];
   recipientRequest: { current: number };
   selectedTokenSymbol: string;
-  sourceWallets: CustodyWalletSummary[];
+  sourceWallets: PrivateChannelsCustodyWallet[];
   state: TransferFormState;
   submitting: { current: boolean };
   t: Translate;

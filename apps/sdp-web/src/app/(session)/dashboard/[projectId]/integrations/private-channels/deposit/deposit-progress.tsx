@@ -2,18 +2,27 @@
 
 import {
   isPrivateChannelDepositTerminal,
+  PRIVATE_CHANNEL_TRANSACTION_STATUSES,
   type PrivateChannelDeposit,
 } from "@sdp/types/private-channels";
 import { Badge, type BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { CheckCircle2Icon, CircleIcon, Loader2Icon, XCircleIcon } from "lucide-react";
-import useSWR from "swr";
-import { privateChannelsQueryKeys } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
+import { useEffect } from "react";
+import { z } from "zod";
+import {
+  privateChannelsMovementReads,
+  privateChannelsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { useTranslations } from "@/i18n/provider";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { fetchDepositAction } from "./actions";
 
 const RANK: Record<PrivateChannelDeposit["status"], number> = {
   pending: 0,
@@ -40,6 +49,15 @@ const STAGES = [
 
 const POLL_INTERVAL_MS = 1500;
 
+const depositProgressResponseSchema = z.object({
+  data: z.object({
+    amount: z.string(),
+    status: z.enum(PRIVATE_CHANNEL_TRANSACTION_STATUSES),
+    signature: z.string().nullable(),
+    failureReason: z.string().nullable(),
+  }),
+});
+
 export function DepositProgress({
   deposit: initial,
   onReset,
@@ -49,15 +67,13 @@ export function DepositProgress({
 }) {
   const cluster = useSolanaCluster();
   const t = useTranslations();
-  const { data = initial } = useSWR(
-    privateChannelsQueryKeys.deposit(initial.id),
-    async () => {
-      const result = await fetchDepositAction(initial.id);
-      if (result === null) throw new Error("Private channel status is unavailable");
-      return result;
-    },
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
+  const response = useDashboardRead(
+    privateChannelsQueryKeys.deposit(scope, initial.id),
+    depositProgressResponseSchema,
     {
-      fallbackData: initial,
+      fallbackData: { data: initial },
       keepPreviousData: false,
       dedupingInterval: POLL_INTERVAL_MS,
       revalidateOnMount: false,
@@ -66,9 +82,15 @@ export function DepositProgress({
       errorRetryCount: Infinity,
       errorRetryInterval: POLL_INTERVAL_MS,
       refreshInterval: (current) =>
-        current && isPrivateChannelDepositTerminal(current.status) ? 0 : POLL_INTERVAL_MS,
+        current && isPrivateChannelDepositTerminal(current.data.status) ? 0 : POLL_INTERVAL_MS,
     }
   );
+  const data = response.data?.data ?? initial;
+  const reachedTerminal = isPrivateChannelDepositTerminal(data.status);
+  // Settlement moves the balances again after the submit cleared them, so they are re-read.
+  useEffect(() => {
+    if (reachedTerminal) void invalidateReads(privateChannelsMovementReads);
+  }, [invalidateReads, reachedTerminal]);
   const deposit = data;
 
   const rank = RANK[deposit.status];

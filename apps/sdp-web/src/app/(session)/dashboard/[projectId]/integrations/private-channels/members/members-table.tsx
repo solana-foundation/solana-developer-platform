@@ -16,7 +16,9 @@ import { EllipsisIcon, PlusIcon, PowerIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { privateChannelsReads } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-query-key";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   addPrincipalToChannelAction,
@@ -103,6 +105,7 @@ function PrincipalRow({
 }) {
   const [pending, startTransition] = useTransition();
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
   const disabled = principal.status === "disabled";
   const channelIds = new Set(principal.channels.map((channel) => channel.id));
   const availableChannels = allChannels.filter((channel) => !channelIds.has(channel.id));
@@ -110,14 +113,22 @@ function PrincipalRow({
   const addToChannel = (channelId: string) => {
     startTransition(async () => {
       const result = await addPrincipalToChannelAction(channelId, principal.id);
-      if (!result.ok) toast.error(result.message);
+      if (result.ok) {
+        void invalidateReads(privateChannelsReads);
+      } else {
+        toast.error(result.message);
+      }
     });
   };
 
   const removeFromChannel = (channelId: string) => {
     startTransition(async () => {
       const result = await removePrincipalFromChannelAction(channelId, principal.id);
-      if (!result.ok) toast.error(result.message);
+      if (result.ok) {
+        void invalidateReads(privateChannelsReads);
+      } else {
+        toast.error(result.message);
+      }
     });
   };
 
@@ -283,12 +294,14 @@ function DisablePrincipalDialog({
 }) {
   const [pending, startTransition] = useTransition();
   const t = useTranslations();
+  const invalidateReads = useInvalidateDashboardReads();
 
   const confirm = () => {
     if (!target) return;
     startTransition(async () => {
       const result = await disablePrincipalAction(target.id);
       if (result.ok) {
+        void invalidateReads(privateChannelsReads);
         toast.success(t("DashboardPrivateChannels.members.disableSuccess"));
         onClose();
       } else {

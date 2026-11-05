@@ -1,18 +1,11 @@
 "use server";
 
 import type { PrivateChannelVerifiedWalletDto } from "@sdp/types/private-channels";
-import { revalidatePath } from "next/cache";
 import {
   deletePrivateChannelVerifiedWallet,
   verifyPrivateChannelWallet,
 } from "@/lib/private-channels";
-import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
-
-const PRIVATE_CHANNELS_PATH = "/dashboard/integrations/private-channels";
-
-async function revalidateWalletViews(): Promise<void> {
-  revalidatePath(await requestProjectHref(PRIVATE_CHANNELS_PATH), "layout");
-}
+import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
 
 export type VerifyWalletResult =
   | { ok: true; wallet: PrivateChannelVerifiedWalletDto }
@@ -28,7 +21,6 @@ export async function verifyWalletAction(
   try {
     const client = await createSdpApiClient();
     const wallet = await verifyPrivateChannelWallet(client, walletId, { principalId });
-    await revalidateWalletViews();
     return { ok: true, wallet };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
@@ -43,7 +35,6 @@ export async function deleteVerifiedWalletAction(
   try {
     const client = await createSdpApiClient();
     await deletePrivateChannelVerifiedWallet(client, pubkey);
-    await revalidateWalletViews();
     return { ok: true };
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
