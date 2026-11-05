@@ -2,7 +2,7 @@
 
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import type { PrivateChannelTokenEligibility } from "@sdp/types/private-channels";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +68,15 @@ vi.mock("./deposit-progress", () => ({
 
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { sentDashboardReads, stubDashboardFetch } from "@/test/dashboard-fetch";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import {
+  MovementReadsProbe,
+  movementReadResponse,
+  PRIVATE_CHANNELS_INSTANCE_READ,
+  privateChannelMovementFixture,
+  WALLET_SUMMARIES_READ,
+} from "@/test/private-channels";
 import { DepositForm } from "./deposit-form";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -105,6 +114,7 @@ const wallets: CustodyWalletSummary[] = [
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
@@ -144,5 +154,36 @@ describe("DepositForm", () => {
     } finally {
       setItem.mockRestore();
     }
+  });
+
+  it("re-reads Private Channels and custody wallet reads once the deposit is accepted", async () => {
+    const fetchMock = stubDashboardFetch(({ path }) => movementReadResponse(path));
+    mocks.fetchWalletBalancesAction.mockResolvedValue({ channel: null, onChain: null });
+    mocks.createDepositAction.mockResolvedValue({
+      ok: true,
+      deposit: privateChannelMovementFixture({ id: "pcd_test_1", status: "submitted" }),
+    });
+    const user = userEvent.setup();
+    render(
+      <DashboardReadsProvider>
+        <MovementReadsProbe />
+        <DepositForm tokens={eligibleTokens} wallets={wallets} />
+      </DashboardReadsProvider>,
+      { wrapper: I18nWrapper }
+    );
+    const [walletSelect] = screen.getAllByRole("combobox");
+    if (!walletSelect) throw new Error("No wallet select rendered");
+    await user.selectOptions(walletSelect, "wallet_treasury");
+    await user.type(screen.getByLabelText("Amount (USDC)"), "1.25");
+    await user.click(screen.getByRole("button", { name: "Deposit" }));
+
+    await waitFor(() =>
+      expect(sentDashboardReads(fetchMock).map((read) => read.path)).toEqual([
+        PRIVATE_CHANNELS_INSTANCE_READ,
+        WALLET_SUMMARIES_READ,
+        PRIVATE_CHANNELS_INSTANCE_READ,
+        WALLET_SUMMARIES_READ,
+      ])
+    );
   });
 });

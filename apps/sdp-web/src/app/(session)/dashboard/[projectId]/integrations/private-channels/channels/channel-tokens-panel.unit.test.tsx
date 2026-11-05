@@ -6,9 +6,8 @@ vi.mock("@/components/token-mark", () => ({
   TokenMark: ({ symbol }: { symbol: string }) => <span>{symbol}-mark</span>,
 }));
 
-vi.mock("@/i18n/server", () => ({
-  getTranslations: async () => (key: string, values?: Record<string, string>) =>
-    values?.channel ? `${key}:${values.channel}` : key,
+vi.mock("@/i18n/provider", () => ({
+  useTranslations: () => (key: string) => key,
 }));
 
 import { ChannelTokensPanel } from "./channel-tokens-panel";
@@ -22,17 +21,14 @@ const allowedToken: PrivateChannelTokenEligibility = {
   exclusionReasons: [],
 };
 
-async function render(
-  tokens: PrivateChannelTokenEligibility[],
-  loadError = false
-): Promise<string> {
+function render(tokens: PrivateChannelTokenEligibility[], loadError: boolean): string {
   return renderToStaticMarkup(
-    await ChannelTokensPanel({ channelName: "Treasury", tokens, loadError })
+    <ChannelTokensPanel channelName="Treasury" tokens={tokens} loadError={loadError} />
   );
 }
 
 describe("ChannelTokensPanel", () => {
-  it("shows only allowed tokens with their channel metadata", async () => {
+  it("shows only allowed tokens with their channel metadata", () => {
     const blockedToken: PrivateChannelTokenEligibility = {
       ...allowedToken,
       symbol: "BLOCKED",
@@ -41,7 +37,7 @@ describe("ChannelTokensPanel", () => {
       exclusionReasons: [{ code: "NOT_ALLOWED_BY_INSTANCE", message: "Not allowed" }],
     };
 
-    const markup = await render([allowedToken, blockedToken]);
+    const markup = render([allowedToken, blockedToken], false);
 
     expect(markup).toContain("USDC-mark");
     expect(markup).toContain("4zMMC9…JDncDU");
@@ -49,14 +45,14 @@ describe("ChannelTokensPanel", () => {
     expect(markup).not.toContain("BLOCKED");
   });
 
-  it("shows the empty state when no token is allowed", async () => {
-    const markup = await render([{ ...allowedToken, enabled: false }]);
+  it("shows the empty state when no token is allowed", () => {
+    const markup = render([{ ...allowedToken, enabled: false }], false);
 
     expect(markup).toContain("DashboardPrivateChannels.channelDetail.tokensEmpty");
   });
 
-  it("prioritizes the load error over token content", async () => {
-    const markup = await render([allowedToken], true);
+  it("prioritizes the load error over token content", () => {
+    const markup = render([allowedToken], true);
 
     expect(markup).toContain("DashboardPrivateChannels.channelDetail.tokensLoadError");
     expect(markup).not.toContain("USDC-mark");

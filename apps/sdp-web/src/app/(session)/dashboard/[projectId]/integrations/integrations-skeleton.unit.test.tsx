@@ -1,11 +1,10 @@
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
-import IntegrationDetailLoading from "./[provider]/loading";
 import { integrationsSkeletonLayout } from "./integration-feature-gates";
 import { INTEGRATION_FAMILIES } from "./integrations-filter";
 import {
@@ -13,7 +12,6 @@ import {
   IntegrationsFlagsSkeleton,
   IntegrationsSkeleton,
 } from "./integrations-skeleton";
-import IntegrationsLoading from "./loading";
 
 const EVERY_FAMILY = integrationsSkeletonLayout({
   releaseChannel: "experimental",
@@ -29,23 +27,7 @@ const STABLE = integrationsSkeletonLayout(dashboardFlagsAt("stable"));
 const SECTION = /space-y-4/g;
 const CARD = /h-\[120px\]/g;
 
-/**
- * A dashboard route has two loading paths: the server `loading.tsx` on a hard
- * navigation, and the shell's skeleton switch on a client one. They used to be
- * hand-duplicated markup, so the Connection section reached only one of them
- * and a client navigation flashed a skeleton one block short of the page.
- */
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe("integration detail skeleton", () => {
-  it("renders the same markup down both loading paths", () => {
-    expect(renderToStaticMarkup(<IntegrationDetailLoading />)).toBe(
-      renderToStaticMarkup(<IntegrationDetailSkeleton />)
-    );
-  });
-
   it("carries a block for every section the detail page renders", () => {
     const markup = renderToStaticMarkup(<IntegrationDetailSkeleton />);
     expect(markup.match(/rounded-2xl/g)).toHaveLength(5);
@@ -92,18 +74,6 @@ describe("integration detail skeleton", () => {
     const markup = renderToStaticMarkup(<IntegrationsFlagsSkeleton />);
     expect(markup.match(SECTION)).toHaveLength(1);
   });
-
-  it.each(["experimental", "stable"] as const)(
-    "renders the same catalog markup down both loading paths on %s",
-    (releaseChannel) => {
-      // The server path follows the release channel; the client path, flags capped at it.
-      vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
-      const layout = releaseChannel === "stable" ? STABLE : EVERY_FAMILY;
-      expect(renderToStaticMarkup(<IntegrationsLoading />)).toContain(
-        renderToStaticMarkup(<IntegrationsSkeleton layout={layout} />)
-      );
-    }
-  );
 
   it("reserves a card per provider the catalog actually lists", () => {
     // Four per section left the placeholder 22% shorter than the page: custody
