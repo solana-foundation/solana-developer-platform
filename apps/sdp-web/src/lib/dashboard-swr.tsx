@@ -13,6 +13,7 @@ import type { z } from "zod";
 import { readApiErrorMessage } from "@/lib/api-error";
 import { dashboardReadRequest } from "@/lib/dashboard-fetch";
 import {
+  type DashboardJsonValue,
   type DashboardKeyScope,
   type DashboardPostReadKey,
   type DashboardRequestKey,
@@ -83,18 +84,19 @@ export async function readDashboardRequest<Schema extends z.ZodType>(
 }
 
 /**
- * A POST read (an estimate or quote that changes nothing) keyed like any other read: the key's
- * path is the URL and its params are the JSON body, so two keys share an entry only when they
- * would send the same request.
+ * A POST read (an estimate or quote that changes nothing). The key's path is the URL; `jsonBody`
+ * is the body, and the key's params must determine it (pass `key[3]` itself, or build both from
+ * one value), so two keys share an entry only when they would send the same request.
  */
 export async function readDashboardPostRequest<Schema extends z.ZodType>(
   key: DashboardPostReadKey,
-  schema: Schema
+  schema: Schema,
+  jsonBody: DashboardJsonValue
 ): Promise<z.infer<Schema>> {
   const response = await dashboardReadRequest(
     key[2],
     { projectId: key[0], demo: key[1] === "demo" },
-    key[3]
+    jsonBody
   );
   return parseDashboardRead(response, schema);
 }

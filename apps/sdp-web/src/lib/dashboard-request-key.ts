@@ -7,6 +7,14 @@ export type DashboardRequestParams = Readonly<
   Record<string, string | number | boolean | undefined>
 >;
 
+export type DashboardJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly DashboardJsonValue[]
+  | { readonly [field: string]: DashboardJsonValue };
+
 export interface DashboardKeyScope {
   projectId: string;
   mode: DashboardMode;

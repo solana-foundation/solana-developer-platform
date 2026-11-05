@@ -8,7 +8,7 @@ import {
 import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { parseDashboardPathname } from "./dashboard-project-path";
-import type { DashboardRequestParams } from "./dashboard-request-key";
+import type { DashboardJsonValue } from "./dashboard-request-key";
 import {
   type ApiAnswer,
   answerRetiresKey,
@@ -421,7 +421,7 @@ export function dashboardRequest(path: string, init: RequestInit): Promise<Respo
 export function dashboardReadRequest(
   url: string,
   scope: { projectId: string; demo: boolean },
-  jsonBody: DashboardRequestParams | undefined
+  jsonBody: DashboardJsonValue | undefined
 ): Promise<Response> {
   const headers = new Headers({ [PROJECT_HEADER_NAME]: scope.projectId });
   if (scope.demo) {
