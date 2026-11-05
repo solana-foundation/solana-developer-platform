@@ -18,6 +18,7 @@ import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
 import {
   type DashboardKeyScope,
+  dashboardPostReadKey,
   dashboardRequestKey,
   readsUnderPath,
 } from "./dashboard-request-key";
@@ -133,7 +134,7 @@ describe("readDashboardPostRequest", () => {
   ] as const)("posts a %s read's params under the key's Project, unkeyed", async (mode, demo) => {
     setWindowPathname(`/dashboard/${PRODUCTION_PROJECT.id}/payments`);
     const fetchMock = stubDashboardFetch(() => dashboardDataResponse(200, { amount: 7 }));
-    const key = dashboardRequestKey(
+    const key = dashboardPostReadKey(
       { projectId: SANDBOX_PROJECT.id, mode },
       ESTIMATE_PATH,
       ESTIMATE_PARAMS
@@ -154,7 +155,7 @@ describe("readDashboardPostRequest", () => {
     stubDashboardFetch(() =>
       Response.json({ error: { code: "VALIDATION_ERROR", message: "Too small" } }, { status: 422 })
     );
-    const key = dashboardRequestKey(SCOPE, ESTIMATE_PATH, ESTIMATE_PARAMS);
+    const key = dashboardPostReadKey(SCOPE, ESTIMATE_PATH, ESTIMATE_PARAMS);
 
     const read = readDashboardPostRequest(key, amountSchema);
 
