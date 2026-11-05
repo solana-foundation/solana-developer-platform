@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn() }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
+vi.mock("@/i18n/server", () => ({ getTranslations: vi.fn(async () => (key: string) => key) }));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));
@@ -39,9 +40,9 @@ const MANAGED_WALLET = { ...WALLET_FIELDS, custodyConfigId: "cfg_test_1" };
 const CONNECTION_WALLET = { ...WALLET_FIELDS, custodyConnectionId: "connection_one" };
 const CONNECTION_PATH = "/internal/dashboard/custody/connections/connection_one";
 
-function readWallet() {
-  return GET(new Request("https://dashboard.test/api/dashboard/wallets/wal_test_1"), {
-    params: Promise.resolve({ walletId: "wal_test_1" }),
+function readWallet(walletId: string) {
+  return GET(new Request(`https://dashboard.test/api/dashboard/wallets/${walletId}`), {
+    params: Promise.resolve({ walletId }),
   });
 }
 
@@ -82,11 +83,31 @@ beforeEach(() => {
 });
 
 describe("GET /api/dashboard/wallets/:walletId", () => {
+  it("decodes the wallet id once before reading the record", async () => {
+    mocks.proxyToSdpApi.mockResolvedValue(Response.json({ data: { wallet: MANAGED_WALLET } }));
+
+    await readWallet("wal_test%2F1");
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/v1/wallets/wal_test%2F1?includeBalance=false" })
+    );
+  });
+
+  it("refuses a malformed wallet id without reading the record", async () => {
+    const response = await readWallet("%E0");
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: "DashboardCustody.invalidWalletId" },
+    });
+    expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
+  });
+
   it("passes a refused wallet read through as sdp-api answered it", async () => {
     const refused = Response.json({ error: { message: "Wallet not found" } }, { status: 404 });
     mocks.proxyToSdpApi.mockResolvedValue(refused);
 
-    expect(await readWallet()).toBe(refused);
+    expect(await readWallet("wal_test_1")).toBe(refused);
     expect(mocks.requestMemberRole).not.toHaveBeenCalled();
     expect(mocks.apiRequest).not.toHaveBeenCalled();
   });
@@ -94,11 +115,8 @@ describe("GET /api/dashboard/wallets/:walletId", () => {
   it("answers a Managed wallet's record with no connection", async () => {
     mocks.proxyToSdpApi.mockResolvedValue(Response.json({ data: { wallet: MANAGED_WALLET } }));
 
-    const response = await readWallet();
+    const response = await readWallet("wal_test_1");
 
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "/v1/wallets/wal_test_1?includeBalance=false" })
-    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ data: { wallet: MANAGED_WALLET, connection: null } });
   });
@@ -107,7 +125,7 @@ describe("GET /api/dashboard/wallets/:walletId", () => {
     mocks.requestMemberRole.mockResolvedValue("member");
     mocks.proxyToSdpApi.mockResolvedValue(Response.json({ data: { wallet: CONNECTION_WALLET } }));
 
-    const response = await readWallet();
+    const response = await readWallet("wal_test_1");
 
     expect(await response.json()).toEqual({
       data: { wallet: CONNECTION_WALLET, connection: { label: "connec..._one", href: null } },
@@ -142,7 +160,7 @@ describe("GET /api/dashboard/wallets/:walletId", () => {
     );
     mocks.fetchProjectProviderAvailability.mockResolvedValue(privyByokAvailability(offered));
 
-    const response = await readWallet();
+    const response = await readWallet("wal_test_1");
 
     expect(await response.json()).toEqual({ data: { wallet: CONNECTION_WALLET, connection } });
   });
@@ -151,7 +169,7 @@ describe("GET /api/dashboard/wallets/:walletId", () => {
     mocks.proxyToSdpApi.mockResolvedValue(Response.json({ data: { wallet: CONNECTION_WALLET } }));
     mocks.apiRequest.mockResolvedValue(connectionAnswer(503));
 
-    const response = await readWallet();
+    const response = await readWallet("wal_test_1");
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: { message: "Wallet request failed" } });
@@ -164,7 +182,7 @@ describe("GET /api/dashboard/wallets/:walletId", () => {
       })
     );
 
-    const response = await readWallet();
+    const response = await readWallet("wal_test_1");
 
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: { message: "Invalid wallet response" } });

@@ -2,6 +2,7 @@
 
 import type { CustodyWalletMetadata, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WalletActivityRow } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-activity.data";
 import { DashboardPageTitleContext } from "@/components/dashboard-page-title-context";
@@ -188,28 +189,36 @@ interface WalletRecordBody {
   connection: { label: string; href: string | null } | null;
 }
 
-function answerWallet(record: WalletRecordBody | number) {
-  return stubDashboardFetch(({ path }) => {
-    if (path === "/api/dashboard/wallets/wallet_one") {
-      return typeof record === "number"
-        ? dashboardErrorResponse(record, "Wallet unavailable")
-        : Response.json({ data: record });
-    }
-    if (path === "/api/dashboard/payments/wallets/wallet_one/balances") {
-      return Response.json({ data: { walletBalances: { balances: [USDC_BALANCE] } } });
-    }
-    return Response.json({ data: [], total: 0, hasMore: false });
-  });
+const BALANCES_PATH = "/api/dashboard/payments/wallets/wallet_one/balances";
+
+function walletAnswer(record: WalletRecordBody | number, path: string): Response {
+  if (path === "/api/dashboard/wallets/wallet_one") {
+    return typeof record === "number"
+      ? dashboardErrorResponse(record, "Wallet unavailable")
+      : Response.json({ data: record });
+  }
+  if (path === BALANCES_PATH) {
+    return Response.json({ data: { walletBalances: { balances: [USDC_BALANCE] } } });
+  }
+  return Response.json({ data: [], total: 0, hasMore: false });
 }
 
-function viewTree() {
+function answerWallet(record: WalletRecordBody | number) {
+  return stubDashboardFetch(({ path }) => walletAnswer(record, path));
+}
+
+function readsTree(children: ReactNode) {
   return (
     <DashboardReadsProvider>
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <WalletDetailView walletId="wallet_one" issuanceEnabled />
+        {children}
       </I18nProvider>
     </DashboardReadsProvider>
   );
+}
+
+function viewTree() {
+  return readsTree(<WalletDetailView walletId="wallet_one" issuanceEnabled />);
 }
 
 function renderView(record: WalletRecordBody | number) {
@@ -244,6 +253,53 @@ describe("the wallet's record", () => {
     expect(
       (await screen.findByRole("link", { name: "Back to overview" })).getAttribute("href")
     ).toBe("/dashboard/prj_test_sandbox");
+  });
+
+  it("shows the not-found view when a revisit finds the cached wallet gone", async () => {
+    const { rerender } = renderView({ wallet, connection: null });
+    expect(await screen.findByText("Payments can sign with this wallet.")).toBeTruthy();
+    rerender(readsTree(null));
+    answerWallet(404);
+
+    rerender(viewTree());
+
+    expect(
+      (await screen.findByRole("link", { name: "Back to overview" })).getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox");
+  });
+
+  it("mutes the balance and token figures, noted stale, when a balance refresh fails", async () => {
+    const { rerender } = renderView({ wallet, connection: null });
+    expect(
+      await screen.findByText("$4,000.00", { selector: "[data-wallet-balance]" })
+    ).toBeTruthy();
+    rerender(readsTree(null));
+    stubDashboardFetch(({ path }) =>
+      path === BALANCES_PATH
+        ? dashboardErrorResponse(503, "Balances unavailable")
+        : walletAnswer({ wallet, connection: null }, path)
+    );
+
+    rerender(viewTree());
+
+    const figure = await waitFor(() => {
+      const shown = present(
+        document.querySelector<HTMLElement>("[data-wallet-balance]"),
+        "the balance figure"
+      );
+      expect(shown.textContent).toContain("$4,000.00 (stale)");
+      return shown;
+    });
+    expect(figure.className).toContain("text-muted");
+    const tokens = present(
+      document.querySelector<HTMLElement>("[data-wallet-tokens]"),
+      "the tokens table"
+    );
+    expect(
+      within(tokens)
+        .getAllByText("(stale)")
+        .map((note) => present(note.closest("td"), "the note's cell").className)
+    ).toEqual([expect.stringContaining("text-muted"), expect.stringContaining("text-muted")]);
   });
 
   it("says the wallet could not be loaded, and loads it on retry", async () => {
