@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import useSWR, {
+  type Arguments,
   type Cache,
   type SWRConfiguration,
   type SWRResponse,
@@ -162,7 +163,7 @@ export function useInvalidateDashboardReads() {
   return useCallback(
     async (matches: (key: DashboardRequestKey) => boolean) => {
       const mountedReads = mountedReadsOf(cache);
-      const isMatch = (key: unknown): key is DashboardRequestKey =>
+      const isMatch = (key: Arguments): key is DashboardRequestKey =>
         isDashboardRequestKey(key) && matches(key);
       await Promise.all([
         mutate((key) => isMatch(key) && mountedReads.has(unstable_serialize(key))),

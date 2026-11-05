@@ -1,3 +1,6 @@
+import type { Arguments } from "swr";
+import { z } from "zod";
+
 export type DashboardMode = "live" | "demo";
 
 export type DashboardRequestParams = Readonly<
@@ -44,15 +47,22 @@ export function dashboardPostReadKey(
   return [scope.projectId, scope.mode, path, params];
 }
 
-export function isDashboardRequestKey(key: unknown): key is DashboardRequestKey {
-  return (
-    Array.isArray(key) &&
-    (key.length === 3 || key.length === 4) &&
-    typeof key[0] === "string" &&
-    (key[1] === "live" || key[1] === "demo") &&
-    typeof key[2] === "string" &&
-    key[2].startsWith("/api/")
-  );
+const requestKeyHeadSchema = z.tuple([
+  z.string(),
+  z.enum(["live", "demo"]),
+  z.string().startsWith("/api/"),
+]);
+const requestKeySchema = z.union([
+  requestKeyHeadSchema,
+  z.tuple([
+    ...requestKeyHeadSchema.def.items,
+    z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.undefined()])),
+  ]),
+]);
+
+/** Whether an SWR cache key is a request key (label keys from unmigrated modules are not). */
+export function isDashboardRequestKey(key: Arguments): key is DashboardRequestKey {
+  return requestKeySchema.safeParse(key).success;
 }
 
 export function dashboardRequestUrl(key: DashboardRequestKey): string {
