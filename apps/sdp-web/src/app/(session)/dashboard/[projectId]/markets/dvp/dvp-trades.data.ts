@@ -2,14 +2,12 @@
 
 import type { DvpSettlementAvailability, DvpTradeSide, DvpTradeStatus } from "@sdp/types/dvp";
 import { z } from "zod";
-import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest, useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
+import { useCadencedDashboardSWR } from "@/lib/use-cadenced-swr";
 import { dvpQueryKeys } from "./dvp-query-key";
-import {
-  type DvpPartyRef,
-  type DvpTrade,
-  dvpActionWalletSchema,
-  isDvpTradeClosed,
-} from "./dvp-trade";
+import { type DvpPartyRef, type DvpTrade, dvpActionWalletSchema } from "./dvp-trade";
+import { isDvpTradeTerminal } from "./dvp-trades-query";
 
 // Action metadata is optional on non-action reads, but must be valid when present.
 const legActionWalletSchema = z.object({
@@ -159,20 +157,25 @@ const dvpTradeResponseSchema = z.object({
 /** An open trade changes when the counterparty pays into escrow, which nothing announces. */
 const OPEN_TRADE_POLL_MS = 6_000;
 
+function readDvpTrade(key: DashboardRequestKey) {
+  return readDashboardRequest(key, dvpTradeResponseSchema);
+}
+
 /**
- * One trade, re-read every few seconds while it is open and the tab is visible (and on return to
- * the tab), so a counterparty's deposit appears without a reload. A closed trade stops polling:
- * settled and cancelled are terminal.
+ * One trade, re-read every few seconds while it is loaded and can still change, and on return to
+ * the tab, so a counterparty's deposit appears without a reload. A terminal trade, a missing one
+ * and a failed read do not poll.
  */
 export function useDvpTrade(tradeId: string) {
   const scope = useDashboardKeyScope();
-  const response = useDashboardRead(
+  const response = useCadencedDashboardSWR(
     dvpQueryKeys.trade(scope, { tradeId }),
-    dvpTradeResponseSchema,
-    {
-      refreshInterval: (latest) =>
-        latest !== undefined && !isDvpTradeClosed(latest.data.trade) ? OPEN_TRADE_POLL_MS : 0,
-    }
+    readDvpTrade,
+    (latest) =>
+      latest !== undefined && !isDvpTradeTerminal(latest.data.trade.status)
+        ? OPEN_TRADE_POLL_MS
+        : 0,
+    {}
   );
   return { ...response, data: response.data?.data.trade };
 }

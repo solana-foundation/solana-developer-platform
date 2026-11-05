@@ -1,5 +1,6 @@
 import {
   type DashboardKeyScope,
+  type DashboardMode,
   type DashboardRequestKey,
   dashboardRequestKey,
   readsUnderPath,
@@ -18,6 +19,14 @@ const readsEarnCatalogue = readsUnderPath(`${EARN_PATH}/strategies`);
 const readsKaminoAllocations = readsUnderPath(`${EARN_PATH}/kamino-allocations`);
 const readsWallets = readsUnderPath("/api/dashboard/wallets");
 const readsWalletBalances = readsUnderPath("/api/dashboard/payments/wallets");
+
+/** The allocations read: its vaults (comma-joined) are always set, so a fetcher can split them. */
+export type KaminoAllocationsKey = readonly [
+  projectId: string,
+  mode: DashboardMode,
+  path: `/api/${string}`,
+  params: { vaults: string; cluster: "mainnet-beta" },
+];
 
 function programPath(programId: string) {
   return `${EARN_PATH}/programs/${encodeURIComponent(programId)}` as const;
@@ -81,11 +90,15 @@ export const earnQueryKeys = {
    */
   fundingWalletInventory: (scope: DashboardKeyScope) =>
     dashboardRequestKey(scope, "/api/dashboard/wallets", { includeBalances: "true" }),
-  kaminoAllocations: (scope: DashboardKeyScope, { vaults }: { vaults: string }) =>
-    dashboardRequestKey(scope, `${EARN_PATH}/kamino-allocations`, {
-      vaults,
-      cluster: "mainnet-beta",
-    }),
+  kaminoAllocations: (
+    scope: DashboardKeyScope,
+    { vaults }: { vaults: string }
+  ): KaminoAllocationsKey => [
+    scope.projectId,
+    scope.mode,
+    `${EARN_PATH}/kamino-allocations`,
+    { vaults, cluster: "mainnet-beta" },
+  ],
   /**
    * Every read an Earn money write can change: the Earn ledgers, positions and programs, and the
    * wallet balances the money moves between. Not the strategy catalogue or the Kamino allocations,

@@ -260,6 +260,9 @@
       "returnToEarn": "Return to Embedded Yield"
     },
     "dvp": {
+      "createCounterpartyAccountsFailed": "Counterparty accounts could not be loaded.",
+      "createTokensFailed": "Issued tokens could not be loaded.",
+      "createWalletsFailed": "Wallets could not be loaded.",
       "actionCancel": "Cancel Trade",
       "actionFailed": "Request failed ({status}).",
       "actionUnconfirmed": "SDP sent this but couldn't read the answer. Check the trade before trying again.",

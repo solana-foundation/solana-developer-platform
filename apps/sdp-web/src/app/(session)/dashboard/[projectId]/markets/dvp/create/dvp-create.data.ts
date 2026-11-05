@@ -9,7 +9,12 @@ import {
   useIssuedTokens,
   useWalletSummaries,
 } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
-import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
+import { useTranslations } from "@/i18n/provider";
+import {
+  type DashboardReadError,
+  useDashboardKeyScope,
+  useDashboardRead,
+} from "@/lib/dashboard-swr";
 
 /**
  * What the create form needs to offer real choices instead of blank fields.
@@ -128,7 +133,13 @@ function mapCounterpartyAccounts(rows: readonly CounterpartyAccountRow[]) {
  * seven seconds, and no field shows one. Funding still refuses a short balance with the amount
  * named.
  */
+/** The API's own message for a failed read, or this form's words when it sent none. */
+function failedReadMessage(error: DashboardReadError | undefined, ownCopy: string): string {
+  return error !== undefined && error.message !== "" ? error.message : ownCopy;
+}
+
 export function useDvpCreateContext(issuanceEnabled: boolean) {
+  const t = useTranslations();
   const scope = useDashboardKeyScope();
   const walletsRead = useWalletSummaries({ includeBalances: false });
   const tokensRead = useIssuedTokens(issuanceEnabled);
@@ -160,7 +171,7 @@ export function useDvpCreateContext(issuanceEnabled: boolean) {
         wallets: [],
         tokens: [],
         counterpartyAccounts: [],
-        error: walletsError?.message || "Wallet list failed.",
+        error: failedReadMessage(walletsError, t("DashboardMarkets.dvp.createWalletsFailed")),
       };
     }
     const walletOptions: DvpCreateWallet[] = wallets.map((wallet) => ({
@@ -178,7 +189,7 @@ export function useDvpCreateContext(issuanceEnabled: boolean) {
         wallets: walletOptions,
         tokens: [],
         counterpartyAccounts: [],
-        error: tokensError?.message || "Token list failed.",
+        error: failedReadMessage(tokensError, t("DashboardMarkets.dvp.createTokensFailed")),
       };
     }
     // Only deployed tokens have a mint to trade. A draft has nothing to put in escrow, so offering
@@ -190,7 +201,10 @@ export function useDvpCreateContext(issuanceEnabled: boolean) {
         wallets: walletOptions,
         tokens,
         counterpartyAccounts: [],
-        error: accountsError?.message || "Counterparty list failed.",
+        error: failedReadMessage(
+          accountsError,
+          t("DashboardMarkets.dvp.createCounterpartyAccountsFailed")
+        ),
       };
     }
     return {
@@ -199,7 +213,7 @@ export function useDvpCreateContext(issuanceEnabled: boolean) {
       counterpartyAccounts: mapCounterpartyAccounts(accountRows.data.accounts),
       error: null,
     };
-  }, [wallets, walletsError, tokenRows, tokensError, accountRows, accountsError]);
+  }, [wallets, walletsError, tokenRows, tokensError, accountRows, accountsError, t]);
   return { context, retry };
 }
 

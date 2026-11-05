@@ -38,6 +38,11 @@ const STATUS_FILTERS = {
 
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 
+/** Whether a trade can still change: the statuses the "closed" filter groups never move on. */
+export function isDvpTradeTerminal(status: DvpTradeStatus): boolean {
+  return STATUS_FILTERS.closed.some((closedStatus) => closedStatus === status);
+}
+
 /**
  * A status the URL can carry; `waiting` is client state, never in the URL.
  */

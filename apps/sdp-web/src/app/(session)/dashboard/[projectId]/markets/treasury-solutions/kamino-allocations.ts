@@ -1,8 +1,10 @@
 "use client";
 
 import type { EarnStrategy } from "@sdp/types/earn";
-import { earnQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
-import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  earnQueryKeys,
+  type KaminoAllocationsKey,
+} from "@/app/(session)/dashboard/[projectId]/markets/earn/earn-query-key";
 import { readDashboardRequest, useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import {
   KAMINO_ALLOCATIONS_MAX_VAULTS,
@@ -64,9 +66,10 @@ export function kaminoAllocationsVaults(
  * about a response it did not shape.
  */
 async function readKaminoAllocations(
-  key: DashboardRequestKey
+  key: KaminoAllocationsKey
 ): Promise<KaminoVaultAllocationsBatch["vaults"]> {
-  const vaults = String(key[3]?.vaults ?? "").split(",");
+  const [projectId, mode, path, params] = key;
+  const vaults = params.vaults.split(",");
   const batches: string[][] = [];
   for (let start = 0; start < vaults.length; start += KAMINO_ALLOCATIONS_MAX_VAULTS) {
     batches.push(vaults.slice(start, start + KAMINO_ALLOCATIONS_MAX_VAULTS));
@@ -74,10 +77,7 @@ async function readKaminoAllocations(
   const reads = await Promise.all(
     batches.map((batch) =>
       readDashboardRequest(
-        dashboardRequestKey({ projectId: key[0], mode: key[1] }, key[2], {
-          ...key[3],
-          vaults: batch.join(","),
-        }),
+        [projectId, mode, path, { ...params, vaults: batch.join(",") }],
         kaminoVaultAllocationsBatchSchema
       )
     )
