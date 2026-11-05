@@ -75,7 +75,7 @@ const navItemInactive = "text-primary hover:bg-fill";
 // Sub-items keep the secondary ink until active; the design indents them under the icon
 // column instead of drawing a rail beside them.
 const childNavItemBase =
-  "flex h-control-md flex-1 items-center gap-2.5 rounded-control pr-2 pl-[52px] text-nav transition-colors";
+  "flex h-control-md flex-1 items-center gap-2.5 rounded-control pr-2 pl-13 text-nav transition-colors";
 const childNavItemActive = `${navItemActive} font-medium`;
 const childNavItemInactive = "text-secondary hover:bg-fill hover:text-primary";
 
