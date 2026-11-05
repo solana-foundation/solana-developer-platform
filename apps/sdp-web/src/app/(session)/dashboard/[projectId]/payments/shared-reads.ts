@@ -1,17 +1,16 @@
 "use client";
 
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
-import useSWR from "swr";
 import { z } from "zod";
 import { ISSUANCE_MAX_PAGE_SIZE } from "@/app/(session)/dashboard/[projectId]/issuance/issuance-list-query";
 import { paymentsWalletsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
 import { sharedReadQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads-query-key";
 import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
 import {
-  type DashboardReadError,
   readDashboardRequest,
   useDashboardKeyScope,
   useDashboardRead,
+  useDashboardSWR,
 } from "@/lib/dashboard-swr";
 
 const walletTokenBalanceSchema = z.object({
@@ -55,6 +54,7 @@ const issuedTokensPageSchema = z.object({
       imageUrl: z.string().nullable().optional(),
     })
   ),
+  total: z.number().int().nonnegative(),
   hasMore: z.boolean(),
 });
 
@@ -112,7 +112,7 @@ async function readAllIssuedTokens(key: DashboardRequestKey): Promise<IssuedToke
         });
       }
     }
-    if (!body.hasMore) {
+    if (!body.hasMore || page * ISSUANCE_MAX_PAGE_SIZE >= body.total) {
       return tokens;
     }
   }
@@ -124,7 +124,7 @@ async function readAllIssuedTokens(key: DashboardRequestKey): Promise<IssuedToke
  */
 export function useIssuedTokens(enabled: boolean) {
   const scope = useDashboardKeyScope();
-  return useSWR<IssuedTokenSymbol[], DashboardReadError>(
+  return useDashboardSWR(
     enabled ? sharedReadQueryKeys.issuedTokens(scope, { pageSize: ISSUANCE_MAX_PAGE_SIZE }) : null,
     readAllIssuedTokens
   );
