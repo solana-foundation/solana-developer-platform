@@ -8,7 +8,7 @@ import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
  * in `server.ts`.
  */
 
-import { SigningError } from "@sdp/custody/signing";
+import { SigningError, type SigningErrorCode } from "@sdp/custody/signing";
 import { SdpEarnError } from "@sdp/earn/errors";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
@@ -24,9 +24,17 @@ import { HTTPException } from "hono/http-exception";
 import { prettyJSON } from "hono/pretty-json";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { DatabaseUnavailableError } from "@/db/client";
-import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
-import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
+import {
+  AppError,
+  badRequest,
+  type ErrorCode,
+  internalError,
+  payloadTooLarge,
+  serviceUnavailable,
+} from "@/lib/errors";
+import { appErrorResponse, errorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
 import { gatewayIdentityMiddleware } from "@/middleware/gateway-identity";
@@ -121,34 +129,31 @@ const MAX_API_BODY_BYTES = 1024 * 1024;
 // tens of bytes; the unauthenticated surface gets no more room than that needs.
 const MAX_PAY_BODY_BYTES = 4 * 1024;
 
-function mapSigningError(err: SigningError): {
-  status: 400 | 404 | 409 | 502 | 504;
-  code: string;
-  message: string;
-} {
-  const message = getSafeSigningErrorMessage(err);
-  switch (err.code) {
-    case "WALLET_NOT_FOUND":
-    case "NOT_FOUND":
-      return { status: 404, code: err.code, message };
-    case "ALREADY_INITIALIZED":
-      return { status: 409, code: err.code, message };
-    case "APPROVAL_TIMEOUT":
-      return { status: 504, code: err.code, message };
-    case "APPROVAL_REJECTED":
-      return { status: 409, code: err.code, message };
-    case "NETWORK_ERROR":
-    case "SIGNING_FAILED":
-      return { status: 502, code: err.code, message };
-    default:
-      return { status: 400, code: err.code, message };
-  }
-}
+/**
+ * What a custody signing failure that reaches the handler answers: an `ErrorCode`, never the
+ * custody package's own code, at that code's status. `PROVIDER_NOT_CONFIGURED` keeps the 400 this
+ * handler has always answered, below the 503 `ERROR_STATUS_CODES` gives it. The signer waist
+ * (`admittedSigner`) turns a policy refusal into `CUSTODY_POLICY_REFUSED` naming the provider;
+ * that row here covers one that arrives any other way.
+ */
+const SIGNING_ERROR_RESPONSES: Record<
+  SigningErrorCode,
+  { status: ContentfulStatusCode; code: ErrorCode }
+> = {
+  PROVIDER_NOT_CONFIGURED: { status: 400, code: "PROVIDER_NOT_CONFIGURED" },
+  WALLET_NOT_FOUND: { status: 404, code: "NOT_FOUND" },
+  NOT_FOUND: { status: 404, code: "NOT_FOUND" },
+  INVALID_REQUEST: { status: 400, code: "BAD_REQUEST" },
+  PROVIDER_CREDENTIAL_INVALID: { status: 400, code: "BAD_REQUEST" },
+  ALREADY_INITIALIZED: { status: 409, code: "CONFLICT" },
+  CONFLICT: { status: 409, code: "CONFLICT" },
+  POLICY_REFUSED: { status: 422, code: "CUSTODY_POLICY_REFUSED" },
+  NETWORK_ERROR: { status: 502, code: "CUSTODY_ERROR" },
+};
 
 function getSafeSigningErrorMessage(err: SigningError): string {
   switch (err.code) {
     case "NETWORK_ERROR":
-    case "SIGNING_FAILED":
       return "The signing provider could not complete the request. Check provider status and try again.";
     case "PROVIDER_NOT_CONFIGURED":
       return "The signing provider is not configured. Check provider configuration and try again.";
@@ -157,21 +162,19 @@ function getSafeSigningErrorMessage(err: SigningError): string {
   }
 }
 
-function getFireblocksBlockedError(err: Error): {
-  status: 400;
-  code: "SIGNING_BLOCKED";
-  message: string;
-} | null {
+/**
+ * The answer for a Fireblocks `BLOCKED` that is not a confirmed policy refusal (the adapter turns
+ * that one into a `SigningError`), or `null` for any other error.
+ */
+function getFireblocksBlockedError(err: Error): AppError | null {
   if (!err.message.includes("Transaction failed with status: BLOCKED")) {
     return null;
   }
 
-  return {
-    status: 400,
-    code: "SIGNING_BLOCKED",
-    message:
-      "Fireblocks blocked this signing request. Confirm raw signing is enabled for this workspace and that the raw-signing policy allows this API user and vault.",
-  };
+  return new AppError(
+    "SIGNING_BLOCKED",
+    "Fireblocks blocked this signing request. Confirm raw signing is enabled for this workspace and that the raw-signing policy allows this API user and vault."
+  );
 }
 
 /** How long a client is told to wait after Solana RPC was unavailable upstream. */
@@ -207,28 +210,38 @@ function rpcUnavailableResponse(
   if (reason === "upstream_unavailable") {
     c.header("Retry-After", String(RPC_UNAVAILABLE_RETRY_AFTER_SECONDS));
   }
-  c.header("X-SDP-Trace-ID", c.get("traceId"));
-  return c.json(
-    {
-      error: {
-        code: "RPC_UNAVAILABLE",
-        message:
-          reason === "upstream_unavailable"
-            ? "Solana RPC is temporarily unavailable. Retry after the Retry-After delay."
-            : "Solana RPC is not available for this environment.",
-        details: { reason, cluster },
-      },
-      meta: { requestId: c.get("requestId") },
-    },
-    503
-  );
+  return errorResponse(c, 503, {
+    code: "RPC_UNAVAILABLE",
+    message:
+      reason === "upstream_unavailable"
+        ? "Solana RPC is temporarily unavailable. Retry after the Retry-After delay."
+        : "Solana RPC is not available for this environment.",
+    details: { reason, cluster },
+  });
+}
+
+type SdkError = SdpRpcError | SdpPaymentsError | SdpEarnError;
+
+/**
+ * The `ErrorCode` an SDK error answers with, or `null` for a cluster scope error: that is SDP's
+ * own wiring bug, so it gets the unexpected-error 500 and its stack in the log. The switch is
+ * exhaustive, so a new SDK code `ErrorCode` lacks fails to compile here.
+ */
+function sdkErrorCode(code: SdkError["code"]): ErrorCode | null {
+  switch (code) {
+    case "CLUSTER_SCOPE_MISSING":
+    case "CLUSTER_SCOPE_CONFLICT":
+      return null;
+    default:
+      return code;
+  }
 }
 
 /**
  * The response for an error thrown by an SDP SDK (`@sdp/rpc`, `@sdp/payments`, `@sdp/earn`), or
- * `null` when `err` is none of theirs. RPC unavailability, including a transient kit error that
- * reached the boundary uncaught, is one `503 RPC_UNAVAILABLE`; any other SDK error answers its own
- * code and status.
+ * `null` when `err` is none of theirs or is a cluster scope error. RPC unavailability, including a
+ * transient kit error that reached the boundary uncaught, is one `503 RPC_UNAVAILABLE`; any other
+ * SDK error answers its own code and status.
  *
  * @param c - The request context.
  * @param err - The thrown error.
@@ -251,6 +264,8 @@ function sdkErrorResponse(
   ) {
     return null;
   }
+  const code = sdkErrorCode(err.code);
+  if (code === null) return null;
   const requestId = c.get("requestId");
   if (err instanceof SdpRpcError) {
     logVendorError("rpc", err.code, err.statusCode);
@@ -271,18 +286,11 @@ function sdkErrorResponse(
     });
   }
   const details = err.details ? redactCredentialSecrets(err.details) : undefined;
-  c.header("X-SDP-Trace-ID", c.get("traceId"));
-  return c.json(
-    {
-      error: {
-        code: err.code,
-        message: redactCredentialString(err.message),
-        ...(details && { details }),
-      },
-      meta: { requestId },
-    },
-    mapErrorStatusCode(err.statusCode)
-  );
+  return errorResponse(c, mapErrorStatusCode(err.statusCode), {
+    code,
+    message: redactCredentialString(err.message),
+    ...(details && { details }),
+  });
 }
 
 /** How long a client is told to wait after the database could not take its request. */
@@ -300,17 +308,7 @@ function unexpectedErrorResponse(c: Context<{ Bindings: Env }>, err: Error): Res
     c.header("Retry-After", String(DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS));
     return appErrorResponse(c, serviceUnavailable());
   }
-  c.header("X-SDP-Trace-ID", c.get("traceId"));
-  return c.json(
-    {
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "An internal error occurred",
-      },
-      meta: { requestId: c.get("requestId") },
-    },
-    500
-  );
+  return appErrorResponse(c, internalError());
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
@@ -500,19 +498,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     if (sdkResponse !== null) return sdkResponse;
 
     if (err instanceof SigningError) {
-      const mapped = mapSigningError(err);
-      logVendorError("signing", mapped.code, mapped.status);
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: mapped.code,
-            message: mapped.message,
-          },
-          meta: { requestId },
-        },
-        mapped.status
-      );
+      const { status, code } = SIGNING_ERROR_RESPONSES[err.code];
+      // The custody package's own code, which the response no longer names.
+      logVendorError("signing", err.code, status);
+      return errorResponse(c, status, { code, message: getSafeSigningErrorMessage(err) });
     }
 
     if (err instanceof FeePaymentError) {
@@ -532,33 +521,13 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         }),
         "Fee payment error"
       );
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: mapped.code,
-            message: mapped.message,
-          },
-          meta: { requestId },
-        },
-        mapped.status
-      );
+      return errorResponse(c, mapped.status, { code: mapped.code, message: mapped.message });
     }
 
     const fireblocksBlocked = getFireblocksBlockedError(err);
     if (fireblocksBlocked) {
-      logVendorError("fireblocks", fireblocksBlocked.code, fireblocksBlocked.status);
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: fireblocksBlocked.code,
-            message: fireblocksBlocked.message,
-          },
-          meta: { requestId },
-        },
-        fireblocksBlocked.status
-      );
+      logVendorError("fireblocks", fireblocksBlocked.code, fireblocksBlocked.statusCode);
+      return appErrorResponse(c, fireblocksBlocked);
     }
 
     // Log unexpected errors. Include `context` and `cause` so SolanaError-style

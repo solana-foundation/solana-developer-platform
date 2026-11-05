@@ -19,6 +19,8 @@ export type ErrorCode =
   | "PAYLOAD_TOO_LARGE"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR"
+  // A provider operation SDP does not support yet
+  | "NOT_IMPLEMENTED"
   | "NOT_ALLOWLISTED"
   | "INVALID_API_KEY"
   | "EXPIRED_API_KEY"
@@ -49,6 +51,8 @@ export type ErrorCode =
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
+  // A custody provider block that is not a confirmed policy refusal
+  | "SIGNING_BLOCKED"
   | "CUSTODY_POLICY_REFUSED"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
@@ -90,6 +94,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   PAYLOAD_TOO_LARGE: 413,
   SERVICE_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
+  NOT_IMPLEMENTED: 501,
   NOT_ALLOWLISTED: 403,
   INVALID_API_KEY: 401,
   EXPIRED_API_KEY: 401,
@@ -122,6 +127,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
+  // Nothing was signed, and a retry is blocked the same way until the
+  // provider's setup changes.
+  SIGNING_BLOCKED: 400,
   // Policy refusals need a policy review or request change before retrying.
   CUSTODY_POLICY_REFUSED: 422,
   PROVIDER_NOT_CONFIGURED: 503,
@@ -162,6 +170,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   PAYLOAD_TOO_LARGE: "Request body is too large",
   SERVICE_UNAVAILABLE: "Service temporarily unavailable",
   INTERNAL_ERROR: PUBLIC_INTERNAL_ERROR_MESSAGE,
+  NOT_IMPLEMENTED: "This operation is not implemented yet",
   NOT_ALLOWLISTED: "Email or domain not on allowlist",
   INVALID_API_KEY: "Invalid API key",
   EXPIRED_API_KEY: "API key has expired",
@@ -193,6 +202,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
+  SIGNING_BLOCKED: "The custody provider blocked this signing request",
   CUSTODY_POLICY_REFUSED:
     "Your custody provider refused to sign this request because of a wallet policy. Review the wallet's policy or adjust the request before retrying.",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
