@@ -6,9 +6,9 @@ import {
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import IntegrationDetailPage from "@/app/(session)/dashboard/[projectId]/integrations/[provider]/page";
+import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/(catalog)/page";
+import IntegrationDetailPage from "@/app/(session)/dashboard/[projectId]/integrations/[provider]/(detail)/page";
 import { integrationsSkeletonLayout } from "@/app/(session)/dashboard/[projectId]/integrations/integration-feature-gates";
-import IntegrationsPage from "@/app/(session)/dashboard/[projectId]/integrations/page";
 import * as flags from "@/flags";
 import * as ramps from "@/flags/ramps";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";

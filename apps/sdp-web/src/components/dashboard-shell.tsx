@@ -367,6 +367,7 @@ function usesWorkspaceViewport(pathname: string): boolean {
     pathname === "/dashboard/wallets" ||
     isWalletSetupRoute ||
     pathname.startsWith("/dashboard/integrations/private-channels") ||
+    /^\/dashboard\/integrations\/[^/]+\/connections\/new$/.test(pathname) ||
     isWalletDetailRoute
   );
 }
@@ -760,6 +761,8 @@ export function DashboardShell({
                         action={headerAction}
                         above={backAction}
                         mark={activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark}
+                        description={activeTitleOverride ? undefined : pageConfig.description}
+                        badge={activeTitleOverride?.badge}
                         utilities={
                           demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined
                         }

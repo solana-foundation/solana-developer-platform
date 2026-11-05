@@ -2,10 +2,18 @@
 
 import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
+import { InfoHint } from "@sdp/ui/info-hint";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useCallback, useRef, useState, useTransition } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -39,11 +47,34 @@ type CheckState =
   // the same key carry a different fingerprint and conflict forever.
   | { kind: "submit_unknown"; message: string; payload: FormData };
 
-const FIELD_INPUT_CLASS =
-  "h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none";
+/** A field's label, its input, and the line under it that says where the value comes from. */
+function CredentialField({
+  htmlFor,
+  label,
+  hint,
+  note,
+  children,
+}: {
+  htmlFor: string;
+  label: string;
+  hint?: string;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={htmlFor}>
+        {label}
+        {hint ? <InfoHint text={hint} /> : null}
+      </Label>
+      {children}
+      {note ? <p className="text-meta text-tertiary">{note}</p> : null}
+    </div>
+  );
+}
 
 /**
- * The four inputs, in the order the Privy dashboard presents them.
+ * The inputs, credentials first in the order the Privy dashboard presents them, then the names.
  *
  * Only the secret is controlled, and only so it can be cleared on a terminal
  * failure — it is never read back from the API, so a stale value left in a
@@ -72,22 +103,6 @@ function CredentialFields({
 }) {
   return (
     <>
-      <div className="space-y-2">
-        <Label htmlFor="byok-credential-label">
-          {t("DashboardCustody.providerCredentialLabel")}
-        </Label>
-        <Input
-          id="byok-credential-label"
-          name="credentialLabel"
-          defaultValue={defaultLabel}
-          required
-          className={FIELD_INPUT_CLASS}
-        />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerCredentialLabelDescription")}
-        </p>
-      </div>
-
       {provider === "fireblocks" ? (
         <FireblocksCredentialFields
           key={fireblocksResetKey}
@@ -96,13 +111,21 @@ function CredentialFields({
         />
       ) : (
         <>
-          <div className="space-y-2">
-            <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-            <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
-            <p className="text-sm leading-5 text-tertiary">
-              {t("DashboardCustody.providerPrivyAppIdDescription")}
-            </p>
-          </div>
+          <CredentialField
+            htmlFor="byok-app-id"
+            label={t("DashboardCustody.providerPrivyAppId")}
+            note={t("DashboardCustody.providerPrivyAppIdDescription")}
+          >
+            <Input
+              size="xl"
+              id="byok-app-id"
+              name="appId"
+              required
+              className="font-mono"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </CredentialField>
 
           <SecretField
             name="appSecret"
@@ -115,16 +138,28 @@ function CredentialFields({
       )}
 
       {provider === "privy" && !hostsWalletLabel ? (
-        <div className="space-y-2">
-          <Label htmlFor="byok-wallet-label">
-            {t("DashboardCustody.providerInitialWalletLabel")}
-          </Label>
-          <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
-          <p className="text-sm leading-5 text-tertiary">
-            {t("DashboardCustody.providerInitialWalletLabelDescription")}
-          </p>
-        </div>
+        <CredentialField
+          htmlFor="byok-wallet-label"
+          label={t("DashboardCustody.providerInitialWalletLabel")}
+          hint={t("DashboardCustody.providerInitialWalletLabelDescription")}
+        >
+          <Input size="xl" id="byok-wallet-label" name="walletLabel" />
+        </CredentialField>
       ) : null}
+
+      <CredentialField
+        htmlFor="byok-credential-label"
+        label={t("DashboardCustody.providerCredentialLabel")}
+        note={t("DashboardCustody.providerCredentialLabelDescription")}
+      >
+        <Input
+          size="xl"
+          id="byok-credential-label"
+          name="credentialLabel"
+          defaultValue={defaultLabel}
+          required
+        />
+      </CredentialField>
     </>
   );
 }
@@ -584,9 +619,9 @@ export function ByokCredentialForm({
   }
 
   return (
-    <form id={formId} onSubmit={handleSubmit} className="grid gap-4" data-privy-byok-form="true">
+    <form id={formId} onSubmit={handleSubmit} className="grid gap-8" data-privy-byok-form="true">
       <input type="hidden" name="provider" value={provider} />
-      <fieldset disabled={isPending} className="grid gap-4">
+      <fieldset disabled={isPending} className="grid gap-8">
         <CredentialFields
           provider={provider}
           appSecret={appSecret}

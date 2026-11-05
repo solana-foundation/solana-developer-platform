@@ -13,6 +13,8 @@ import { useDashboardPathname } from "@/lib/use-dashboard-project";
  * @param props.mark - Shown before the title (a wallet's provider mark).
  * @param props.actions - The page's own actions, before the route's header action. Pass a
  *   stable element (memoized), since a new one each render sets the header again.
+ * @param props.badge - Shown after the title on its line (a connection's status). Pass a stable
+ *   element (memoized), as with `actions`.
  * @param props.alwaysVisible - Shows the title even where the route hides its own.
  * @returns Nothing; the shell renders the title.
  */
@@ -20,18 +22,20 @@ export function DashboardPageTitle({
   title,
   mark,
   actions,
+  badge,
   alwaysVisible,
 }: {
   title: string;
   mark?: ReactNode;
   actions?: ReactNode;
+  badge?: ReactNode;
   alwaysVisible?: true;
 }) {
   const setTitle = useContext(DashboardPageTitleContext);
   const pathname = useDashboardPathname();
   useLayoutEffect(() => {
-    setTitle?.({ pathname, title, mark, actions, alwaysVisible });
+    setTitle?.({ pathname, title, mark, actions, badge, alwaysVisible });
     return () => setTitle?.(null);
-  }, [setTitle, pathname, title, mark, actions, alwaysVisible]);
+  }, [setTitle, pathname, title, mark, actions, badge, alwaysVisible]);
   return null;
 }

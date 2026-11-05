@@ -133,9 +133,26 @@ export function RecordBlock({
   );
 }
 
-/** The parts of a record, 64px apart on a desktop (32px on a phone), as the design spaces them. */
-export function RecordStack({ children }: { children: ReactNode }) {
-  return <div className="flex min-w-0 flex-col gap-8 md:gap-16">{children}</div>;
+const RECORD_STACK_SPACING = {
+  default: "gap-8 md:gap-16",
+  loose: "gap-12 pt-6 pb-16 md:gap-20 md:pt-10 md:pb-24",
+} as const;
+
+/**
+ * The parts of a record, 64px apart on a desktop (32px on a phone), as the design spaces them.
+ * `loose` sets a page of several titled blocks under the header 80px apart (48px on a phone),
+ * with room under the title before the first and after the last (the shell pads neither).
+ */
+export function RecordStack({
+  spacing = "default",
+  children,
+}: {
+  spacing?: keyof typeof RECORD_STACK_SPACING;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("flex min-w-0 flex-col", RECORD_STACK_SPACING[spacing])}>{children}</div>
+  );
 }
 
 /**

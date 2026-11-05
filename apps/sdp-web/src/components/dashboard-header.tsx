@@ -8,6 +8,11 @@ import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ACCOUNT_TABS } from "@/app/(session)/dashboard/[projectId]/account/account-tabs";
+import {
+  type IntegrationProviderIdentity,
+  integrationProviderIdentity,
+} from "@/app/(session)/dashboard/[projectId]/integrations/integration-detail";
+import { IntegrationProviderMark } from "@/app/(session)/dashboard/[projectId]/integrations/integration-provider-mark";
 import { privateChannelsInstancePath } from "@/app/(session)/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { SETTINGS_TABS } from "@/app/(session)/dashboard/[projectId]/settings/settings-tabs";
 import {
@@ -17,6 +22,7 @@ import {
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
@@ -65,6 +71,8 @@ type DashboardPageConfig = {
    * page names itself, so the header is its final height from the first frame.
    */
   titleMark?: ReactNode;
+  /** One line under a marked title saying what the page's subject is (a provider's purpose). */
+  description?: string;
 };
 
 export type DashboardHeaderActionConfig = {
@@ -216,6 +224,10 @@ type DashboardTopBarProps = {
   utilities?: ReactNode;
   /** Shown before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
+  /** Set under a marked title. */
+  description?: string;
+  /** Set after the title on its line (a record's status). */
+  badge?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -280,6 +292,8 @@ export function StackedDashboardTopBar({
   hideTitle = false,
   above,
   mark,
+  description,
+  badge,
 }: {
   navigation: ReactNode;
   title: string;
@@ -290,6 +304,10 @@ export function StackedDashboardTopBar({
   above?: ReactNode;
   /** Set before the title, 16px from it (a wallet's 48px provider mark). */
   mark?: ReactNode;
+  /** Set under the title beside the mark. */
+  description?: string;
+  /** Set after the title on its line. */
+  badge?: ReactNode;
 }) {
   return (
     <div
@@ -319,9 +337,21 @@ export function StackedDashboardTopBar({
             <div className="flex min-w-0 items-center gap-4">
               {/* A flex box, so an inline mark sits on no line box and the row is the mark's height. */}
               <span className="flex shrink-0">{mark}</span>
+              <div className="min-w-0">
+                <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+                  {title}
+                </h1>
+                {description ? (
+                  <p className="mt-1 text-body text-secondary">{description}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : badge ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
                 {title}
               </h1>
+              {badge}
             </div>
           ) : (
             <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
@@ -457,6 +487,8 @@ export function DashboardTopBar({
   above,
   utilities,
   mark,
+  description,
+  badge,
 }: DashboardTopBarProps) {
   const utilityContent = utilities ?? null;
   const trailingContent = action ? (
@@ -480,6 +512,8 @@ export function DashboardTopBar({
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
         mark={mark}
+        description={description}
+        badge={badge}
         action={action}
         trailingContent={utilityContent}
       />
@@ -923,18 +957,55 @@ function getIssuanceRoutePageConfig(
   };
 }
 
+const INTEGRATION_FAMILY_TITLE_KEYS = {
+  custody: "Shared.integrations.custodyTitle",
+  ramps: "Shared.integrations.rampsTitle",
+  compliance: "Shared.integrations.complianceTitle",
+} as const satisfies Record<IntegrationProviderIdentity["family"], MessageKey>;
+
 function getIntegrationsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  if (/^\/dashboard\/integrations\/[^/]+$/.test(pathname)) {
+  const providerPage = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname);
+  if (providerPage) {
+    const identity = integrationProviderIdentity(providerPage[1] ?? "");
+    if (!identity) {
+      return {
+        title: t("Shared.dashboardShell.integrations"),
+        contentWidthClass: PAGE_WIDTH,
+        backAction: {
+          href: "/dashboard/integrations",
+          label: t("Shared.integrations.backToIntegrations"),
+        },
+      };
+    }
+    // The provider names itself in the header from the static catalog, so the mark and the
+    // line under the title are there from the first frame.
     return {
-      title: t("Shared.dashboardShell.integrations"),
-      contentWidthClass: "max-w-5xl",
+      title: identity.label,
+      titleMark: <IntegrationProviderMark identity={identity} />,
+      description: t(identity.descriptionKey),
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: "/dashboard/integrations",
-        label: t("Shared.integrations.backToIntegrations"),
+        label: t(INTEGRATION_FAMILY_TITLE_KEYS[identity.family]),
       },
+    };
+  }
+  // A new connection: a flow, so the way back over the title in the form's column and the
+  // footer band across the page. Checked before the connection route, which `new` also matches.
+  const newConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/new$/.exec(pathname);
+  if (newConnection) {
+    const provider = newConnection[1] ?? "";
+    const providerName = isKnownCustodyProvider(provider)
+      ? formatCustodyProviderName(provider)
+      : provider;
+    return {
+      title: t("DashboardCustody.newConnectionTitle", { provider: providerName }),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: { href: `/dashboard/integrations/${provider}`, label: providerName },
     };
   }
   // One custody connection. Checked before the catch-all below, which would
@@ -947,14 +1018,10 @@ function getIntegrationsPageConfig(
     const provider = custodyConnection[1] ?? "";
     return {
       title: t("DashboardCustody.connectionPageTitle"),
-      contentWidthClass: "max-w-5xl",
+      contentWidthClass: PAGE_WIDTH,
       backAction: {
         href: `/dashboard/integrations/${provider}`,
-        label: t("DashboardCustody.backToProvider", {
-          provider: isKnownCustodyProvider(provider)
-            ? formatCustodyProviderName(provider)
-            : provider,
-        }),
+        label: isKnownCustodyProvider(provider) ? formatCustodyProviderName(provider) : provider,
       },
     };
   }

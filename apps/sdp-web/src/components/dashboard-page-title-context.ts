@@ -10,6 +10,8 @@ export interface DashboardPageTitleOverride {
   mark?: ReactNode;
   /** The page's own actions, before the route's header action (a wallet's favorite star). */
   actions?: ReactNode;
+  /** Set after the title on its line: the record's status word (a connection's Active). */
+  badge?: ReactNode;
   /** Shown even on a route that hides its title, as a missing page has to say what happened. */
   alwaysVisible?: true;
 }

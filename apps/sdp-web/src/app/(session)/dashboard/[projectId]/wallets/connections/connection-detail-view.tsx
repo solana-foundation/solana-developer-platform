@@ -4,126 +4,38 @@ import type { CustodyProvider, CustodyWalletSummary } from "@sdp/types/custody";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
-import { PlusIcon, RefreshCwIcon } from "lucide-react";
+import { cn } from "@sdp/ui/cn";
+import { ChevronDownIcon, RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { recheckPrivyCredentialAction } from "@/app/(session)/dashboard/[projectId]/wallets/byok-actions";
-import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { formatCreatedDate } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
-import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
+import { DashboardPageTitle } from "@/components/dashboard-page-title";
+import { EntityLink } from "@/components/entity-link";
+import { RecordBlock, RecordLine, RecordStack } from "@/components/refresh-record";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
-import { ConnectionCredentialsSection } from "./connection-credentials-section";
+import {
+  ConnectionCredentialsSection,
+  type RotationState,
+  resolveCredentialActions,
+  rotatableLifecycle,
+} from "./connection-credentials-section";
 import type {
   CustodyCredentialLifecycle,
   CustodyInstallationConnection,
 } from "./connection-detail.data";
-import { SigningLine } from "./connection-status";
 import { STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status-presentation";
 import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type { CustodyConnectionListItem } from "./connections.data";
 import { DeactivateConnectionDialog } from "./deactivate-connection-dialog";
+import { DeactivateCredentialsDialog } from "./deactivate-credentials-dialog";
 import { useSelectedProjectName } from "./use-selected-project-name";
 import { resolveCompletionOutcome } from "./verification-outcome";
 import { VerificationOutcomeCallout } from "./verification-outcome-callout";
-
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
-      <dt className="w-32 shrink-0 text-tertiary">{label}</dt>
-      <dd className="min-w-0 text-primary">{children}</dd>
-    </div>
-  );
-}
-
-/**
- * Identity of the connection, plus the action that applies to it as a whole.
- *
- * Signing availability sits on its own line under the badges rather than
- * becoming a third one: connection health and whether it may sign right now are
- * different facts, and collapsing them into one row would hide that.
- */
-function ConnectionHeaderCard({
-  canManageCustody,
-  connection,
-  listItem,
-  onAddWallet,
-  projectName,
-  provider,
-  t,
-}: {
-  canManageCustody: boolean;
-  connection: CustodyInstallationConnection;
-  listItem: CustodyConnectionListItem | null;
-  onAddWallet: () => void;
-  projectName: string | null;
-  provider: CustodyProvider;
-  t: ReturnType<typeof useTranslations>;
-}) {
-  const locale = useLocale();
-  const formattedCreated = listItem ? formatCreatedDate(listItem.createdAt, locale) : null;
-
-  return (
-    <header className="rounded-2xl border border-border-default bg-surface-raised p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-fill-strong">
-            <WalletProviderMark provider={provider} size="sm" />
-          </span>
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-medium tracking-tight text-primary">
-                {connection.label}
-              </h1>
-              <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
-                {statusLabel(connection.status, t)}
-              </Badge>
-            </div>
-            {listItem ? (
-              <SigningLine
-                status={connection.status}
-                isRuntimeExecutionAllowed={listItem.isRuntimeExecutionAllowed}
-              />
-            ) : null}
-            <dl className="space-y-1 pt-1">
-              <DetailRow label={t("DashboardCustody.provider")}>
-                {formatCustodyProviderName(provider)}
-              </DetailRow>
-              {projectName ? (
-                <DetailRow label={t("DashboardCustody.project")}>{projectName}</DetailRow>
-              ) : null}
-              <DetailRow label={t("DashboardCustody.connectionIdLabel")}>
-                <span className="flex min-w-0 items-center gap-1">
-                  <span className="truncate font-mono text-xs">{connection.id}</span>
-                  <WalletMetadataCopyButton
-                    value={connection.id}
-                    label={t("DashboardCustody.connectionIdLabel")}
-                    tooltip={connection.id}
-                  />
-                </span>
-              </DetailRow>
-              {formattedCreated ? (
-                <DetailRow label={t("DashboardCustody.created")}>{formattedCreated}</DetailRow>
-              ) : null}
-            </dl>
-          </div>
-        </div>
-
-        {/* Nothing is actionable on a connection that has been ended, and a
-            half-finished one has exactly one next step, offered below. */}
-        {canManageCustody && connection.status === "active" ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button onClick={onAddWallet} iconLeft={<PlusIcon className="size-4" />}>
-              {t("DashboardCustody.addWalletAction")}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </header>
-  );
-}
 
 /**
  * An install that never finished, and the two ways out of it.
@@ -178,52 +90,159 @@ function UnfinishedSetupCallout({
   );
 }
 
+/** One irreversible action: what it does on the left, its control on the right. */
+function DangerRow({
+  title,
+  body,
+  control,
+  children,
+}: {
+  title: string;
+  body: string;
+  control: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-subtle py-4 first:pt-0 last:border-b-0 last:pb-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <div className="min-w-0">
+          <p className="text-field font-medium text-primary">{title}</p>
+          <p className="text-body text-secondary">{body}</p>
+        </div>
+        {control ? <div className="shrink-0">{control}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /**
- * Ending the connection for good.
+ * Ending the connection, or the credentials behind it, for good.
  *
- * The button stays enabled even when deactivation would be refused, because the
- * dialog behind it is where the refusal is explained — a disabled control
- * cannot open the thing that would tell you why it is disabled. The inline line
- * above it is the at-a-glance version of the same reason.
+ * Active wallets block deactivating the connection, so instead of a button that would only be
+ * refused the row says how many and lists them, each a link to the wallet whose page can move
+ * or retire it. `null` hides a row the connection's state rules out.
  */
-function DeactivateConnectionCard({
-  activeWalletCount,
-  canManageCustody,
-  isUnfinished,
-  onDeactivate,
+function DangerZone({
+  connectionRow,
+  onDeactivateCredentials,
   t,
 }: {
-  activeWalletCount: number;
-  canManageCustody: boolean;
-  isUnfinished: boolean;
-  onDeactivate: () => void;
+  connectionRow: {
+    activeWallets: CustodyWalletSummary[];
+    canManageCustody: boolean;
+    isUnfinished: boolean;
+    onDeactivate: () => void;
+  } | null;
+  onDeactivateCredentials: (() => void) | null;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const blockingReason = isUnfinished
-    ? t("DashboardCustody.deactivateNotApplicableUnfinished")
-    : activeWalletCount > 0
-      ? t("DashboardCustody.deactivateBlockedByWallets", { count: activeWalletCount })
-      : null;
+  const href = useProjectHref();
+  const [walletsShown, setWalletsShown] = useState(false);
+  const activeWallets = connectionRow?.activeWallets ?? [];
+  const blockingWallets = activeWallets.length;
+
+  const connectionControl =
+    !connectionRow || connectionRow.isUnfinished ? null : blockingWallets > 0 ? (
+      <button
+        type="button"
+        aria-expanded={walletsShown}
+        onClick={() => setWalletsShown((shown) => !shown)}
+        className="inline-flex items-center gap-1.5 text-field text-primary"
+      >
+        {blockingWallets === 1
+          ? t("DashboardCustody.walletsStillActiveOne")
+          : t("DashboardCustody.walletsStillActive", { count: blockingWallets })}
+        <ChevronDownIcon
+          aria-hidden
+          className={cn("size-4 text-tertiary transition-transform", walletsShown && "rotate-180")}
+        />
+      </button>
+    ) : connectionRow.canManageCustody ? (
+      <Button variant="destructive" size="sm" onClick={connectionRow.onDeactivate}>
+        {t("DashboardCustody.deactivateConnectionConfirm")}
+      </Button>
+    ) : null;
 
   return (
-    <section className="rounded-2xl border border-border-default bg-surface-raised p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 space-y-1">
-          <h2 className="text-base font-medium text-primary">
-            {t("DashboardCustody.deactivateConnectionSectionTitle")}
-          </h2>
-          <p className="text-sm text-secondary">
-            {t("DashboardCustody.deactivateConnectionSectionBody")}
-          </p>
-          {blockingReason ? <p className="text-sm text-warning">{blockingReason}</p> : null}
-        </div>
-        {canManageCustody && !isUnfinished ? (
-          <Button variant="destructive" className="shrink-0" onClick={onDeactivate}>
-            {t("DashboardCustody.deactivateConnectionConfirm")}
-          </Button>
+    <RecordBlock title={t("DashboardCustody.dangerZoneTitle")}>
+      <div>
+        {connectionRow ? (
+          <DangerRow
+            title={t("DashboardCustody.deactivateConnectionSectionTitle")}
+            body={
+              connectionRow.isUnfinished
+                ? t("DashboardCustody.deactivateNotApplicableUnfinished")
+                : t("DashboardCustody.deactivateConnectionSectionBody")
+            }
+            control={connectionControl}
+          >
+            {walletsShown && blockingWallets > 0 ? (
+              <ul className="space-y-2 pt-1">
+                {activeWallets.map((wallet) => (
+                  <li key={wallet.walletId} className="text-body">
+                    <EntityLink
+                      href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+                    >
+                      {wallet.label?.trim() || wallet.walletId}
+                    </EntityLink>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </DangerRow>
+        ) : null}
+        {onDeactivateCredentials ? (
+          <DangerRow
+            title={t("DashboardCustody.deactivateCredentialsConfirm")}
+            body={t("DashboardCustody.deactivateCredentialsRowBody")}
+            control={
+              <Button variant="destructive" size="sm" onClick={onDeactivateCredentials}>
+                {t("DashboardCustody.deactivateCredentialsConfirm")}
+              </Button>
+            }
+          />
         ) : null}
       </div>
-    </section>
+    </RecordBlock>
+  );
+}
+
+function ConnectionDetails({
+  connection,
+  listItem,
+  projectName,
+  t,
+}: {
+  connection: CustodyInstallationConnection;
+  listItem: CustodyConnectionListItem | null;
+  projectName: string | null;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const locale = useLocale();
+  return (
+    <RecordBlock title={t("DashboardCustody.connectionDetailsTitle")}>
+      <dl>
+        <RecordLine label={t("DashboardCustody.connectionIdLabel")}>
+          <span className="min-w-0 truncate">{connection.id}</span>
+          <span className="-my-1.5 ml-auto">
+            <WalletMetadataCopyButton
+              value={connection.id}
+              label={t("DashboardCustody.connectionIdLabel")}
+              tooltip={connection.id}
+            />
+          </span>
+        </RecordLine>
+        {projectName ? (
+          <RecordLine label={t("DashboardCustody.project")}>{projectName}</RecordLine>
+        ) : null}
+        {listItem ? (
+          <RecordLine label={t("DashboardCustody.created")}>
+            {formatCreatedDate(listItem.createdAt, locale)}
+          </RecordLine>
+        ) : null}
+      </dl>
+    </RecordBlock>
   );
 }
 
@@ -282,12 +301,13 @@ function SetupStateBanner({
 }
 
 /** Which dialog, if any, the page is showing. */
-type DialogName = "addWallet" | "deactivate" | "cancelSetup" | null;
+type DialogName = "addWallet" | "deactivate" | "deactivateCredentials" | "cancelSetup" | null;
 
 /** Every dialog the page can open, each deciding for itself when it is visible. */
 function ConnectionDialogs({
   activeWalletCount,
   connection,
+  credentialLifecycle,
   open,
   onClose,
   projectName,
@@ -295,6 +315,8 @@ function ConnectionDialogs({
 }: {
   activeWalletCount: number;
   connection: CustodyInstallationConnection;
+  /** The credentials the viewer may deactivate, or `null` when they may not. */
+  credentialLifecycle: CustodyCredentialLifecycle | null;
   open: DialogName;
   onClose: () => void;
   projectName: string;
@@ -318,6 +340,15 @@ function ConnectionDialogs({
         provider={provider}
         activeWalletCount={activeWalletCount}
       />
+      {credentialLifecycle ? (
+        <DeactivateCredentialsDialog
+          isOpen={open === "deactivateCredentials"}
+          onClose={onClose}
+          lifecycle={credentialLifecycle}
+          provider={provider}
+          connectionId={connection.id}
+        />
+      ) : null}
       <CancelSetupDialog
         isOpen={open === "cancelSetup"}
         onClose={onClose}
@@ -366,10 +397,41 @@ export function ConnectionDetailView({
   // which is what a modal surface means anyway.
   const [openDialog, setOpenDialog] = useState<DialogName>(null);
   const [rechecking, startRecheck] = useTransition();
+  const [rotation, setRotation] = useState<RotationState>({ lifecycle: null, open: false });
 
   const isDeactivated = connection.status === "deactivated";
   const isUnfinished = connection.status === "pending" || connection.status === "failed";
   const activeWallets = wallets.filter((wallet) => wallet.status === "active");
+  const signingPaused =
+    listItem !== null && connection.status === "active" && !listItem.isRuntimeExecutionAllowed;
+  const rotatable = rotatableLifecycle(lifecycle, canManageCustody, rotation);
+  const credentialActions = resolveCredentialActions(lifecycle, canManageCustody);
+  const deactivatableCredentials = credentialActions.canDeactivate
+    ? credentialActions.availableLifecycle
+    : null;
+
+  // Stable elements, so the shell's header is set once per state rather than every render.
+  const badge = useMemo(
+    () => (
+      <Badge variant={STATUS_BADGE_VARIANTS[connection.status]}>
+        {statusLabel(connection.status, t)}
+      </Badge>
+    ),
+    [connection.status, t]
+  );
+  const actions = useMemo(
+    () =>
+      rotatable ? (
+        <Button
+          variant="outline"
+          onClick={() => setRotation({ lifecycle: rotatable, open: true })}
+          iconLeft={<RefreshCwIcon className="size-4" />}
+        >
+          {t("DashboardCustody.rotateSecretAction")}
+        </Button>
+      ) : undefined,
+    [rotatable, t]
+  );
 
   const handleRecheck = () => {
     startRecheck(async () => {
@@ -384,57 +446,82 @@ export function ConnectionDetailView({
   };
 
   return (
-    <div className="w-full space-y-6 px-4 py-6 md:px-6" data-custody-connection={connection.id}>
-      <ConnectionHeaderCard
-        canManageCustody={canManageCustody}
-        connection={connection}
-        listItem={listItem}
-        onAddWallet={() => setOpenDialog("addWallet")}
-        projectName={projectName}
-        provider={provider}
-        t={t}
-      />
+    <div className="@container w-full" data-custody-connection={connection.id}>
+      <DashboardPageTitle title={connection.label} badge={badge} actions={actions} />
+      <RecordStack spacing="loose">
+        <div className="flex flex-col gap-3 empty:hidden">
+          {isDeactivated ? (
+            <Callout variant="neutral">
+              {t("DashboardCustody.connectionDeactivatedExplainer")}
+            </Callout>
+          ) : (
+            <SetupStateBanner
+              canManageCustody={canManageCustody}
+              connection={connection}
+              onCancelSetup={() => setOpenDialog("cancelSetup")}
+              onRecheck={handleRecheck}
+              rechecking={rechecking}
+              t={t}
+            />
+          )}
+          {signingPaused ? (
+            <Callout variant="warning">{t("DashboardCustody.connectionSigningPaused")}</Callout>
+          ) : null}
+        </div>
 
-      {isDeactivated ? (
-        <Callout variant="neutral">{t("DashboardCustody.connectionDeactivatedExplainer")}</Callout>
-      ) : (
-        <SetupStateBanner
-          canManageCustody={canManageCustody}
+        <ConnectionWalletsCard
+          wallets={wallets}
+          walletsUnavailable={walletsUnavailable}
+          isDeactivated={isDeactivated}
+          pendingWalletLabel={connection.walletLabel ?? null}
+          provider={provider}
+          onAddWallet={
+            canManageCustody && connection.status === "active"
+              ? () => setOpenDialog("addWallet")
+              : null
+          }
+        />
+
+        <ConnectionCredentialsSection
+          lifecycle={lifecycle}
           connection={connection}
-          onCancelSetup={() => setOpenDialog("cancelSetup")}
-          onRecheck={handleRecheck}
-          rechecking={rechecking}
-          t={t}
-        />
-      )}
-
-      <ConnectionWalletsCard
-        wallets={wallets}
-        walletsUnavailable={walletsUnavailable}
-        isDeactivated={isDeactivated}
-        pendingWalletLabel={connection.walletLabel ?? null}
-      />
-
-      <ConnectionCredentialsSection
-        lifecycle={lifecycle}
-        connection={connection}
-        provider={provider}
-        canManageCustody={canManageCustody}
-      />
-
-      {isDeactivated ? null : (
-        <DeactivateConnectionCard
-          activeWalletCount={activeWallets.length}
+          provider={provider}
           canManageCustody={canManageCustody}
-          isUnfinished={isUnfinished}
-          onDeactivate={() => setOpenDialog("deactivate")}
+          rotation={rotation}
+          onRotationChange={setRotation}
+        />
+
+        <ConnectionDetails
+          connection={connection}
+          listItem={listItem}
+          projectName={projectName}
           t={t}
         />
-      )}
+
+        {isDeactivated && !deactivatableCredentials ? null : (
+          <DangerZone
+            connectionRow={
+              isDeactivated
+                ? null
+                : {
+                    activeWallets,
+                    canManageCustody,
+                    isUnfinished,
+                    onDeactivate: () => setOpenDialog("deactivate"),
+                  }
+            }
+            onDeactivateCredentials={
+              deactivatableCredentials ? () => setOpenDialog("deactivateCredentials") : null
+            }
+            t={t}
+          />
+        )}
+      </RecordStack>
 
       <ConnectionDialogs
         activeWalletCount={activeWallets.length}
         connection={connection}
+        credentialLifecycle={deactivatableCredentials}
         open={openDialog}
         onClose={() => setOpenDialog(null)}
         projectName={projectName}
