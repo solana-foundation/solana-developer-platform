@@ -43,6 +43,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, forbidden } from "@/lib/errors";
 import {
   isCustodyProviderAvailable,
+  isCustodyProviderOffered,
   isEarnEnabled,
   isModuleAvailable,
   isRampProviderAvailable,
@@ -562,7 +563,7 @@ export async function getProviderAvailability(
       custody: buildAvailabilityEntries(
         resolved.providers.custody,
         configured.custody,
-        (provider) => CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode))
+        (provider) => isCustodyProviderOffered(env, provider)
       ),
       compliance: buildAvailabilityEntries(
         resolved.providers.compliance,
