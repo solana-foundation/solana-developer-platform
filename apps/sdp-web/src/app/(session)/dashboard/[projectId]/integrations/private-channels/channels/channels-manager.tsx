@@ -8,7 +8,8 @@ import { Label } from "@sdp/ui/label";
 import { Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { createChannelAction, deleteChannelAction } from "./actions";
 
 interface Props {
@@ -17,9 +18,9 @@ interface Props {
   canWrite: boolean;
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, locale: string, timeZone: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(locale, { timeZone });
 }
 
 export function ChannelsManager({ initialChannels, canWrite }: Props) {
@@ -28,6 +29,8 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
   const [isCreating, startCreate] = useTransition();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const t = useTranslations();
+  const locale = useLocale();
+  const timeZone = useTimeZone();
 
   const channels = initialChannels;
 
@@ -125,7 +128,7 @@ export function ChannelsManager({ initialChannels, canWrite }: Props) {
                 ) : null}
                 <span className="text-xs text-secondary">
                   {t("DashboardPrivateChannels.channels.created", {
-                    date: formatDate(channel.createdAt),
+                    date: formatDate(channel.createdAt, locale, timeZone),
                   })}
                 </span>
               </div>

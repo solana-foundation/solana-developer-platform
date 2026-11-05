@@ -19,6 +19,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import type { TranslationValues } from "@/i18n/translate";
 import { type LoadEventsResult, loadProjectEventsAction } from "./actions";
 import { EventDetail } from "./event-detail";
@@ -67,12 +68,13 @@ const FAMILY_FILTERS = [
   PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR,
 ] as const satisfies readonly EventFamilyFilter[];
 
-function formatWhen(iso: string, locale: string): string {
+function formatWhen(iso: string, locale: string, timeZone: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(locale, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone,
   });
 }
 
@@ -272,6 +274,7 @@ export function EventsList({
   const [isFiltering, startFiltering] = useTransition();
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const isBusy = isLoadingMore || isFiltering;
 
   // The page scope is the feed's identity: when it changes, rows, cursor, and
@@ -387,11 +390,11 @@ export function EventsList({
           event,
           label: eventTypeLabel(t, event.type),
           detail: formatRowSummary(t, summary, locale, names),
-          when: formatWhen(event.occurredAt, locale),
+          when: formatWhen(event.occurredAt, locale, timeZone),
           channelLabel: labelFor(names, event.channelId) ?? null,
         };
       }),
-    [feed.events, locale, names, t]
+    [feed.events, locale, names, t, timeZone]
   );
 
   return (
@@ -533,7 +536,7 @@ export function EventsList({
         <EventDetail
           event={selectedEvent}
           summary={selectedSummary}
-          formattedOccurredAt={formatWhen(selectedEvent.occurredAt, locale)}
+          formattedOccurredAt={formatWhen(selectedEvent.occurredAt, locale, timeZone)}
           canViewRawPayload={canViewRawPayload}
           names={names}
           onClose={() => setSelectedEvent(null)}

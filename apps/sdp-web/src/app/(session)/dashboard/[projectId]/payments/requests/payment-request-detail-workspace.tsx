@@ -38,6 +38,7 @@ import { RecordFact, RecordFactColumns } from "@/components/refresh-record";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
@@ -80,6 +81,7 @@ function requestWhy(
   expires: string | null,
   canceler: PaymentRequestCanceler | null,
   locale: string,
+  timeZone: string,
   t: Translate
 ): string {
   const status = request.status;
@@ -93,7 +95,7 @@ function requestWhy(
     case "expired":
       return t("DashboardPayments.requestDetail.why.expired");
     case "canceled":
-      return canceledWhy(request, canceler, locale, t);
+      return canceledWhy(request, canceler, locale, timeZone, t);
     default: {
       const unhandled: never = status;
       throw new Error(`Unhandled payment request status: ${String(unhandled)}`);
@@ -106,10 +108,11 @@ function canceledWhy(
   request: PaymentRequest,
   canceler: PaymentRequestCanceler | null,
   locale: string,
+  timeZone: string,
   t: Translate
 ): string {
   const actor = cancelerLabel(request, canceler, t);
-  const date = request.canceledAt ? formatDateTime(request.canceledAt, locale) : null;
+  const date = request.canceledAt ? formatDateTime(request.canceledAt, locale, timeZone) : null;
   if (actor && date) {
     return t("DashboardPayments.requestDetail.why.canceledByOn", { actor, date });
   }
@@ -544,6 +547,7 @@ function PaymentRequestRecord({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const { sdpEnvironment, dashboardAccess } = useDashboardWorkspace();
   // Whether it is still payable depends on the clock, so it is decided only in the browser: the
   // server render and the first client render both leave Cancel out, and agree.
@@ -563,7 +567,7 @@ function PaymentRequestRecord({
     request.status === "awaiting_payment" &&
     (now === null || isPaymentRequestPayableAt(request, now));
   const symbol = tokenSymbolByMint.get(request.token) ?? shortenAddress(request.token);
-  const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale) : null;
+  const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale, timeZone) : null;
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -573,7 +577,7 @@ function PaymentRequestRecord({
         <RecordStateBand
           state={t(REQUEST_STATUS_TRANSLATION_KEYS[request.status])}
           tone={REQUEST_STATUS_TONE[request.status]}
-          why={requestWhy(request, expires, canceler, locale, t)}
+          why={requestWhy(request, expires, canceler, locale, timeZone, t)}
           action={
             request.status === "paid" && request.fulfilledByTransferId ? (
               <Button asChild variant="outline" size="sm">
@@ -632,7 +636,7 @@ function PaymentRequestRecord({
                 {expires ?? t("DashboardPayments.requests.noExpiry")}
               </RecordFact>
               <RecordFact label={t("DashboardPayments.recurring.created")}>
-                {formatDateTime(request.createdAt, locale) ?? request.createdAt}
+                {formatDateTime(request.createdAt, locale, timeZone) ?? request.createdAt}
               </RecordFact>
             </dl>
           </RecordFactColumns>
