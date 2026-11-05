@@ -109,7 +109,7 @@ function renderWithoutConnections(provider: string, canManageCustody: boolean): 
 }
 
 function recordLine(markup: string, label: string): string | null {
-  const match = new RegExp(`>${label}(?:<.*?)?</dt><dd[^>]*>(.*?)</dd>`).exec(markup);
+  const match = new RegExp(`>${label}(?:(?!</dt>).)*</dt><dd[^>]*>(.*?)</dd>`).exec(markup);
   return match ? match[1].replace(/<[^>]+>/g, "") : null;
 }
 

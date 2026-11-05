@@ -16,7 +16,7 @@ export function IntegrationProviderMark({ identity }: { identity: IntegrationPro
   return (
     <span
       aria-hidden
-      className="relative inline-flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[white] p-2.5"
+      className="relative inline-flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white p-2.5"
     >
       <span className="relative h-full w-full">
         <Image src={src} alt="" fill sizes="48px" className="object-contain" />

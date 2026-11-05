@@ -4,6 +4,10 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  DashboardPageTitleContext,
+  type DashboardPageTitleOverride,
+} from "@/components/dashboard-page-title-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
@@ -23,6 +27,11 @@ vi.mock("./use-selected-project-name", () => ({
 const PROVIDER_HREF = "/dashboard/prj_test_sandbox/integrations/privy";
 const CONNECTION_HREF = "/dashboard/prj_test_sandbox/integrations/privy/connections/cconn_new";
 
+let shownTitle: DashboardPageTitleOverride | null = null;
+const showTitle = (override: DashboardPageTitleOverride | null) => {
+  shownTitle = override;
+};
+
 beforeEach(() => {
   setPageRequest("/dashboard/prj_test_sandbox/integrations/privy/connections/new");
 });
@@ -33,12 +42,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   resetDashboardNavigation();
+  shownTitle = null;
 });
 
 function flow(provider: "privy" | "fireblocks") {
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <AddConnectionFlow provider={provider} />
+      <DashboardPageTitleContext.Provider value={showTitle}>
+        <AddConnectionFlow provider={provider} />
+      </DashboardPageTitleContext.Provider>
     </I18nProvider>
   );
 }
@@ -79,12 +91,12 @@ it.each([
     "Connects this Privy app to Acme Payments and creates the first wallet in it.",
     "Connect and create wallet",
   ],
-  ["fireblocks", "Connects this Fireblocks account to Acme Payments.", "Connect"],
+  ["fireblocks", "Connects this Fireblocks account to Acme Payments.", "Connect and verify"],
 ] as const)("words the %s footer for what connecting creates", (provider, footer, primary) => {
   const markup = renderToStaticMarkup(flow(provider));
 
   expect(markup).toContain(footer);
-  expect(markup).toContain(`${primary}</span>`);
+  expect(markup).toContain(primary);
 });
 
 it("returns to the provider page on Cancel", async () => {
@@ -139,12 +151,14 @@ it("blocks leaving during a completion retry and releases it after a refusal", a
   await user.click(screen.getByRole("button", { name: "Check again" }));
   const close = screen.getByRole("button", { name: "Close" });
   expect(close).toHaveProperty("disabled", true);
+  expect(shownTitle).toMatchObject({ backLocked: true });
   await user.click(close);
   expect(dashboardRouter.push).not.toHaveBeenCalled();
 
   retry.resolve(Response.json({ error: { message: "Try again later." } }, { status: 403 }));
   await screen.findByText("Try again later.");
   await waitFor(() => expect(close).toHaveProperty("disabled", false));
+  expect(shownTitle).toHaveProperty("backLocked", undefined);
   await user.click(close);
   expect(dashboardRouter.push).toHaveBeenCalledWith(PROVIDER_HREF);
 });

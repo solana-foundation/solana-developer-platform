@@ -10,17 +10,17 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ orgId: "org_test", getToken: async () => "test-token" }),
 }));
 
-import {
-  ConnectionCredentialsSection,
-  type RotationState,
-  resolveCredentialActions,
-  rotatableLifecycle,
-} from "./connection-credentials-section";
+import { ConnectionCredentialsSection } from "./connection-credentials-section";
 import type {
   CustodyCredentialLifecycle,
   CustodyInstallationConnection,
   LifecycleCredential,
 } from "./connection-detail.data";
+import {
+  type RotationState,
+  resolveCredentialActions,
+  rotatableLifecycle,
+} from "./credential-actions";
 
 const HOUR_MS = 60 * 60 * 1000;
 const IDLE: RotationState = { lifecycle: null, open: false };

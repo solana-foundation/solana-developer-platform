@@ -234,18 +234,17 @@ export function HeaderBackAction({
   href,
   label,
   compactOnMobile = false,
+  locked = false,
 }: {
   href: string;
   label: string;
   compactOnMobile?: boolean;
+  /** Shown but not followable, while the page holds work that leaving would drop. */
+  locked?: boolean;
 }) {
   const projectHref = useProjectHref();
-  return (
-    <Link
-      href={projectHref(href)}
-      // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
-      className="inline-flex items-center rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary -ml-1.5 h-5 gap-1.5"
-    >
+  const content = (
+    <>
       <ChevronLeftIcon className="size-4 block" />
       <span
         className={[
@@ -255,6 +254,24 @@ export function HeaderBackAction({
       >
         {label}
       </span>
+    </>
+  );
+  // The chevron's stroke sits on the column's edge (the 16px icon has 6px of air before it), 6px to its label.
+  const className =
+    "inline-flex items-center rounded-[var(--button-radius-md)] -ml-1.5 h-5 gap-1.5";
+  if (locked) {
+    return (
+      <button type="button" disabled className={cn(className, "cursor-not-allowed text-tertiary")}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Link
+      href={projectHref(href)}
+      className={cn(className, "text-secondary transition-colors hover:text-primary")}
+    >
+      {content}
     </Link>
   );
 }
@@ -967,9 +984,9 @@ function getIntegrationsPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
-  const providerPage = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname);
-  if (providerPage) {
-    const identity = integrationProviderIdentity(providerPage[1] ?? "");
+  const providerPageId = /^\/dashboard\/integrations\/([^/]+)$/.exec(pathname)?.[1];
+  if (providerPageId) {
+    const identity = integrationProviderIdentity(providerPageId);
     if (!identity) {
       return {
         title: t("Shared.dashboardShell.integrations"),
@@ -995,27 +1012,28 @@ function getIntegrationsPageConfig(
   }
   // A new connection: a flow, so the way back over the title in the form's column and the
   // footer band across the page. Checked before the connection route, which `new` also matches.
-  const newConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/new$/.exec(pathname);
-  if (newConnection) {
-    const provider = newConnection[1] ?? "";
-    const providerName = isKnownCustodyProvider(provider)
-      ? formatCustodyProviderName(provider)
-      : provider;
+  const newConnectionProvider = /^\/dashboard\/integrations\/([^/]+)\/connections\/new$/.exec(
+    pathname
+  )?.[1];
+  if (newConnectionProvider) {
+    const providerName = isKnownCustodyProvider(newConnectionProvider)
+      ? formatCustodyProviderName(newConnectionProvider)
+      : newConnectionProvider;
     return {
       title: t("DashboardCustody.newConnectionTitle", { provider: providerName }),
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
-      backAction: { href: `/dashboard/integrations/${provider}`, label: providerName },
+      backAction: {
+        href: `/dashboard/integrations/${newConnectionProvider}`,
+        label: providerName,
+      },
     };
   }
   // One custody connection. Checked before the catch-all below, which would
   // otherwise title this "Integrations" and send Back to the catalogue rather
   // than to the provider that owns the connection.
-  const custodyConnection = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(
-    pathname
-  );
-  if (custodyConnection) {
-    const provider = custodyConnection[1] ?? "";
+  const provider = /^\/dashboard\/integrations\/([^/]+)\/connections\/[^/]+$/.exec(pathname)?.[1];
+  if (provider) {
     return {
       title: t("DashboardCustody.connectionPageTitle"),
       contentWidthClass: PAGE_WIDTH,

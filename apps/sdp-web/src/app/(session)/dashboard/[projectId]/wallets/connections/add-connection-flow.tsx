@@ -8,6 +8,7 @@ import { useId, useState } from "react";
 import { useSelectedProjectName } from "@/app/(session)/dashboard/[projectId]/wallets/connections/use-selected-project-name";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { ByokCredentialForm } from "@/app/(session)/dashboard/[projectId]/wallets/setup/privy-credential-form";
+import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -55,7 +56,7 @@ export function AddConnectionFlow({ provider }: { provider: ByokCustodyProvider 
 
   const footer = (
     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:gap-8">
-      <p className="max-w-[36em] text-body text-secondary">
+      <p className="max-w-md text-body text-secondary">
         {t(
           createsWallet
             ? "DashboardCustody.addConnectionFooterWithWallet"
@@ -99,6 +100,12 @@ export function AddConnectionFlow({ provider }: { provider: ByokCustodyProvider 
       progressLabel={t("DashboardCustody.addConnection")}
       footer={footer}
     >
+      {/* The header's Back follows the same lock as Cancel: leaving unmounts the form, and with
+          it the payload and key an unknown submission needs to replay safely. */}
+      <DashboardPageTitle
+        title={t("DashboardCustody.newConnectionTitle", { provider: providerName })}
+        backLocked={leaveDisabled ? true : undefined}
+      />
       <div data-custody-add-connection>
         <ByokCredentialForm
           provider={provider}

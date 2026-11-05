@@ -19,12 +19,7 @@ import { useTimeZone } from "@/i18n/time-zone";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { AddWalletDialog } from "./add-wallet-dialog";
 import { CancelSetupDialog } from "./cancel-setup-dialog";
-import {
-  ConnectionCredentialsSection,
-  type RotationState,
-  resolveCredentialActions,
-  rotatableLifecycle,
-} from "./connection-credentials-section";
+import { ConnectionCredentialsSection } from "./connection-credentials-section";
 import type {
   CustodyCredentialLifecycle,
   CustodyInstallationConnection,
@@ -32,6 +27,11 @@ import type {
 import { STATUS_BADGE_VARIANTS, statusLabel } from "./connection-status-presentation";
 import { ConnectionWalletsCard } from "./connection-wallets-card";
 import type { CustodyConnectionListItem } from "./connections.data";
+import {
+  type RotationState,
+  resolveCredentialActions,
+  rotatableLifecycle,
+} from "./credential-actions";
 import { DeactivateConnectionDialog } from "./deactivate-connection-dialog";
 import { DeactivateCredentialsDialog } from "./deactivate-credentials-dialog";
 import { useSelectedProjectName } from "./use-selected-project-name";
@@ -117,82 +117,121 @@ function DangerRow({
   );
 }
 
+/** What the Deactivate connection row can offer, in the order the checks apply. */
+type ConnectionDangerState = "unfinished" | "blocked_by_wallets" | "ready" | "view_only";
+
+function connectionDangerState(
+  isUnfinished: boolean,
+  blockingWallets: number,
+  canManageCustody: boolean
+): ConnectionDangerState {
+  if (isUnfinished) return "unfinished";
+  if (blockingWallets > 0) return "blocked_by_wallets";
+  return canManageCustody ? "ready" : "view_only";
+}
+
 /**
- * Ending the connection, or the credentials behind it, for good.
- *
- * Active wallets block deactivating the connection, so instead of a button that would only be
- * refused the row says how many and lists them, each a link to the wallet whose page can move
- * or retire it. `null` hides a row the connection's state rules out.
+ * Deactivating the connection. Active wallets block it, so instead of a button that would
+ * only be refused the row says how many and lists them, each a link to the wallet whose page
+ * can move or retire it.
+ */
+function DeactivateConnectionRow({
+  activeWallets,
+  canManageCustody,
+  isUnfinished,
+  onDeactivate,
+  t,
+}: {
+  activeWallets: CustodyWalletSummary[];
+  canManageCustody: boolean;
+  isUnfinished: boolean;
+  onDeactivate: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const href = useProjectHref();
+  const [walletsShown, setWalletsShown] = useState(false);
+  const state = connectionDangerState(isUnfinished, activeWallets.length, canManageCustody);
+
+  const control = (() => {
+    switch (state) {
+      case "unfinished":
+      case "view_only":
+        return null;
+      case "blocked_by_wallets":
+        return (
+          <button
+            type="button"
+            aria-expanded={walletsShown}
+            onClick={() => setWalletsShown((shown) => !shown)}
+            className="inline-flex items-center gap-1.5 text-field text-primary"
+          >
+            {activeWallets.length === 1
+              ? t("DashboardCustody.walletsStillActiveOne")
+              : t("DashboardCustody.walletsStillActive", { count: activeWallets.length })}
+            <ChevronDownIcon
+              aria-hidden
+              className={cn(
+                "size-4 text-tertiary transition-transform",
+                walletsShown && "rotate-180"
+              )}
+            />
+          </button>
+        );
+      case "ready":
+        return (
+          <Button variant="destructive" size="sm" onClick={onDeactivate}>
+            {t("DashboardCustody.deactivateConnectionConfirm")}
+          </Button>
+        );
+      default: {
+        const exhaustive: never = state;
+        throw new Error(`Unknown danger state: ${String(exhaustive)}`);
+      }
+    }
+  })();
+
+  return (
+    <DangerRow
+      title={t("DashboardCustody.deactivateConnectionSectionTitle")}
+      body={
+        state === "unfinished"
+          ? t("DashboardCustody.deactivateNotApplicableUnfinished")
+          : t("DashboardCustody.deactivateConnectionSectionBody")
+      }
+      control={control}
+    >
+      {state === "blocked_by_wallets" && walletsShown ? (
+        <ul className="space-y-2 pt-1">
+          {activeWallets.map((wallet) => (
+            <li key={wallet.walletId} className="text-body">
+              <EntityLink href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}>
+                {wallet.label?.trim() || wallet.walletId}
+              </EntityLink>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </DangerRow>
+  );
+}
+
+/**
+ * Ending the connection, or the credentials behind it, for good. A row the connection's state
+ * rules out is left out.
  */
 function DangerZone({
   connectionRow,
   onDeactivateCredentials,
   t,
 }: {
-  connectionRow: {
-    activeWallets: CustodyWalletSummary[];
-    canManageCustody: boolean;
-    isUnfinished: boolean;
-    onDeactivate: () => void;
-  } | null;
+  connectionRow: Omit<Parameters<typeof DeactivateConnectionRow>[0], "t"> | null;
   onDeactivateCredentials: (() => void) | null;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const href = useProjectHref();
-  const [walletsShown, setWalletsShown] = useState(false);
-  const activeWallets = connectionRow?.activeWallets ?? [];
-  const blockingWallets = activeWallets.length;
-
-  const connectionControl =
-    !connectionRow || connectionRow.isUnfinished ? null : blockingWallets > 0 ? (
-      <button
-        type="button"
-        aria-expanded={walletsShown}
-        onClick={() => setWalletsShown((shown) => !shown)}
-        className="inline-flex items-center gap-1.5 text-field text-primary"
-      >
-        {blockingWallets === 1
-          ? t("DashboardCustody.walletsStillActiveOne")
-          : t("DashboardCustody.walletsStillActive", { count: blockingWallets })}
-        <ChevronDownIcon
-          aria-hidden
-          className={cn("size-4 text-tertiary transition-transform", walletsShown && "rotate-180")}
-        />
-      </button>
-    ) : connectionRow.canManageCustody ? (
-      <Button variant="destructive" size="sm" onClick={connectionRow.onDeactivate}>
-        {t("DashboardCustody.deactivateConnectionConfirm")}
-      </Button>
-    ) : null;
-
   return (
     <RecordBlock title={t("DashboardCustody.dangerZoneTitle")}>
       <div>
-        {connectionRow ? (
-          <DangerRow
-            title={t("DashboardCustody.deactivateConnectionSectionTitle")}
-            body={
-              connectionRow.isUnfinished
-                ? t("DashboardCustody.deactivateNotApplicableUnfinished")
-                : t("DashboardCustody.deactivateConnectionSectionBody")
-            }
-            control={connectionControl}
-          >
-            {walletsShown && blockingWallets > 0 ? (
-              <ul className="space-y-2 pt-1">
-                {activeWallets.map((wallet) => (
-                  <li key={wallet.walletId} className="text-body">
-                    <EntityLink
-                      href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
-                    >
-                      {wallet.label?.trim() || wallet.walletId}
-                    </EntityLink>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </DangerRow>
-        ) : null}
+        {connectionRow ? <DeactivateConnectionRow {...connectionRow} t={t} /> : null}
         {onDeactivateCredentials ? (
           <DangerRow
             title={t("DashboardCustody.deactivateCredentialsConfirm")}

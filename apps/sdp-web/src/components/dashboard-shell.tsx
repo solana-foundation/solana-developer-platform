@@ -483,7 +483,11 @@ export function DashboardShell({
   // An action page sets its way back over a left title, in the page's column, tabs or not (a
   // wallet's page has both), as the design does.
   const backAction = pageConfig.backAction ? (
-    <HeaderBackAction href={pageConfig.backAction.href} label={pageConfig.backAction.label} />
+    <HeaderBackAction
+      href={pageConfig.backAction.href}
+      label={pageConfig.backAction.label}
+      locked={activeTitleOverride?.backLocked === true}
+    />
   ) : null;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);

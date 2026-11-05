@@ -24,13 +24,13 @@ import {
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const LIFECYCLE_TONES: Record<CustodyConnectionListItem["status"], StatusTone> = {
+const LIFECYCLE_TONES = {
   pending: "attention",
   checking: "progress",
   active: "positive",
   failed: "critical",
   deactivated: "neutral",
-};
+} as const satisfies Record<CustodyConnectionListItem["status"], StatusTone>;
 
 function formatCreated(value: string, locale: string, timeZone: string): string {
   const date = new Date(value);
