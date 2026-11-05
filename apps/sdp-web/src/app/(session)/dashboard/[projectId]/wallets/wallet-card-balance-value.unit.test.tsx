@@ -1,29 +1,28 @@
+// @vitest-environment jsdom
+
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import { renderToStaticMarkup } from "react-dom/server";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SANDBOX_PROJECT } from "@/test/projects";
-import { restoreWindowLocation, setWindowPathname } from "@/test/window-location";
-
-const { mockUsePersistedDashboardSWR } = vi.hoisted(() => ({
-  mockUsePersistedDashboardSWR: vi.fn(),
-}));
-
-vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
-}));
-
-vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: mockUsePersistedDashboardSWR,
-}));
-
+import {
+  dashboardErrorResponse,
+  sentDashboardReads,
+  stubDashboardFetch,
+} from "@/test/dashboard-fetch";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
+import { DashboardReadsProvider } from "@/test/dashboard-reads";
+import { EnglishI18n } from "@/test/i18n";
 import { WalletCardBalanceValue } from "./wallet-card-balance-value";
 
-const WALLET_ID = "wallet-1";
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const WALLET_ID = "wal_test_card";
+const SUMMARIES_URL = "/api/dashboard/wallets?includeBalances=true&view=summary";
+const OWN_BALANCES_URL = `/api/dashboard/payments/wallets/${WALLET_ID}/balances`;
 
 function balance(usdValue: number): CustodyWalletTokenBalance {
   return {
     token: "USDC",
-    mint: "mint-1",
+    mint: "MintTest111111111111111111111111111111111111",
     amount: String(usdValue * 1_000_000),
     uiAmount: String(usdValue),
     decimals: 6,
@@ -31,86 +30,107 @@ function balance(usdValue: number): CustodyWalletTokenBalance {
   };
 }
 
-function renderBalance(initialBalances: CustodyWalletTokenBalance[] = [balance(1)]): string {
-  return renderToStaticMarkup(
-    <WalletCardBalanceValue walletId={WALLET_ID} initialBalances={initialBalances} />
+function summaries(walletId: string, balances: CustodyWalletTokenBalance[]): Response {
+  return Response.json({
+    data: {
+      wallets: [
+        {
+          id: `cwlt_${walletId}`,
+          walletId,
+          publicKey: "11111111111111111111111111111111",
+          label: null,
+          custodyConfigId: "cfg_test_1",
+          isRuntimeExecutionAllowed: true,
+          balances,
+        },
+      ],
+    },
+  });
+}
+
+function ownBalances(balances: CustodyWalletTokenBalance[]): Response {
+  return Response.json({ data: { walletBalances: { balances } } });
+}
+
+function renderBalance() {
+  return render(
+    <DashboardReadsProvider>
+      <EnglishI18n>
+        <WalletCardBalanceValue walletId={WALLET_ID} />
+      </EnglishI18n>
+    </DashboardReadsProvider>
   );
 }
 
+function readPaths(fetchMock: ReturnType<typeof stubDashboardFetch>): string[] {
+  return sentDashboardReads(fetchMock).map((read) => read.path);
+}
+
 beforeEach(() => {
-  setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`);
+  resetDashboardNavigation();
 });
 
 afterEach(() => {
-  mockUsePersistedDashboardSWR.mockReset();
-  restoreWindowLocation();
+  cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("WalletCardBalanceValue", () => {
-  it("excludes unavailable balances while preserving a known empty wallet", async () => {
-    mockUsePersistedDashboardSWR.mockReturnValue({ data: undefined });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          data: { wallets: [{ walletId: WALLET_ID }, { walletId: "empty-wallet", balances: [] }] },
-        })
-      )
+  it("shows the wallet's total from the shared read and reads nothing else", async () => {
+    const fetchMock = stubDashboardFetch(() => summaries(WALLET_ID, [balance(12)]));
+    renderBalance();
+
+    expect(await screen.findByText("$12.00")).toBeTruthy();
+    expect(readPaths(fetchMock)).toEqual([SUMMARIES_URL]);
+  });
+
+  it.each([
+    ["leaves the wallet out", () => summaries("wal_test_other", [])],
+    ["fails", () => dashboardErrorResponse(503, "Balances unavailable")],
+  ])("reads this wallet on its own when the shared read %s", async (_case, sharedAnswer) => {
+    const fetchMock = stubDashboardFetch(({ path }) =>
+      path === OWN_BALANCES_URL ? ownBalances([balance(10)]) : sharedAnswer()
     );
     renderBalance();
-    const fetchBatch = mockUsePersistedDashboardSWR.mock.calls[0]?.[1];
-    expect(await fetchBatch()).toEqual({ "empty-wallet": [] });
+
+    expect(await screen.findByText("$10.00")).toBeTruthy();
+    expect(screen.queryByText("(stale)")).toBeNull();
+    expect(readPaths(fetchMock)).toEqual([SUMMARIES_URL, OWN_BALANCES_URL]);
   });
 
-  it("recovers an omitted wallet through its own balance endpoint", () => {
-    mockUsePersistedDashboardSWR
-      .mockReturnValueOnce({ data: { "other-wallet": [] }, error: undefined })
-      .mockReturnValueOnce({ data: [balance(10)], error: undefined });
-    expect(renderBalance()).toContain("$10.00");
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
+  it("shows no figure when the shared read and this wallet's own read both fail", async () => {
+    stubDashboardFetch(() => dashboardErrorResponse(503, "Balances unavailable"));
+    renderBalance();
+
+    expect(await screen.findByText("—")).toBeTruthy();
+  });
+
+  it("re-reads the shared balances every 30 seconds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubDashboardFetch(() => summaries(WALLET_ID, [balance(12)]));
+    renderBalance();
+
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(readPaths(fetchMock)).toEqual([SUMMARIES_URL]);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(readPaths(fetchMock)).toEqual([SUMMARIES_URL, SUMMARIES_URL]);
+  });
+
+  it("keeps the last total, marked stale, when a re-read and this wallet's own read fail", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let sharedFails = false;
+    stubDashboardFetch(() =>
+      sharedFails
+        ? dashboardErrorResponse(503, "Balances unavailable")
+        : summaries(WALLET_ID, [balance(3)])
     );
-  });
+    renderBalance();
+    expect(await screen.findByText("$3.00")).toBeTruthy();
 
-  it("keeps the per-wallet fallback dormant when the shared batch succeeds", () => {
-    mockUsePersistedDashboardSWR
-      .mockReturnValueOnce({ data: { [WALLET_ID]: [balance(12)] }, error: undefined })
-      .mockReturnValueOnce({ data: undefined, error: undefined });
+    sharedFails = true;
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
 
-    const markup = renderBalance();
-
-    expect(mockUsePersistedDashboardSWR).toHaveBeenCalledTimes(2);
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBeNull();
-    expect(markup).toContain("$12.00");
-    expect(markup).not.toContain("DashboardCustody.stale");
-  });
-
-  it("loads only this wallet through the fallback when the shared batch fails", () => {
-    mockUsePersistedDashboardSWR
-      .mockReturnValueOnce({ data: undefined, error: new Error("batch unavailable") })
-      .mockReturnValueOnce({ data: [balance(10)], error: undefined });
-
-    const markup = renderBalance();
-
-    expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
-    );
-    expect(markup).toContain("$10.00");
-    expect(markup).not.toContain("DashboardCustody.stale");
-  });
-
-  it("keeps stale data marked when both the shared batch and this wallet fail", () => {
-    mockUsePersistedDashboardSWR
-      .mockReturnValueOnce({
-        data: { [WALLET_ID]: [balance(3)] },
-        error: new Error("batch unavailable"),
-      })
-      .mockReturnValueOnce({ data: undefined, error: new Error("wallet unavailable") });
-
-    const markup = renderBalance();
-
-    expect(markup).toContain("$3.00");
-    expect(markup).toContain("DashboardCustody.stale");
+    await waitFor(() => expect(screen.getByText("$3.00").textContent).toBe("$3.00 (stale)"));
   });
 });

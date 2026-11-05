@@ -5,14 +5,10 @@ import { setPageRequest } from "@/test/request-project";
 
 const mocks = vi.hoisted(() => ({
   createSdpApiClient: vi.fn(),
-  revalidatePath: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(async () => ({ userId: "user_test", orgId: "org_test" })),
-}));
-vi.mock("next/cache", () => ({
-  revalidatePath: mocks.revalidatePath,
 }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/i18n/server", () => ({
@@ -63,7 +59,6 @@ describe("initializeCustodySetupAction", () => {
     );
 
     expect(result).toEqual({ status: "success", walletId: "privy_wallet_first" });
-    expect(mocks.revalidatePath).toHaveBeenCalled();
   });
 
   // The key's original request never recorded its outcome: the wallet may
@@ -124,7 +119,6 @@ describe("initializeCustodySetupAction", () => {
       "/v1/wallets/initialize",
       expect.anything()
     );
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -258,7 +252,7 @@ describe("requestDevnetSolanaFaucetAction", () => {
     mocks.createSdpApiClient.mockResolvedValue(client);
   });
 
-  it("revalidates the wallet pages once the API has waited for the airdrop", async () => {
+  it("reports the airdrop once the API has waited for it to confirm", async () => {
     client.fetch.mockResolvedValue({
       signature: "sig_airdrop",
       status: "confirmed",
@@ -276,10 +270,6 @@ describe("requestDevnetSolanaFaucetAction", () => {
     expect(client.fetch).toHaveBeenCalledWith("/internal/dashboard/wallets/wallet_one/faucet", {
       method: "POST",
     });
-    expect(mocks.revalidatePath.mock.calls).toEqual([
-      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets`],
-      [`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet_one`],
-    ]);
   });
 
   it("reports an airdrop that failed on-chain instead of success", async () => {
@@ -295,6 +285,5 @@ describe("requestDevnetSolanaFaucetAction", () => {
       status: "error",
       message: "DashboardCustody.devnetFaucetTransactionFailed",
     });
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 });
