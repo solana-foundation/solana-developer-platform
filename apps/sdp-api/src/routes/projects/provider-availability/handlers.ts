@@ -2,6 +2,7 @@ import type { ProjectProviderAvailability } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
+import { isCustodyProviderOffered } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
 import { isModuleInChannel, isRampProviderInChannel } from "@/middleware/require-module";
 import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/openapi/spec";
@@ -16,8 +17,9 @@ type AppContext = Context<{ Bindings: Env }>;
  * response: Earn entries only when `EARN_PUBLIC_SURFACE_PUBLISHED` is true and
  * the release channel runs Earn, compliance entries only when the release
  * channel runs Compliance, ramp entries only for providers the release channel
- * runs, and other families only when their module runs (the document prunes
- * the others; openapi/release-channel-values.ts).
+ * runs, custody entries only for providers it offers in some custody mode, and
+ * other families only when their module runs (the document prunes the others;
+ * openapi/release-channel-values.ts).
  *
  * @param c - Request context, for the deployment's release channel.
  * @param availability - The project's availability across every family.
@@ -32,6 +34,9 @@ function publishedProviderAvailability(
     providers: availability.providers.filter((entry) => {
       if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
       if (entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) return false;
+      if (entry.family === "custody" && !isCustodyProviderOffered(c.env, entry.provider)) {
+        return false;
+      }
       return isModuleInChannel(c, entry.family);
     }),
   };

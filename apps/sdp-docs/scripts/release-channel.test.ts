@@ -24,6 +24,7 @@ const STABLE: PublicSurface = {
   releaseChannel: "stable",
   modules: ["custody", "payments", "compliance"],
   rampProviders: [],
+  custodyProviders: ["privy"],
   grantableActions: [{ module: "transfers", verbs: ["read", "execute"] }],
   ...ALL,
 };
@@ -32,6 +33,7 @@ const EXPERIMENTAL: PublicSurface = {
   releaseChannel: "experimental",
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
   rampProviders: ["stripe"],
+  custodyProviders: ["fireblocks", "privy"],
   grantableActions: [
     { module: "transfers", verbs: ["read", "execute"] },
     { module: "onramp", verbs: ["read", "execute"] },
@@ -130,6 +132,22 @@ describe("docs follow the release channel", () => {
         "",
       ].join("\n")
     );
+  });
+
+  it("tables only the custody providers the build publishes", () => {
+    const block = "<CustodyProviderTable />\n";
+    assert.equal(
+      expandDocsBlocks(block, "setup-wallets.mdx", { surface: STABLE }),
+      [
+        "| Provider | Description |",
+        "| --- | --- |",
+        "| **Privy** | Embedded wallet infrastructure platform |",
+        "",
+      ].join("\n")
+    );
+    const experimental = expandDocsBlocks(block, "setup-wallets.mdx", { surface: EXPERIMENTAL });
+    assert.match(experimental, /\| \*\*Privy\*\* \|[^\n]*\n\| \*\*Fireblocks\*\* \|/);
+    assert.doesNotMatch(experimental, /Anchorage|Turnkey/);
   });
 
   it("renders the same blocks into the compiled page", () => {

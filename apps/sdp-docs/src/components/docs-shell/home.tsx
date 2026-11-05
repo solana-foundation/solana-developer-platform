@@ -7,7 +7,6 @@ import {
   RAMP_PROVIDERS,
   type RampProviderId,
 } from "@sdp/types/provider-access";
-import { isCustodyProviderInReleaseChannel } from "@sdp/types/release-channels";
 import Image from "next/image";
 import Link from "next/link";
 import { isModulePublished, publicSurface } from "@/lib/release-channel";
@@ -26,6 +25,7 @@ const CUSTODY_PARTNERS = {
   anchorage: { name: "Anchorage Digital", logo: "anchorage" },
   utila: { name: "Utila", logo: "utila" },
 } as const satisfies Record<CustodyProvider, Partner | null>;
+const PUBLISHED_CUSTODY_PROVIDERS = new Set(publicSurface.custodyProviders);
 
 const COMPLIANCE_PARTNERS = {
   range: { name: "Range", logo: "range" },
@@ -125,10 +125,8 @@ const NEXT_PATHS = [
 
 /** A concise start page with one product model and one route to first success. */
 export function DocsHome() {
-  const custodyPartners = CUSTODY_PROVIDERS.filter(
-    (provider) =>
-      isCustodyProviderInReleaseChannel(publicSurface.releaseChannel, provider, "managed") ||
-      isCustodyProviderInReleaseChannel(publicSurface.releaseChannel, provider, "byok")
+  const custodyPartners = CUSTODY_PROVIDERS.filter((provider) =>
+    PUBLISHED_CUSTODY_PROVIDERS.has(provider)
   ).flatMap((provider) => {
     const partner = CUSTODY_PARTNERS[provider];
     return partner ? [partner] : [];

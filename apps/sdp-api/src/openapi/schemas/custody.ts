@@ -1,5 +1,6 @@
 import { CUSTODY_PROVIDERS } from "@sdp/types/custody";
 import { z } from "zod";
+import { CUSTODY_MODE_GATE } from "@/openapi/release-channel-values";
 import {
   connectionWalletOwnerSchema as connectionWalletOwnerSchemaBase,
   createManagedWalletSchema as createManagedWalletSchemaBase,
@@ -17,9 +18,11 @@ import {
   withOpenApi,
 } from "./base";
 
+// Initialize sets up Managed custody, so each provider's branch follows its Managed pair.
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {
   description:
     "Initialize wallet signing provider for the project resolved from the request context.",
+  [CUSTODY_MODE_GATE]: "managed",
 });
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
@@ -39,6 +42,7 @@ const managedWalletOwnerOpenApiSchema = managedWalletOwnerSchemaBase
       description:
         "Provider whose Managed config owns the new wallet. A project holds one active config per provider.",
       example: "privy",
+      [CUSTODY_MODE_GATE]: "managed",
     }),
   });
 
@@ -86,9 +90,11 @@ export const createCustodyWalletRequestSchema = z
 
 export const deleteWalletRequestSchema = deleteWalletSchemaBase
   .extend({
+    // Only a Managed config's wallet can be deleted; a Connection's is refused with 400.
     provider: orgCustodyProviderSchema.optional().openapi({
       description: "Optional consistency assertion for the Provider of the wallet being deleted.",
       example: "anchorage",
+      [CUSTODY_MODE_GATE]: "managed",
     }),
     walletId: walletIdParamSchema.openapi({
       description: "Provider wallet ID to delete from its exact owning target.",

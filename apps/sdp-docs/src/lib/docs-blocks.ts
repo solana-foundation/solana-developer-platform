@@ -11,6 +11,7 @@ import generatedExamples from "@/generated/api-examples.json";
 import { apiExampleOf, type GuideApiExamples, renderApiExample } from "./api-example";
 import {
   DOCS_ACTION_MODULES,
+  DOCS_CUSTODY_PROVIDERS,
   DOCS_MODULES,
   DOCS_RAMP_PROVIDERS,
   DOCS_TUTORIALS,
@@ -36,6 +37,7 @@ import { apiUrl, canonicalSite } from "./site";
  * - `<ModuleTable />`: the modules, with what each does.
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
+ * - `<CustodyProviderTable />`: the custody providers, with what each is.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
  * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
  * - `<TutorialLinks />`: tutorials available on this build.
@@ -93,6 +95,13 @@ const BLOCKS = {
         `\`${entry.deliveryMode}\``,
         entry.bestFor,
       ])
+    ),
+  CustodyProviderTable: (surface) =>
+    table(
+      ["Provider", "Description"],
+      DOCS_CUSTODY_PROVIDERS.filter((entry) =>
+        surface.custodyProviders.includes(entry.provider)
+      ).map((entry) => [`**${entry.name}**`, entry.description])
     ),
   ApiKeyGrantsTable: (surface) =>
     table(

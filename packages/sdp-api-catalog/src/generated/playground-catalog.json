@@ -8815,6 +8815,36 @@
     },
     "bvnk": {
       "module": "ramps"
+    },
+    "local": {
+      "custodyProvider": "local"
+    },
+    "fireblocks": {
+      "custodyProvider": "fireblocks"
+    },
+    "privy": {
+      "custodyProvider": "privy"
+    },
+    "coinbase_cdp": {
+      "custodyProvider": "coinbase_cdp"
+    },
+    "para": {
+      "custodyProvider": "para"
+    },
+    "turnkey": {
+      "custodyProvider": "turnkey"
+    },
+    "dfns": {
+      "custodyProvider": "dfns"
+    },
+    "ibm_haven": {
+      "custodyProvider": "ibm_haven"
+    },
+    "anchorage": {
+      "custodyProvider": "anchorage"
+    },
+    "utila": {
+      "custodyProvider": "utila"
     }
   },
   "channelOverrides": {
@@ -9707,6 +9737,180 @@
       }
     },
     "stable": {
+      "POST /v1/wallets/initialize": {
+        "id": "initialize-wallet-signing",
+        "operationId": "initializeWalletSigning",
+        "title": "Initialize wallet signing",
+        "method": "POST",
+        "path": "/v1/wallets/initialize",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"privy\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "configId": "cfg_example",
+          "publicKey": "So11111111111111111111111111111111111111112",
+          "walletId": "privy_wallet_123"
+        }
+      },
+      "DELETE /v1/wallets": {
+        "id": "delete-wallet",
+        "operationId": "deleteWallet",
+        "title": "Delete wallet",
+        "method": "DELETE",
+        "path": "/v1/wallets",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "walletId": "anchorage_wallet_123",
+            "deleted": true
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      "GET /v1/wallets": {
+        "id": "list-wallets",
+        "operationId": "listWallets",
+        "title": "List wallets",
+        "method": "GET",
+        "path": "/v1/wallets?provider={provider}&includeBalances={includeBalances}&view={view}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          },
+          {
+            "key": "includeBalances",
+            "label": "includeBalances",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ],
+            "valueType": "boolean"
+          },
+          {
+            "key": "view",
+            "label": "view",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "summary",
+                "value": "summary"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "wallets": [
+              {
+                "id": "cw_example",
+                "custodyConfigId": "cfg_example",
+                "provider": "privy",
+                "isRuntimeExecutionAllowed": true,
+                "walletId": "privy_wallet_123",
+                "publicKey": "So11111111111111111111111111111111111111112",
+                "label": "Root Signing Wallet",
+                "purpose": "root",
+                "status": "active",
+                "createdAt": "2025-01-01T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      "GET /v1/wallets/aggregate": {
+        "id": "aggregate-wallet-balances",
+        "operationId": "aggregateWalletBalances",
+        "title": "Aggregate wallet balances",
+        "method": "GET",
+        "path": "/v1/wallets/aggregate?provider={provider}",
+        "pathFields": [
+          {
+            "key": "provider",
+            "label": "provider",
+            "description": "Wallet signing provider.",
+            "defaultValue": "privy",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "privy",
+                "value": "privy"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "aggregate": {
+              "walletCount": 3,
+              "balances": [
+                {
+                  "token": "USDC",
+                  "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                  "amount": "1250000",
+                  "uiAmount": "1.25",
+                  "decimals": 6,
+                  "usdPrice": 1,
+                  "usdValue": 125.5
+                }
+              ]
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
       "POST /v1/payments/transfers": {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",

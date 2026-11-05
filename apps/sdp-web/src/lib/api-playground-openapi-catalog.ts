@@ -1,9 +1,11 @@
 import type { PlaygroundModule } from "@sdp/api-catalog/catalog";
 import generatedCatalog from "@sdp/api-catalog/playground-catalog";
+import { CUSTODY_MODES, CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 // biome-ignore lint/style/noRestrictedImports: validates the generated catalog's provider names; visibility comes from isRampProviderInReleaseChannel
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
+  isCustodyProviderInReleaseChannel,
   isRampProviderInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
@@ -18,7 +20,10 @@ import type {
 } from "@/components/api-playground-shell";
 
 type RouteOwner = SdpModule | "core";
-type ValueGate = { module: SdpModule } | { rampProvider: RampProviderId };
+type ValueGate =
+  | { module: SdpModule }
+  | { rampProvider: RampProviderId }
+  | { custodyProvider: CustodyProvider };
 
 type GeneratedPlaygroundOperation = ApiPlaygroundEndpointConfig & {
   releaseModule: string;
@@ -29,7 +34,7 @@ type GeneratedPlaygroundOperation = ApiPlaygroundEndpointConfig & {
 interface GeneratedPlaygroundCatalog {
   modules: Record<PlaygroundModule, GeneratedPlaygroundOperation[]>;
   /** apps/sdp-api/src/openapi/release-channel-values.ts: the owner of each module value. */
-  valueGates: Record<string, { module?: string; rampProvider?: string }>;
+  valueGates: Record<string, { module?: string; rampProvider?: string; custodyProvider?: string }>;
   /** Only forms that differ from experimental, projected from each channel's public document. */
   channelOverrides: Record<SdpReleaseChannel, Record<string, ApiPlaygroundEndpointConfig>>;
 }
@@ -42,6 +47,7 @@ const catalog = generatedCatalog as GeneratedPlaygroundCatalog;
 // The experimental channel runs every module by construction (release-channels.ts).
 const SDP_MODULE_NAMES: ReadonlySet<string> = new Set(SDP_RELEASE_CHANNELS.experimental);
 const RAMP_PROVIDER_NAMES: ReadonlySet<string> = new Set(RAMP_PROVIDERS);
+const CUSTODY_PROVIDER_NAMES: ReadonlySet<string> = new Set(CUSTODY_PROVIDERS);
 
 function isSdpModule(value: string): value is SdpModule {
   return SDP_MODULE_NAMES.has(value);
@@ -51,15 +57,26 @@ function isRampProviderId(value: string): value is RampProviderId {
   return RAMP_PROVIDER_NAMES.has(value);
 }
 
+function isCustodyProvider(value: string): value is CustodyProvider {
+  return CUSTODY_PROVIDER_NAMES.has(value);
+}
+
 function parseRouteOwner(value: string): RouteOwner {
   if (value === "core" || isSdpModule(value)) return value;
   throw new Error(`Playground catalog names an unknown module: ${value}`);
 }
 
-function parseValueGate(gate: { module?: string; rampProvider?: string }): ValueGate {
+function parseValueGate(gate: {
+  module?: string;
+  rampProvider?: string;
+  custodyProvider?: string;
+}): ValueGate {
   if (gate.module !== undefined && isSdpModule(gate.module)) return { module: gate.module };
   if (gate.rampProvider !== undefined && isRampProviderId(gate.rampProvider)) {
     return { rampProvider: gate.rampProvider };
+  }
+  if (gate.custodyProvider !== undefined && isCustodyProvider(gate.custodyProvider)) {
+    return { custodyProvider: gate.custodyProvider };
   }
   throw new Error(`Playground catalog names an unknown value gate: ${JSON.stringify(gate)}`);
 }
@@ -166,6 +183,15 @@ function publishedIn(releaseChannel: SdpReleaseChannel): Published {
     const gate = VALUE_GATES.get(value);
     if (gate === undefined) return true;
     if ("module" in gate) return modules.has(gate.module);
+    // A custody provider runs while the channel offers it in any custody mode.
+    if ("custodyProvider" in gate) {
+      return (
+        modules.has("custody") &&
+        CUSTODY_MODES.some((mode) =>
+          isCustodyProviderInReleaseChannel(releaseChannel, gate.custodyProvider, mode)
+        )
+      );
+    }
     return (
       modules.has("ramps") &&
       isRampProviderInReleaseChannel(releaseChannel, gate.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
@@ -247,7 +273,7 @@ function pruneFields(
  * catalog's operations and the hand-authored forms alike, so the playground
  * never offers a request the proxy route or the API refuses. Inside the endpoints it
  * keeps, select options, defaults and example responses lose the values of
- * modules and ramp providers the channel does not run. The catalog holds every
+ * modules, ramp providers and custody providers the channel does not run. The catalog holds every
  * channel's operations; this is where a deployment narrows it.
  *
  * @param endpoints - The playground's endpoints.

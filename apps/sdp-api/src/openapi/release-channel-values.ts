@@ -1,4 +1,10 @@
 import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
+import {
+  CUSTODY_MODES,
+  CUSTODY_PROVIDERS,
+  type CustodyMode,
+  type CustodyProvider,
+} from "@sdp/types/custody";
 import { RAMP_ONLY_TRANSFER_STATUSES, RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
   ORGANIZATION_PROVIDER_FAMILIES,
@@ -7,6 +13,7 @@ import {
   RETIRED_RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import {
+  isCustodyProviderInReleaseChannel,
   isRampProviderInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
@@ -23,14 +30,21 @@ import { z } from "zod";
  * Value-level visibility for the public OpenAPI document. Removing a module's
  * routes is not enough: shared schemas name its values too (an API key's
  * `earn.execute` grant, a `mint_authority` wallet purpose, a `moonpay` transfer
- * provider). Every enum value a module owns is classified here, from the
- * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
- * document's channel does not publish. Actions carry their owner in the
- * registry, and wallet purposes in `WALLET_PURPOSE_OWNERS`, which the dashboard
- * filters its purpose pickers by too.
+ * provider, a `fireblocks` custody provider). Every enum value a module owns is
+ * classified here, from the catalogs in `@sdp/types`, and
+ * `pruneUnpublishedValues` drops the ones the document's channel does not
+ * publish. Actions carry their owner in the registry, and wallet purposes in
+ * `WALLET_PURPOSE_OWNERS`, which the dashboard filters its purpose pickers by
+ * too. A custody provider is published while the channel offers it in at least
+ * one custody mode (`SDP_MANAGED_CUSTODY_PROVIDER_MATURITY`,
+ * `SDP_BYOK_CUSTODY_PROVIDER_MATURITY`); a schema about one mode narrows that
+ * with `CUSTODY_MODE_GATE`.
  */
 
-export type Owner = { module: SdpModule } | { rampProvider: RampProviderId };
+export type Owner =
+  | { module: SdpModule }
+  | { rampProvider: RampProviderId }
+  | { custodyProvider: CustodyProvider };
 
 function buildOwners(): ReadonlyMap<string, Owner> {
   const owners = new Map<string, Owner>();
@@ -61,6 +75,7 @@ function buildOwners(): ReadonlyMap<string, Owner> {
   for (const provider of RAMP_PROVIDERS) own(provider, { rampProvider: provider });
   // Retired providers have no stage; their stored rows read under Ramps.
   for (const provider of RETIRED_RAMP_PROVIDERS) own(provider, { module: "ramps" });
+  for (const provider of CUSTODY_PROVIDERS) own(provider, { custodyProvider: provider });
   return owners;
 }
 
@@ -85,8 +100,21 @@ export function publishedModules(
 }
 
 /**
+ * Whether the release channel offers custody `provider` in one of `modes`. Called at
+ * prune time, not import time, so a test that mocks the custody stages sees them here.
+ */
+function offersCustodyProvider(
+  releaseChannel: SdpReleaseChannel,
+  provider: CustodyProvider,
+  modes: readonly CustodyMode[]
+): boolean {
+  return modes.some((mode) => isCustodyProviderInReleaseChannel(releaseChannel, provider, mode));
+}
+
+/**
  * Whether a public document for `modules` may name `value`. A hidden family's
- * action never is; other unclassified values are core.
+ * action never is; other unclassified values are core. A custody provider is
+ * published while the channel offers it in any custody mode.
  */
 export function isValuePublished(
   value: string,
@@ -97,6 +125,12 @@ export function isValuePublished(
   const owner = VALUE_OWNERS.get(value);
   if (!owner) return true;
   if ("module" in owner) return modules.has(owner.module);
+  if ("custodyProvider" in owner) {
+    return (
+      modules.has("custody") &&
+      offersCustodyProvider(releaseChannel, owner.custodyProvider, CUSTODY_MODES)
+    );
+  }
   return (
     modules.has("ramps") &&
     isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
@@ -113,7 +147,10 @@ export function hiddenValues(): readonly string[] {
   return [...HIDDEN_VALUES];
 }
 
-/** The module or ramp provider that owns a value, for consumers that filter by channel. */
+/**
+ * The module, ramp provider or custody provider that owns a value, for consumers
+ * that filter by channel.
+ */
 export function valueGates(): Record<string, Owner> {
   return Object.fromEntries(VALUE_OWNERS);
 }
@@ -182,7 +219,12 @@ function pruneExample(value: Json, published: Published): Json | undefined {
  * channel accepts; response schemas must also accept what a deployment already
  * stores, such as an API key saved with a scope the channel now leaves out.
  */
-type Context = { published: Published; inResponse: boolean; modules: ReadonlySet<SdpModule> };
+type Context = {
+  published: Published;
+  inResponse: boolean;
+  modules: ReadonlySet<SdpModule>;
+  releaseChannel: SdpReleaseChannel;
+};
 
 /** Schema ownership is contextual: `transferId` also names ordinary transfer rows. */
 export const MODULE_GATE = "x-sdp-module";
@@ -190,6 +232,12 @@ export const MODULE_GATE = "x-sdp-module";
 export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
 /** Alternate prose for a shared operation when its channel excludes a module. */
 export const DESCRIPTION_GATE = "x-sdp-description-without-module";
+/**
+ * Marks a schema about one custody mode: below it, a custody provider is published
+ * only while the channel offers it in that mode, so a Managed-only request never
+ * lists a provider the channel offers for BYOK alone.
+ */
+export const CUSTODY_MODE_GATE = "x-sdp-custody-mode";
 
 const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
 const moduleGateSchema = moduleNameSchema.optional();
@@ -199,6 +247,21 @@ const descriptionGateSchema = z
     description: z.string(),
   })
   .optional();
+const custodyModeGateSchema = z.enum(CUSTODY_MODES).optional();
+
+/** Whether `value` names no custody provider, or one the channel offers in `mode`. */
+function isOfferedInCustodyMode(
+  value: Json,
+  releaseChannel: SdpReleaseChannel,
+  mode: CustodyMode
+): boolean {
+  const owner = typeof value === "string" ? VALUE_OWNERS.get(value) : undefined;
+  return (
+    owner === undefined ||
+    !("custodyProvider" in owner) ||
+    offersCustodyProvider(releaseChannel, owner.custodyProvider, [mode])
+  );
+}
 
 /**
  * An enum without the unpublished values. In a request it narrows; in a
@@ -278,10 +341,26 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
         published(value) && !RAMP_ONLY_TRANSFER_STATUSES.some((status) => status === value),
     };
   }
+  const custodyMode = custodyModeGateSchema.parse(node[CUSTODY_MODE_GATE]);
+  if (custodyMode !== undefined) {
+    const { published, releaseChannel } = context;
+    context = {
+      ...context,
+      published: (value) =>
+        published(value) && isOfferedInCustodyMode(value, releaseChannel, custodyMode),
+    };
+  }
   const alternateDescription = descriptionGateSchema.parse(node[DESCRIPTION_GATE]);
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(node)) {
-    if (key === MODULE_GATE || key === TRANSFER_STATUS_GATE || key === DESCRIPTION_GATE) continue;
+    if (
+      key === MODULE_GATE ||
+      key === TRANSFER_STATUS_GATE ||
+      key === DESCRIPTION_GATE ||
+      key === CUSTODY_MODE_GATE
+    ) {
+      continue;
+    }
     if (
       key === "description" &&
       alternateDescription !== undefined &&
@@ -359,6 +438,7 @@ export function pruneUnpublishedValues(
       typeof value !== "string" || isValuePublished(value, modules, releaseChannel),
     inResponse: false,
     modules,
+    releaseChannel,
   });
   if (pruned === EMPTY) throw new Error("The public OpenAPI document pruned to nothing");
   return openApiDocumentSchema.parse(pruned);
