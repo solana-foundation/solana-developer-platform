@@ -88,6 +88,22 @@ describe("dashboard workspace tab URL state", () => {
     }
   );
 
+  it.each([
+    ["/dashboard/members", "members", false],
+    ["/dashboard/members", "security", false],
+    ["/dashboard/payments", "members", false],
+    ["/dashboard/payments", "security", false],
+    ["/dashboard/members", "playground", true],
+  ])("from %s, Settings clears the %s tab: %s", (previousPathname, tab, cleared) => {
+    expect(
+      shouldClearDashboardTabAfterPathnameChange({
+        previousPathname,
+        pathname: "/dashboard/settings",
+        tab,
+      })
+    ).toBe(cleared);
+  });
+
   it("clears tabs the Integrations hub does not own", () => {
     for (const tab of ["playground", "overview"]) {
       expect(

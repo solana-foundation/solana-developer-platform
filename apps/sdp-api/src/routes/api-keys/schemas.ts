@@ -1,9 +1,9 @@
+import { isValidIpRange } from "@sdp/ip/ip-range";
 import { ACTIONS, isApiKeyGrantableAction } from "@sdp/types/actions";
 import { API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
 import { z } from "zod";
-import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
 
-const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
+const apiKeyAllowedIpSchema = z.string().refine(isValidIpRange, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",
 });
 

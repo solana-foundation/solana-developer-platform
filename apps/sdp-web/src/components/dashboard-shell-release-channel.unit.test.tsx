@@ -56,6 +56,7 @@ function workspaceFor(flags: DashboardFlags): DashboardWorkspace {
     isProjectSwitching: false,
     selectProject: () => undefined,
     setSidebarOpen: () => undefined,
+    switchOrganization: async () => undefined,
     toggleSidebar: () => undefined,
   };
 }

@@ -81,6 +81,27 @@ describe("Markets dashboard headers", () => {
   });
 });
 
+describe("Settings header", () => {
+  it("gates the Members and Security tabs on the capability the workspace checks", () => {
+    expect(getDashboardPageConfig("/dashboard/settings", t).headerTabs).toEqual({
+      tabs: [
+        { id: "general", label: "Shared.organizationSettings.tabs.general", capability: undefined },
+        {
+          id: "members",
+          label: "Shared.organizationSettings.tabs.members",
+          capability: "canManageOrgSettings",
+        },
+        {
+          id: "security",
+          label: "Shared.organizationSettings.tabs.security",
+          capability: "canManageOrgSettings",
+        },
+      ],
+      hideOnMobile: false,
+    });
+  });
+});
+
 describe("Integrations dashboard headers", () => {
   it("keeps category navigation in the sidebar submenu", () => {
     const config = getDashboardPageConfig("/dashboard/integrations", t, true);
@@ -165,7 +186,7 @@ describe("dashboard route headers", () => {
       "DashboardPrivateChannels.overview.walletsTitle",
     ],
     ["/dashboard/integrations/private-channels/events", "Shared.dashboardShell.privateChannels"],
-    ["/dashboard/settings", "Shared.dashboardShell.settings"],
+    ["/dashboard/settings", "Shared.organizationSettings.title"],
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
     ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {

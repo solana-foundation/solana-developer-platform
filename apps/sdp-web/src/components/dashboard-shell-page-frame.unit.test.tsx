@@ -97,6 +97,7 @@ beforeEach(() => {
     isProjectSwitching: false,
     selectProject: () => undefined,
     setSidebarOpen: () => undefined,
+    switchOrganization: async () => undefined,
     toggleSidebar: () => undefined,
   });
   // Chrome with its own data reads, none of which the frame depends on.

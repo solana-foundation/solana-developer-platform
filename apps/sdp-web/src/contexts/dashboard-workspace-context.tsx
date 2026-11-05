@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Project } from "@sdp/types/projects";
 import { useRouter } from "next/navigation";
@@ -16,6 +16,13 @@ import {
   useTransition,
 } from "react";
 import { SWRConfig } from "swr";
+import {
+  clearOrganizationSwitch,
+  requestedOrganizationSwitch,
+  requestOrganizationSwitch,
+  settleOrganizationSwitch,
+  settleOrganizationSwitchOnRender,
+} from "@/contexts/requested-organization-switch";
 import type { DashboardFlags } from "@/flags/dashboard";
 import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -43,6 +50,8 @@ type DashboardWorkspaceContextValue = {
   issuanceTab: IssuanceWorkspaceTab;
   isProjectSwitching: boolean;
   selectProject: (projectId: string) => void;
+  /** Makes another organization active and lands on its Project (the bare `/dashboard`). */
+  switchOrganization: (organizationId: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
 };
@@ -73,6 +82,7 @@ export function DashboardWorkspaceProvider({
   initialSidebarOpen = true,
 }: DashboardWorkspaceProviderProps) {
   const auth = useAuth();
+  const { setActive } = useClerk();
   const router = useRouter();
   const pathname = useDashboardPathname();
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
@@ -102,16 +112,20 @@ export function DashboardWorkspaceProvider({
   );
   // Set while rendering, before any child reads a key, so a key store never
   // hands one user's or org's Idempotency-Keys to another in the same tab.
-  setIdempotencyKeyScope(liveDashboardCacheScopeKey);
+  const liveWorkspaceIsMissing = auth.isLoaded && (!auth.userId || !auth.orgId);
+  setIdempotencyKeyScope(liveWorkspaceIsMissing ? "" : liveDashboardCacheScopeKey);
   const serverDashboardCacheScopeKey = useMemo(
     () => getDashboardCacheScopeKey(serverDashboardCacheScope),
     [serverDashboardCacheScope]
   );
-  const dashboardScopeIsFresh = liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
+  const dashboardScopeIsFresh =
+    !liveWorkspaceIsMissing && liveDashboardCacheScopeKey === serverDashboardCacheScopeKey;
   const shouldRenderScopeRefreshFallback = !dashboardScopeIsFresh;
-  const swrScopeKey = getDashboardCacheScopeKey(liveDashboardCacheScope, {
-    projectId: selectedProjectId,
-  });
+  const swrScopeKey = liveWorkspaceIsMissing
+    ? "signed-out"
+    : `${auth.sessionId}:${getDashboardCacheScopeKey(liveDashboardCacheScope, {
+        projectId: selectedProjectId,
+      })}`;
 
   const [isProjectSwitching, startProjectSwitchTransition] = useTransition();
 
@@ -139,17 +153,75 @@ export function DashboardWorkspaceProvider({
     [router]
   );
 
-  // An Organization switched in Clerk leaves this URL naming the previous
-  // Organization's Project; the bare landing resolves the new one's.
+  const switchOrganization = useCallback(
+    async (organizationId: string) => {
+      requestOrganizationSwitch(organizationId);
+      try {
+        await setActive({ organization: organizationId });
+        settleOrganizationSwitch(organizationId);
+      } catch (error) {
+        clearOrganizationSwitch();
+        throw error;
+      }
+    },
+    [setActive]
+  );
+
+  // The organization this tab re-activated to match its URL, so it asks once.
+  const alignedOrganizationIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (liveDashboardCacheScopeKey === serverDashboardCacheScopeKey) {
+    if (!auth.isLoaded) {
       return;
     }
-
-    startProjectSwitchTransition(() => {
-      router.replace("/dashboard");
+    if (dashboardScopeIsFresh) {
+      // Clerk and the server agree again: a later mismatch is a new one.
+      alignedOrganizationIdRef.current = null;
+      settleOrganizationSwitchOnRender(serverDashboardCacheScope.orgId);
+      return;
+    }
+    const requestedOrganizationId = requestedOrganizationSwitch();
+    const isOwnSwitch =
+      requestedOrganizationId !== null && liveDashboardCacheScope.orgId === requestedOrganizationId;
+    if (
+      liveWorkspaceIsMissing ||
+      isOwnSwitch ||
+      liveDashboardCacheScope.userId !== serverDashboardCacheScope.userId
+    ) {
+      // An Organization switched in this tab, another person signing in, or a
+      // session that ended leaves this URL naming a Project they no longer see;
+      // the bare landing resolves theirs. A tab without focus may land before
+      // Clerk writes the new session cookie, so it lands again until the server
+      // renders the requested organization.
+      startProjectSwitchTransition(() => {
+        router.replace("/dashboard");
+      });
+      return;
+    }
+    const serverOrganizationId = serverDashboardCacheScope.orgId;
+    if (alignedOrganizationIdRef.current === serverOrganizationId) {
+      return;
+    }
+    // Clerk loaded another organization than the one this URL rendered. Clerk's
+    // backend records an organization only when it is made active in a focused
+    // tab, so a switch made without focus, or another tab's, comes back on the
+    // next load. The URL decides (HOO-2622): Clerk follows the organization it
+    // rendered, and Clerk refreshes the page once it is active.
+    alignedOrganizationIdRef.current = serverOrganizationId;
+    setActive({ organization: serverOrganizationId }).catch((error: unknown) => {
+      console.error("Could not make the page's organization active", error);
+      startProjectSwitchTransition(() => {
+        router.replace("/dashboard");
+      });
     });
-  }, [liveDashboardCacheScopeKey, serverDashboardCacheScopeKey, router]);
+  }, [
+    auth.isLoaded,
+    dashboardScopeIsFresh,
+    liveWorkspaceIsMissing,
+    liveDashboardCacheScope,
+    serverDashboardCacheScope,
+    router,
+    setActive,
+  ]);
 
   const previousPathnameRef = useRef(pathname);
   useEffect(() => {
@@ -192,6 +264,7 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       issuanceTab,
       selectProject,
+      switchOrganization,
       setSidebarOpen,
       toggleSidebar,
     }),
@@ -210,6 +283,7 @@ export function DashboardWorkspaceProvider({
       isProjectSwitching,
       issuanceTab,
       selectProject,
+      switchOrganization,
       setSidebarOpen,
       toggleSidebar,
     ]

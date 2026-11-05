@@ -67,6 +67,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
+import { callerInsufficientFundsError } from "@/services/fee-payment-errors";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -327,13 +328,19 @@ export async function sendSubscriptionInstructions(input: {
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
-  return submitSponsoredTransaction({
-    feePayment,
-    rpc,
-    transaction: txBytes,
-    lastValidBlockHeight,
-    store: input.submissionStore,
-  });
+  try {
+    return await submitSponsoredTransaction({
+      feePayment,
+      rpc,
+      transaction: txBytes,
+      lastValidBlockHeight,
+      store: input.submissionStore,
+    });
+  } catch (error) {
+    // A source wallet short of funds is recorded with the reason the caller
+    // can act on, not "An internal error occurred" (HOO-2621).
+    throw callerInsufficientFundsError(error, input.instructions) ?? error;
+  }
 }
 
 /** A row holding one of a step's saved signatures. */

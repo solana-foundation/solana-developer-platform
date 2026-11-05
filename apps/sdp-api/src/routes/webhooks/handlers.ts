@@ -486,18 +486,29 @@ export const handleRampProviderWebhook = async (c: AppContext, environment: SdpE
 };
 
 export const handleClerkWebhook = async (c: AppContext) => {
+  // Anyone can post here, so neither refusal says more than its status: the
+  // configuration gap and the verifier's reason go to the log only.
   const secret = c.env.CLERK_WEBHOOK_SECRET;
   if (!secret) {
-    throw new AppError("INTERNAL_ERROR", "CLERK_WEBHOOK_SECRET is required");
+    getLogger().error(
+      { requestId: c.get("requestId") },
+      "webhooks: CLERK_WEBHOOK_SECRET is not configured"
+    );
+    throw new AppError("INTERNAL_ERROR");
   }
 
   let event: WebhookEvent;
   try {
     event = await verifyWebhook(c.req.raw, { signingSecret: secret });
   } catch (err) {
-    throw new AppError("UNAUTHORIZED", "Invalid webhook signature", {
-      cause: err instanceof Error ? err.message : String(err),
-    });
+    getLogger().warn(
+      {
+        requestId: c.get("requestId"),
+        cause: err instanceof Error ? err.message : String(err),
+      },
+      "webhooks: refused a Clerk webhook with an invalid signature"
+    );
+    throw new AppError("UNAUTHORIZED", "Invalid webhook signature");
   }
 
   switch (event.type) {

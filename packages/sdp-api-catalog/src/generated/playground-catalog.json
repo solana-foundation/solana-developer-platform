@@ -7,14 +7,14 @@
       "Wallets": 10,
       "Projects": 4,
       "Issuance": 37,
-      "Payments": 37,
+      "Payments": 41,
       "Compliance": 1,
       "Counterparties": 13,
       "Asset Profiles": 7
     },
     "modules": {
       "wallets": 10,
-      "payments": 37,
+      "payments": 41,
       "counterparties": 13,
       "issuance": 37
     }
@@ -602,7 +602,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -890,7 +890,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -993,7 +993,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -1175,7 +1175,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1419,7 +1419,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -1553,7 +1553,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -2092,6 +2092,236 @@
         "shadowedBy": []
       },
       {
+        "id": "create-payment-request",
+        "operationId": "createPaymentRequest",
+        "title": "Create payment request",
+        "method": "POST",
+        "path": "/v1/payments/requests",
+        "pathFields": [],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"walletId\": \"privy_wallet_123\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"10.00\",\n  \"expiresAt\": null\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "list-payment-requests",
+        "operationId": "listPaymentRequests",
+        "title": "List payment requests",
+        "method": "GET",
+        "path": "/v1/payments/requests?page={page}&pageSize={pageSize}&status={status}",
+        "pathFields": [
+          {
+            "key": "page",
+            "label": "page",
+            "description": "Page number, starting at 1.",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "description": "Results per page, 1 to 100.",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+            "defaultValue": "canceled",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "awaiting_payment",
+                "value": "awaiting_payment"
+              },
+              {
+                "label": "paid",
+                "value": "paid"
+              },
+              {
+                "label": "canceled",
+                "value": "canceled"
+              },
+              {
+                "label": "expired",
+                "value": "expired"
+              }
+            ]
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "paymentRequests": [
+              {
+                "id": "preq_example",
+                "organizationId": "organization_example",
+                "projectId": "project_example",
+                "walletId": "wallet_example",
+                "destinationAddress": "So11111111111111111111111111111111111111112",
+                "token": "example",
+                "amount": "100.00",
+                "reference": "So11111111111111111111111111111111111111112",
+                "status": "canceled",
+                "expiresAt": "2025-01-01T00:00:00.000Z",
+                "fulfilledByTransferId": "fulfilledbytransfer_example",
+                "paidLate": false,
+                "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+                "canceledByApiKeyId": "canceledbyapikey_example",
+                "canceledByUserId": "canceledbyuser_example",
+                "canceledAt": "2025-01-01T00:00:00.000Z",
+                "lifecycle": [
+                  {
+                    "status": "canceled",
+                    "at": "2025-01-01T00:00:00.000Z"
+                  }
+                ],
+                "createdBy": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request",
+        "operationId": "getPaymentRequest",
+        "title": "Get payment request",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
+        "id": "get-payment-request-link",
+        "operationId": "getPaymentRequestLink",
+        "title": "Get payment request link",
+        "method": "GET",
+        "path": "/v1/payments/requests/{paymentRequestId}/link",
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "publicToken": "example-public-token"
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        },
+        "releaseModule": "payments",
+        "shadowedBy": []
+      },
+      {
         "id": "cancel-payment-request",
         "operationId": "cancelPaymentRequest",
         "title": "Cancel payment request",
@@ -2204,7 +2434,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -2233,7 +2463,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -2438,7 +2668,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -3172,7 +3402,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -3312,7 +3542,7 @@
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
                 "signature": "example",
-                "error": "example",
+                "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
                 "metadata": {
                   "recurringPaymentId": "recurringpayment_example",
                   "initiatedByKeyId": "initiatedbykey_example",
@@ -8630,7 +8860,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -8852,7 +9082,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -8919,7 +9149,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9018,7 +9248,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9116,7 +9346,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9214,7 +9444,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -9302,7 +9532,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -9331,7 +9561,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9517,7 +9747,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9739,7 +9969,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9806,7 +10036,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"
@@ -9905,7 +10135,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10003,7 +10233,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10101,7 +10331,7 @@
                 "slot": 123456,
                 "blockTime": "2025-01-01T00:00:00.000Z",
                 "confirmedAt": "2025-01-01T00:00:00.000Z",
-                "fee": 5000,
+                "fee": 0,
                 "error": "Signature failed",
                 "initiatedBy": {
                   "type": "api_key"
@@ -10189,7 +10419,7 @@
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
               "signature": "example",
-              "error": "example",
+              "error": "The wallet used for this payment does not have enough funds. Add funds and try again.",
               "metadata": {
                 "recurringPaymentId": "recurringpayment_example",
                 "initiatedByKeyId": "initiatedbykey_example",
@@ -10218,7 +10448,7 @@
               "slot": 123456,
               "blockTime": "2025-01-01T00:00:00.000Z",
               "confirmedAt": "2025-01-01T00:00:00.000Z",
-              "fee": 5000,
+              "fee": 0,
               "error": "Signature failed",
               "initiatedBy": {
                 "type": "api_key"

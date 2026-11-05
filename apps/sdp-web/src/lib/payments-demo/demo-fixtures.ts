@@ -1774,7 +1774,32 @@ export function demoWorldBody(world: DemoWorld, pathWithQuery: string): unknown 
       return counterpartiesRoute(rest, params, world);
     case "issuance":
       return rest.length === 1 && rest[0] === "tokens" ? emptyIssuedTokensBody(params) : undefined;
+    case "members":
+      return rest.length === 0 ? demoMembersBody() : undefined;
     default:
       return undefined;
   }
+}
+
+/**
+ * The demo's one member, who created and canceled its requests, so a canceled request's page
+ * names them without reading the real organization's members.
+ */
+function demoMembersBody() {
+  return {
+    data: {
+      members: [
+        {
+          id: "demo_member_ops",
+          role: "admin",
+          status: "active",
+          createdAt: "2026-01-05T09:00:00.000Z",
+          isSelf: false,
+          user: { id: CREATED_BY, email: "ops@example.com", name: "Ops team" },
+        },
+      ],
+      invitations: [],
+      meta: { total: 1, page: 1, pageSize: MAX_PAGE_SIZE, hasMore: false, activeAdminCount: 1 },
+    },
+  };
 }

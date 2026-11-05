@@ -162,7 +162,7 @@ describe("/api/playground/v1/[...path]", () => {
     ["an admin mount", "POST", "/admin/allowlist"],
     ["a non-versioned path", "GET", "/health"],
     ["a dashboard-only family", "GET", "/v1/api-keys"],
-    ["an undocumented public route", "POST", "/v1/payments/requests"],
+    ["an undocumented public route", "POST", "/v1/places/autocomplete"],
     ["a documented path under the wrong method", "DELETE", "/v1/payments/transfers"],
     ["an extra segment", "GET", "/v1/payments/transfers/trf_1/extra"],
     ["an empty path parameter", "GET", "/v1/payments/transfers/"],
