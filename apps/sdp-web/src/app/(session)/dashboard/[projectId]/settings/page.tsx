@@ -3,12 +3,13 @@ import { redirect } from "next/navigation";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { requestMemberRole } from "@/lib/sdp-api";
-import { LeaveOrganizationCard } from "./leave-organization-card";
+import { LeaveOrganizationSection } from "./leave-organization-section";
 import { MainnetAccessSection } from "./mainnet-access-section";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 import { OrganizationAlertEmailsSection } from "./organization-alert-emails-section";
 import { OrganizationDetailsSection } from "./organization-details-section";
+import { SettingsWorkspace } from "./settings-workspace";
 
 /** Anything that is not a positive integer falls back to the first page. */
 function resolveMembersPage(value: string | string[] | undefined): number {
@@ -18,8 +19,10 @@ function resolveMembersPage(value: string | string[] | undefined): number {
 }
 
 /**
- * Organization settings: the organization's name and ID, the quick start for API key managers, and the members,
- * mainnet access, API-key IP allowlist and email alert sections for organization admins.
+ * Organization settings, as tabs. General: the organization's name and ID, the quick start for
+ * API key managers, mainnet access and email alerts for admins, and leaving for everyone else.
+ * Members, for admins: inviting and the member list. Security, for admins: the API-key IP
+ * allowlist.
  *
  * @param props - The route props.
  * @param props.searchParams - The query, carrying the members page.
@@ -38,25 +41,35 @@ export default async function SettingsPage({
   }
 
   const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
+  const { canManageApiKeys, canManageOrgSettings } = dashboardAccess.capabilities;
 
   return (
-    <div className="w-full flex flex-col gap-6">
-      <OrganizationDetailsSection />
-      {dashboardAccess.capabilities.canManageApiKeys ? (
-        <DashboardQuickStart variant="settings" />
-      ) : null}
-      {/* canManageOrgSettings resolves to org:write, which is what inviting a
-          member requires. */}
-      {dashboardAccess.capabilities.canManageOrgSettings ? (
-        <MembersSection page={membersPage} />
-      ) : null}
-      {dashboardAccess.capabilities.canManageOrgSettings ? <MainnetAccessSection /> : null}
-      {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
-      {dashboardAccess.capabilities.canManageOrgSettings ? (
-        <OrganizationAlertEmailsSection />
-      ) : null}
-      {/* Admins cannot leave; another admin removes them. */}
-      {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
-    </div>
+    <SettingsWorkspace
+      general={
+        <div className="@container flex w-full flex-col gap-2.5">
+          <OrganizationDetailsSection />
+          {canManageApiKeys ? <DashboardQuickStart variant="settings" /> : null}
+          {canManageOrgSettings ? <MainnetAccessSection /> : null}
+          {canManageOrgSettings ? <OrganizationAlertEmailsSection /> : null}
+          {/* Admins cannot leave; another admin removes them. */}
+          {dashboardAccess.role !== "admin" ? <LeaveOrganizationSection /> : null}
+        </div>
+      }
+      members={
+        // canManageOrgSettings resolves to org:write, which is what inviting a member requires.
+        canManageOrgSettings ? (
+          <div className="@container flex w-full flex-col gap-2.5">
+            <MembersSection page={membersPage} />
+          </div>
+        ) : null
+      }
+      security={
+        canManageOrgSettings ? (
+          <div className="@container flex w-full flex-col gap-2.5">
+            <OrganizationAccessSection />
+          </div>
+        ) : null
+      }
+    />
   );
 }

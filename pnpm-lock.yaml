@@ -396,6 +396,9 @@ importers:
       '@sdp/design-tokens':
         specifier: workspace:*
         version: link:../../packages/sdp-design-tokens
+      '@sdp/ip':
+        specifier: workspace:*
+        version: link:../../packages/sdp-ip
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance

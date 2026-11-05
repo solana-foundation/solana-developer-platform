@@ -15,6 +15,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { API_KEYS_PAGE_PATH } from "@/app/(session)/dashboard/[projectId]/api-keys/api-key-flash";
+import { RecordFacts } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import {
   changeMemberRole,
   listMemberApiKeys,
@@ -24,6 +25,7 @@ import {
 import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { projectHref } from "@/lib/dashboard-project-path";
+import { refreshKeepingDashboardUrl } from "@/lib/dashboard-url-state";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 import { membersQueryKeys } from "./members-query-key";
 
@@ -75,7 +77,7 @@ export function MemberActions({
         return;
       }
       toast.success(t("Shared.members.roleChanged", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -115,7 +117,7 @@ export function MemberActions({
 
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
-      router.refresh();
+      refreshKeepingDashboardUrl(router);
     });
   };
 
@@ -208,8 +210,8 @@ function MemberApiKeys({ apiKeys, label }: { apiKeys: MemberApiKey[]; label: str
           <li key={apiKey.id} className="flex items-center gap-3 px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="truncate text-primary">{apiKey.name}</p>
-              <p className="truncate text-tertiary text-xs">
-                {apiKey.keyPrefix}… · {apiKey.projectName}
+              <p className="text-tertiary text-xs">
+                <RecordFacts facts={[`${apiKey.keyPrefix}…`, apiKey.projectName]} />
               </p>
             </div>
             <EntityLink

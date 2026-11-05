@@ -5,9 +5,6 @@ import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
-
-vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));

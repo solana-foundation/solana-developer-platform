@@ -7,5 +7,5 @@ import { requestProjectHref } from "@/lib/sdp-api";
  * would otherwise 404.
  */
 export default async function DashboardMembersPage() {
-  redirect(await requestProjectHref("/dashboard/settings#members"));
+  redirect(await requestProjectHref("/dashboard/settings?tab=members"));
 }

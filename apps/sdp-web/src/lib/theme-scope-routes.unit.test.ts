@@ -31,6 +31,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/markets/earn",
     "/dashboard/markets/earn/configure",
     "/dashboard/account",
+    "/dashboard/settings",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });

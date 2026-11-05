@@ -58,6 +58,10 @@ function Providers({ children }: { children: ReactNode }) {
   );
 }
 
+function sessionRows(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-slot="record-action-row"]'));
+}
+
 function renderSecurity(user: ReturnType<typeof testUser>) {
   clerk.user = user;
   return render(<AccountSecurity />, { wrapper: Providers });
@@ -113,7 +117,7 @@ describe("AccountSecurity password", () => {
     user.updatePassword.mockResolvedValue(user);
     renderSecurity(user);
     const actor = userEvent.setup();
-    expect(await screen.findAllByRole("listitem")).toHaveLength(2);
+    await waitFor(() => expect(sessionRows()).toHaveLength(2));
 
     user.getSessions.mockResolvedValue([current]);
     await actor.click(screen.getByRole("button", { name: "Change password" }));
@@ -121,8 +125,8 @@ describe("AccountSecurity password", () => {
     await actor.type(screen.getByLabelText("New password"), "new-password-test");
     await actor.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
-    expect(screen.queryByText("Firefox 1 · Macintosh")).toBeNull();
+    await waitFor(() => expect(sessionRows()).toHaveLength(1));
+    expect(screen.queryByText("Firefox 1")).toBeNull();
     expect(other.revoke).not.toHaveBeenCalled();
   });
 });
@@ -137,13 +141,13 @@ describe("AccountSecurity sessions", () => {
     renderSecurity(user);
     const actor = userEvent.setup();
 
-    const rows = await screen.findAllByRole("listitem");
-    expect(rows).toHaveLength(2);
-    const [currentRow, otherRow] = rows;
-    expect(within(currentRow).getByText("Chrome 1 · Macintosh")).toBeDefined();
+    await waitFor(() => expect(sessionRows()).toHaveLength(2));
+    const [currentRow, otherRow] = sessionRows();
+    expect(within(currentRow).getByText("Chrome 1")).toBeDefined();
+    expect(within(currentRow).getByText("Macintosh")).toBeDefined();
     expect(within(currentRow).getByText("This device")).toBeDefined();
     expect(within(currentRow).queryByRole("button")).toBeNull();
-    expect(within(otherRow).getByText("Firefox 1 · Macintosh")).toBeDefined();
+    expect(within(otherRow).getByText("Firefox 1")).toBeDefined();
     expect(within(otherRow).queryByText("This device")).toBeNull();
     expect(screen.queryByText(/Safari/)).toBeNull();
 
@@ -151,6 +155,6 @@ describe("AccountSecurity sessions", () => {
     await actor.click(within(otherRow).getByRole("button", { name: "Sign out" }));
 
     expect(other.revoke).toHaveBeenCalledOnce();
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
+    await waitFor(() => expect(sessionRows()).toHaveLength(1));
   });
 });

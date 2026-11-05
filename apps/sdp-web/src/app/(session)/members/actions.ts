@@ -3,16 +3,10 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { MEMBER_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
 import { type ApiAnswer, IDEMPOTENCY_KEY_HEADER, IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency";
-import {
-  createOrgSdpApiClient,
-  createSdpApiClient,
-  requestProjectHref,
-  sdpApiAnswer,
-} from "@/lib/sdp-api";
+import { createOrgSdpApiClient, createSdpApiClient, sdpApiAnswer } from "@/lib/sdp-api";
 import { readableApiError } from "@/lib/sdp-api-error";
 
 // Membership is organization-wide, so reads use the org client. Mutations go
@@ -76,8 +70,6 @@ async function mutateMembers(path: string, init: RequestInit): Promise<MemberAct
   } catch (error) {
     return { status: "error", message: readableApiError(error), answer: sdpApiAnswer(error) };
   }
-
-  revalidatePath(await requestProjectHref("/dashboard/settings"));
   return { status: "success" };
 }
 
@@ -258,8 +250,6 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
     return { status: "error", message: readableApiError(error), answer: sdpApiAnswer(error) };
   }
 
-  // Members render inside the settings page; /members only redirects there.
-  revalidatePath(await requestProjectHref("/dashboard/settings"));
   return {
     status: "success",
     email: parsed.data.email,

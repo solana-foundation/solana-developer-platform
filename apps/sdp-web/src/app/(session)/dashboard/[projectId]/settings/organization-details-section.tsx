@@ -1,9 +1,11 @@
 "use client";
 
 import { useOrganization } from "@clerk/nextjs";
-import { Card, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
-import { DetailList, DetailRow } from "@sdp/ui/detail-list";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
+import {
+  RecordList,
+  RecordRow,
+  RecordSection,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
 import { useTranslations } from "@/i18n/provider";
 
 export function OrganizationDetailsSection() {
@@ -14,24 +16,13 @@ export function OrganizationDetailsSection() {
     return null;
   }
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("Shared.organizationSettings.detailsTitle")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <DetailList>
-          <DetailRow label={t("Shared.organizationSettings.name")}>{organization.name}</DetailRow>
-          <DetailRow label={t("Shared.SharedComponents.organizationId")}>
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-mono text-meta">{organization.id}</span>
-              <WalletMetadataCopyButton
-                value={organization.id}
-                label={t("Shared.SharedComponents.organizationId")}
-              />
-            </span>
-          </DetailRow>
-        </DetailList>
-      </CardContent>
-    </Card>
+    <RecordSection title={t("Shared.organizationSettings.detailsTitle")}>
+      <RecordList>
+        <RecordRow label={t("Shared.organizationSettings.name")}>{organization.name}</RecordRow>
+        <RecordRow label={t("Shared.SharedComponents.organizationId")} copy={organization.id}>
+          <span className="tabular-nums">{organization.id}</span>
+        </RecordRow>
+      </RecordList>
+    </RecordSection>
   );
 }

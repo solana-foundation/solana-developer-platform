@@ -60,7 +60,6 @@ export async function saveOrganizationIpAllowlistAction(
         body: JSON.stringify({ settings: { allowedIpAddresses: parseAllowedIps(value) } }),
       }
     );
-    revalidatePath(await requestProjectHref("/dashboard/settings"), "page");
     return { ok: true, allowedIps: parseAllowlist(organization) };
   } catch (error) {
     return { ok: false, error: readableApiError(error) };
