@@ -497,12 +497,20 @@ export function recurringPaymentCounterpartyViews(
   const counterparties: RecurringPaymentCounterpartyView[] = [];
   let failed = 0;
   for (const { id, lookup } of lookups) {
-    if (lookup.kind === "found") {
-      counterparties.push({ id, displayName: lookup.counterparty.displayName });
-    } else if (lookup.kind === "missing") {
-      counterparties.push({ id, displayName: archivedLabel });
-    } else {
-      failed += 1;
+    switch (lookup.kind) {
+      case "found":
+        counterparties.push({ id, displayName: lookup.counterparty.displayName });
+        break;
+      case "missing":
+        counterparties.push({ id, displayName: archivedLabel });
+        break;
+      case "failed":
+        failed += 1;
+        break;
+      default: {
+        const exhaustive: never = lookup;
+        throw new Error(`Unknown counterparty lookup: ${JSON.stringify(exhaustive)}`);
+      }
     }
   }
   return { counterparties, failed };
