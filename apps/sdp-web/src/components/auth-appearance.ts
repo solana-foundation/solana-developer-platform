@@ -4,6 +4,11 @@ import type { ComponentProps } from "react";
 const UNDERLINE_FIELD_CLASS =
   "rounded-none border-0 border-b border-border-default bg-transparent text-field text-primary shadow-none outline-none transition-colors hover:border-border-strong focus:border-primary focus:shadow-none focus-visible:shadow-none";
 
+// Clerk draws generic checkbox fields (reset password's "Sign out of all other devices") with the
+// formFieldInput element too; this restores the box the underline style would erase.
+const CHECKBOX_INPUT_CLASS =
+  "[&[type=checkbox]]:size-4 [&[type=checkbox]]:p-0 [&[type=checkbox]]:rounded-sm [&[type=checkbox]]:border [&[type=checkbox]]:border-border-strong [&[type=checkbox]]:checked:border-primary [&[type=checkbox]]:checked:bg-primary";
+
 const SECONDARY_BUTTON_CLASS =
   "h-10 rounded-control border-0 bg-fill bg-none text-body font-medium text-primary shadow-none hover:bg-fill-strong focus-visible:shadow-none";
 
@@ -29,7 +34,7 @@ export const authAppearance = {
     footer: "hidden",
     formFieldLabel: "text-meta font-medium text-primary",
     formFieldAction: "text-meta font-medium text-primary hover:underline",
-    formFieldInput: `h-9 px-0.5 ${UNDERLINE_FIELD_CLASS}`,
+    formFieldInput: `h-9 px-0.5 ${UNDERLINE_FIELD_CLASS} ${CHECKBOX_INPUT_CLASS}`,
     formFieldInputShowPasswordButton: "text-secondary hover:bg-transparent hover:text-primary",
     formFieldErrorText: "text-meta text-error",
     formButtonPrimary:
