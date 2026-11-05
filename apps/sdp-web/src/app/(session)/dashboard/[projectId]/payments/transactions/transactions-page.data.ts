@@ -1,45 +1,64 @@
-import type { UnifiedTransactionsListResponse } from "@sdp/types/unified-transactions";
 import {
-  DEFAULT_TRANSACTION_PAGE_SIZE,
-  type TransactionFilters,
-  toTransactionsApiQuery,
-} from "@/app/(session)/dashboard/[projectId]/payments/transactions/transactions-query";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
-import type { SdpApiClient } from "@/lib/sdp-api";
+  UNIFIED_TRANSACTION_MODULE_CONTRACTS,
+  UNIFIED_TRANSACTION_STATUSES,
+} from "@sdp/types/unified-transactions";
+import { z } from "zod";
 
-export type TransactionsPageResult = UnifiedTransactionsListResponse;
+const unifiedTransactionCommonSchema = z.object({
+  id: z.string().min(1),
+  moduleId: z.string().min(1),
+  status: z.enum(UNIFIED_TRANSACTION_STATUSES),
+  organizationId: z.string(),
+  projectId: z.string().nullable(),
+  custodyWalletId: z.string().nullable(),
+  custodyWalletLabel: z.string().nullable(),
+  token: z.string().nullable(),
+  amount: z.string().nullable(),
+  counterpartyId: z.string().nullable(),
+  signature: z.string().nullable(),
+  createdAt: z.string(),
+});
 
-/**
- * The `/v1/transactions` query string for one dashboard page (the chosen page size, 25 by
- * default), and the SWR key for the client fetch: identical filter sets share one cache entry.
- */
-export function transactionsApiQuery(filters: TransactionFilters): string {
-  return toTransactionsApiQuery(
-    filters,
-    filters.pageSize ?? DEFAULT_TRANSACTION_PAGE_SIZE
-  ).toString();
-}
+const contracts = UNIFIED_TRANSACTION_MODULE_CONTRACTS;
 
-export async function fetchTransactionsPage(
-  apiClient: SdpApiClient,
-  filters: TransactionFilters
-): Promise<TransactionsPageResult> {
-  return apiClient.fetch<UnifiedTransactionsListResponse>(
-    `/v1/transactions?${transactionsApiQuery(filters)}`
-  );
-}
+export const unifiedTransactionSchema = z.discriminatedUnion("module", [
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("payments"),
+    kind: z.enum(contracts.payments.kinds),
+    moduleStatus: z.enum(contracts.payments.moduleStatuses),
+  }),
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("earn"),
+    kind: z.enum(contracts.earn.kinds),
+    moduleStatus: z.enum(contracts.earn.moduleStatuses),
+  }),
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("dvp"),
+    kind: z.enum(contracts.dvp.kinds),
+    moduleStatus: z.enum(contracts.dvp.moduleStatuses),
+  }),
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("private_channels"),
+    kind: z.enum(contracts.private_channels.kinds),
+    moduleStatus: z.enum(contracts.private_channels.moduleStatuses),
+  }),
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("issuance"),
+    kind: z.enum(contracts.issuance.kinds),
+    moduleStatus: z.enum(contracts.issuance.moduleStatuses),
+  }),
+  unifiedTransactionCommonSchema.extend({
+    module: z.literal("rings"),
+    kind: z.enum(contracts.rings.kinds),
+    moduleStatus: z.enum(contracts.rings.moduleStatuses),
+  }),
+]);
 
-/**
- * Fetches `/v1/transactions` through the `/api/dashboard/payments/transactions`
- * proxy, which authenticates the session server-side and forwards the query
- * string untouched. Throws on a non-ok response so SWR surfaces it as `error`.
- */
-export async function fetchTransactionsPageFromDashboard(
-  apiQuery: string
-): Promise<TransactionsPageResult> {
-  const result = await dashboardFetch<{ data: UnifiedTransactionsListResponse }>(
-    `/api/dashboard/payments/transactions?${apiQuery}`
-  );
-  if (!result.ok) throw new Error(result.error);
-  return result.data.data;
-}
+export const transactionsPageResponseSchema = z.object({
+  data: z.object({
+    transactions: z.array(unifiedTransactionSchema),
+    nextCursor: z.string().nullable(),
+  }),
+});
+
+export type TransactionsPageResult = z.infer<typeof transactionsPageResponseSchema>["data"];

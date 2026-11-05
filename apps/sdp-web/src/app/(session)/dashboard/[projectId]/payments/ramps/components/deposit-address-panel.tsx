@@ -20,9 +20,8 @@ import { ChevronDownIcon, CopyIcon, InfoIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
@@ -34,15 +33,16 @@ import {
   PAYMENT_STATUS_TONE,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { transferListResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/payments-read-schemas";
 import {
   DepositAddressSkeleton,
   RecentDepositsTableSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
-import { fetchTransfers } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { RECENT_DEPOSIT_COLUMN_WIDTHS } from "./recent-deposit-columns";
@@ -100,16 +100,22 @@ function walletName(wallet: PaymentsDashboardWallet): string {
  */
 function AddressQr({ address, className }: { address: string; className?: string }) {
   const t = useTranslations();
-  const { data } = useSWR(
-    paymentsQueryKeys.walletAddressQr(address),
-    () =>
-      QRCode.toDataURL(address, {
-        margin: 0,
-        width: 288,
-        color: { dark: "#0f0f12", light: "#00000000" },
-      }),
-    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
-  );
+  // Drawn here, not read: the code is the address itself, so it needs no request or cache.
+  const [drawn, setDrawn] = useState<{ address: string; dataUrl: string } | null>(null);
+  useEffect(() => {
+    let current = true;
+    void QRCode.toDataURL(address, {
+      margin: 0,
+      width: 288,
+      color: { dark: "#0f0f12", light: "#00000000" },
+    }).then((dataUrl) => {
+      if (current) setDrawn({ address, dataUrl });
+    });
+    return () => {
+      current = false;
+    };
+  }, [address]);
+  const data = drawn?.address === address ? drawn.dataUrl : undefined;
   return (
     <div
       className={cn(
@@ -406,12 +412,8 @@ function RecentDeposits({
  * deposits it has received. No contact is needed; anyone can send to an address.
  */
 export function DepositAddressPanel({
-  wallets,
-  walletsError,
   issuedTokenSymbolsByMint,
 }: {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
 }) {
   const t = useTranslations();
@@ -421,27 +423,23 @@ export function DepositAddressPanel({
   const timeZone = useTimeZone();
   const href = useProjectHref();
   const cluster = useSolanaCluster();
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const wallet = liveWallets.find((candidate) => candidate.id === selectedId) ?? liveWallets[0];
 
-  const { data: deposits, error: depositsError } = useSWR(
-    wallet ? paymentsQueryKeys.walletDeposits(wallet.id) : null,
-    () =>
-      fetchTransfers(
-        {
+  const scope = useDashboardKeyScope();
+  const depositsRead = useDashboardRead(
+    wallet
+      ? paymentsQueryKeys.walletDeposits(scope, {
+          custodyWalletId: wallet.id,
           pageSize: RECENT_DEPOSIT_COUNT,
-          custodyWalletId: wallet?.id,
-          direction: "inbound",
-          includeObserved: true,
-        },
-        t
-      ),
+        })
+      : null,
+    transferListResponseSchema,
     { refreshInterval: DEPOSIT_POLL_MS, revalidateOnFocus: false }
   );
+  const deposits = depositsRead.data?.data;
+  const depositsError = depositsRead.error;
 
   if (walletsLoading && liveWallets.length === 0) {
     return <DepositAddressSkeleton />;

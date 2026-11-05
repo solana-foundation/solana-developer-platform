@@ -30,7 +30,10 @@ import {
   AccountPageSkeleton,
   SettingsPageSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/operations-card-page-skeletons";
-import CounterpartyDirectoryLoading from "@/app/(session)/dashboard/[projectId]/payments/counterparty/loading";
+import {
+  CounterpartyDirectoryLoading,
+  PaymentRequestsListLoading,
+} from "@/app/(session)/dashboard/[projectId]/payments/counterparty-menu-loading";
 import { PaymentsPageSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-page-skeleton";
 import {
   CounterpartyCreateSkeleton,
@@ -45,7 +48,6 @@ import {
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
-import PaymentRequestsLoading from "@/app/(session)/dashboard/[projectId]/payments/requests/loading";
 import TokenHoldingsLoading from "@/app/(session)/dashboard/[projectId]/tokens/loading";
 import {
   WalletDetailSkeleton,
@@ -118,7 +120,7 @@ function resolveCurrentPageLoadingComponent(
     case "payments-deposit":
       return PaymentsDepositPageSkeleton;
     case "payment-requests":
-      return PaymentRequestsLoading;
+      return PaymentRequestsListLoading;
     case "payment-request-create":
       return PaymentRequestCreateSkeleton;
     case "payment-request-detail":

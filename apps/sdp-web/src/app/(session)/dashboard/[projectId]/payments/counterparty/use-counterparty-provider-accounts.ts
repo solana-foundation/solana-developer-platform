@@ -1,44 +1,11 @@
 "use client";
 
-import type {
-  CounterpartyProviderAccount,
-  ListCounterpartyProviderAccountsResponse,
-} from "@sdp/types/counterparties";
-import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
-import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
-import type { TranslationValues } from "@/i18n/translate";
-import { dashboardFetch } from "@/lib/dashboard-fetch";
-
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
+import { counterpartyProviderAccountsResponseSchema } from "./counterparty-read-schemas";
 
 /**
- * Loads provider-owned fiat accounts for a counterparty through the dashboard proxy.
- *
- * @param counterpartyId - Counterparty whose provider accounts should be loaded.
- * @param t - Dashboard translation function for the missing-payload error.
- * @returns Provider account rows for the counterparty.
- */
-async function fetchCounterpartyProviderAccounts(
-  counterpartyId: string,
-  t: Translate
-): Promise<CounterpartyProviderAccount[]> {
-  const result = await dashboardFetch<{ data: ListCounterpartyProviderAccountsResponse }>(
-    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`
-  );
-  if (!result.ok) {
-    throw new Error(result.error);
-  }
-  const accounts = result.data?.data?.accounts;
-  if (!accounts) {
-    throw new Error(t("DashboardPayments.counterparty.providerAccountsMissing"));
-  }
-  return accounts;
-}
-
-/**
- * Reads provider-owned fiat accounts for a counterparty with the payments query key.
+ * Reads provider-owned fiat accounts for a counterparty.
  *
  * @param counterpartyId - Counterparty whose provider accounts should be loaded.
  * @param options.enabled - False when ramps are off; provider accounts are ramp onboarding state.
@@ -48,11 +15,11 @@ export function useCounterpartyProviderAccounts(
   counterpartyId: string,
   { enabled }: { enabled: boolean }
 ) {
-  const t = useTranslations();
-
-  return useSWR(
-    enabled ? paymentsQueryKeys.counterpartyProviderAccounts({ counterpartyId }) : null,
-    () => fetchCounterpartyProviderAccounts(counterpartyId, t),
+  const scope = useDashboardKeyScope();
+  const response = useDashboardRead(
+    enabled ? paymentsQueryKeys.counterpartyProviderAccounts(scope, counterpartyId) : null,
+    counterpartyProviderAccountsResponseSchema,
     { revalidateOnFocus: false }
   );
+  return { ...response, data: response.data?.data.accounts };
 }

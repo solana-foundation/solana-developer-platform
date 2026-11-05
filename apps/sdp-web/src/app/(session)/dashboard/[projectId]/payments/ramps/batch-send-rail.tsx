@@ -1,6 +1,5 @@
 "use client";
 
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import Link from "next/link";
@@ -11,8 +10,6 @@ import { RampWizardShell } from "./components/ramp-wizard-shell";
 import { type BatchSendWizard, useBatchSendWizard } from "./hooks/use-batch-send-wizard";
 
 interface BatchSendRailProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   onExit: () => void;
 }
@@ -68,17 +65,10 @@ function BatchFooterAction({ wizard }: { wizard: BatchSendWizard }) {
   }
 }
 
-export function BatchSendRail({
-  wallets,
-  walletsError,
-  issuedTokenSymbolsByMint,
-  onExit,
-}: BatchSendRailProps) {
+export function BatchSendRail({ issuedTokenSymbolsByMint, onExit }: BatchSendRailProps) {
   const t = useTranslations();
   const { sdpEnvironment } = useDashboardWorkspace();
   const wizard = useBatchSendWizard({
-    wallets,
-    walletsError,
     issuedTokenSymbolsByMint,
     cluster: CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment],
     onExit,

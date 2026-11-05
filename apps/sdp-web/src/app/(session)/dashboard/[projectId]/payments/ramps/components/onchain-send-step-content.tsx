@@ -3,6 +3,7 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DetailList, DetailRow } from "@sdp/ui/detail-list";
@@ -199,6 +200,8 @@ function DestinationFields({
     fields,
     setField,
     accountsLoading,
+    accountsError,
+    retryAccounts,
     counterpartyId,
     addAccountOpen,
     setAddAccountOpen,
@@ -228,7 +231,13 @@ function DestinationFields({
           searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
           isLoading={hasContact && accountsLoading}
           disabled={!hasContact || destinationOptions.length === 0}
+          error={accountsError ? t("DashboardPayments.payForm.destinationsLoadFailed") : undefined}
         />
+        {accountsError ? (
+          <Button type="button" variant="outline" size="sm" onClick={retryAccounts}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        ) : null}
         {addingAddress ? (
           <NewSolanaAddressForm
             key={counterpartyId}

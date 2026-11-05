@@ -9,15 +9,13 @@ import { isCollectStageStatus } from "@sdp/types/ramp-requirements";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import useSWR, { useSWRConfig } from "swr";
 import type { z } from "zod";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import type { CounterpartyOptions } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-all-counterparties";
 import {
-  type CounterpartiesResult,
-  cancelRampTransfer,
-  counterpartyListComplete,
-  fetchAllCounterparties,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+  counterpartyRequirementsReads,
+  paymentTransferReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { cancelRampTransfer } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   type MemoRow,
   memoRowsToRecord,
@@ -28,6 +26,7 @@ import {
   rampSelectionSchema,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
@@ -82,11 +81,9 @@ export interface RampWizardConfig<TId extends string = string> {
 }
 
 export interface UseRampWizardProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
-  counterpartiesResult: CounterpartiesResult;
+  counterparties: CounterpartyOptions;
   selectedCounterparty: Counterparty | null;
   /** Counterparty chosen upstream; seeds the form and is no longer picked in-wizard. */
   initialCounterpartyId: string;
@@ -96,11 +93,9 @@ export interface UseRampWizardProps {
 
 export function useRampWizard<TId extends string>(
   {
-    wallets,
-    walletsError,
     enabledRampProviders,
     rampProviderAccess,
-    counterpartiesResult,
+    counterparties,
     selectedCounterparty,
     initialCounterpartyId,
     onExit,
@@ -108,6 +103,7 @@ export function useRampWizard<TId extends string>(
   config: RampWizardConfig<TId>
 ) {
   const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const href = useProjectHref();
   const t = useTranslations();
 
@@ -134,11 +130,8 @@ export function useRampWizard<TId extends string>(
     setField("counterpartyId", initialCounterpartyId);
   }, [initialCounterpartyId, setField]);
 
-  const { mutate: mutateSwrCache } = useSWRConfig();
   const selectProvider = (provider: RampProviderId) => {
-    void mutateSwrCache(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {
-      revalidate: true,
-    });
+    void invalidateReads(counterpartyRequirementsReads);
     setField("provider", provider);
   };
 
@@ -151,10 +144,7 @@ export function useRampWizard<TId extends string>(
     }
   }, [config.pairs, selectedRampPair, selectedProviderField, setField]);
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets();
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.id === fields.walletId) ?? null,
@@ -170,17 +160,6 @@ export function useRampWizard<TId extends string>(
     fiatCurrency: selectedRampPair.fiatCurrency,
     destinationCustodyWalletId: selectedWallet === null ? null : selectedWallet.id,
   });
-
-  const { mutate: mutateCounterparties } = useSWR(
-    paymentsQueryKeys.actionCounterparties(),
-    fetchAllCounterparties,
-    {
-      fallbackData: counterpartiesResult,
-      // The server read the first page: reuse it when it holds every contact, and
-      // finish loading a larger directory here.
-      revalidateIfStale: !counterpartyListComplete(counterpartiesResult),
-    }
-  );
 
   // Once inserted, the requirements step is pinned for the provider's lifetime in
   // this wizard: an advance answering `ready` flips needsCollection off, but the
@@ -282,7 +261,11 @@ export function useRampWizard<TId extends string>(
     endpoint: config.quoteEndpoint,
     payload: quotePayload,
     shouldCreate: isLastStep && onboardingStatus === "ready",
-    onCreated: config.onQuoteCreated,
+    // A quote creates the transfer it settles into, so the transfer lists change with it.
+    onCreated: (quote: PaymentRampQuote) => {
+      void invalidateReads(paymentTransferReads);
+      config.onQuoteCreated?.(quote);
+    },
   });
 
   const advanceRequirementsAndProceed = async () => {
@@ -424,10 +407,7 @@ export function useRampWizard<TId extends string>(
 
   const handleCounterpartyCreated = (created: Counterparty) => {
     setField("counterpartyId", created.id);
-    void mutateCounterparties(
-      (prev) => (prev ? { ...prev, data: [created, ...prev.data] } : { ok: true, data: [created] }),
-      { revalidate: true }
-    );
+    counterparties.addCreated(created);
     setCounterpartyDialogOpen(false);
   };
 

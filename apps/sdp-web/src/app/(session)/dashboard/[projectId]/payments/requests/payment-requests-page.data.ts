@@ -1,9 +1,9 @@
-import type { PaginatedResponse } from "@sdp/types/pagination";
 import {
   type ListPaymentRequestsResponse,
   PAYMENT_REQUEST_STATUSES,
   type PaymentRequest,
   type PaymentRequestLink,
+  paymentRequestSchema,
 } from "@sdp/types/payments";
 import {
   type SolanaCluster,
@@ -11,39 +11,27 @@ import {
   type WellKnownToken,
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { dashboardFetch, dashboardRequest } from "@/lib/dashboard-fetch";
+import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
+import { readDashboardRequest } from "@/lib/dashboard-swr";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
-import type { SdpApiClient } from "@/lib/sdp-api";
 
 export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
 
 /** The detail read's envelope, parsed at the API boundary. */
-const paymentRequestDetailResponseSchema = z.object({
+export const paymentRequestDetailResponseSchema = z.object({ data: paymentRequestSchema });
+
+export const paymentRequestsListResponseSchema = z.object({
   data: z.object({
-    id: z.string(),
-    organizationId: z.string(),
-    projectId: z.string().nullable(),
-    walletId: z.string(),
-    destinationAddress: z.string(),
-    token: z.string(),
-    amount: z.string(),
-    reference: z.string(),
-    status: z.enum(PAYMENT_REQUEST_STATUSES),
-    expiresAt: z.string().nullable(),
-    fulfilledByTransferId: z.string().nullable(),
-    paidLate: z.boolean(),
-    canceledByApiKeyId: z.string().nullable(),
-    canceledByUserId: z.string().nullable(),
-    canceledAt: z.string().nullable(),
-    lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
-    createdBy: z.string().nullable(),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-  }) satisfies z.ZodType<PaymentRequest>,
+    paymentRequests: z.array(paymentRequestSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+  }),
 });
 
 /** The link read's envelope, parsed: its token is a bearer credential (APE-849). */
-const paymentRequestLinkResponseSchema = z.object({
+export const paymentRequestLinkResponseSchema = z.object({
   data: z.object({
     id: z.string(),
     publicToken: z.string().min(1),
@@ -54,11 +42,6 @@ export interface PaymentRequestTokenOption {
   mintAddress: string;
   symbol: string;
 }
-
-export type PaymentRequestsLocalErrorCode = "paymentRequestsLoadFailed";
-export type PaymentRequestsResult = PaginatedResponse<PaymentRequest> & {
-  localErrorCode?: PaymentRequestsLocalErrorCode;
-};
 
 /**
  * Well-known tokens deployed on the given cluster. Payment requests are
@@ -74,42 +57,6 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
     const mint = token.mints[cluster];
     return mint ? [{ mintAddress: mint.address, symbol: token.symbol }] : [];
   });
-}
-
-/**
- * Fetches one page of payment requests for the authenticated project, newest first, up to
- * {@link PAYMENT_REQUESTS_PAGE_SIZE} rows.
- *
- * @param request - Authenticated SDP API fetcher.
- * @param options - The page (1-based), its size and an optional status.
- * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
- *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
- */
-export async function fetchPaymentRequests(
-  request: SdpApiClient["request"],
-  options: { page?: number; pageSize?: number; status?: PaymentRequest["status"] } = {}
-): Promise<PaymentRequestsResult> {
-  try {
-    const query = new URLSearchParams({
-      page: String(options.page ?? 1),
-      pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
-      ...(options.status ? { status: options.status } : {}),
-    });
-    const response = await request(`/v1/payments/requests?${query.toString()}`);
-    if (!response.ok) {
-      return { ok: false, data: [], total: 0, error: await response.text() };
-    }
-    const json = (await response.json()) as { data: ListPaymentRequestsResponse };
-    return { ok: true, data: json.data.paymentRequests, total: json.data.total };
-  } catch (error) {
-    return {
-      ok: false,
-      data: [],
-      total: 0,
-      error: error instanceof Error ? error.message : undefined,
-      localErrorCode: error instanceof Error ? undefined : "paymentRequestsLoadFailed",
-    };
-  }
 }
 
 /** Rows a page of the Requests list shows until the user picks another size. */
@@ -212,42 +159,30 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
   return `${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`;
 }
 
-export type PaymentRequestsListResult = PaymentRequestsResult & {
+export interface PaymentRequestsListView {
+  rows: PaymentRequest[];
+  /** How many requests the API counts under the status filter. */
+  total: number;
   /**
    * Whether `total` is exactly how many requests the status filter matches. Under Awaiting
-   * payment it is the API's count by stored status, an upper bound the list does not show (see
-   * {@link loadPaymentRequestsList}).
+   * payment it is the API's count by stored status, an upper bound the list does not show.
    */
   totalIsExact: boolean;
   /** Whether the API has a page after this one. */
   hasNextPage: boolean;
-};
+}
 
 /**
- * One page of the Requests list as its URL names it, read straight from the API's page: its
- * page, its size and its status filter. Under Awaiting payment, the rows the API returns as paid
- * are left out (see below).
- *
- * @param request - Authenticated SDP API fetcher.
- * @param state - The list's page, size and status. Its search is not sent, since the API has
- *   none: the list matches it against the page's rows (see PaymentRequestsWorkspace).
- * @returns The page's rows, how many requests the API counts in all, whether that count is exact
- *   and whether a page follows; on any failure `{ ok: false, data: [], total: 0, error, … }`.
- *   Never throws.
+ * One page of the Requests list as the API returned it for the list's page, size and status.
+ * Under Awaiting payment, the rows the API returns as paid are left out (see below).
  */
-export async function loadPaymentRequestsList(
-  request: SdpApiClient["request"],
+export function paymentRequestsListView(
+  page: ListPaymentRequestsResponse,
   state: PaymentRequestsListState
-): Promise<PaymentRequestsListResult> {
-  const { page, pageSize, status } = state;
-  const result = await fetchPaymentRequests(request, {
-    page,
-    pageSize,
-    ...(status ? { status } : {}),
-  });
-  const hasNextPage = result.ok && page * pageSize < result.total;
-  if (!result.ok || status !== "awaiting_payment") {
-    return { ...result, totalIsExact: true, hasNextPage };
+): PaymentRequestsListView {
+  const hasNextPage = state.page * state.pageSize < page.total;
+  if (state.status !== "awaiting_payment") {
+    return { rows: page.paymentRequests, total: page.total, totalIsExact: true, hasNextPage };
   }
   // The API filters by the stored status, and listing then reconciles each open request on chain:
   // one paid since it was last read comes back paid (and is saved so). Awaiting payment leaves
@@ -258,81 +193,11 @@ export async function loadPaymentRequestsList(
   // again and Paid stops missing a request paid since its last read until something reads it
   // again. Known limitation of the API, not of this list.
   return {
-    ...result,
-    data: result.data.filter((row) => row.status === "awaiting_payment"),
+    rows: page.paymentRequests.filter((row) => row.status === "awaiting_payment"),
+    total: page.total,
     totalIsExact: false,
     hasNextPage,
   };
-}
-
-export type PaymentRequestDetailResult =
-  | { status: "found"; request: PaymentRequest }
-  | { status: "not_found" }
-  | { status: "error"; error: string | undefined };
-
-/**
- * One payment request by id. Reads never carry the pay link's token (APE-849); see
- * {@link fetchPaymentRequestLinkToken}.
- *
- * @param request - Authenticated SDP API fetcher.
- * @param requestId - The request's id.
- * @returns The request, `not_found`, or the load error; never throws.
- */
-export async function fetchPaymentRequestDetail(
-  request: SdpApiClient["request"],
-  requestId: string
-): Promise<PaymentRequestDetailResult> {
-  try {
-    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}`);
-    if (response.status === 404) return { status: "not_found" };
-    if (!response.ok) return { status: "error", error: await response.text() };
-    const json = paymentRequestDetailResponseSchema.parse(await response.json());
-    return { status: "found", request: json.data };
-  } catch (error) {
-    return { status: "error", error: error instanceof Error ? error.message : undefined };
-  }
-}
-
-/**
- * One payment request read from the browser, through the dashboard's proxy, for a page watching
- * an open request for its payment. Parsed like the server's read; a failed read throws, so the
- * watch keeps the last answer it had.
- *
- * @param requestId - The request's id.
- * @returns The request as the API holds it now.
- */
-export async function fetchPaymentRequestFromBrowser(requestId: string): Promise<PaymentRequest> {
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/requests/${encodeURIComponent(requestId)}`,
-    { method: "GET", cache: "no-store" }
-  );
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return paymentRequestDetailResponseSchema.parse(await response.json()).data;
-}
-
-/**
- * The pay link's token, or null when the member's role does not hold
- * `payment_requests.manage` (a 403): the token is a bearer credential (APE-849).
- *
- * @param request - Authenticated SDP API fetcher.
- * @param requestId - The request's id.
- * @returns The token, null when refused, or the load error; never throws.
- */
-export async function fetchPaymentRequestLinkToken(
-  request: SdpApiClient["request"],
-  requestId: string
-): Promise<{ ok: true; publicToken: string | null } | { ok: false; error: string | undefined }> {
-  try {
-    const response = await request(`/v1/payments/requests/${encodeURIComponent(requestId)}/link`);
-    if (response.status === 403) return { ok: true, publicToken: null };
-    if (!response.ok) return { ok: false, error: await response.text() };
-    const json = paymentRequestLinkResponseSchema.parse(await response.json());
-    return { ok: true, publicToken: json.data.publicToken };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : undefined };
-  }
 }
 
 /**
@@ -358,8 +223,8 @@ export type PaymentRequestCanceler =
   | { kind: "api_key"; id: string; name: string | null }
   | { kind: "member"; id: string; name: string | null };
 
-const apiKeyNameResponseSchema = z.object({ data: z.object({ id: z.string(), name: z.string() }) });
-
+// The members read is this page's own entry (its params differ from the members page's), so
+// only the fields it names are kept.
 const memberDirectoryPageSchema = z.object({
   data: z.object({
     members: z.array(
@@ -371,81 +236,30 @@ const memberDirectoryPageSchema = z.object({
   }),
 });
 
-/** The members directory's largest page, so an organization's members come in one read. */
-const MEMBERS_LOOKUP_PAGE_SIZE = 100;
-/** Pages read before the canceler is left unnamed: 1,000 members. */
-const MEMBERS_LOOKUP_MAX_PAGES = 10;
-
-function memberDisplayName(user: { email: string; name: string | null }): string | null {
+export function memberDisplayName(user: { email: string; name: string | null }): string | null {
   const name = user.name?.trim();
   if (name) return name;
   const email = user.email.trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
-async function readApiKeyName(
-  request: SdpApiClient["request"],
-  apiKeyId: string
-): Promise<string | null> {
-  const response = await request(`/v1/api-keys/${encodeURIComponent(apiKeyId)}`);
-  if (!response.ok) return null;
-  return apiKeyNameResponseSchema.parse(await response.json()).data.name.trim() || null;
-}
-
-async function readMemberName(
-  request: SdpApiClient["request"],
-  userId: string
-): Promise<string | null> {
-  for (let page = 1; page <= MEMBERS_LOOKUP_MAX_PAGES; page += 1) {
-    const query = new URLSearchParams({
-      page: String(page),
-      pageSize: String(MEMBERS_LOOKUP_PAGE_SIZE),
-    });
-    const response = await request(`/v1/members?${query.toString()}`);
-    if (!response.ok) return null;
-    const directory = memberDirectoryPageSchema.parse(await response.json()).data;
-    const member = directory.members.find((candidate) => candidate.user.id === userId);
-    if (member) return memberDisplayName(member.user);
-    if (!directory.meta.hasMore) return null;
-  }
-  return null;
-}
-
 /**
- * Who canceled a request: the API key's name, read in the request's Project, or the member's
- * name (else email) from the organization's members. A key since deleted, a member since
- * removed, or a role that may not read either leaves the name null, and the page says "an API
- * key" or "a member" instead.
- *
- * @param request - Authenticated SDP API fetcher; the members read ignores its Project.
- * @param paymentRequest - The request as the API returned it.
- * @returns The canceler, or null when the request is not canceled or names nobody; never throws.
+ * The organization's members up to the key's `cap`, one page at a time, for naming who canceled
+ * a request. `cap` is not sent; it bounds how many pages are read.
  */
-export async function fetchPaymentRequestCanceler(
-  request: SdpApiClient["request"],
-  paymentRequest: PaymentRequest
-): Promise<PaymentRequestCanceler | null> {
-  if (paymentRequest.status !== "canceled") return null;
-  const { canceledByApiKeyId: apiKeyId, canceledByUserId: userId } = paymentRequest;
-  try {
-    if (apiKeyId) {
-      return {
-        kind: "api_key",
-        id: apiKeyId,
-        name: await readApiKeyName(request, apiKeyId),
-      };
-    }
-    if (userId) {
-      return {
-        kind: "member",
-        id: userId,
-        name: await readMemberName(request, userId),
-      };
-    }
-  } catch {
-    // A failed read only costs the name.
-    if (apiKeyId) return { kind: "api_key", id: apiKeyId, name: null };
-    if (userId) return { kind: "member", id: userId, name: null };
+export async function readMemberDirectory(
+  key: DashboardRequestKey
+): Promise<{ id: string; email: string; name: string | null }[]> {
+  const { cap, ...params } = key[3] ?? {};
+  const scope = { projectId: key[0], mode: key[1] };
+  const members: { id: string; email: string; name: string | null }[] = [];
+  for (let page = 1; members.length < Number(cap); page += 1) {
+    const body = await readDashboardRequest(
+      dashboardRequestKey(scope, key[2], { ...params, page }),
+      memberDirectoryPageSchema
+    );
+    members.push(...body.data.members.map((member) => member.user));
+    if (!body.data.meta.hasMore) break;
   }
-  return null;
+  return members;
 }

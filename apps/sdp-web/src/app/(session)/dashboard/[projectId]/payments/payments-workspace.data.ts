@@ -1,37 +1,22 @@
 "use client";
 
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
-import type {
-  Counterparty,
-  CounterpartyAccount,
-  ListCounterpartiesResponse,
-  ListCounterpartyAccountsResponse,
-} from "@sdp/types/counterparties";
-import { type CustodyWalletAggregate, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
-import { RAMP_FIAT_CURRENCIES, type RampFiatCurrency } from "@sdp/types/generated/ramp";
-import {
-  CRYPTO_RAIL_ASSET_LABELS,
-  type CryptoRailId,
-  SOLANA_CRYPTO_RAILS,
-} from "@sdp/types/payment-rails";
+import type { Counterparty } from "@sdp/types/counterparties";
+import { STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
+import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
+import { CRYPTO_RAIL_ASSET_LABELS, SOLANA_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   type ListProjectCounterpartyAccountsEnvelope,
   type ListProjectCounterpartyAccountsResponse,
-  type PaymentsWalletAggregateEnvelope,
   type PaymentTransferBatch,
   type PaymentTransferBatchEnvelope,
-  type PaymentTransferBatchEstimate,
-  type PaymentTransferBatchEstimateEnvelope,
   type PaymentTransferBatchRequest,
   type PaymentTransferRecipient,
   RAMP_AMOUNT_LIMIT_REASONS,
   RAMP_DIRECTIONS,
-  type RampDirection,
   type RampProviderEstimateResult,
   type PaymentTransferEnvelope as TransferEnvelope,
   type PaymentTransferSummary as TransferRecord,
-  type PaymentsDashboardWallet as WalletRecord,
-  type PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types/payments";
 // biome-ignore lint/style/noRestrictedImports: validates the provider ids an estimate response names; which providers to ask comes from getEnabledRampProviders()
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
@@ -50,6 +35,8 @@ import {
   dashboardRequestUnderOwnKey,
   MOVEMENT_READ_PATHS,
 } from "@/lib/dashboard-fetch";
+import type { DashboardPostReadKey } from "@/lib/dashboard-request-key";
+import { readDashboardPostRequest } from "@/lib/dashboard-swr";
 import { apiErrorCode } from "@/lib/idempotency";
 import {
   type PaymentApiErrorBody as ApiErrorBody,
@@ -167,145 +154,6 @@ export function getHighRiskProviders(snapshot: ComplianceSnapshot): CompliancePr
   return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
 }
 
-export async function fetchWallets(
-  options: { signal?: AbortSignal; includeBalances?: boolean },
-  t: Translate
-): Promise<WalletRecord[]> {
-  const query = new URLSearchParams({
-    view: "summary",
-  });
-  if (options.includeBalances) {
-    query.set("includeBalances", "true");
-  }
-  const response = await dashboardRequest(`/api/dashboard/wallets?${query.toString()}`, {
-    method: "GET",
-    cache: "no-store",
-    signal: options.signal,
-  });
-  const body = (await response.json().catch(() => ({}))) as WalletsEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletListRequestFailed", { status: response.status })
-      )
-    );
-  }
-  return body.data?.wallets ?? [];
-}
-
-export async function fetchWalletAggregate(
-  t: Translate,
-  signal?: AbortSignal
-): Promise<CustodyWalletAggregate> {
-  const response = await dashboardRequest("/api/dashboard/wallets/aggregate", {
-    method: "GET",
-    cache: "no-store",
-    signal,
-  });
-  const body = (await response.json().catch(() => ({}))) as PaymentsWalletAggregateEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletAggregateRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  if (!body.data?.aggregate) {
-    throw new Error(t("DashboardPayments.workspace.walletAggregateMissing"));
-  }
-
-  return body.data.aggregate;
-}
-
-interface TransferListEnvelope {
-  data?: TransferRecord[];
-  error?: {
-    message?: string;
-  };
-}
-
-export async function fetchTransfers(
-  options: {
-    pageSize: number;
-    custodyWalletId?: string;
-    category?: "wallet" | "ramp";
-    counterpartyId?: string;
-    statuses?: readonly string[];
-    direction?: "inbound" | "outbound";
-    /** Include chain history SDP did not initiate (deposits from outside), for one wallet. */
-    includeObserved?: boolean;
-    signal?: AbortSignal;
-  },
-  t: Translate
-): Promise<TransferRecord[]> {
-  const transfersQuery = new URLSearchParams({
-    page: "1",
-    pageSize: String(options.pageSize),
-    ...(options.custodyWalletId ? { custodyWalletId: options.custodyWalletId } : {}),
-    ...(options.category ? { category: options.category } : {}),
-    ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
-    ...(options.statuses ? { status: options.statuses.join(",") } : {}),
-    ...(options.direction ? { direction: options.direction } : {}),
-    ...(options.includeObserved ? { includeObserved: "true" } : {}),
-  }).toString();
-  const response = await dashboardRequest(`/api/dashboard/payments/transfers?${transfersQuery}`, {
-    method: "GET",
-    cache: "no-store",
-    signal: options.signal,
-  });
-  const body = (await response.json()) as TransferListEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.transferListRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  if (!body.data) {
-    throw new Error(t("DashboardPayments.workspace.transferListMissing"));
-  }
-
-  return body.data;
-}
-
-export async function fetchTransferById(
-  input: {
-    transferId: string;
-    signal?: AbortSignal;
-  },
-  t: Translate
-): Promise<TransferRecord> {
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/transfers/${encodeURIComponent(input.transferId)}`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal: input.signal,
-    }
-  );
-  const body = (await response.json()) as {
-    data?: { transfer?: TransferRecord };
-    error?: { message?: string };
-  };
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.transferLookupFailed", { status: response.status })
-      )
-    );
-  }
-  if (!body.data?.transfer) {
-    throw new Error(t("DashboardPayments.workspace.transferLookupMissing"));
-  }
-  return body.data.transfer;
-}
-
 export async function cancelRampTransfer(
   input: {
     transferId: string;
@@ -328,46 +176,13 @@ export async function cancelRampTransfer(
   }
 }
 
-export async function fetchRampEstimates(
-  input: {
-    direction: RampDirection;
-    assetRail: CryptoRailId;
-    fiatCurrency: RampFiatCurrency;
-    amount: string;
-    signal?: AbortSignal;
-  },
+/** The estimates a ramp estimate key asks for, each with a rate it can show. */
+export async function readRampEstimates(
+  key: DashboardPostReadKey,
   t: Translate
 ): Promise<RampProviderEstimateResult[]> {
-  const amountField = input.direction === "onramp" ? "fiatAmount" : "cryptoAmount";
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/ramps/${input.direction}/estimate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      signal: input.signal,
-      body: JSON.stringify({
-        assetRail: input.assetRail,
-        fiatCurrency: input.fiatCurrency,
-        [amountField]: input.amount,
-      }),
-    }
-  );
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.rampEstimateRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  const parsed = rampEstimateEnvelopeSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new Error(t("DashboardPayments.workspace.rampEstimateMissing"));
-  }
-  return parsed.data.data.estimates.map((result) => withUsableRate(result, t));
+  const body = await readDashboardPostRequest(key, rampEstimateEnvelopeSchema);
+  return body.data.estimates.map((result) => withUsableRate(result, t));
 }
 
 const rampEstimateCurrencySchema = z.union([
@@ -597,30 +412,6 @@ export async function fetchBatchRecipients(
   return body.data;
 }
 
-export async function estimateTransferBatch(
-  input: PaymentTransferBatchRequest,
-  t: Translate
-): Promise<PaymentTransferBatchEstimate> {
-  const response = await dashboardRequest("/api/dashboard/payments/transfers/batch/estimate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.batchEstimateRequestFailed", { status: response.status })
-      )
-    );
-  }
-  if (!body.data?.estimate) {
-    throw new Error(t("DashboardPayments.workspace.batchEstimateMissing"));
-  }
-  return body.data.estimate;
-}
-
 export interface CreateTransferBatchResult {
   batch: PaymentTransferBatch;
   recipients: PaymentTransferRecipient[];
@@ -733,31 +524,6 @@ async function readTransferBatchAnswer(
   };
 }
 
-export async function fetchCounterpartyAccounts(
-  counterpartyId: string,
-  t: Translate
-): Promise<CounterpartyAccount[]> {
-  const response = await dashboardRequest(
-    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/accounts?pageSize=100`,
-    {}
-  );
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: ListCounterpartyAccountsResponse;
-    error?: { message?: string };
-  };
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.counterpartyAccountsRequestFailed", {
-          status: response.status,
-        })
-      )
-    );
-  }
-  return body.data?.accounts ?? [];
-}
-
 type SandboxTransferSimulationInput = { transferId: string };
 
 export async function simulateSandboxTransfer(
@@ -801,9 +567,6 @@ export async function runComplianceCheck(
   };
 }
 
-const COUNTERPARTY_PAGE_SIZE = 100;
-const MAX_COUNTERPARTY_PAGES = 50;
-
 export interface CounterpartiesResult {
   ok: boolean;
   data: Counterparty[];
@@ -815,40 +578,4 @@ export interface CounterpartiesResult {
 /** Whether a contacts read holds the whole directory, so a reader can reuse it. */
 export function counterpartyListComplete(result: CounterpartiesResult): boolean {
   return result.ok && (result.total === undefined || result.data.length >= result.total);
-}
-
-export async function fetchAllCounterparties(): Promise<CounterpartiesResult> {
-  const counterparties: Counterparty[] = [];
-
-  try {
-    for (let page = 1; page <= MAX_COUNTERPARTY_PAGES; page += 1) {
-      const query = new URLSearchParams({
-        page: String(page),
-        pageSize: String(COUNTERPARTY_PAGE_SIZE),
-      });
-      const response = await dashboardRequest(`/api/dashboard/counterparty?${query.toString()}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) {
-        return { ok: false, data: [], error: await response.text() };
-      }
-
-      const json = (await response.json()) as { data?: ListCounterpartiesResponse };
-      const list = json.data;
-      counterparties.push(...(list?.counterparties ?? []));
-
-      const total = list?.total ?? counterparties.length;
-      if (counterparties.length >= total || (list?.counterparties.length ?? 0) === 0) {
-        break;
-      }
-    }
-
-    return { ok: true, data: counterparties };
-  } catch (error) {
-    return {
-      ok: false,
-      data: [],
-      ...(error instanceof Error ? { error: error.message } : {}),
-    };
-  }
 }

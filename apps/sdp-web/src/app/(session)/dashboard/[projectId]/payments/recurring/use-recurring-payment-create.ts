@@ -11,25 +11,32 @@ import type { ComboboxOption } from "@sdp/ui/combobox";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import useSWR, { preload } from "swr";
+import { preload } from "swr";
+import { counterpartyAccountsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
+import { useAllCounterparties } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/use-all-counterparties";
 import {
   isSolBalance,
   resolveTokenByMint,
   resolveTotalBalance,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "@/app/(session)/dashboard/[projectId]/payments/payments-page.data";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
-  type CounterpartiesResult,
-  fetchAllCounterparties,
-  fetchCounterpartyAccounts,
-} from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
+  paymentsQueryKeys,
+  recurringPaymentReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import {
   walletBalanceAssetOptions,
   walletComboboxOptions,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/wallet-options";
+import { useIssuedTokens } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useTranslations } from "@/i18n/provider";
+import type { DashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -37,11 +44,8 @@ import { createRecurringPayment } from "./recurring-payments.data";
 import { accountAddress, getSchedulePresets, parsePeriodHours } from "./recurring-payments-shared";
 
 export interface RecurringPaymentCreateInput {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
-  issuedTokenSymbolsByMint: Record<string, string>;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  counterpartiesResult: CounterpartiesResult;
+  /** Whether Issuance is on, so its tokens can be scheduled and named. */
+  issuanceEnabled: boolean;
 }
 
 type RecurringPaymentCreateStepId = "payment" | "when" | "review";
@@ -184,14 +188,22 @@ function assetPlaceholder(hasWallet: boolean, assetCount: number, t: Translate):
  * @param input - The page's wallets, contacts and token names.
  * @returns Everything the steps and the frame read and call.
  */
-export function useRecurringPaymentCreate({
-  wallets,
-  walletsError,
-  issuedTokenSymbolsByMint,
-  issuedTokensByMint,
-  counterpartiesResult,
-}: RecurringPaymentCreateInput) {
+export function useRecurringPaymentCreate({ issuanceEnabled }: RecurringPaymentCreateInput) {
   const t = useTranslations();
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
+  const issuedTokens = useIssuedTokens(issuanceEnabled);
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens.data ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens.data]
+  );
+  const issuedTokenSymbolsByMint = useMemo(
+    () =>
+      Object.fromEntries(
+        (issuedTokens.data ?? []).map((token) => [token.mintAddress, token.symbol])
+      ),
+    [issuedTokens.data]
+  );
   const steps = [
     { id: "payment", label: t("DashboardPayments.recurring.paymentStep"), title: "" },
     { id: "when", label: t("DashboardPayments.recurring.whenStep"), title: "" },
@@ -221,32 +233,31 @@ export function useRecurringPaymentCreate({
     firstCollectionAt: "",
   });
 
-  const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
-    paymentsQueryKeys.actionCounterparties(),
-    fetchAllCounterparties,
-    {
-      fallbackData: counterpartiesResult,
-    }
-  );
-  const liveCounterparties =
-    liveCounterpartiesResult === undefined ? counterpartiesResult : liveCounterpartiesResult;
-
-  const { liveWallets: availableWallets, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
+  const counterparties = useAllCounterparties();
+  const liveCounterparties = counterparties.result;
 
   const {
-    data: accounts,
-    isLoading: accountsLoading,
+    liveWallets: availableWallets,
+    walletsLoading,
+    liveWalletsError,
+  } = usePaymentsActionWallets();
+
+  const {
+    data: accountsBody,
+    error: accountsReadError,
     mutate: mutateAccounts,
-  } = useSWR(
+  } = useDashboardRead(
     fields.counterpartyId
-      ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId: fields.counterpartyId })
+      ? paymentsQueryKeys.counterpartyAccounts(scope, fields.counterpartyId)
       : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
+    counterpartyAccountsResponseSchema,
     { revalidateOnFocus: false }
   );
+  const accounts = accountsBody?.data.accounts;
+  const accountsLoading =
+    fields.counterpartyId !== "" && accounts === undefined && accountsReadError === undefined;
+  const accountsError = accountsReadError !== undefined;
+  const retryAccounts = () => void mutateAccounts();
 
   const cryptoAccounts = useMemo(
     () =>
@@ -352,8 +363,9 @@ export function useRecurringPaymentCreate({
     }));
     setFormError(null);
     if (counterpartyId) {
-      void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
-        fetchCounterpartyAccounts(counterpartyId, t)
+      void preload(
+        paymentsQueryKeys.counterpartyAccounts(scope, counterpartyId),
+        (key: DashboardRequestKey) => readDashboardRequest(key, counterpartyAccountsResponseSchema)
       );
     }
   };
@@ -374,13 +386,7 @@ export function useRecurringPaymentCreate({
 
   const handleCounterpartyCreated = (created: Counterparty) => {
     selectCounterparty(created.id);
-    void mutateCounterparties(
-      (previous) =>
-        previous
-          ? { ...previous, data: [created, ...previous.data] }
-          : { ok: true, data: [created] },
-      { revalidate: true }
-    );
+    counterparties.addCreated(created);
     setCounterpartyDialogOpen(false);
   };
 
@@ -391,7 +397,13 @@ export function useRecurringPaymentCreate({
     }));
     setFormError(null);
     setDestinationAccountDialogOpen(false);
-    void mutateAccounts((previous) => [account, ...(previous ?? [])], { revalidate: true });
+    void mutateAccounts(
+      (previous) =>
+        previous === undefined
+          ? previous
+          : { data: { ...previous.data, accounts: [account, ...previous.data.accounts] } },
+      { revalidate: true }
+    );
   };
 
   const canProceed = useMemo(() => {
@@ -447,6 +459,7 @@ export function useRecurringPaymentCreate({
         undefined,
         t
       );
+      void invalidateReads(recurringPaymentReads);
       toast.success(t("DashboardPayments.newDesign.recurring.paymentCreated"), {
         id: toastId,
         description: t("DashboardPayments.recurring.pendingActivationDescription"),
@@ -518,9 +531,14 @@ export function useRecurringPaymentCreate({
     selectCounterparty,
     selectWallet,
     liveCounterparties,
+    counterpartiesLoading: counterparties.loading,
+    retryCounterparties: counterparties.retry,
     liveWalletsError,
     availableWallets,
+    walletsLoading,
     accountsLoading,
+    accountsError,
+    retryAccounts,
     cryptoAccounts,
     resolvedAccountId,
     selectedAccount,

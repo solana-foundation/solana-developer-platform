@@ -11,7 +11,10 @@ import { CheckIcon, PlusIcon, ShieldAlertIcon } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  counterpartyReads,
+  isCounterpartyReadKey,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   getHighRiskProviders,
   runComplianceCheck,
@@ -20,6 +23,7 @@ import type { ComplianceSnapshot } from "@/app/(session)/dashboard/[projectId]/p
 import { useTranslations } from "@/i18n/provider";
 import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
 import { CRYPTO_ACCOUNT_NETWORKS, type CryptoAccountNetwork } from "./counterparty-create-schemas";
@@ -50,7 +54,8 @@ export function CryptoAccountForm({
   footerStart,
 }: CryptoAccountFormProps) {
   const t = useTranslations();
-  const notice = useOutcomeUnknownNotice(paymentsQueryKeys.isCounterpartyListKey);
+  const notice = useOutcomeUnknownNotice(isCounterpartyReadKey);
+  const invalidateReads = useInvalidateDashboardReads();
   const [label, setLabel] = useState("");
   const [network, setNetwork] = useState<CryptoAccountNetwork>("solana");
   const [address, setAddress] = useState("");
@@ -120,6 +125,7 @@ export function CryptoAccountForm({
       return;
     }
 
+    void invalidateReads(counterpartyReads);
     const account = result.data?.data?.account;
     if (account) onAdded?.(account);
     toast.success(t("DashboardPayments.counterparty.cryptoAccountAttached"), {

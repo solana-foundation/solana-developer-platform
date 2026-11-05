@@ -1,8 +1,6 @@
 import { CUSTODY_PROVIDERS, type CustodyWalletAggregate } from "@sdp/types/custody";
 import type {
   PaymentsDashboardWallet,
-  PaymentTransferBatch,
-  PaymentTransferRecipient,
   PaymentTransferSummary,
   PaymentTransferType,
 } from "@sdp/types/payments";
@@ -251,62 +249,6 @@ export async function fetchPaymentTransfers(
       ok: false,
       ...(error instanceof Error ? { error: error.message } : {}),
     };
-  }
-}
-
-/**
- * The project's most recent transfer batches, newest first.
- *
- * @param request - Authenticated API request function.
- * @param pageSize - How many batches to read.
- * @returns The batches, or the API error.
- */
-export async function fetchTransferBatches(
-  request: SdpApiClient["request"],
-  pageSize: number
-): Promise<FetchResult<PaymentTransferBatch[]>> {
-  try {
-    const response = await request(`/v1/payments/transfer-batches?page=1&pageSize=${pageSize}`);
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        error: parsePaymentApiErrorText(await response.text()),
-      };
-    }
-    const json = (await response.json()) as { data?: PaymentTransferBatch[] };
-    return { ok: true, data: (json.data ?? []).filter((batch) => typeof batch.id === "string") };
-  } catch (error) {
-    return { ok: false, ...(error instanceof Error ? { error: error.message } : {}) };
-  }
-}
-
-/**
- * One batch's recipients, for counting how many settled or failed.
- *
- * @param request - Authenticated API request function.
- * @param batchId - The batch id.
- * @returns The recipients, or the API error.
- */
-export async function fetchTransferBatchRecipients(
-  request: SdpApiClient["request"],
-  batchId: string
-): Promise<FetchResult<PaymentTransferRecipient[]>> {
-  try {
-    const response = await request(`/v1/payments/transfer-batches/${encodeURIComponent(batchId)}`);
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        error: parsePaymentApiErrorText(await response.text()),
-      };
-    }
-    const json = (await response.json()) as {
-      data?: { recipients?: PaymentTransferRecipient[] };
-    };
-    return { ok: true, data: json.data?.recipients ?? [] };
-  } catch (error) {
-    return { ok: false, ...(error instanceof Error ? { error: error.message } : {}) };
   }
 }
 

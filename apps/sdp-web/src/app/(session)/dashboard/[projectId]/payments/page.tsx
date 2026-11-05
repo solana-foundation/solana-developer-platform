@@ -1,78 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import { resolvePlaygroundApiBaseUrl } from "@/app/(session)/dashboard/[projectId]/playground-api-data";
-import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
-import { getEnabledRampProviders } from "@/flags/ramps";
-import { getTranslations } from "@/i18n/server";
-import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
-import { fetchCounterparties } from "./counterparty/counterparty-page.data";
+import { issuance } from "@/flags";
+import { getEnabledRampProviders, isRampsEnabled } from "@/flags/ramps";
+import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { PaymentsCommandCenter } from "./payments-command-center";
-import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsPlaygroundWorkspace } from "./payments-workspace";
-
-type ApiClientPromise = ReturnType<typeof createSdpApiClient>;
-type Trace = ReturnType<typeof createTimedTrace>;
-
-async function PaymentsPlaygroundData({
-  apiClientPromise,
-  trace,
-}: {
-  apiClientPromise: ApiClientPromise;
-  trace: Trace;
-}) {
-  const [t, apiClient] = await Promise.all([getTranslations(), apiClientPromise]);
-  const [walletsResult, transfersResult, counterpartiesResult, rampProviders] = await Promise.all([
-    trace.step("fetch_payments_wallet_summaries", () =>
-      fetchPaymentsWallets(apiClient.request, { view: "summary" })
-    ),
-    trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
-    // Fills the contact endpoints' id pickers; the API's largest page.
-    trace.step("fetch_counterparties", () =>
-      fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
-    ),
-    // The quote endpoints offer the providers the channel-capped flags leave on, never the raw list.
-    getEnabledRampProviders(),
-  ]);
-  const wallets = walletsResult.data ?? [];
-  const transfers = transfersResult.data ?? [];
-  const walletsError = walletsResult.ok
-    ? null
-    : t("DashboardPayments.page.walletApiError", {
-        status: walletsResult.status ?? t("DashboardPayments.page.unavailableStatus"),
-        error: walletsResult.error ?? t("DashboardPayments.page.unknownError"),
-      });
-  const transfersError = transfersResult.ok
-    ? null
-    : t("DashboardPayments.page.transferApiError", {
-        status: transfersResult.status ?? t("DashboardPayments.page.unavailableStatus"),
-        error: transfersResult.error ?? t("DashboardPayments.page.unknownError"),
-      });
-
-  trace.log({
-    ok: true,
-    walletCount: wallets.length,
-    transferCount: transfers.length,
-  });
-
-  return (
-    <PaymentsPlaygroundWorkspace
-      apiBaseUrl={resolvePlaygroundApiBaseUrl()}
-      wallets={wallets}
-      walletsError={walletsError}
-      transfers={transfers}
-      transfersError={transfersError}
-      counterparties={counterpartiesResult.data.map(({ id, displayName }) => ({ id, displayName }))}
-      rampProviders={rampProviders}
-    />
-  );
-}
 
 export default async function PaymentsPage() {
   const { orgId } = await auth();
@@ -80,10 +18,12 @@ export default async function PaymentsPage() {
     redirect("/dashboard");
   }
 
-  const trace = createTimedTrace("dashboard.payments.page");
-  const apiClientPromise = trace.step("create_sdp_api_client", () =>
-    createSdpApiClient(trace.childContext("dashboard.payments.api"))
-  );
+  const [rampsOffered, issuanceEnabled, rampProviders] = await Promise.all([
+    isRampsEnabled(),
+    issuance(),
+    // The quote endpoints offer the providers the channel-capped flags leave on, never the raw list.
+    getEnabledRampProviders(),
+  ]);
 
   return (
     <DashboardWorkspaceTabShell
@@ -91,15 +31,26 @@ export default async function PaymentsPage() {
         {
           id: "overview",
           className: dashboardWorkspaceOverviewPanelClassName,
-          content: <PaymentsCommandCenter apiClientPromise={apiClientPromise} />,
+          content: (
+            <PaymentsCommandCenter
+              modules={{
+                rampsOffered,
+                rampsInReleaseChannel: isModuleInDeploymentReleaseChannel("ramps"),
+                complianceInReleaseChannel: isModuleInDeploymentReleaseChannel("compliance"),
+                issuanceEnabled,
+                enabledRampProviders: rampProviders,
+              }}
+            />
+          ),
         },
         {
           id: "playground",
           className: dashboardWorkspacePlaygroundPanelClassName,
           content: (
-            <Suspense fallback={<ApiPlaygroundShellSkeleton />}>
-              <PaymentsPlaygroundData apiClientPromise={apiClientPromise} trace={trace} />
-            </Suspense>
+            <PaymentsPlaygroundWorkspace
+              apiBaseUrl={resolvePlaygroundApiBaseUrl()}
+              rampProviders={rampProviders}
+            />
           ),
         },
       ]}

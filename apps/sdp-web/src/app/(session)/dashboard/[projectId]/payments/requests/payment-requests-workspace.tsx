@@ -15,13 +15,15 @@ import { Table, TableBody, TableRow } from "@solana/design-system/table";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { PaymentRequestsListLoading } from "@/app/(session)/dashboard/[projectId]/payments/counterparty-menu-loading";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { PAYMENTS_TABLE_CELL } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
 import { PaymentsTableHeader } from "@/app/(session)/dashboard/[projectId]/payments/payments-table-header";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -31,6 +33,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
 import { copyPendingText } from "@/lib/copy-pending-text";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -43,8 +46,10 @@ import {
   deriveTokenOptions,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
   type PaymentRequestsListState,
-  type PaymentRequestsLocalErrorCode,
   paymentRequestMatchesSearch,
+  paymentRequestsListHref,
+  paymentRequestsListResponseSchema,
+  paymentRequestsListView,
 } from "./payment-requests-page.data";
 
 function StatusBadge({
@@ -60,19 +65,6 @@ function StatusBadge({
       {t(REQUEST_STATUS_TRANSLATION_KEYS[status])}
     </StatusText>
   );
-}
-
-interface PaymentRequestsWorkspaceProps {
-  initialPaymentRequests: PaymentRequest[];
-  initialError?: string;
-  initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
-  /** How many requests the API counts for the status filter, across every page. */
-  total: number;
-  /** Whether `total` is exact; when it is not, the pager shows the page without a count. */
-  totalIsExact: boolean;
-  /** Whether the API has a page after this one. */
-  hasNextPage: boolean;
-  listState: PaymentRequestsListState;
 }
 
 const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
@@ -384,18 +376,10 @@ function usePaymentRequestAmountLabel() {
 
 /**
  * The Requests list. The page, its size, the status filter and the search live in the URL. The
- * page, its size and the status load on the server (see loadPaymentRequestsList); the search is
- * matched here against that page's rows, and stays in the URL as the user pages on.
+ * page, its size and the status are what the list reads; the search is matched here against that
+ * page's rows, and stays in the URL as the user pages on.
  */
-export function PaymentRequestsWorkspace({
-  initialPaymentRequests,
-  initialError,
-  initialLocalErrorCode,
-  total,
-  totalIsExact,
-  hasNextPage,
-  listState,
-}: PaymentRequestsWorkspaceProps) {
+export function PaymentRequestsWorkspace({ listState }: { listState: PaymentRequestsListState }) {
   const t = useTranslations();
   const demo = usePaymentsDemo();
   const locale = useLocale();
@@ -404,17 +388,34 @@ export function PaymentRequestsWorkspace({
   const projectHref = useProjectHref();
   const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const [isPending, startTransition] = useTransition();
+  const scope = useDashboardKeyScope();
+  const { data, error, mutate } = useDashboardRead(
+    paymentsQueryKeys.paymentRequests(scope, listState),
+    paymentRequestsListResponseSchema,
+    { keepPreviousData: true }
+  );
+  const view = data === undefined ? null : paymentRequestsListView(data.data, listState);
+  // Under Awaiting payment the total is the API's upper bound, so a page past it is past the end
+  // all the more.
+  const lastPage = view === null ? null : Math.max(1, Math.ceil(view.total / listState.pageSize));
+  useEffect(() => {
+    if (lastPage !== null && listState.page > lastPage) {
+      // A page past the end (an old link, or requests gone since) lands on the last one.
+      router.replace(projectHref(paymentRequestsListHref({ ...listState, page: lastPage })));
+    }
+  }, [lastPage, listState, projectHref, router]);
   // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
   // requests only by page and stored status, so until then the search matches the page the list
   // has read, by amount, token, destination and reference, and the pager carries it to
   // the other pages. Known limitation of the API, not of this list.
   const { search } = listState;
+  const pageRows = view?.rows;
   const rows = useMemo(
     () =>
-      search === null
-        ? initialPaymentRequests
-        : initialPaymentRequests.filter((request) => paymentRequestMatchesSearch(request, search)),
-    [initialPaymentRequests, search]
+      pageRows === undefined || search === null
+        ? pageRows
+        : pageRows.filter((request) => paymentRequestMatchesSearch(request, search)),
+    [pageRows, search]
   );
 
   const applyListParams = (updates: ListParamsUpdate) => {
@@ -422,7 +423,6 @@ export function PaymentRequestsWorkspace({
     if (href === null) return;
     startTransition(() => router.replace(projectHref(href), { scroll: false }));
   };
-  const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
@@ -450,13 +450,28 @@ export function PaymentRequestsWorkspace({
     );
   };
 
+  if (error !== undefined) {
+    return (
+      <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+        <ListEmptyState
+          message={t("DashboardPayments.requests.loadFailed")}
+          action={
+            <Button variant="outline" onClick={() => void mutate()}>
+              {t("Shared.SharedComponents.retry")}
+            </Button>
+          }
+        />
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+  if (view === null || rows === undefined) {
+    return <PaymentRequestsListLoading />;
+  }
+  const listIsEmpty = view.total === 0 && listState.status === null && listState.search === null;
+
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
-      {initialError || initialLocalErrorCode ? (
-        <p className="text-body text-error">
-          {initialError ?? t("DashboardPayments.requests.loadFailed")}
-        </p>
-      ) : listIsEmpty ? (
+      {listIsEmpty ? (
         <ListEmptyState
           hidesPageAction={canWrite}
           message={t("DashboardPayments.requests.emptyTitle")}
@@ -507,9 +522,9 @@ export function PaymentRequestsWorkspace({
             />
           )}
           <PaymentRequestsPagination
-            total={total}
-            totalIsExact={totalIsExact}
-            hasNextPage={hasNextPage}
+            total={view.total}
+            totalIsExact={view.totalIsExact}
+            hasNextPage={view.hasNextPage}
             listState={listState}
             pending={isPending}
             onPageChange={(page) => applyListParams({ page })}

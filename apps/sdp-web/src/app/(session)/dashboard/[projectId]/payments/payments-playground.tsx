@@ -25,6 +25,7 @@ interface PaymentsPlaygroundProps {
   transfersError: string | null;
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  counterpartiesError: string | null;
   counterparties: CounterpartyPlaygroundView[];
   rampProviders: readonly RampProviderId[];
 }
@@ -40,6 +41,7 @@ export function PaymentsPlayground({
   transfersError,
   wallets,
   walletsError,
+  counterpartiesError,
   counterparties,
   rampProviders,
 }: PaymentsPlaygroundProps) {
@@ -70,6 +72,7 @@ export function PaymentsPlayground({
       leftMessages={[
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),
         ...(transfersError ? [{ text: transfersError, tone: "critical" as const }] : []),
+        ...(counterpartiesError ? [{ text: counterpartiesError, tone: "critical" as const }] : []),
       ]}
     />
   );

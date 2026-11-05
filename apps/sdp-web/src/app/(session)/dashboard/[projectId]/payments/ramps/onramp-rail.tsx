@@ -137,11 +137,9 @@ function onrampFrameState(
 }
 
 export function OnrampRail({
-  wallets,
-  walletsError,
   enabledRampProviders,
   rampProviderAccess,
-  counterpartiesResult,
+  counterparties,
   selectedCounterparty,
   counterpartyId,
   counterpartyName,
@@ -159,11 +157,9 @@ export function OnrampRail({
   const t = useTranslations();
   const projectHref = useProjectHref();
   const wizard = useOnrampWizard({
-    wallets,
-    walletsError,
     enabledRampProviders,
     rampProviderAccess,
-    counterpartiesResult,
+    counterparties,
     selectedCounterparty,
     initialCounterpartyId: counterpartyId,
     onExit,

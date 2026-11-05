@@ -5,12 +5,13 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { address } from "@solana/kit";
 import { SendIcon, XIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import useSWR, { useSWRConfig } from "swr";
 import useSWRMutation from "swr/mutation";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  moneyMovementReads,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   RecordList,
   RecordRow,
@@ -20,7 +21,6 @@ import {
   type CreateTransferInput,
   cancelRampTransfer,
   createTransfer,
-  fetchTransferById,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { CancelTransactionDialog } from "@/app/(session)/dashboard/[projectId]/payments/ramps/components/cancel-transaction-dialog";
 import {
@@ -28,54 +28,10 @@ import {
   SendDepositDialog,
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/components/offramp-final-step";
 import { submitOfframpDeposit } from "@/app/(session)/dashboard/[projectId]/payments/ramps/offramp-deposit";
-import { rampTransferPollInterval } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
-import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
-
-type RampTransferDetail = PaymentTransferDetail & { type: "onramp" | "offramp" };
-
-function isRamp(transfer: PaymentTransferDetail | null): transfer is RampTransferDetail {
-  return transfer?.type === "onramp" || transfer?.type === "offramp";
-}
-
-/** The status key a ramp in motion polls, or null once it can no longer change. */
-function liveRampTransferKey(transfer: PaymentTransferDetail | null) {
-  if (!isRamp(transfer) || getRampTransferState(transfer.status).terminal) return null;
-  switch (transfer.type) {
-    case "offramp":
-      return paymentsQueryKeys.offrampTransferStatus({ transferId: transfer.id });
-    case "onramp":
-      return paymentsQueryKeys.onrampTransferStatus({ transferId: transfer.id });
-    default: {
-      const unhandled: never = transfer.type;
-      throw new Error(`Unhandled ramp type: ${String(unhandled)}`);
-    }
-  }
-}
-
-/**
- * The page renders once on the server; a ramp still in motion keeps reading
- * its transfer, as the wizard does, so its state and actions stay current.
- */
-export function useLiveRampTransfer(
-  initial: PaymentTransferDetail | null
-): PaymentTransferDetail | null {
-  const t = useTranslations();
-  const { data } = useSWR(
-    liveRampTransferKey(initial),
-    ([, transferId]: readonly [string, string]) => fetchTransferById({ transferId }, t),
-    {
-      // A fresh function each render re-arms SWR's timer with the latest transfer.
-      refreshInterval: (transfer) => rampTransferPollInterval(transfer),
-      revalidateOnFocus: false,
-      revalidateOnMount: false,
-      dedupingInterval: 2_000,
-    }
-  );
-  return initial && data ? { ...initial, ...data } : initial;
-}
 
 /**
  * An open sale's own actions, so leaving the wizard never strands it: where
@@ -90,12 +46,11 @@ export function RampOpenSale({
   walletLabel: string | null;
 }) {
   const t = useTranslations();
-  const router = useRouter();
   const canWrite = useCanWrite();
   const [confirmingSend, setConfirmingSend] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [canceling, setCanceling] = useState(false);
-  const { mutate } = useSWRConfig();
+  const invalidateReads = useInvalidateDashboardReads();
   const {
     trigger: send,
     data: sent,
@@ -114,11 +69,8 @@ export function RampOpenSale({
     (transfer.token ? WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token)?.symbol : undefined) ??
     t("DashboardPayments.transactionDetail.theTokens");
 
-  // The wizard and this page read the same transfer key; the server parts refresh with it.
-  const refresh = async () => {
-    await mutate(paymentsQueryKeys.offrampTransferStatus({ transferId: transfer.id }));
-    router.refresh();
-  };
+  // The wizard and this page read the same transfer, and the ledger row beside it.
+  const refresh = () => invalidateReads(moneyMovementReads);
 
   const sendDeposit = async () => {
     if (!deposit || !transfer.custodyWalletId || !transfer.token) return;

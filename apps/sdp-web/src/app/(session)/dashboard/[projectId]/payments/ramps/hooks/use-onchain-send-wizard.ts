@@ -9,10 +9,12 @@ import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { counterpartyAccountsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
+import {
+  moneyMovementReads,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import type { CreateTransferInput } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
-import { fetchCounterpartyAccounts } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   cryptoWalletAccountDetailsSchema,
   ONCHAIN_AMOUNT_PATTERN,
@@ -32,6 +34,11 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -175,14 +182,13 @@ export function onchainAmountExceedsBalance(
 }
 
 export interface UseOnchainSendWizardProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   counterpartyId: string;
   onExit: () => void;
 }
 
 function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
+  const invalidateReads = useInvalidateDashboardReads();
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
   const finished = transferResult !== null;
@@ -229,6 +235,7 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
         position: "bottom-right",
       });
     } finally {
+      void invalidateReads(moneyMovementReads);
       setSubmitting(false);
     }
   };
@@ -278,8 +285,6 @@ function useOnchainAssetSelection(
 }
 
 export function useOnchainSendWizard({
-  wallets,
-  walletsError,
   issuedTokenSymbolsByMint,
   counterpartyId,
   onExit,
@@ -310,17 +315,22 @@ export function useOnchainSendWizard({
     setField("accountId", "");
   }, [counterpartyId, setField]);
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets();
 
-  const { data: accounts, mutate: mutateAccounts } = useSWR(
-    counterpartyId ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId }) : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
+  const scope = useDashboardKeyScope();
+  const {
+    data: accountsBody,
+    error: accountsReadError,
+    mutate: mutateAccounts,
+  } = useDashboardRead(
+    counterpartyId ? paymentsQueryKeys.counterpartyAccounts(scope, counterpartyId) : null,
+    counterpartyAccountsResponseSchema,
     { revalidateOnFocus: false }
   );
-  const accountsLoading = accounts === undefined;
+  const accounts = accountsBody?.data.accounts;
+  const accountsLoading = accounts === undefined && accountsReadError === undefined;
+  const accountsError = accountsReadError !== undefined;
+  const retryAccounts = () => void mutateAccounts();
   const cryptoAccounts = useMemo(() => {
     if (accounts === undefined) {
       return [];
@@ -395,10 +405,18 @@ export function useOnchainSendWizard({
   const handleAccountAdded = (account: CounterpartyAccount) => {
     setField("accountId", account.id);
     void mutateAccounts(
-      (prev) => {
-        const existingAccounts = prev === undefined ? [] : prev;
-        return [account, ...existingAccounts.filter((existing) => existing.id !== account.id)];
-      },
+      (previous) =>
+        previous === undefined
+          ? previous
+          : {
+              data: {
+                ...previous.data,
+                accounts: [
+                  account,
+                  ...previous.data.accounts.filter((existing) => existing.id !== account.id),
+                ],
+              },
+            },
       { revalidate: true }
     );
     setAddAccountOpen(false);
@@ -464,6 +482,8 @@ export function useOnchainSendWizard({
       signingUnavailable && !transferResult ? t("DashboardPayments.signingUnavailable") : null,
     cryptoAccounts,
     accountsLoading,
+    accountsError,
+    retryAccounts,
     counterpartyId,
     selectedWallet,
     selectedAccount,

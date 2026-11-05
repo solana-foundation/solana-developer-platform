@@ -14,8 +14,13 @@ import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
+import {
+  counterpartyAccountsResponseSchema,
+  counterpartyResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
 import {
   formatDisplayAmount,
   isHttpUrl,
@@ -27,7 +32,17 @@ import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import {
+  paymentsQueryKeys,
+  recurringPaymentReads,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { RecordLoadError } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { RecurringPaymentDetailSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
 import { usePaymentsActionWallets } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import {
+  useIssuedTokens,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -42,16 +57,31 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { type DashboardRequestKey, dashboardRequestKey } from "@/lib/dashboard-request-key";
+import {
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { explorerAddressUrl } from "@/lib/explorer";
+import { PAYMENT_RECURRING_HREF } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { RecurringPaymentRunHistory } from "./recurring-payment-collection-history";
 import {
   getRecurringPaymentDetailState,
+  recurringPaymentReadFailureOutcome,
   refreshIfOutcomeUnknown,
 } from "./recurring-payment-detail-state";
 import { RecurringPaymentEditForm } from "./recurring-payment-edit-form";
-import { type RecurringPaymentAction, runRecurringPaymentAction } from "./recurring-payments.data";
+import {
+  collectionAttemptsEnvelopeSchema,
+  type RecurringPaymentAction,
+  recurringPaymentEnvelopeSchema,
+  runRecurringPaymentAction,
+} from "./recurring-payments.data";
 import {
   accountAddress,
   formatPeriodHours,
@@ -806,13 +836,13 @@ export function RecurringPaymentDetailWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const timeZone = useTimeZone();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
-  const { liveWallets, liveWalletsError } = usePaymentsActionWallets(wallets, null);
+  const { liveWallets, liveWalletsError } = usePaymentsActionWallets();
   const liveSourceWallet = liveWallets.find(
     (entry) => entry.id === recurringPayment.sourceCustodyWalletId
   );
@@ -869,9 +899,9 @@ export function RecurringPaymentDetailWorkspace({
     try {
       await runRecurringPaymentAction(recurringPayment.id, action, undefined, t);
       toast.success(actionSuccessLabel(action, t), { id: toastId, position: "bottom-right" });
-      router.refresh();
+      void invalidateReads(recurringPaymentReads);
     } catch (error) {
-      refreshIfOutcomeUnknown(error, () => router.refresh());
+      refreshIfOutcomeUnknown(error, () => void invalidateReads(recurringPaymentReads));
       const message =
         error instanceof Error
           ? error.message
@@ -993,5 +1023,128 @@ export function RecurringPaymentDetailWorkspace({
         />
       </div>
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+async function readCounterpartyWalletAccounts(
+  key: DashboardRequestKey
+): Promise<CounterpartyAccount[]> {
+  const accounts: CounterpartyAccount[] = [];
+  for (let page = 1; ; page += 1) {
+    const body = await readDashboardRequest(
+      dashboardRequestKey({ projectId: key[0], mode: key[1] }, key[2], { ...key[3], page }),
+      counterpartyAccountsResponseSchema
+    );
+    accounts.push(...body.data.accounts);
+    if (accounts.length >= body.data.total || body.data.accounts.length < body.data.pageSize) {
+      return accounts;
+    }
+  }
+}
+
+function isSettled(read: { data: unknown; error: unknown }): boolean {
+  return read.data !== undefined || read.error !== undefined;
+}
+
+/**
+ * The schedule page: the schedule, its wallet and contact, the contact's addresses and the
+ * collection history, each read on its own. A schedule the API does not hold is not found; a
+ * demo schedule that is gone (the demo was reset) sends the page back to the list.
+ */
+export function RecurringPaymentDetailRoute({
+  recurringPaymentId,
+  issuanceEnabled,
+}: {
+  recurringPaymentId: string;
+  issuanceEnabled: boolean;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  const projectHref = useProjectHref();
+  const scope = useDashboardKeyScope();
+  const schedule = useDashboardRead(
+    paymentsQueryKeys.recurringPayment(scope, recurringPaymentId),
+    recurringPaymentEnvelopeSchema
+  );
+  const record = schedule.data?.data;
+  const counterpartyId = record?.recurringPayment.counterpartyId ?? null;
+  const wallets = useWalletSummaries({ includeBalances: true });
+  const issuedTokens = useIssuedTokens(issuanceEnabled);
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens.data ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens.data]
+  );
+  const contact = useDashboardRead(
+    counterpartyId === null ? null : paymentsQueryKeys.counterparty(scope, counterpartyId),
+    counterpartyResponseSchema
+  );
+  const accounts = useDashboardSWR(
+    counterpartyId === null
+      ? null
+      : paymentsQueryKeys.counterpartyWalletAccounts(scope, counterpartyId),
+    readCounterpartyWalletAccounts
+  );
+  const attempts = useDashboardRead(
+    paymentsQueryKeys.recurringPaymentCollectionAttempts(scope, recurringPaymentId),
+    collectionAttemptsEnvelopeSchema
+  );
+  const outcome =
+    schedule.error === undefined
+      ? null
+      : recurringPaymentReadFailureOutcome(recurringPaymentId, schedule.error.status);
+  useEffect(() => {
+    if (outcome === "list") router.replace(projectHref(PAYMENT_RECURRING_HREF));
+  }, [outcome, projectHref, router]);
+
+  if (outcome === "not_found") {
+    return <ProjectNotFound />;
+  }
+  if (outcome === "failed") {
+    return (
+      <DashboardWorkspaceOverviewPanel>
+        <RecordLoadError
+          title={t("DashboardPayments.newDesign.recurring.unableToLoad")}
+          description={t("DashboardPayments.recurring.loadFailedDescription")}
+          onRetry={() => void schedule.mutate()}
+        />
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+  if (
+    record === undefined ||
+    !isSettled(wallets) ||
+    !isSettled(contact) ||
+    !isSettled(accounts) ||
+    !isSettled(attempts)
+  ) {
+    return <RecurringPaymentDetailSkeleton />;
+  }
+  const sourceCustodyWalletId = record.recurringPayment.sourceCustodyWalletId;
+  if (sourceCustodyWalletId === null) {
+    throw new Error("Recurring payment source wallet is unresolved");
+  }
+  const walletList = wallets.data ?? [];
+  return (
+    <RecurringPaymentDetailWorkspace
+      recurringPayment={{ ...record.recurringPayment, sourceCustodyWalletId }}
+      tokenApproval={record.tokenApproval ?? null}
+      wallet={walletList.find((entry) => entry.id === sourceCustodyWalletId) ?? null}
+      wallets={walletList}
+      issuedTokensByMint={issuedTokensByMint}
+      counterpartyAccounts={(accounts.data ?? []).filter(
+        (account) => account.accountKind === "crypto_wallet" && account.status === "active"
+      )}
+      counterpartyLabel={
+        contact.data?.data.counterparty.displayName ??
+        t("DashboardPayments.recurring.counterpartyUnavailable")
+      }
+      collectionAttempts={attempts.data?.data.collectionAttempts ?? []}
+      collectionAttemptsTotal={attempts.data?.data.total ?? 0}
+      collectionAttemptsError={
+        attempts.error === undefined
+          ? undefined
+          : t("DashboardPayments.recurring.historyUnavailable")
+      }
+    />
   );
 }

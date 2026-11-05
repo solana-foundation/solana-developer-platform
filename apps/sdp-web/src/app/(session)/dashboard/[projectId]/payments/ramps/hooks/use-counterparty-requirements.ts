@@ -15,57 +15,29 @@ import {
   isCounterpartyRequirementsPollStatus,
 } from "@sdp/types/ramp-requirements";
 import { useMemo, useState } from "react";
-import useSWR from "swr";
 import { getPaymentApiError as getApiError } from "@/app/(session)/dashboard/[projectId]/payments/payment-api-errors";
 import {
   buildCounterpartyRequirementsKey,
   type CounterpartyRequirementsParams,
   paymentsQueryKeys,
+  requirementsPollRequest,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { counterpartyRequirementsResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-requirements-schemas";
 import { requirementFieldError } from "@/app/(session)/dashboard/[projectId]/payments/ramps/schema";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
+import type { DashboardKeyScope } from "@/lib/dashboard-request-key";
+import {
+  type DashboardReadError,
+  readDashboardRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+} from "@/lib/dashboard-swr";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-async function fetchCounterpartyRequirements(
-  counterpartyId: string,
-  provider: RampProviderId,
-  direction: RampDirection,
-  corridor: AdvanceRequirementsPayload,
-  t: Translate
-): Promise<CounterpartyRequirements> {
-  const params = new URLSearchParams({
-    provider,
-    direction,
-    assetRail: corridor.assetRail,
-    fiatCurrency: corridor.fiatCurrency,
-  });
-  if (direction === "onramp") {
-    params.set("destinationCustodyWalletId", corridor.destinationCustodyWalletId);
-  }
-  const response = await dashboardRequest(
-    `/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/requirements?${params.toString()}`,
-    {}
-  );
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: CounterpartyRequirements;
-    error?: { message?: string };
-  };
-
-  if (!response.ok || !body.data) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.requirementsRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  return body.data;
-}
 
 interface AdvanceRequirementsPayload {
   assetRail: CryptoRailId;
@@ -148,22 +120,29 @@ function recordForCorridor<Entry extends { corridor: string }>(
 /**
  * Keys the onboarding status poll, or disables it while there is nothing pending to poll.
  *
+ * @param scope - The Project and mode the poll reads under.
  * @param advance - The current corridor's advance, if any.
  * @param params - The hook's request.
- * @param subjectKey - The current corridor identity.
  * @returns The poll key, or null.
  */
 function onboardingPollKey(
+  scope: DashboardKeyScope,
   advance: AdvanceRecord | null,
-  params: CounterpartyRequirementsParams | null,
-  subjectKey: string
+  params: CounterpartyRequirementsParams | null
 ) {
   return advance !== null &&
     params?.provider &&
     isCounterpartyRequirementsPollStatus(advance.result.status)
-    ? paymentsQueryKeys.requirementsStatusPoll({
-        subjectKey: `${subjectKey}#${advance.advanceId}`,
-      })
+    ? paymentsQueryKeys.requirementsPoll(
+        scope,
+        {
+          counterpartyId: params.counterpartyId,
+          provider: params.provider,
+          direction: params.direction,
+          ...advance.payload,
+        },
+        advance.advanceId
+      )
     : null;
 }
 
@@ -185,12 +164,13 @@ function currentOnboarding(
  * must not strand a wizard whose advance succeeded.
  */
 function requirementsBlockReason(
-  error: unknown,
+  error: DashboardReadError | undefined,
   requirementsData: CounterpartyRequirements | undefined,
-  data: CounterpartyRequirements | undefined
+  data: CounterpartyRequirements | undefined,
+  t: Translate
 ): string | null {
-  if (error instanceof Error && requirementsData === undefined) {
-    return error.message;
+  if (error !== undefined && requirementsData === undefined) {
+    return t("DashboardPayments.workspace.requirementsRequestFailed", { status: error.status });
   }
   if (data?.status === "unsupported") {
     return data.reason;
@@ -236,6 +216,7 @@ export function useCounterpartyRequirements(
   params: CounterpartyRequirementsParams | null
 ): CounterpartyRequirementsState {
   const t = useTranslations();
+  const scope = useDashboardKeyScope();
   const [collectedData, setCollectedData] = useState<CollectedFieldData>({});
   const setField = (key: string, value: string) => {
     setCollectedData((previous) => ({ ...previous, [key]: value }));
@@ -265,33 +246,18 @@ export function useCounterpartyRequirements(
   }
   const advance = recordForCorridor(advanceRecord, subjectKey);
 
-  const key = buildCounterpartyRequirementsKey(params);
   // Requirements never revalidate on their own — `needsCollection` (and thus the
   // wizard's step list) can't flip out from under the user mid-flow.
-  const { data, error } = useSWR(
-    key,
-    ([
-      ,
-      counterpartyId,
-      provider,
-      direction,
-      assetRail,
-      fiatCurrency,
-      destinationCustodyWalletId,
-    ]) =>
-      fetchCounterpartyRequirements(
-        counterpartyId,
-        provider,
-        direction,
-        { assetRail, fiatCurrency, destinationCustodyWalletId },
-        t
-      ),
+  const { data: requirementsBody, error } = useDashboardRead(
+    buildCounterpartyRequirementsKey(scope, params),
+    counterpartyRequirementsResponseSchema,
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       revalidateIfStale: false,
     }
   );
+  const data = requirementsBody?.data;
 
   const submitRequirements = async (
     payload: AdvanceRequirementsPayload
@@ -340,21 +306,16 @@ export function useCounterpartyRequirements(
   // https://github.com/vercel/swr/discussions/2293) and cache.delete cannot
   // stop an in-flight tick from repopulating a shared key, so no two advances
   // ever share a key.
-  const pollKey = onboardingPollKey(advance, params, subjectKey);
-  const { data: polledOnboarding, mutate: refreshPolledOnboarding } = useSWR(
+  const pollKey = onboardingPollKey(scope, advance, params);
+  const { data: polledOnboarding, mutate: refreshPolledOnboarding } = useDashboardSWR(
     pollKey,
-    () => {
-      if (advance === null || !params?.provider) {
-        throw new Error(t("DashboardPayments.workspace.requirementsContextMissing"));
-      }
-      return fetchCounterpartyRequirements(
-        params.counterpartyId,
-        params.provider,
-        params.direction,
-        advance.payload,
-        t
-      );
-    },
+    async (key) =>
+      (
+        await readDashboardRequest(
+          requirementsPollRequest(key),
+          counterpartyRequirementsResponseSchema
+        )
+      ).data,
     {
       refreshInterval: (latest) =>
         latest !== undefined && !isCounterpartyRequirementsPollStatus(latest.status) ? 0 : 4000,
@@ -393,7 +354,7 @@ export function useCounterpartyRequirements(
   );
   const isComplete = requirementsData !== undefined && fieldsComplete;
 
-  const blockReason = requirementsBlockReason(error, requirementsData, data);
+  const blockReason = requirementsBlockReason(error, requirementsData, data, t);
 
   return {
     fields,

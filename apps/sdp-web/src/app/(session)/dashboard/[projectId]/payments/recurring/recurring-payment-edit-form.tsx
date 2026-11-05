@@ -10,12 +10,13 @@ import { Button } from "@sdp/ui/button";
 import { Combobox } from "@sdp/ui/combobox";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
+import { recurringPaymentReads } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { useTranslations } from "@/i18n/provider";
+import { useInvalidateDashboardReads } from "@/lib/dashboard-swr";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 import { updateRecurringPayment } from "./recurring-payments.data";
 import {
@@ -103,7 +104,7 @@ export function RecurringPaymentEditForm({
   onClose: () => void;
 }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [fields, setFields] = useState<EditFields>(() => ({
     amount: recurringPayment.amount,
     token: recurringPayment.token,
@@ -174,7 +175,7 @@ export function RecurringPaymentEditForm({
         position: "bottom-right",
       });
       onClose();
-      router.refresh();
+      void invalidateReads(recurringPaymentReads);
     } catch (error) {
       toast.error(t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"), {
         id: toastId,

@@ -9,7 +9,6 @@ import { Modal } from "@sdp/ui/modal";
 import { playMark } from "@sdp/ui/motion";
 import { CheckIcon, CopyIcon, DownloadIcon, Share2Icon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -20,25 +19,39 @@ import {
   useSyncExternalStore,
 } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  paymentRequestReads,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import {
   RecordAmount,
   RecordLoadError,
   RecordSection,
   RecordStateBand,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
+import { PaymentRequestDetailSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import {
+  useApiKey,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { RecordFact, RecordFactColumns } from "@/components/refresh-record";
 import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import {
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
 import { downloadSolanaQrCode } from "@/lib/solana-qr";
@@ -49,8 +62,11 @@ import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-
 import {
   cancelPaymentRequest,
   deriveTokenOptions,
-  fetchPaymentRequestFromBrowser,
+  memberDisplayName,
   type PaymentRequestCanceler,
+  paymentRequestDetailResponseSchema,
+  paymentRequestLinkResponseSchema,
+  readMemberDirectory,
 } from "./payment-requests-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -349,7 +365,7 @@ function RequestPaymentLink({
  */
 function RequestDangerZone({ requestId }: { requestId: string }) {
   const t = useTranslations();
-  const router = useRouter();
+  const invalidateReads = useInvalidateDashboardReads();
   const [confirming, setConfirming] = useState(false);
   const [canceling, setCanceling] = useState(false);
 
@@ -358,6 +374,8 @@ function RequestDangerZone({ requestId }: { requestId: string }) {
     const result = await cancelPaymentRequest(requestId);
     setCanceling(false);
     setConfirming(false);
+    // This page, the list and its counts all read the request.
+    void invalidateReads(paymentRequestReads);
     if (result.ok) {
       toast.success(t("DashboardPayments.requestDetail.requestCanceled"));
     } else {
@@ -365,7 +383,6 @@ function RequestDangerZone({ requestId }: { requestId: string }) {
         description: result.error,
       });
     }
-    router.refresh();
   }
 
   const title = t("DashboardPayments.requestDetail.cancelRequest");
@@ -437,84 +454,93 @@ const CANCEL_ELIGIBILITY_REFRESH_MS = 30_000;
 const PAYMENT_WATCH_INTERVAL_MS = 10_000;
 
 /**
- * The request as the API holds it now. An open one is read again until it is paid, canceled or
- * expired, in a visible tab, and never in demo mode, whose requests are fixtures. The newer of
- * this read and the server's wins, so a cancel's refresh shows at once.
+ * Who canceled a request, by name: the API key's, or the member's (else email). A key since
+ * deleted, a member since removed, or a role that may not read either leaves the name null, and
+ * the page says "an API key" or "a member" instead.
  */
-function useWatchedPaymentRequest(served: PaymentRequest): PaymentRequest {
-  const demo = usePaymentsDemo();
-  const { data } = useSWR(
-    demo || served.status !== "awaiting_payment"
-      ? null
-      : paymentsQueryKeys.paymentRequestWatch(served.id),
-    ([, requestId]: readonly [string, string]) => fetchPaymentRequestFromBrowser(requestId),
-    {
-      // A fresh function each render re-arms SWR's timer with the latest read. Before the first
-      // read it sees nothing, and the server's open request stands in.
-      refreshInterval: (latest) =>
-        (latest ?? served).status === "awaiting_payment" ? PAYMENT_WATCH_INTERVAL_MS : 0,
-      revalidateOnMount: false,
-      revalidateOnFocus: true,
-      dedupingInterval: 2_000,
-      // Once the server's request closes, the key goes null and its last read must go with it.
-      keepPreviousData: false,
-    }
+function usePaymentRequestCanceler(
+  request: PaymentRequest | undefined
+): PaymentRequestCanceler | null {
+  const scope = useDashboardKeyScope();
+  const canceled = request?.status === "canceled";
+  const apiKeyId = canceled ? request.canceledByApiKeyId : null;
+  const userId = canceled && apiKeyId === null ? request.canceledByUserId : null;
+  const apiKey = useApiKey(apiKeyId);
+  const members = useDashboardSWR(
+    userId === null ? null : paymentsQueryKeys.memberDirectory(scope),
+    readMemberDirectory
   );
-  // A tie goes to the read: the API derives `expired` from the clock, before anything writes it.
-  return data !== undefined && data.updatedAt >= served.updatedAt ? data : served;
-}
-
-interface PaymentRequestDetailWorkspaceProps {
-  request: PaymentRequest | null;
-  /**
-   * The pay link's token, null when the member's role may not manage payment
-   * requests: the token is a bearer credential (APE-849).
-   */
-  publicToken: string | null;
-  /** The destination wallet's label, when it has one. */
-  walletName: string | null;
-  /** Who canceled the request as the server read it; null when it is not canceled. */
-  canceler?: PaymentRequestCanceler | null;
-  /** Set when the requests could not be read; the page says so and offers a retry. */
-  error?: string;
+  if (apiKeyId !== null) {
+    return { kind: "api_key", id: apiKeyId, name: apiKey.data?.name.trim() || null };
+  }
+  if (userId !== null) {
+    const member = members.data?.find((candidate) => candidate.id === userId);
+    return { kind: "member", id: userId, name: member ? memberDisplayName(member) : null };
+  }
+  return null;
 }
 
 /**
  * One payment request as the design's record: its state and why, the amount asked, the link
- * to copy, where it lands, its reference, expiry and creation.
+ * to copy, where it lands, its reference, expiry and creation. An open request is read again
+ * until it is paid, canceled or expired, in a visible tab, and never in demo mode, whose
+ * requests are fixtures.
  */
-export function PaymentRequestDetailWorkspace({
-  request,
-  publicToken,
-  walletName,
-  canceler = null,
-  error,
-}: PaymentRequestDetailWorkspaceProps) {
+export function PaymentRequestDetailWorkspace({ requestId }: { requestId: string }) {
   const t = useTranslations();
-  const router = useRouter();
+  const demo = usePaymentsDemo();
+  const scope = useDashboardKeyScope();
+  const detail = useDashboardRead(
+    paymentsQueryKeys.paymentRequest(scope, requestId),
+    paymentRequestDetailResponseSchema,
+    {
+      // A fresh function each render re-arms SWR's timer with the latest read.
+      refreshInterval: (latest) =>
+        !demo && latest?.data.status === "awaiting_payment" ? PAYMENT_WATCH_INTERVAL_MS : 0,
+      revalidateOnFocus: true,
+    }
+  );
+  const link = useDashboardRead(
+    paymentsQueryKeys.paymentRequestLink(scope, requestId),
+    paymentRequestLinkResponseSchema,
+    { revalidateOnFocus: false }
+  );
+  const wallets = useWalletSummaries({ includeBalances: false });
+  const request = detail.data?.data;
+  const canceler = usePaymentRequestCanceler(request);
   // The new-request page's note is read once, on arrival, and dropped, so a reload or a later
   // visit says nothing about a copy made earlier.
-  const [linkCopiedOnCreate] = useState(() =>
-    request === null ? null : createdRequestLinkCopied(request.id)
-  );
+  const [linkCopiedOnCreate] = useState(() => createdRequestLinkCopied(requestId));
   useEffect(forgetCreatedRequestLink, []);
 
-  if (!request) {
+  if (detail.error?.status === 404) {
+    return <ProjectNotFound />;
+  }
+  if (detail.error !== undefined) {
     return (
       <DashboardWorkspaceOverviewPanel>
         <RecordLoadError
           title={t("DashboardPayments.requestDetail.loadFailedTitle")}
-          description={error ?? t("DashboardPayments.requestDetail.loadFailedDescription")}
-          onRetry={() => router.refresh()}
+          description={t("DashboardPayments.requestDetail.loadFailedDescription")}
+          onRetry={() => void detail.mutate()}
         />
       </DashboardWorkspaceOverviewPanel>
     );
   }
+  const linkSettled = link.data !== undefined || link.error !== undefined;
+  if (request === undefined || !linkSettled) {
+    return <PaymentRequestDetailSkeleton />;
+  }
+  const wallet = (wallets.data ?? []).find(
+    (candidate) => candidate.walletId === request.walletId || candidate.id === request.walletId
+  );
   return (
     <PaymentRequestRecord
       request={request}
-      publicToken={publicToken}
-      walletName={walletName}
+      // Null when the member's role may not manage payment requests: the token is a bearer
+      // credential (APE-849), so a refused or failed read shows no link.
+      publicToken={link.data?.data.publicToken ?? null}
+      walletName={wallet?.label ?? null}
       canceler={canceler}
       linkCopiedOnCreate={linkCopiedOnCreate}
     />
@@ -523,7 +549,7 @@ export function PaymentRequestDetailWorkspace({
 
 /** The record once the request could be read: the band, the amount and link, then the rows. */
 function PaymentRequestRecord({
-  request: served,
+  request,
   publicToken,
   walletName,
   canceler,
@@ -536,14 +562,6 @@ function PaymentRequestRecord({
   /** Whether the new-request page that opened this page copied the link; null otherwise. */
   linkCopiedOnCreate: boolean | null;
 }) {
-  const request = useWatchedPaymentRequest(served);
-  const router = useRouter();
-  // Who canceled is read on the server, so a cancel the watch sees first refreshes the page once;
-  // the refreshed request is canceled, so it does not refresh again.
-  const canceledUnderWatch = served.status === "awaiting_payment" && request.status === "canceled";
-  useEffect(() => {
-    if (canceledUnderWatch) router.refresh();
-  }, [canceledUnderWatch, router]);
   const t = useTranslations();
   const projectHref = useProjectHref();
   const locale = useLocale();

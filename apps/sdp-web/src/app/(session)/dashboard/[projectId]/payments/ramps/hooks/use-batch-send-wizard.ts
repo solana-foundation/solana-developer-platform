@@ -21,14 +21,19 @@ import {
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
-import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  moneyMovementReads,
+  paymentsQueryKeys,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import {
+  projectCounterpartyAccountsResponseSchema,
+  transferBatchEstimateResponseSchema,
+  transferBatchResponseSchema,
+} from "@/app/(session)/dashboard/[projectId]/payments/payments-read-schemas";
 import {
   type CreateTransferBatchResult,
-  estimateTransferBatch,
   fetchBatchRecipients,
-  fetchTransferBatch,
   TransferBatchRequestError,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import type { BulkImportRow } from "@/app/(session)/dashboard/[projectId]/payments/ramps/bulk-import";
@@ -49,6 +54,14 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
+import type { DashboardJsonValue } from "@/lib/dashboard-request-key";
+import {
+  readDashboardPostRequest,
+  useDashboardKeyScope,
+  useDashboardRead,
+  useDashboardSWR,
+  useInvalidateDashboardReads,
+} from "@/lib/dashboard-swr";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -105,8 +118,6 @@ interface BatchRecipientEntry {
 }
 
 export interface UseBatchSendWizardProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
   issuedTokenSymbolsByMint: Record<string, string>;
   cluster: SolanaCluster;
   onExit: () => void;
@@ -158,26 +169,30 @@ function retryFailureCopy(
  * again from the first page.
  */
 function useBatchRecipientPage() {
-  const t = useTranslations();
+  const scope = useDashboardKeyScope();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
 
   const trimmedSearch = search.trim();
-  const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
-    paymentsQueryKeys.batchRecipients({ page, search: trimmedSearch }),
-    () =>
-      fetchBatchRecipients(
-        {
-          page,
-          pageSize: RECIPIENTS_PAGE_SIZE,
-          search: trimmedSearch.length > 0 ? trimmedSearch : undefined,
-        },
-        t
-      ),
+  const {
+    data: recipientBody,
+    error: recipientsReadError,
+    isLoading: recipientsLoading,
+    mutate: refetchRecipients,
+  } = useDashboardRead(
+    paymentsQueryKeys.projectCounterpartyAccounts(scope, {
+      page,
+      pageSize: RECIPIENTS_PAGE_SIZE,
+      search: trimmedSearch,
+    }),
+    projectCounterpartyAccountsResponseSchema,
     { revalidateOnFocus: false, keepPreviousData: true }
   );
+  const recipientPage = recipientBody?.data;
   const pageRecipients = recipientPage ? recipientPage.accounts : [];
   const recipientTotal = recipientPage ? recipientPage.total : 0;
+  const recipientsError = recipientsReadError !== undefined;
+  const retryRecipients = () => void refetchRecipients();
   const pageCount = Math.max(1, Math.ceil(recipientTotal / RECIPIENTS_PAGE_SIZE));
 
   const setSearchQuery = (next: string) => {
@@ -192,6 +207,8 @@ function useBatchRecipientPage() {
     setSearchQuery,
     pageRecipients,
     recipientsLoading,
+    recipientsError,
+    retryRecipients,
     recipientTotal,
     pageCount,
   };
@@ -291,6 +308,23 @@ function batchCanProceed({
   );
 }
 
+/** The batch as the estimate endpoint reads it: exactly the fields this flow sets. */
+function batchEstimateBody(request: PaymentTransferBatchRequest): {
+  readonly [field: string]: DashboardJsonValue;
+} {
+  return {
+    ...(request.externalId === undefined ? {} : { externalId: request.externalId }),
+    sourceCustodyWalletId: request.sourceCustodyWalletId,
+    token: request.token,
+    recipients: request.recipients.map((recipient) => ({
+      ...(recipient.externalId === undefined ? {} : { externalId: recipient.externalId }),
+      counterpartyId: recipient.counterpartyId,
+      counterpartyAccountId: recipient.counterpartyAccountId,
+      amount: recipient.amount,
+    })),
+  };
+}
+
 /** How often an estimate with warnings is re-read while the review is open. */
 const ESTIMATE_WARNING_RECHECK_MS = 10_000;
 
@@ -330,15 +364,10 @@ export function sourceBelowRentMinimum(
 
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
 function estimateErrorMessage(error: unknown, t: Translate): string | null {
-  if (!error) {
-    return null;
-  }
-  return error instanceof Error ? error.message : t("DashboardPayments.batchSend.estimateFailed");
+  return error ? t("DashboardPayments.batchSend.estimateFailed") : null;
 }
 
 export function useBatchSendWizard({
-  wallets,
-  walletsError,
   issuedTokenSymbolsByMint,
   cluster,
   onExit,
@@ -346,6 +375,8 @@ export function useBatchSendWizard({
   const router = useRouter();
   const href = useProjectHref();
   const t = useTranslations();
+  const scope = useDashboardKeyScope();
+  const invalidateReads = useInvalidateDashboardReads();
   const steps = getBatchSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const [walletId, setWalletId] = useState("");
@@ -362,10 +393,7 @@ export function useBatchSendWizard({
   const [unconfirmedSend, setUnconfirmedSend] = useState<PaymentTransferBatchRequest | null>(null);
   const recovering = unconfirmedSend !== null;
 
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets();
 
   const {
     page,
@@ -374,6 +402,8 @@ export function useBatchSendWizard({
     setSearchQuery,
     pageRecipients,
     recipientsLoading,
+    recipientsError,
+    retryRecipients,
     recipientTotal,
     pageCount,
   } = useBatchRecipientPage();
@@ -531,11 +561,12 @@ export function useBatchSendWizard({
     hasMint,
   });
 
-  const { data: estimate, error: estimateError } = useSWR(
+  const { data: estimate, error: estimateError } = useDashboardSWR(
     currentStepId === "REVIEW" && canProceed && !batchResult
-      ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
+      ? paymentsQueryKeys.batchEstimate(scope, batchEstimateBody(request))
       : null,
-    () => estimateTransferBatch(request, t),
+    async (key) =>
+      (await readDashboardPostRequest(key, transferBatchEstimateResponseSchema)).data.estimate,
     {
       revalidateOnFocus: false,
       // Each estimate belongs to its own request: its warnings index that
@@ -641,24 +672,25 @@ export function useBatchSendWizard({
         position: "bottom-right",
       });
     } finally {
+      void invalidateReads(moneyMovementReads);
       setSubmitting(false);
     }
   };
 
   // The send answers before its chunks settle, so the batch is read until it
   // is final: a recipient that fails later still offers Retry.
-  const { data: liveBatch, mutate: setLiveBatch } = useSWR(
-    batchResult ? paymentsQueryKeys.transferBatch({ batchId: batchResult.batch.id }) : null,
-    ([, batchId]) => fetchTransferBatch(batchId, t),
+  const { data: liveBatchBody, mutate: setLiveBatch } = useDashboardRead(
+    batchResult ? paymentsQueryKeys.transferBatch(scope, batchResult.batch.id) : null,
+    transferBatchResponseSchema,
     {
       revalidateOnFocus: false,
       refreshInterval: (latest) =>
-        isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
+        isMovementInFlight((latest?.data ?? batchResult)?.batch.status ?? null)
           ? MOVEMENT_POLL_INTERVAL_MS
           : 0,
     }
   );
-  const currentBatch = liveBatch ?? batchResult;
+  const currentBatch = liveBatchBody?.data ?? batchResult;
   const failedRecipientIds =
     currentBatch?.recipients
       .filter((recipient) => recipient.status === "failed")
@@ -677,8 +709,9 @@ export function useBatchSendWizard({
     });
     try {
       const result = await retryTransferBatchUnderKey(currentBatch.batch.id, failedRecipientIds, t);
+      void invalidateReads(moneyMovementReads);
       setBatchResult(result);
-      await setLiveBatch(result, { revalidate: false });
+      await setLiveBatch({ data: result }, { revalidate: false });
       toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
         id: toastId,
         description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
@@ -751,6 +784,8 @@ export function useBatchSendWizard({
     exceedsMaxRecipients,
     pageRecipients,
     recipientsLoading,
+    recipientsError,
+    retryRecipients,
     recipientTotal,
     page,
     pageCount,

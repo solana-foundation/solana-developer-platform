@@ -5,6 +5,7 @@ import {
   PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
 } from "@sdp/types/payments";
+import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Combobox } from "@sdp/ui/combobox";
 import { DateField } from "@sdp/ui/date-field";
@@ -104,9 +105,13 @@ function ContactFields({ form }: StepProps) {
     fields,
     setField,
     liveCounterparties,
+    counterpartiesLoading,
+    retryCounterparties,
     selectCounterparty,
     setCounterpartyDialogOpen,
     accountsLoading,
+    accountsError,
+    retryAccounts,
     cryptoAccounts,
     resolvedAccountId,
     destinationAccountDialogOpen,
@@ -114,11 +119,13 @@ function ContactFields({ form }: StepProps) {
     handleDestinationAccountAdded,
   } = form;
   const hasContact = fields.counterpartyId !== "";
-  const accountsKnown = hasContact && !accountsLoading;
+  const accountsKnown = hasContact && !accountsLoading && !accountsError;
   return (
     <div className="space-y-3">
       <ContactCombobox
         counterpartiesResult={liveCounterparties}
+        loading={counterpartiesLoading}
+        onRetry={retryCounterparties}
         onChange={selectCounterparty}
         value={fields.counterpartyId}
         footer={(close) => (
@@ -151,6 +158,16 @@ function ContactFields({ form }: StepProps) {
           placeholder={t("DashboardPayments.payForm.selectDestination")}
           searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
         />
+      ) : null}
+      {hasContact && accountsError ? (
+        <div className="flex flex-col items-start gap-2">
+          <FieldHint tone="error">
+            {t("DashboardPayments.payForm.destinationsLoadFailed")}
+          </FieldHint>
+          <Button type="button" variant="outline" size="sm" onClick={retryAccounts}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        </div>
       ) : null}
       {accountsKnown && cryptoAccounts.length === 0 ? (
         <FieldHint tone="error">{t("DashboardPayments.payForm.noDestinations")}</FieldHint>
@@ -185,13 +202,15 @@ function ContactFields({ form }: StepProps) {
 function ScheduleSourceWalletField({ form }: StepProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const { fields, selectWallet, walletOptions, availableWallets, selectedWallet } = form;
+  const { fields, selectWallet, walletOptions, availableWallets, walletsLoading, selectedWallet } =
+    form;
   const total = form.selectedWalletTotal;
   return (
     <SourceWalletField
       value={fields.sourceCustodyWalletId}
       onChange={selectWallet}
       options={walletOptions}
+      isLoading={walletsLoading}
       disabled={availableWallets.length === 0}
       trailing={
         total === null ? undefined : (

@@ -6,8 +6,9 @@ import type { UnifiedTransaction } from "@sdp/types/unified-transactions";
 import { Button } from "@sdp/ui/button";
 import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
+import ProjectNotFound from "@/app/(session)/dashboard/[projectId]/not-found";
+import { counterpartyResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/counterparty/counterparty-read-schemas";
 import {
   resolveTokenByMint,
   shortenAddress,
@@ -18,6 +19,8 @@ import {
   formatDecimalAmount,
   saleFiatLabel,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
+import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
+import { transferResponseSchema } from "@/app/(session)/dashboard/[projectId]/payments/payments-read-schemas";
 import {
   RecordAmount,
   RecordColumns,
@@ -27,22 +30,28 @@ import {
   RecordSection,
   RecordStateBand,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { rampPhaseCopy } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
+import { PaymentTransactionDetailSkeleton } from "@/app/(session)/dashboard/[projectId]/payments/payments-route-skeletons";
+import {
+  rampPhaseCopy,
+  rampTransferPollInterval,
+} from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
+import { useIssuedTokens } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useTimeZone } from "@/i18n/time-zone";
+import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 import { explorerTxUrl } from "@/lib/explorer";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { getRampProviderLabel } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { RampOpenSale, useLiveRampTransfer } from "./ramp-open-sale";
-import type { PaymentTransferDetail } from "./transaction-detail.data";
+import { RampOpenSale } from "./ramp-open-sale";
+import { type PaymentTransferDetail, withTransferState } from "./transaction-detail.data";
 import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";
-import { usePendingPaymentRefresh } from "./use-pending-payment-refresh";
+import { transactionsPageResponseSchema } from "./transactions-page.data";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -432,79 +441,111 @@ function ProofSection({
   );
 }
 
-interface TransactionDetailWorkspaceProps {
-  transaction: UnifiedTransaction | null;
-  transfer: PaymentTransferDetail | null;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  /** Set when the ledger could not be read; the page says so and offers a retry. */
-  error?: string;
-  /** The contact's name from the project's contacts, when the row carries only its id. */
-  counterpartyName?: string | null;
+// A pending payment re-reads on this cadence while the page is open; a ramp follows its phase.
+const PENDING_PAYMENT_POLL_MS = 15_000;
+
+function isRampTransfer(transfer: PaymentTransferDetail | undefined): boolean {
+  return transfer?.type === "onramp" || transfer?.type === "offramp";
 }
 
 /**
  * One transaction as the design's record: titled with what moved and between whom, its state
  * and what to do about it, the amount, the parties and wallet, the provider that handled a
- * ramp, and the proof (signature, id, network, times).
+ * ramp, and the proof (signature, id, network, times). The ledger has no read of a single row,
+ * so the page searches for the id and keeps the exact match; a payment also reads its transfer
+ * record, which carries the source, destination, memo, provider and fee.
  */
 export function TransactionDetailWorkspace({
-  transaction,
-  transfer,
-  issuedTokensByMint,
-  counterpartyName = null,
-  error,
-}: TransactionDetailWorkspaceProps) {
+  transactionId,
+  issuanceEnabled,
+}: {
+  transactionId: string;
+  /** Whether Issuance is on, so its tokens can name the amount. */
+  issuanceEnabled: boolean;
+}) {
   const t = useTranslations();
-  const router = useRouter();
+  const scope = useDashboardKeyScope();
+  const lookup = useDashboardRead(
+    paymentsQueryKeys.transactionLookup(scope, transactionId),
+    transactionsPageResponseSchema,
+    {
+      refreshInterval: (body) => {
+        const row = body?.data.transactions.find((candidate) => candidate.id === transactionId);
+        return row?.module === "payments" && row.status === "pending" ? PENDING_PAYMENT_POLL_MS : 0;
+      },
+    }
+  );
+  const row = lookup.data?.data.transactions.find((candidate) => candidate.id === transactionId);
+  const transferRead = useDashboardRead(
+    row?.module === "payments" ? paymentsQueryKeys.transfer(scope, row.moduleId) : null,
+    transferResponseSchema,
+    {
+      refreshInterval: (body) => {
+        const transfer = body?.data.transfer;
+        if (transfer === undefined) return 0;
+        if (isRampTransfer(transfer)) return rampTransferPollInterval(transfer);
+        return row?.status === "pending" ? PENDING_PAYMENT_POLL_MS : 0;
+      },
+      revalidateOnFocus: false,
+    }
+  );
+  const contact = useDashboardRead(
+    row?.counterpartyId ? paymentsQueryKeys.counterparty(scope, row.counterpartyId) : null,
+    counterpartyResponseSchema
+  );
+  const issuedTokens = useIssuedTokens(issuanceEnabled);
+  const issuedTokensByMint = useMemo(
+    () => Object.fromEntries((issuedTokens.data ?? []).map((token) => [token.mintAddress, token])),
+    [issuedTokens.data]
+  );
 
-  if (!transaction) {
+  if (lookup.error !== undefined) {
     return (
       <DashboardWorkspaceOverviewPanel>
         <RecordLoadError
           title={t("DashboardPayments.transactionDetail.loadFailedTitle")}
-          description={error ?? t("DashboardPayments.transactionDetail.loadFailedDescription")}
-          onRetry={() => router.refresh()}
+          description={t("DashboardPayments.transactionDetail.loadFailedDescription")}
+          onRetry={() => void lookup.mutate()}
         />
       </DashboardWorkspaceOverviewPanel>
     );
   }
+  const transferSettled =
+    row?.module !== "payments" ||
+    transferRead.data !== undefined ||
+    transferRead.error !== undefined;
+  if (lookup.data === undefined || (row !== undefined && !transferSettled)) {
+    return <PaymentTransactionDetailSkeleton />;
+  }
+  if (row === undefined) {
+    return <ProjectNotFound />;
+  }
+  // A transfer read that failed only costs its sections: the ledger row still says what moved.
+  const transfer = transferRead.data?.data.transfer ?? null;
   return (
     <TransactionRecord
-      transaction={transaction}
+      transaction={withTransferState(row, transfer)}
       transfer={transfer}
       issuedTokensByMint={issuedTokensByMint}
-      counterpartyName={counterpartyName}
+      // A contact since removed keeps its id.
+      counterpartyName={contact.data?.data.counterparty.displayName ?? null}
     />
   );
 }
 
 function TransactionRecord({
-  transaction: initialTransaction,
-  transfer: initialTransfer,
+  transaction,
+  transfer,
   issuedTokensByMint,
-  counterpartyName = null,
+  counterpartyName,
 }: {
   transaction: UnifiedTransaction;
   transfer: PaymentTransferDetail | null;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
   /** The contact's name from the project's contacts, when the row carries only its id. */
-  counterpartyName?: string | null;
+  counterpartyName: string | null;
 }) {
   const t = useTranslations();
-  const liveTransfer = useLiveRampTransfer(initialTransfer);
-  const transfer = liveTransfer;
-  // A live ramp's state replaces the server's snapshot of it.
-  const transaction: UnifiedTransaction =
-    initialTransaction.module === "payments" &&
-    liveTransfer &&
-    (liveTransfer.type === "onramp" || liveTransfer.type === "offramp")
-      ? {
-          ...initialTransaction,
-          moduleStatus: liveTransfer.status,
-          signature: liveTransfer.signature,
-        }
-      : initialTransaction;
-  usePendingPaymentRefresh(transaction, transfer?.type);
   const summary = useTransactionSummary(
     transaction,
     transfer,
