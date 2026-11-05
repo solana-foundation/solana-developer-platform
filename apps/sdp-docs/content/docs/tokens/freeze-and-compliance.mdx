@@ -57,27 +57,27 @@ Stop one holder from sending or receiving this token. The freeze applies to that
 
 On the token's **Operations** tab, find **Freeze authority** under **Transfers** and click **Freeze**.
 
-![Freeze Controls tab with empty wallet address and reason fields](/images/tokens/freeze-controls-empty.png)
+<img src="/docs/images/tokens/freeze-controls-empty.png" alt="Freeze form under Freeze authority with empty Wallet address and Reason fields" width="552" height="350" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 Enter the holder's **Wallet address** and an optional **Reason**, which the audit history keeps. If several wallets hold the freeze authority, choose the signing wallet first. Click **Freeze account**.
 
-![Freeze Controls tab with wallet address and reason filled in](/images/tokens/freeze-controls-filled.png)
+<img src="/docs/images/tokens/freeze-controls-filled.png" alt="Freeze form with a holder's wallet address and a reason filled in" width="552" height="350" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 Confirm with **Freeze now**.
 
-![Freeze account confirmation dialog](/images/tokens/freeze-confirm.png)
+<img src="/docs/images/tokens/freeze-confirm.png" alt="Freeze balance? confirmation with a warning, the token, wallet address and network, and Freeze now" width="513" height="398" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 The toast reads "Freeze transaction finalized."
 
-![Compliance tab showing Freeze transaction finalized toast and Frozen Accounts count updated to 1](/images/tokens/freeze-confirmed.png)
+![Compliance tab with one frozen account and the Freeze transaction finalized toast](/images/tokens/freeze-confirmed.png)
 
 To lift the freeze, open the same form, enter the address and click **Unfreeze account**, then **Unfreeze now**.
 
-![Unfreeze account confirmation dialog](/images/tokens/unfreeze-confirm.png)
+<img src="/docs/images/tokens/unfreeze-confirm.png" alt="Unfreeze balance? confirmation with a warning, the token, wallet address and network, and Unfreeze now" width="513" height="398" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 The toast reads "Unfreeze transaction finalized."
 
-![Compliance tab showing Unfreeze transaction finalized toast and Frozen Accounts count back to 0](/images/tokens/unfreeze-confirmed.png)
+![Compliance tab with the frozen account count back to 0 and the Unfreeze transaction finalized toast](/images/tokens/unfreeze-confirmed.png)
 
 </Tab>
 <Tab value="API">
@@ -131,19 +131,19 @@ Stop every transfer of the token at once. The token needs the `pausable` extensi
 
 On **Operations**, click **Pause** on the **Transfers** row.
 
-![Pause Controls tab showing Pause token and Unpause token buttons](/images/tokens/pause-controls.png)
+![Transfers section on Operations with transfers Running and a Pause button](/images/tokens/pause-controls.png)
 
 Read the warning, then click **Pause transfers**. It runs at once, unless several wallets hold the pause authority: then a dialog asks which one signs.
 
-![Pause token confirmation dialog](/images/tokens/pause-confirm.png)
+![Pause warning on the Transfers row with Pause transfers and Cancel](/images/tokens/pause-confirm.png)
 
 The toast reads "Pause transaction finalized." and the token shows **Paused**: transfers are stopped, and holders keep their balances.
 
-![Compliance tab showing Token is paused banner and Pause transaction finalized toast](/images/tokens/pause-confirmed.png)
+![Overview showing Paused: transfers are stopped and holders keep their balances, with Resume transfers](/images/tokens/pause-confirmed.png)
 
 To resume, click **Resume** on the **Transfers** row and then **Resume transfers**. **Resume transfers** on **Overview** does the same after a confirmation.
 
-![Unpause token confirmation dialog](/images/tokens/unpause-confirm.png)
+<img src="/docs/images/tokens/unpause-confirm.png" alt="Resume transfers for all holders? confirmation with a warning, the signing wallet and Resume transfers" width="513" height="404" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 </Tab>
 <Tab value="API">

@@ -32,7 +32,7 @@ In **Issuance**, open the token marked **Draft**. Its **Overview** tab shows **D
 
 Save or discard any edits first: the dashboard holds the deploy while changes are unsaved.
 
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+![Acme Dollar's Overview tab in the Draft state, with Deploy this token and its Deploy token button](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
@@ -61,9 +61,7 @@ SDP signs and sends the deploy with `signingCustodyWalletId`. A value in the req
 
 Click **Deploy token**. In the **Deploy token** dialog, check the **Signing wallet** (choose one if several can sign), then click **Deploy token**.
 
-![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
-
-![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
+<img src="/docs/images/tokens/token-deploy-modal.png" alt="Deploy token dialog with the Treasury signing wallet" width="449" height="320" style={{ display: "block", maxWidth: "100%", height: "auto", margin: "0 0 18px" }} />
 
 SDP signs, sends and confirms the deploy in one request. The token shows **Deploying** while it runs, and you can leave the page.
 
@@ -122,7 +120,7 @@ The toast reads "Deploy transaction finalized." and the token shows **Live oncha
 
 If the deploy fails, the token shows **Deploy failed** with the reason, **Retry deploy** and **Open wallets**.
 
-![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+![Acme Dollar after the deploy: Live onchain, with Explorer and Mint tokens](/images/tokens/token-deployed.png)
 
 </Tab>
 <Tab value="API">
