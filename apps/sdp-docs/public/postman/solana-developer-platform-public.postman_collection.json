@@ -114,7 +114,7 @@
             "description": "Sets up Managed custody for the project's named provider by creating its active signing configuration and first wallet. Production projects use BYOK only: there this returns 403 with details.reason custody_mode_not_allowed, and wallets are created in a Custody Connection with POST /v1/wallets and connectionId.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"local\",\n  \"walletLabel\": \"\"\n}",
+              "raw": "{\n  \"provider\": \"fireblocks\",\n  \"walletLabel\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -171,7 +171,7 @@
             "description": "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+              "raw": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
