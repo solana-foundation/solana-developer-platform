@@ -128,13 +128,14 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
 function destinationPlaceholder(
   hasContact: boolean,
   optionCount: number,
-  accountsLoading: boolean,
+  accountsSettled: boolean,
   t: Translate
 ): string {
   if (!hasContact) {
     return t("DashboardPayments.payForm.selectContactFirst");
   }
-  return optionCount === 0 && !accountsLoading
+  // Only a read that answered can say the contact has no address; a failed one says so below.
+  return optionCount === 0 && accountsSettled
     ? t("DashboardPayments.payForm.noDestinations")
     : t("DashboardPayments.payForm.selectDestination");
 }
@@ -225,15 +226,19 @@ function DestinationFields({
           placeholder={destinationPlaceholder(
             hasContact,
             destinationOptions.length,
-            accountsLoading,
+            !accountsLoading && !accountsError,
             t
           )}
           searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
           isLoading={hasContact && accountsLoading}
           disabled={!hasContact || destinationOptions.length === 0}
-          error={accountsError ? t("DashboardPayments.payForm.destinationsLoadFailed") : undefined}
+          validationError={
+            hasContact && accountsError
+              ? t("DashboardPayments.payForm.destinationsLoadFailed")
+              : undefined
+          }
         />
-        {accountsError ? (
+        {hasContact && accountsError ? (
           <Button type="button" variant="outline" size="sm" onClick={retryAccounts}>
             {t("Shared.SharedComponents.retry")}
           </Button>
