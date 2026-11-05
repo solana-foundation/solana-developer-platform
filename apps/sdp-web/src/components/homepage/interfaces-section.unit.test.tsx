@@ -80,7 +80,9 @@ describe("InterfacesSection", () => {
     const section = doc.querySelector("section#interfaces");
     expect(section?.getAttribute("data-ground")).toBe("paper");
     expect(doc.querySelectorAll("h2")).toHaveLength(1);
-    expect(doc.querySelector("h2")?.textContent).toContain("Call the API.");
+    expect(doc.querySelector("h2")?.textContent).toContain(
+      "Integrate directly via API or manage from a single dashboard"
+    );
 
     const tablist = doc.querySelector('[role="tablist"]');
     expect(tablist?.getAttribute("aria-label")).toBe("Ways to work with the platform");

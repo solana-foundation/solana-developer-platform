@@ -1,12 +1,12 @@
 /*
  * The speed race, drawn.
  * Four rails across the box; one payment leaves on each at the same moment. On Solana it crosses in
- * ~0.4s and settles with a green pulse; the card, ACH and SWIFT signals crawl, taking as many
+ * 150ms and settles with a green pulse; the card, ACH and SWIFT signals crawl, taking as many
  * seconds as the real thing takes days. Drawn in the night palette of the network's dark panel.
  * Pure drawing: the component owns the loop.
  */
 
-export const LANE_SECONDS = [0.42, 16, 22, 30] as const;
+export const LANE_SECONDS = [0.15, 16, 22, 30] as const;
 
 /** Seconds between payments. */
 export const LAUNCH_EVERY = 2.4;

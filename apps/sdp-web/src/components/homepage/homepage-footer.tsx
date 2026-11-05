@@ -24,8 +24,8 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
       id: "platform",
       title: t("Homepage.footer.columns.platform"),
       links: [
-        { label: t("Homepage.footer.links.payments"), href: "#payments-api" },
         { label: t("Homepage.footer.links.issuance"), href: "#issuance" },
+        { label: t("Homepage.footer.links.payments"), href: "#payments" },
         { label: t("Homepage.footer.links.markets"), href: "#markets" },
       ],
     },
@@ -55,7 +55,12 @@ export async function HomepageFooter({ links }: { links: HomepageLinks }) {
         <div className={styles.grid}>
           <div className={styles.lead}>
             <Link className={styles.brand} href="/" aria-label={t("Homepage.footer.home")}>
-              <Image src="/homepage/v6/logo-sdp-lockup-on-dark.svg" alt="" width={78} height={30} />
+              <Image
+                src="/homepage/v6/logo-sdp-wordmark-on-dark.svg"
+                alt=""
+                width={332}
+                height={30}
+              />
             </Link>
             <p className={styles.tagline}>{t("Homepage.footer.tagline")}</p>
           </div>

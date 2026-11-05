@@ -30,11 +30,7 @@ export async function InterfacesSection({ links }: { links: HomepageLinks }) {
             <FormHeadline
               as="h2"
               className={shared.display}
-              parts={[
-                t("Homepage.interfaces.headlineLine1"),
-                { lineBreak: true },
-                t("Homepage.interfaces.headlineLine2"),
-              ]}
+              parts={[t("Homepage.interfaces.headline")]}
             />
           </div>
           <p className={styles.intro}>{t("Homepage.interfaces.intro")}</p>

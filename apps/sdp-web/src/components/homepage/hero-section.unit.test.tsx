@@ -88,7 +88,7 @@ describe("HeroSection", () => {
     const hero = await renderHero(signupLinks);
     const alts = [...hero.querySelectorAll("img")].map((img) => img.getAttribute("alt"));
     expect(alts).toEqual([...SDP_BUILDERS, ...SOLANA_BUILDERS].map((logo) => logo.name));
-    expect(hero.textContent).toContain("Building with SDP");
+    expect(hero.textContent).toContain("Building with Solana Developer Platform");
     expect(hero.textContent).toContain("Building on Solana");
     const globe = hero.querySelector('[role="img"]');
     expect(globe?.getAttribute("aria-label")).toBe("Payments crossing the network");

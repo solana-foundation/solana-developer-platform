@@ -29,7 +29,9 @@ describe("NetworkSection", () => {
     const markup = await render();
     expect(markup.match(/<h2/g)).toHaveLength(1);
     expect(markup).not.toMatch(/<h[13]/);
-    expect(markup).toContain('<span class="sr-only">Settled everywhere, under a second.</span>');
+    expect(markup).toContain(
+      '<span class="sr-only">Sub-second finality meets enterprise throughput</span>'
+    );
   });
 
   it("describes the race canvas as an image and keeps the lane names as text", async () => {
@@ -38,8 +40,8 @@ describe("NetworkSection", () => {
       'role="img" aria-label="The same payment on four rails: Solana settles in under a second while the others take days"'
     );
     for (const lane of [
-      "Solana, via SDP",
-      "~0.4 s",
+      "Solana Developer Platform",
+      "150ms",
       "Card networks",
       "ACH",
       "SWIFT",
@@ -57,12 +59,12 @@ describe("NetworkSection", () => {
 
   it("renders every figure at its final value, read once", async () => {
     const markup = await render();
-    expect(markup).toContain("&lt;1 s");
-    for (const value of ["30+", "200+", "1"]) {
+    for (const value of ["150ms", "30+"]) {
       expect(markup).toContain(
         `<span aria-hidden="true">${value}</span><span class="sr-only">${value}</span>`
       );
     }
-    expect(markup).toContain("partners behind one integration");
+    expect(markup).toContain("Custody, compliance, and payment partners");
+    expect(markup.match(/<li class="[^"]*_stat_/g)).toHaveLength(2);
   });
 });

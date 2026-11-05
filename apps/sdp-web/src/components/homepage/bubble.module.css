@@ -1,12 +1,9 @@
 /*
- * The page's bubble: a pill in two rings, shared by the stack
- * and payments. The bubble's root takes `.bubble` and a tone (`.violet`, `.mint`, `.grey`);
- * its outer ring `.ring`, its inner ring `.inner`, its pill `.pill`. Each section keeps its own
- * layout (sizes in cqw, the pill's width and what is in it) and may set `--ring-pad` and
- * `--inner-pad` on the root. The script toggles data-beat (the pill swells, the wave runs out
- * through the rings and a ripple leaves the outer one) and data-paused (off screen or tab hidden:
- * the breathing stops). A live bubble (`.live`, with followPointer in bubble-motion.ts) answers the
- * pointer.
+ * The page's bubble: a pill in two rings, used by the stack drawing. The bubble's root takes
+ * `.bubble` and a tone (`.violet`, `.mint`, `.grey`); its outer ring `.ring`, its inner ring
+ * `.inner`, its pill `.pill`. Each section keeps its own layout (sizes in cqw, the pill's width and
+ * what is in it) and may set `--ring-pad` and `--inner-pad` on the root. The script toggles
+ * data-beat (the pill swells, the wave runs out through the rings and a ripple leaves the outer one).
  */
 
 /* ── tones ──────────────────────────────────────────────────────────────── */
@@ -27,10 +24,6 @@
   --pill-shadow: inset 0 0 18px #9945ff55, inset 0 0 44px #9945ff29, 0 10px 40px -18px #7a2fe066;
   --pill-shadow-beat:
     inset 0 0 22px #9945ff77, inset 0 0 54px #9945ff3d, 0 12px 56px -12px #7a2fe099;
-  --pill-shadow-hover:
-    inset 0 0 20px #9945ff66, inset 0 0 50px #9945ff33, 0 18px 48px -16px #7a2fe08c;
-  --lit-strength: 0.55;
-  --lit-reach: 42%;
 }
 
 .mint {
@@ -112,29 +105,6 @@
   animation: pillLight 9s ease-in-out infinite;
 }
 
-/* ── the live bubble ──────────────────────────────────────────────────────
-   Over its rings the whole bubble opens out a little and a soft light inside the pill follows the
-   cursor. Scale goes on the bubble, not its rings or pill: those already pulse on every beat (on
-   `scale`), and two hands on one property made it jump. */
-@property --lit {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
-.live .pill {
-  background:
-    radial-gradient(
-      circle at var(--mx, 50%) var(--my, 50%),
-      rgb(255 255 255 / calc(var(--lit) * var(--lit-strength))) 0,
-      rgb(255 255 255 / 0) var(--lit-reach)
-    ),
-    var(--pill-bg);
-  background-size:
-    100% 100%,
-    160% 160%;
-}
-
 /* the beat: the pill swells, the wave runs out through the inner ring, then the outer, and a thin
    ripple leaves past the edge; it uses `scale`, so the rings' slow breath (on transform) carries on */
 .bubble[data-beat] .pill {
@@ -157,38 +127,6 @@
 
 .bubble[data-beat] .ring::after {
   animation: ripple 1700ms cubic-bezier(0.2, 0.6, 0.3, 1) 300ms 1 both;
-}
-
-.bubble[data-paused] .pill,
-.bubble[data-paused] .ring,
-.bubble[data-paused] .inner,
-.bubble[data-paused] .ring::after {
-  animation-play-state: paused;
-}
-
-/* the live bubble under the pointer */
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .live {
-    transition: scale 900ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  /* the pill's width keeps its own transition */
-  .live .pill {
-    transition:
-      width 600ms cubic-bezier(0.65, 0, 0.25, 1),
-      box-shadow 700ms cubic-bezier(0.22, 1, 0.36, 1),
-      --lit 600ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  /* it answers only over its own rings, not the empty box around them */
-  .live:has(> .ring:hover) {
-    scale: 1.035;
-  }
-
-  .live:has(> .ring:hover) .pill {
-    --lit: 1;
-    box-shadow: var(--pill-shadow-hover);
-  }
 }
 
 @keyframes ringBreath {

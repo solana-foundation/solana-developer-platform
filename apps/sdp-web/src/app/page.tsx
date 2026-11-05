@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { cn } from "@sdp/ui/cn";
+import type { Metadata, ResolvingMetadata } from "next";
 import { BuildersSection } from "@/components/homepage/builders-section";
 import { HeroSection } from "@/components/homepage/hero-section";
 import styles from "@/components/homepage/homepage.module.css";
@@ -11,8 +12,6 @@ import { IssuanceSection } from "@/components/homepage/issuance-section";
 import { homepageRootStyle } from "@/components/homepage/layout";
 import { MarketsSection } from "@/components/homepage/markets-section";
 import { NetworkSection } from "@/components/homepage/network-section";
-import { PaymentKindProvider } from "@/components/homepage/payments/payment-kind-context";
-import { PaymentsApiSection } from "@/components/homepage/payments-api-section";
 import { PaymentsSection } from "@/components/homepage/payments-section";
 import { StackSection } from "@/components/homepage/stack-section";
 import { StartSection } from "@/components/homepage/start-section";
@@ -32,6 +31,37 @@ const NOSCRIPT_CSS = [
   "[data-form-letter]{color:inherit!important;-webkit-text-stroke:0!important;filter:none!important;opacity:1!important;transform:none!important}",
   "[data-state=hidden] [data-form-phrase]::before{opacity:1!important}",
 ].join("");
+
+/**
+ * The homepage's own description; the rest of the site keeps the layout's. A page that sets
+ * `openGraph` or `twitter` replaces the layout's whole object, so the layout's fields come along,
+ * and so do the share images it resolved from the file conventions (`opengraph-image.tsx`,
+ * `twitter-image.tsx`), which belong to the layout's segment, not the page's.
+ */
+export async function generateMetadata(
+  _props: { searchParams: Promise<Record<string, string | string[] | undefined>> },
+  parent: ResolvingMetadata
+): Promise<Metadata> {
+  const [t, inherited] = await Promise.all([getTranslations(), parent]);
+  const title = t("Metadata.title");
+  const description = t("Homepage.metadata.description");
+  return {
+    description,
+    openGraph: {
+      type: "website",
+      siteName: title,
+      title,
+      description,
+      images: inherited.openGraph?.images,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: inherited.twitter?.images,
+    },
+  };
+}
 
 export default async function Home() {
   const [t, openSignup, { userId }] = await Promise.all([
@@ -58,15 +88,11 @@ export default async function Home() {
         <StackSection />
         <NetworkSection />
         <IssuanceSection />
-        {/* the bench under issuance moves the bubble of the payments API further down */}
-        <PaymentKindProvider>
-          <PaymentsSection />
-          <div className={cn(styles.panel, styles.panelRun)}>
-            <MarketsSection />
-          </div>
-          <InterfacesSection links={links} />
-          <PaymentsApiSection />
-        </PaymentKindProvider>
+        <PaymentsSection />
+        <div className={cn(styles.panel, styles.panelRun)}>
+          <MarketsSection />
+        </div>
+        <InterfacesSection links={links} />
         <BuildersSection />
         <StartSection links={links} />
       </main>

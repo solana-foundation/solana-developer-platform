@@ -17,7 +17,6 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 import { getMessages } from "@/i18n/messages";
 import { translate } from "@/i18n/translate";
 import { EnglishI18n } from "@/test/i18n";
-import { FILMS, filmUrl, SERIES_URL } from "./builders/films";
 import type { HomepageLinks } from "./homepage-links";
 import { HomepageNav } from "./homepage-nav";
 import { pickGround } from "./nav/use-nav-scroll";
@@ -120,8 +119,8 @@ describe("HomepageNav", () => {
       Array.from(container.querySelectorAll(`#${id} a`)).map((a) => a.getAttribute("href"));
 
     expect(hrefs("homepage-nav-platform")).toEqual([
-      "#payments-api",
       "#issuance",
+      "#payments",
       "#markets",
       "#stack",
       "#interfaces",
@@ -129,36 +128,16 @@ describe("HomepageNav", () => {
       "/sign-up",
     ]);
     expect(screen.getByRole("link", { name: t("Homepage.nav.platform.sandbox") })).toBeTruthy();
-    expect(hrefs("homepage-nav-builders").slice(0, 2)).toEqual(["#builders", "#stack"]);
     const docs = hrefs("homepage-nav-docs");
     expect(docs.slice(0, 3)).toEqual([openLinks.docs, openLinks.openapi, openLinks.llms]);
     expect(docs).toContain("/sign-in");
   });
 
-  it("opens the builders' films in a new tab and says so", async () => {
+  it("leaves Builders out of the bar; the footer keeps it", async () => {
     const { container } = render(await HomepageNav({ links: openLinks }), { wrapper: EnglishI18n });
-    // past the panel's features, which link into the page
-    const films = Array.from(container.querySelectorAll("#homepage-nav-builders a")).filter(
-      (a) => !a.getAttribute("href")?.startsWith("#")
-    );
-
-    const series = films.at(-1);
-    expect(series?.textContent).toBe(t("Homepage.nav.builders.series"));
-    expect(series?.getAttribute("href")).toBe(SERIES_URL);
-    // five of the films, each linked to its own video
-    const named = films.slice(0, -1);
-    expect(named).toHaveLength(5);
-    for (const link of named) {
-      const film = FILMS.find((each) => each.name === link.textContent);
-      expect(link.getAttribute("href")).toBe(film && filmUrl(film.id));
-    }
-    for (const film of films) {
-      expect(film.getAttribute("target")).toBe("_blank");
-      expect(film.getAttribute("rel")).toBe("noreferrer");
-      expect(film.getAttribute("aria-label")).toMatch(/\(opens in a new tab\)$/);
-      // the accessible name starts with the visible label (WCAG 2.5.3)
-      expect(film.getAttribute("aria-label")?.startsWith(film.textContent ?? "")).toBe(true);
-    }
+    expect(container.querySelector("#homepage-nav-builders")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Builders" })).toBeNull();
+    expect(container.querySelector('a[href="#builders"]')).toBeNull();
   });
 
   it("opens a panel from its trigger, not from focus, and returns focus to it on Escape", async () => {
@@ -184,15 +163,15 @@ describe("HomepageNav", () => {
   it("closes the open panel when focus moves on to the next trigger", async () => {
     await renderNav(openLinks);
     const platform = screen.getByRole("button", { name: t("Homepage.nav.platform.label") });
-    const builders = screen.getByRole("button", { name: t("Homepage.nav.builders.label") });
+    const docs = screen.getByRole("button", { name: t("Homepage.nav.docs.label") });
 
     act(() => platform.focus());
     fireEvent.click(platform);
     expect(platform.getAttribute("aria-expanded")).toBe("true");
 
-    act(() => builders.focus());
+    act(() => docs.focus());
     expect(platform.getAttribute("aria-expanded")).toBe("false");
-    expect(builders.getAttribute("aria-expanded")).toBe("false");
+    expect(docs.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("closes the open panel when the window narrows past the bar", async () => {
@@ -241,7 +220,7 @@ describe("HomepageNav", () => {
     expect(document.documentElement.style.overflow).toBe("");
 
     fireEvent.click(burger);
-    fireEvent.click(within(menu).getByRole("link", { name: t("Homepage.nav.mobile.builders") }));
+    fireEvent.click(within(menu).getByRole("link", { name: t("Homepage.nav.platform.partners") }));
     expect(burger.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(burger);
   });

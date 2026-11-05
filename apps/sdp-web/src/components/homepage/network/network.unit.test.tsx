@@ -71,11 +71,11 @@ describe("CountUp", () => {
 
   it("shows the final figure at once under reduced motion", () => {
     setReducedMotion(true);
-    render(<CountUp to={200} message="Homepage.network.stats.currencies.value" />, {
+    render(<CountUp to={150} message="Homepage.network.stats.finality.value" />, {
       wrapper: EnglishI18n,
     });
-    expect(screen.getAllByText("200+")).toHaveLength(2);
-    expect(screen.queryByText("0+")).toBeNull();
+    expect(screen.getAllByText("150ms")).toHaveLength(2);
+    expect(screen.queryByText("0ms")).toBeNull();
   });
 });
 
@@ -112,7 +112,8 @@ describe("stepAndDraw", () => {
     const state = createRaceState();
     launch(state);
     let settled = 0;
-    for (let i = 0; i < 20; i++) {
+    // 0.6 s: past Solana's 150ms crossing, inside its 0.9 s ripple
+    for (let i = 0; i < 12; i++) {
       settled += stepAndDraw(ctx, state, { width: 1000, height: 400, right: 650 }, 0.05);
     }
     expect(LANE_SECONDS[0]).toBeLessThan(1);
@@ -128,7 +129,7 @@ describe("SpeedRace", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     render(<SpeedRace />, { wrapper: EnglishI18n });
     expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/^The same payment/);
-    expect(screen.getByText("Solana, via SDP")).toBeTruthy();
+    expect(screen.getByText("Solana Developer Platform")).toBeTruthy();
   });
 
   it("draws one still frame with settled rows under reduced motion", () => {

@@ -50,9 +50,9 @@ describe("IssuanceSection", () => {
 
     const heading = doc.querySelector("h2");
     expect(heading?.querySelector(".sr-only")?.textContent).toBe(
-      "Issue the asset. Control after launch."
+      "Full programmatic asset control with built-in compliance"
     );
-    expect(doc.body.textContent).toContain("every operation auditable.");
+    expect(doc.body.textContent).toContain("directly via SDK or web console.");
 
     const link = doc.querySelector("a");
     expect(link?.textContent).toBe("Open issuance in the sandbox");
