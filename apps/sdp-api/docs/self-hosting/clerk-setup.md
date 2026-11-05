@@ -2,7 +2,7 @@
 
 This guide walks an operator through wiring up their own Clerk tenant for a self-hosted SDP deployment. Follow it after you have the API and dashboard running with `SDP_DEPLOYMENT_MODE=self_hosted` (see [`apps/sdp-api/README.md`](../../README.md#self-hosted-mode-no-third-party-providers)).
 
-SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only syncs the name, slug and entitlements of organizations SDP already knows, and ignores membership events. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the session token does not contain `org_id` by default — see step 3).
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only syncs the name, slug and entitlements of organizations SDP already knows, and ignores membership events. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Clerk token missing organization` (the session token does not contain `org_id` by default — see step 3).
 
 Time estimate: under 30 minutes against a fresh Clerk account.
 
@@ -135,7 +135,7 @@ In production self-hosted deployments, point Clerk directly at the deployment's 
 
 ## Troubleshooting
 
-- **API returns `Active Clerk organization required`** — the JWT lacks `org_id`. Confirm the session token customization (step 3) includes `"org_id": "{{org.id}}"` and you signed in with an active organization selected.
+- **API returns `Clerk token missing organization`**: the JWT lacks `org_id`. Confirm the session token customization (step 3) includes `"org_id": "{{org.id}}"` and you signed in with an active organization selected.
 - **Webhook signature verification fails** — `CLERK_WEBHOOK_SECRET` does not match the endpoint's signing secret in Clerk. Re-copy the secret from the endpoint detail page, restart the API.
 - **`organizations` row never appears** — the ngrok tunnel is not running, or the Clerk endpoint URL doesn't match `WEBHOOK_INGEST_DOMAIN`. Check deliveries in the ngrok inspector at `http://localhost:4040`; check the Clerk endpoint's **Message Attempts** tab for HTTP errors.
 - **Token verification fails with `unable to retrieve JWKS`** — `CLERK_ISSUER` is wrong. The default JWKS path is `${CLERK_ISSUER}/.well-known/jwks.json`; load that URL in a browser to confirm Clerk returns a JSON document.

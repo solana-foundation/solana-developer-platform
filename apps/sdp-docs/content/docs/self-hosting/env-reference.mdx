@@ -3,94 +3,79 @@ title: Environment Reference
 description: The configuration variables a self-hosted Solana Developer Platform reads from .env.
 ---
 
-The self-hosted stack reads its configuration from a single `.env` file next to
-`compose.yml`. The [configurator](/docs/self-hosting/configurator) is the
-authoritative source of the field list, defaults, and validation — it always
-matches the release you installed. This page explains how the configuration is
-organized and the variables you are most likely to set by hand.
+The stack reads one `.env` file next to `compose.yml`. The [configurator](/docs/self-hosting/configurator) writes it, with the defaults and validation of the release you installed. This page covers how the file is organized and the variables you're most likely to set by hand.
 
-The configurator groups variables into sections:
+The configurator groups the variables into sections:
 
 | Section | What it covers |
 |---|---|
-| Basic | Core runtime — environment, deployment mode, Transactional Email sender and Resend key. |
+| Basic | `ENVIRONMENT`. The deployment mode is always `self_hosted`. |
 | Database | Bundled Postgres or an external database. |
-| Cache | Bundled Redis or an external cache. |
-| Solana RPC | Network and RPC endpoint. |
-| Authentication (Clerk) | Required Clerk keys and JWT settings. |
-| Signing provider | Which signer(s) to enable and their credentials. |
+| Cache | Bundled Redis or an external one. |
+| Solana RPC | The devnet and mainnet RPC endpoints. |
+| Authentication (Clerk) | Clerk keys, issuer, dashboard URL, and webhook secret. |
+| Signing provider | Which signers to enable, the default one, and their credentials. |
 | Fee payment | How transaction fees are paid. |
-| Secrets | App secrets, generated locally. |
-| Advanced | Image source, ports, and internal service URLs. |
+| Secrets | App secrets, generated where you run the configurator. |
+| Advanced | Image source, ports, public URLs, proxy trust, and optional features. |
 
 ## Required variables
 
-These must be set or the stack will refuse to start:
+`compose.yml` refuses to start without these:
 
 | Variable | Description |
 |---|---|
-| `POSTGRES_PASSWORD` | Password for the bundled Postgres. Always required — the bundled `postgres` service starts even when the API points at an external `DATABASE_URL`. |
-| `API_KEY_PEPPER` | Server-side pepper for API key hashing. Generate with `openssl rand -hex 32`. |
-| `CUSTODY_ENCRYPTION_KEY` | Encryption key for custody material at rest. Generate with `openssl rand -base64 32`. |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the web app. |
-| `CLERK_SECRET_KEY` | Clerk secret key for the API. |
-| `CLERK_ISSUER` | Clerk issuer URL used to validate tokens. |
-| `FRONTEND_URL` | The dashboard URL the browser loads. With `ENVIRONMENT=production`, the API accepts only Clerk sessions issued to this origin. |
-| `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` | Devnet endpoint Sandbox projects read and send through. |
-| `SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL` | Mainnet endpoint Production projects read and send through; unset refuses them. |
-| `SIGNING_PROVIDER` | The default signing provider. Each non-local provider adds its own required credentials. |
+| `POSTGRES_PASSWORD` | Password for the bundled Postgres. Required even with an external `DATABASE_URL`, because the bundled `postgres` service still starts. |
+| `API_KEY_PEPPER` | Server-side pepper for API key hashes. Generate it with `openssl rand -hex 32`. |
+| `CUSTODY_ENCRYPTION_KEY` | Encrypts custody secrets at rest. Generate it with `openssl rand -base64 32`. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key for the dashboard. |
+| `CLERK_SECRET_KEY` | Clerk secret key. |
 
-The configurator generates `API_KEY_PEPPER` and `CUSTODY_ENCRYPTION_KEY` for you
-and can auto-generate `POSTGRES_PASSWORD`.
+The configurator also requires these. The stack starts without them, but most leave a core flow broken:
+
+| Variable | Description |
+|---|---|
+| `CLERK_ISSUER` | Clerk issuer URL. Without it, dashboard sessions can't be verified, so sign-in fails. |
+| `FRONTEND_URL` | The dashboard URL the browser loads. With `ENVIRONMENT=production`, the compose default, the API accepts only Clerk sessions issued to this origin, and won't start if it isn't an `http(s)` URL. |
+| `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` | The devnet endpoint Sandbox projects read and send through. Without it, they get `503 RPC_UNAVAILABLE`. |
+| `SIGNING_PROVIDER` | The configurator's default signer, `local` unless you change it. The API reads it only at startup, where `local` (also its value when unset) requires `SDP_DEPLOYMENT_MODE=self_hosted`. |
+| `CUSTODY_PRIVATE_KEY` | With local signing selected: SDP offers the local signer only while this is set. |
+| `CREDENTIAL_FINGERPRINT_PEPPER` | Without it, saving or rotating provider credentials in the dashboard fails. Keep it stable. |
+
+`SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL` is optional: without it, SDP refuses Production projects' chain reads and sends.
+
+The configurator generates `API_KEY_PEPPER`, `CREDENTIAL_FINGERPRINT_PEPPER`, and `CUSTODY_ENCRYPTION_KEY` for you, and can generate `POSTGRES_PASSWORD`.
 
 ## Database
 
-In the configurator, `DATABASE_MODE` chooses between the bundled Postgres and an
-external database. It is a generation-time selector and is not written to `.env`.
+The configurator's database choice (`DATABASE_MODE`) shapes the file, but isn't written to it.
 
-For the bundled database, set `POSTGRES_DB`, `POSTGRES_USER`, and
-`POSTGRES_PASSWORD`; the API and migration services build their connection string
-from them. To use an external database, set `DATABASE_URL` to your own
-`postgresql://…` string and the API and migrations connect there instead. Note
-that `compose.yml` always starts the bundled `postgres` container — with an
-external `DATABASE_URL` it goes unused, and `POSTGRES_PASSWORD` is still
-required for it to start.
-
-The configurator hides `POSTGRES_PASSWORD` once you select an external database
-but still emits an auto-generated value for it, since the bundled `postgres`
-container needs one to start even when nothing connects to it.
+- **Bundled:** set `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`. The API and `sdp-migrate` build their connection string from them.
+- **External:** set `DATABASE_URL` to your `postgresql://…` string, and the API and migrations connect there. The bundled `postgres` container still starts, unused, so it still needs `POSTGRES_PASSWORD`. The configurator hides that field and generates a value for it.
 
 ## Cache
 
-Like `DATABASE_MODE`, `CACHE_MODE` is a configurator-only selector and is not
-written to `.env`. To use an external cache, set `REDIS_URL` to your own
-`redis://…` endpoint; the bundled `redis` container still starts but goes unused.
+The cache choice (`CACHE_MODE`) isn't written to the file either. For an external cache, set `REDIS_URL` to your `redis://…` or `rediss://…` endpoint. The bundled `redis` container still starts, unused.
 
 ## Signing providers
 
-`SIGNING_PROVIDER` is the default signer written to `.env`. Supported values are
-`local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`.
-The configurator also tracks a `SIGNING_PROVIDERS` selection to decide which
-fields to show, but that key is configurator-only and is not written to `.env`.
-Each non-local provider requires its own credentials — for example Fireblocks
-needs an API key, secret, and vault ID — and the configurator only prompts for
-the providers you enable.
+The configurator offers `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, and `utila`. Its list of providers to enable (`SIGNING_PROVIDERS`) only decides which credential fields it shows, and isn't written to the file. Each provider other than `local` needs its own credentials, such as an API key, secret, and vault ID for Fireblocks. Each project picks its signer when you set up custody in the dashboard.
 
-For provider-managed co-signer runtimes that live outside the default stack, see
-[External co-signers](/docs/self-hosting/external-co-signers).
+Privy, Coinbase CDP, Para, and Turnkey are open to every organization. The others, `local` included, also need a per-organization activation: [First devnet deployment](/docs/self-hosting/first-devnet-deployment) shows how for the local signer.
+
+For provider co-signers that run outside the stack, see [External co-signers](/docs/self-hosting/external-co-signers).
 
 ## Advanced
 
 | Variable | Default | Description |
 |---|---|---|
-| `SDP_IMAGE_REGISTRY` | `ghcr.io/solana-foundation/sdp` | Registry the service images are pulled from. |
-| `SDP_VERSION` | `latest` | Image tag for every SDP service. Pin this to a release tag in production. |
+| `SDP_IMAGE_REGISTRY` | `ghcr.io/solana-foundation/sdp` | Registry the images come from. |
+| `SDP_VERSION` | `latest` | Image tag for every SDP service. Pin it to a release tag, such as `vX.Y.Z`, in production. |
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
-| `TRUST_PROXY_HEADERS` | `false` | How to read `X-Forwarded-For`. `true` trusts the first address — enable only behind an ingress that replaces caller-supplied forwarding headers. `gclb` is for ingress restricted to a Google Cloud external Application Load Balancer, which appends the verified client address instead. Direct deployments leave this `false` and share the fail-closed unidentified quota bucket. |
+| `TRUST_PROXY_HEADERS` | `false` | How to read `X-Forwarded-For`. `true` trusts the first address: use it only behind an ingress that replaces caller-supplied forwarding headers. `gclb` is for ingress restricted to a Google Cloud external Application Load Balancer, which appends the verified client address. With `false`, SDP can't see caller addresses: per-IP limits count every caller as one, and an IP allowlist refuses every request. |
 
-`SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
-for server-to-server calls. The browser-facing `NEXT_PUBLIC_*` URLs default to
-`localhost` (for example `http://localhost:8787` and `http://localhost:3000`) and
-need changing when you put the services behind your own domains or ingress.
+`SDP_API_BASE_URL` (default `http://sdp-api:8787`) is how the dashboard's server reaches the API inside the Docker network. The browser-facing `NEXT_PUBLIC_*` URLs default to `localhost`, such as `http://localhost:8787` for the API and `http://localhost:3000` for the dashboard. Change them, and `FRONTEND_URL`, when you put the services behind your own domains.
+
+`compose.yml` also reads `SDP_RELEASE_CHANNEL`, which the configurator doesn't set. It decides which modules and providers the API and dashboard run (`experimental`, `beta`, or `stable`), and defaults to `experimental`.

@@ -1,10 +1,10 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/(session)/dashboard/[projectId]/payments/payments-query-key";
 import { fetchWallets } from "@/app/(session)/dashboard/[projectId]/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 
 /**
  * Loads payment action wallets with live balances while preserving the initial server wallet state.
@@ -18,11 +18,13 @@ export function usePaymentsActionWallets(
   liveWalletsError: string | null;
 } {
   const t = useTranslations();
-  const { data: swrWallets, error: walletsFetchError } = usePersistedDashboardSWR<
-    PaymentsDashboardWallet[]
-  >(paymentsQueryKeys.actionWallets(), () => fetchWallets({ includeBalances: true }, t), {
-    fallbackData: wallets.length > 0 ? wallets : undefined,
-  });
+  const { data: swrWallets, error: walletsFetchError } = useSWR<PaymentsDashboardWallet[]>(
+    paymentsQueryKeys.actionWallets(),
+    () => fetchWallets({ includeBalances: true }, t),
+    {
+      fallbackData: wallets.length > 0 ? wallets : undefined,
+    }
+  );
   const liveWallets = swrWallets ?? wallets;
   const walletsLoading = swrWallets === undefined && !walletsFetchError;
   const liveWalletsError = walletsFetchError

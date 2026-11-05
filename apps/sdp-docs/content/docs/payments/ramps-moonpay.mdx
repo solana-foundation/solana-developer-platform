@@ -1,22 +1,27 @@
 ---
 rampProvider: moonpay
 title: MoonPay
-description: Configure MoonPay as an SDP ramp provider — credentials, capabilities, and limits.
+description: Configure MoonPay as an SDP ramp provider, with its credentials, capabilities, and limits.
 ---
 
-MoonPay is one of SDP's ramp providers. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix); quotes go through [Ramps](/docs/payments/ramps) with `"provider": "moonpay"`.
+MoonPay is one of SDP's ramp providers, for onramps and offramps. Its capabilities sit beside the others' in the [capability matrix](/docs/payments/ramps-providers#capability-matrix). Quote through [Ramps](/docs/payments/ramps) with `"provider": "moonpay"`.
 
-A Sandbox project uses the `MOONPAY_SANDBOX_*` keys and a Production project the `MOONPAY_PRODUCTION_*` keys. MoonPay runs in a mode only while all three of its keys are set and fit that mode; otherwise it answers `PROVIDER_NOT_CONFIGURED`.
+A Sandbox project uses the `MOONPAY_SANDBOX_*` keys, and a Production project the `MOONPAY_PRODUCTION_*` keys. MoonPay runs in a mode only while all three of that mode's keys are set and fit it. Otherwise it answers `PROVIDER_NOT_CONFIGURED`.
 
 ## Configuration
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `MOONPAY_SANDBOX_API_KEY` | conditional | Test-mode publishable key (`pk_test_…`). A live key is refused before any request. |
-| `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Test-mode secret (`sk_test_…`) used to sign onramp and offramp URLs. Paired with `MOONPAY_SANDBOX_API_KEY`. |
-| `MOONPAY_SANDBOX_WEBHOOK_SECRET` | conditional | Test-mode webhook key (`wk_test_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/sandbox/moonpay`. |
-| `MOONPAY_PRODUCTION_API_KEY` | conditional | Live publishable key (`pk_live_…`). A test-mode key is refused before any request. |
-| `MOONPAY_PRODUCTION_SECRET_KEY` | conditional | Live secret (`sk_live_…`). Paired with `MOONPAY_PRODUCTION_API_KEY`. |
-| `MOONPAY_PRODUCTION_WEBHOOK_SECRET` | conditional | Live webhook key (`wk_live_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/production/moonpay`. |
+| Variable | Notes |
+| --- | --- |
+| `MOONPAY_SANDBOX_API_KEY` | Test-mode publishable key (`pk_test_…`). A live key is refused before any request. |
+| `MOONPAY_SANDBOX_SECRET_KEY` | Test-mode secret key (`sk_test_…`). It signs the onramp and offramp widget URLs. |
+| `MOONPAY_SANDBOX_WEBHOOK_SECRET` | Test-mode webhook key (`wk_test_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/sandbox/moonpay`. |
+| `MOONPAY_PRODUCTION_API_KEY` | Live publishable key (`pk_live_…`). A test-mode key is refused before any request. |
+| `MOONPAY_PRODUCTION_SECRET_KEY` | Live secret key (`sk_live_…`). |
+| `MOONPAY_PRODUCTION_WEBHOOK_SECRET` | Live webhook key (`wk_live_…`) that signs MoonPay's calls to `/webhooks/payments/ramps/production/moonpay`. |
 
-MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.
+## Behavior
+
+- Quotes return `deliveryMode: "hosted"`: send the customer to `quote.hostedUrl`.
+- An offramp quote without `fiatCurrency` pays out in `USD`.
+- An offramp quote checks the source wallet's balance first, and refuses a sale the wallet can't fund with `400 INSUFFICIENT_TOKEN_BALANCE`.
+- Send SDP's asset rails, such as `usdc.solana`. SDP maps them to MoonPay's currency codes, such as `usdc_sol`.
