@@ -35,7 +35,6 @@ import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/th
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_ACCOUNT_HREF } from "@/lib/dashboard-navigation-loading";
-import { clearDashboardSnapshots } from "@/lib/dashboard-snapshot-storage";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { userDisplayName } from "@/lib/user-display-name";
 
@@ -149,7 +148,6 @@ export function SidebarUserMenu({
         <DropdownMenuItem
           className="gap-2.5"
           onSelect={() => {
-            clearDashboardSnapshots();
             void signOut();
           }}
         >

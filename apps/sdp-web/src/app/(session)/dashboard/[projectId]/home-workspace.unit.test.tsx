@@ -8,7 +8,6 @@ import type { SWRResponse } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import * as dashboardSwr from "@/lib/dashboard-swr";
 import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import type { HomeActivityRow } from "./home-page.data";
 import type { PaymentsIssuedTokenSymbol } from "./payments/payments-page.data";
@@ -36,9 +35,11 @@ const mocks = vi.hoisted(() => {
       },
     },
     swr,
+    useSWR: vi.fn<(key: unknown) => SWRResponse<unknown, unknown>>(),
   };
 });
 
+vi.mock("swr", () => ({ default: mocks.useSWR }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
@@ -128,7 +129,7 @@ function at<T>(items: readonly T[], index: number): T {
   return item;
 }
 
-/** What the persisted SWR hook returns for the data a test seeded under a key. */
+/** What the SWR hook returns for the data a test seeded under a key. */
 function seededSwr(key: unknown): SWRResponse<unknown, unknown> {
   const seeded = typeof key === "string" ? mocks.swr[key] : undefined;
   return {
@@ -142,11 +143,7 @@ function seededSwr(key: unknown): SWRResponse<unknown, unknown> {
 
 beforeEach(() => {
   resetDashboardNavigation();
-  // SAFETY: the stand-in serves whatever the test seeded under the key; each caller reads it as
-  // the data type it asked for.
-  vi.spyOn(dashboardSwr, "usePersistedDashboardSWR").mockImplementation(
-    seededSwr as typeof dashboardSwr.usePersistedDashboardSWR
-  );
+  mocks.useSWR.mockClear().mockImplementation(seededSwr);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
   mocks.workspace.flags = { custody: true, issuance: true, payments: true };
@@ -181,14 +178,9 @@ const UNPRICED_SOL: CustodyWalletTokenBalance = {
   decimals: 9,
 };
 
-/** The keys Home's activity read was asked for under, across every render. */
-function activityReadKeys(): Set<unknown> {
-  return new Set(
-    vi
-      .mocked(dashboardSwr.usePersistedDashboardSWR)
-      .mock.calls.filter(([, , , persisted]) => persisted?.key === "home-activity")
-      .map(([key]) => key)
-  );
+/** The keys every SWR read on the page was asked for under, across every render. */
+function swrReadKeys(): unknown[] {
+  return mocks.useSWR.mock.calls.map(([key]) => key);
 }
 
 afterEach(() => {
@@ -224,7 +216,7 @@ describe("Overview (HomeWorkspace)", () => {
     expect(section("quick-start")).toBeTruthy();
     expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
     expect(screen.getByText("No recent activity found yet.")).toBeTruthy();
-    expect(activityReadKeys()).toEqual(new Set(["dashboard-home-activity"]));
+    expect(swrReadKeys()).toContain("dashboard-home-activity");
   });
 
   it("reads one wallet and one token in the singular and a dash while volume is unknown", () => {
@@ -309,7 +301,7 @@ describe("Overview (HomeWorkspace)", () => {
     );
     expect(section("activity")).toBeNull();
     // Neither the list nor the volume is on screen, so their read is never made.
-    expect(activityReadKeys()).toEqual(new Set([null]));
+    expect(swrReadKeys()).not.toContain("dashboard-home-activity");
     const actions = within(requireSection("actions"));
     expect(actions.queryByText("Create a wallet")).toBeNull();
     expect(actions.queryByText("Send a payment")).toBeNull();

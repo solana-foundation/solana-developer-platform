@@ -30,12 +30,6 @@ test.describe("overview census", () => {
 
   test("today's volume landing moves nothing at phone width", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 });
-    // A saved snapshot would draw the figure on first paint; the census has to start at its dash.
-    await page.addInitScript(() => {
-      for (const key of Object.keys(window.localStorage)) {
-        if (key.endsWith(".home-activity")) window.localStorage.removeItem(key);
-      }
-    });
     // Hold the read until the dash is measured, then answer with a figure that wrapped the
     // previous one-line census at this width.
     const activityRead = Promise.withResolvers<void>();
