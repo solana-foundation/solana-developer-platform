@@ -43,12 +43,15 @@ export function rankTitlesFirst(
     if (result.type === "page") {
       const rank = rankOf(
         queryWords,
-        wordsOf(String(result.content)),
+        wordsOf(result.content),
         wordsOf(descriptionOf(result.url) ?? "")
       );
       groups.push({ rank, results: [result] });
     } else {
-      groups.at(-1)?.results.push(result);
+      // The engine lists each page before its passages.
+      const page = groups.at(-1);
+      if (page === undefined) throw new Error(`Search passage came before its page: ${result.url}`);
+      page.results.push(result);
     }
   }
   return groups.sort((a, b) => a.rank - b.rank).flatMap((group) => group.results);

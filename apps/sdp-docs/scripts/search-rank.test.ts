@@ -61,4 +61,12 @@ describe("search ranking", () => {
       ["/docs/payouts", "/docs/tutorial"]
     );
   });
+
+  it("refuses a passage listed before any page", () => {
+    const results = [passage("/docs/keys", "Each API key holds grants.")];
+    assert.throws(
+      () => rankTitlesFirst(results, "api key", descriptionOf),
+      /Search passage came before its page/
+    );
+  });
 });
