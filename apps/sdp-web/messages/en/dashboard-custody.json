@@ -305,7 +305,7 @@
     "providerAnchorageDescription": "Institutional custody with wallet lifecycle management.",
     "providerUtilaDescription": "Vault-backed Solana wallet signing through Utila service accounts.",
     "providerCredentialLabel": "Connection name",
-    "providerCredentialLabelDescription": "How this connection is listed in the project. You can change it later.",
+    "providerCredentialLabelDescription": "How this connection is listed in the project.",
     "providerCredentialScope": "Credential scope",
     "providerCredentialScopeDescription": "Organization credentials can be shared by reference; project credentials stay isolated to the selected project.",
     "providerCredentialScopeOrganization": "Organization",

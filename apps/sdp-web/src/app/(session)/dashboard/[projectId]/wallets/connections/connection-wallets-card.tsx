@@ -5,7 +5,10 @@ import { Button } from "@sdp/ui/button";
 import { PlusIcon } from "lucide-react";
 import { formatCustodyProviderName } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import { WalletAddressCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
-import { formatWalletMeta } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
+import {
+  formatWalletMeta,
+  formatWalletPurposeLabel,
+} from "@/app/(session)/dashboard/[projectId]/wallets/wallet-format-utils";
 import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-provider-mark";
 import { EntityLink } from "@/components/entity-link";
 import { RecordBlock } from "@/components/refresh-record";
@@ -29,10 +32,25 @@ function walletSubtitle(
   } else if (wallet.status !== "active") {
     parts.push(wallet.status);
   }
-  if (wallet.purpose?.trim()) {
-    parts.push(wallet.purpose.trim());
+  const purposeLabel = formatWalletPurposeLabel(wallet.purpose, t);
+  if (purposeLabel) {
+    parts.push(purposeLabel);
   }
   return parts.join(" · ");
+}
+
+function walletsEmptyMessage(
+  walletsUnavailable: boolean,
+  pendingWalletLabel: string | null,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (walletsUnavailable) {
+    return t("DashboardCustody.connectionWalletsUnavailable");
+  }
+  if (pendingWalletLabel) {
+    return t("DashboardCustody.walletsPendingSetup");
+  }
+  return t("DashboardCustody.connectionNoWallets");
 }
 
 /**
@@ -97,11 +115,7 @@ export function ConnectionWalletsCard({
         </ul>
       ) : (
         <p className="text-body text-tertiary">
-          {walletsUnavailable
-            ? t("DashboardCustody.connectionWalletsUnavailable")
-            : pendingWalletLabel
-              ? t("DashboardCustody.walletsPendingSetup")
-              : t("DashboardCustody.connectionNoWallets")}
+          {walletsEmptyMessage(walletsUnavailable, pendingWalletLabel, t)}
         </p>
       )}
       {onAddWallet ? (
