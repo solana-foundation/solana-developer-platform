@@ -162,8 +162,8 @@ nothing else; the program create still sends the body `requestId` form.
   dropped its table. Do not reintroduce persisted presentation state here.)
 - Pages await no sdp-api call. Both routes read provider access in the browser
   (`useEarnProviderAccess`, `./earn-provider-access.ts`) from the shared
-  `/api/dashboard/organizations/current/provider-access` route, parsing only
-  `providers.earn`. A failed read is no access and disables every deposit.
+  `useOrganizationProviderAccess()` read (`payments/shared-reads.ts`), taking
+  its `earn` entries. A failed read is no access and disables every deposit.
   Provider access is organization-scoped: the cache is dropped when the
   identity changes.
 - Gates by segment: `../layout.tsx` holds `markets()`, which every Markets

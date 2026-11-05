@@ -86,8 +86,6 @@ export const earnQueryKeys = {
       vaults,
       cluster: "mainnet-beta",
     }),
-  providerAccess: (scope: DashboardKeyScope) =>
-    dashboardRequestKey(scope, "/api/dashboard/organizations/current/provider-access"),
   /**
    * Every read an Earn money write can change: the Earn ledgers, positions and programs, and the
    * wallet balances the money moves between. Not the strategy catalogue or the Kamino allocations,
