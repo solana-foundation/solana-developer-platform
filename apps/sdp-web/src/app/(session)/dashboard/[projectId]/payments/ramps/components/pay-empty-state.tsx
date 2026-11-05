@@ -59,7 +59,7 @@ export function PayEmptyState({ reason, onExit }: { reason: PayEmptyReason; onEx
       }
     >
       <ListEmptyState
-        className="refresh:flex-1 refresh:justify-center refresh:py-0"
+        className="flex-1 justify-center py-0"
         message={message}
         description={description}
         action={

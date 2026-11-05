@@ -9,8 +9,8 @@ import { normalizeWorkspaceReturnPath, WORKSPACE_LOADING_PATH } from "@/lib/work
 /**
  * Bare `/dashboard` renders nothing: it lands on the last-used Project while the
  * user can still reach it, else the Organization's Sandbox Project, at the page
- * `return_to` names (proxy.ts sends project-less page URLs here) or the Project's
- * home. An Organization whose Projects are still being provisioned waits on the
+ * `return_to` names (inbound links that cannot know the Project, such as the docs' playground
+ * links and admin alert emails) or the Project's home. An Organization whose Projects are still being provisioned waits on the
  * workspace loading page, which returns here once they exist.
  *
  * @param props.searchParams - The landing's query; `return_to` is a project-less dashboard path.

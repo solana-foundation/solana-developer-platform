@@ -1,23 +1,12 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowDownLeftIcon,
   ArrowLeftRightIcon,
-  ArrowUpRightIcon,
   BlocksIcon,
   CircleDotDashedIcon,
   CoinsIcon,
-  FileTextIcon,
-  HandshakeIcon,
   KeyRoundIcon,
-  LandmarkIcon,
   LayoutDashboardIcon,
-  PercentIcon,
-  ReceiptTextIcon,
-  RepeatIcon,
-  ShieldCheckIcon,
   TrendingUpIcon,
-  UsersIcon,
-  VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -33,9 +22,7 @@ import { resolveDocsUrl } from "@/lib/docs-url";
 export type SubNavItem = {
   label: string;
   href: string;
-  /** Optional so nav groups that have not been given icons keep rendering unchanged. */
-  icon?: LucideIcon;
-  /** Artwork drawn in place of an icon and kept on the refresh sidebar (a pinned wallet's logo). */
+  /** Artwork drawn in place of an icon (a pinned wallet's logo). */
   leading?: ReactNode;
   disabled?: boolean;
 };
@@ -118,32 +105,26 @@ export function getPaymentsActions(
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
-      icon: ReceiptTextIcon,
     },
     {
       label: t("Shared.dashboardShell.contacts"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
-      icon: UsersIcon,
     },
     {
       label: t("Shared.dashboardShell.pay"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
-      icon: ArrowUpRightIcon,
     },
     {
       label: t("Shared.dashboardShell.deposit"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.deposit,
-      icon: ArrowDownLeftIcon,
     },
     {
       label: t("Shared.dashboardShell.requests"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.requests,
-      icon: FileTextIcon,
     },
     {
       label: t("Shared.dashboardShell.newDesign.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
-      icon: RepeatIcon,
     },
   ];
   return canWrite
@@ -165,14 +146,12 @@ function getMarketsActions(
     {
       label: t("Shared.dashboardShell.treasurySolutions"),
       href: DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions,
-      icon: LandmarkIcon,
     },
     ...(earnEnabled
       ? [
           {
             label: t("Shared.dashboardShell.earnProgram"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
-            icon: PercentIcon,
           },
         ]
       : []),
@@ -181,7 +160,6 @@ function getMarketsActions(
           {
             label: t("DashboardMarkets.dvp.navLabel"),
             href: DASHBOARD_MARKETS_SUBNAV_HREFS.dvp,
-            icon: HandshakeIcon,
           },
         ]
       : []),
@@ -206,7 +184,6 @@ function getIntegrationActions(
           {
             label: t("Shared.integrations.custodyTitle"),
             href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.custody,
-            icon: WalletIcon,
           },
         ]
       : []),
@@ -215,7 +192,6 @@ function getIntegrationActions(
           {
             label: t("Shared.integrations.rampsTitle"),
             href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.ramps,
-            icon: ArrowLeftRightIcon,
           },
         ]
       : []),
@@ -224,7 +200,6 @@ function getIntegrationActions(
           {
             label: t("Shared.integrations.complianceTitle"),
             href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.compliance,
-            icon: ShieldCheckIcon,
           },
         ]
       : []),
@@ -233,7 +208,6 @@ function getIntegrationActions(
           {
             label: t("Shared.integrations.privacyTitle"),
             href: DASHBOARD_INTEGRATIONS_SUBNAV_HREFS.privacy,
-            icon: VenetianMaskIcon,
           },
         ]
       : []),

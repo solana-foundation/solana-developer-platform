@@ -10,7 +10,6 @@ import { ArrowRightIcon, ExternalLinkIcon } from "lucide-react";
 import Image from "next/image";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import {
   formatPaymentTransferType,
   formatTimestamp,
@@ -23,6 +22,7 @@ import { isInboundTransfer } from "@/app/(session)/dashboard/[projectId]/payment
 import { providerTransferDetailRows } from "@/app/(session)/dashboard/[projectId]/payments/provider-transfer-details";
 import { rampPhaseCopy } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { MemoJsonView } from "@/app/(session)/dashboard/[projectId]/payments/wizard-summary-list";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, getRampProviderLogo } from "@/lib/ramps";

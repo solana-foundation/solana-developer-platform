@@ -24,7 +24,7 @@ export function SegmentedControl({
   ariaLabel,
   className,
   optionClassName,
-  selectedClassName = "bg-surface-raised text-primary refresh:bg-chip refresh:shadow-chip",
+  selectedClassName = "bg-chip text-primary shadow-chip",
 }: {
   options: readonly SegmentedOption[];
   value: string;
@@ -39,10 +39,7 @@ export function SegmentedControl({
   const groupName = useId();
   return (
     <fieldset
-      className={cn(
-        "flex min-w-0 rounded-lg border border-border-default bg-fill-subtle p-0.5 refresh:rounded-control refresh:border-0",
-        className
-      )}
+      className={cn("flex min-w-0 rounded-control border-0 bg-fill-subtle p-0.5", className)}
       disabled={disabled}
     >
       <legend className="sr-only">{ariaLabel}</legend>
@@ -66,14 +63,10 @@ export function SegmentedControl({
             />
             <span
               className={cn(
-                "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-primary",
-                "refresh:whitespace-nowrap refresh:rounded-control-inner refresh:py-1 refresh:text-meta",
+                "inline-flex flex-1 items-center justify-center whitespace-nowrap rounded-control-inner px-3 py-1 text-meta font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-primary",
                 checked
                   ? selectedClassName
-                  : cn(
-                      "text-tertiary refresh:text-secondary",
-                      !disabled && "peer-hover:text-primary"
-                    ),
+                  : cn("text-secondary", !disabled && "peer-hover:text-primary"),
                 optionClassName
               )}
             >

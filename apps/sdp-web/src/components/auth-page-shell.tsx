@@ -1,4 +1,3 @@
-import { refreshThemeProps } from "@sdp/design-tokens";
 import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
@@ -41,11 +40,7 @@ export async function AuthPageShell({
   const isBeta = deploymentReleaseChannel() === "beta";
 
   return (
-    <main
-      data-sdp-auth-shell=""
-      {...refreshThemeProps}
-      className="flex min-h-dvh flex-col bg-surface px-6 pb-10"
-    >
+    <main className="flex min-h-dvh flex-col bg-surface px-6 pb-10">
       <div className="flex h-18 items-center justify-end">
         {action === null ? null : (
           <Button asChild variant="outline" size="sm">

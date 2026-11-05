@@ -38,14 +38,14 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
       <img
         src={imageUrl}
         alt=""
-        className="size-6 shrink-0 rounded-md object-cover refresh:size-8"
+        className="shrink-0 rounded-md object-cover size-8"
         aria-hidden="true"
       />
     );
   }
   const initials = name.trim().slice(0, 2).toUpperCase() || "?";
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-semibold text-on-primary refresh:size-8 refresh:text-body refresh:font-medium">
+    <span className="flex shrink-0 items-center justify-center rounded-md bg-primary text-on-primary size-8 text-body font-medium">
       {initials}
     </span>
   );
@@ -230,8 +230,8 @@ export function WorkspaceSwitcher({
           aria-busy={isSwitching}
           aria-label={organizationName}
           className={cn(
-            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:h-10 refresh:hover:bg-fill",
-            collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2 refresh:gap-3"
+            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            collapsed ? "w-10 justify-center" : "w-full min-w-0 px-2 gap-3"
           )}
         >
           <OrgAvatar name={activeOrg?.name ?? ""} imageUrl={activeOrg?.imageUrl ?? null} />
@@ -239,7 +239,7 @@ export function WorkspaceSwitcher({
             <>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
+                  <span className="truncate leading-tight text-primary text-field font-medium">
                     {organizationName}
                   </span>
                   {/* Beta shares sign-in with production, so its switcher says which one this is. */}
@@ -249,7 +249,7 @@ export function WorkspaceSwitcher({
                     </Badge>
                   ) : null}
                 </span>
-                <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
+                <span className="truncate leading-tight text-meta text-secondary">
                   {t(ENVIRONMENT_PRESENTATIONS[sdpEnvironment].labelKey)}
                 </span>
               </span>

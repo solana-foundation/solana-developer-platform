@@ -7,8 +7,6 @@ import { UiI18nProvider, type UiMessageKey, type UiTranslate } from "#/i18n";
 export const ENGLISH_UI_MESSAGES: Record<UiMessageKey, string> = {
   "Shared.SharedComponents.chooseDate": "Choose date",
   "Shared.SharedComponents.chooseDateAndTime": "Choose date and time",
-  "Shared.SharedComponents.chooseDateRange": "Choose date range",
-  "Shared.SharedComponents.chooseEndDate": "Choose end date",
   "Shared.SharedComponents.clear": "Clear",
   "Shared.SharedComponents.closeModal": "Close modal",
   "Shared.SharedComponents.done": "Done",
