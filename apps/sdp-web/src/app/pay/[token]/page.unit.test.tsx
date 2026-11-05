@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextNavigationMock, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import PayPage from "./page";
@@ -48,6 +49,37 @@ describe("PayPage unknown links", () => {
 
     await expect(renderPage("AbCdEfGh12345-xy")).rejects.toThrow("Pay link read failed (429)");
     expect(nextNavigationMock.notFound).not.toHaveBeenCalled();
+  });
+});
+
+describe("PayPage open requests", () => {
+  const openRequest = {
+    amount: "1.5",
+    tokenSymbol: "USDC",
+    recipient: "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV",
+    status: "awaiting_payment",
+    expiresAt: null,
+    network: "devnet",
+  };
+
+  it("tells the payer an open request without a Solana Pay link can't be paid (HOO-2009)", async () => {
+    fetchMock.mockResolvedValue(Response.json({ ...openRequest, solanaPayUrl: null }));
+
+    const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+
+    expect(html).toContain("Payment unavailable");
+    expect(html).not.toContain("Scan with a Solana wallet to pay");
+  });
+
+  it("offers the Solana Pay link while the request can be paid", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ ...openRequest, solanaPayUrl: "solana:https://sdp-api.test/pay/x/tx" })
+    );
+
+    const html = renderToStaticMarkup(await renderPage("AbCdEfGh12345-xy"));
+
+    expect(html).toContain("Scan with a Solana wallet to pay");
+    expect(html).not.toContain("Payment unavailable");
   });
 });
 

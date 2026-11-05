@@ -183,21 +183,18 @@ const UNPUBLISHED_CUSTODY_PROVIDERS: ReadonlySet<CustodyProvider> = new Set(["lo
 
 /**
  * Whether a release channel's public surfaces (OpenAPI document, docs,
- * playground) may name custody `provider`: in `mode` when given, otherwise in
- * any mode the channel offers it in.
+ * playground) may name custody `provider`: the channel offers it in either
+ * custody mode, and it is not unpublished.
  *
  * @param releaseChannel - The surface's release channel.
  * @param provider - The custody provider.
- * @param mode - The custody mode a field names providers for; omitted for a field about any mode.
- * @returns True when the channel offers the provider (in `mode`) and it is publishable.
+ * @returns True when the channel offers the provider and it is publishable.
  */
 export function isCustodyProviderPublished(
   releaseChannel: SdpReleaseChannel,
-  provider: CustodyProvider,
-  mode?: CustodyMode
+  provider: CustodyProvider
 ): boolean {
   if (UNPUBLISHED_CUSTODY_PROVIDERS.has(provider)) return false;
-  if (mode !== undefined) return isCustodyProviderInReleaseChannel(releaseChannel, provider, mode);
   return (
     isCustodyProviderInReleaseChannel(releaseChannel, provider, "managed") ||
     isCustodyProviderInReleaseChannel(releaseChannel, provider, "byok")

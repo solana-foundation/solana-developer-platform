@@ -129,7 +129,7 @@ Keys are kept for 24 hours after the original request. After that, a same-key re
 
 ## Creating wallets
 
-One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. Privy and Coinbase CDP also receive a provider request ID derived from the key, so they dedupe creation. A provider failure is stored as `503` for 24 hours. A new key is a new provider request.
+One `POST /v1/wallets` key maps to one recorded wallet. Same-key retries return it, even after 24 hours; a different request under that key returns `422`. A provider that accepts a request ID also receives one derived from the key, so it dedupes creation. A provider failure is stored as `503` for 24 hours. A new key is a new provider request.
 
 An ambiguous `503` may mean the provider created a wallet before SDP received the result. Other providers do not dedupe on the request ID. If SDP wrote no wallet row, a same-key retry after 24 hours can create another wallet. Before retrying with any key, check `GET /v1/wallets` and, if needed, the provider account.
 
