@@ -165,12 +165,27 @@ export function useInvalidateDashboardReads() {
       const mountedReads = mountedReadsOf(cache);
       const isMatch = (key: Arguments): key is DashboardRequestKey =>
         isDashboardRequestKey(key) && matches(key);
+      const offScreenKeys: string[] = [];
       await Promise.all([
         mutate((key) => isMatch(key) && mountedReads.has(unstable_serialize(key))),
-        mutate((key) => isMatch(key) && !mountedReads.has(unstable_serialize(key)), undefined, {
-          revalidate: false,
-        }),
+        mutate(
+          (key) => {
+            const offScreen = isMatch(key) && !mountedReads.has(unstable_serialize(key));
+            if (offScreen) {
+              offScreenKeys.push(unstable_serialize(key));
+            }
+            return offScreen;
+          },
+          undefined,
+          { revalidate: false }
+        ),
       ]);
+      // The clear above records a mutation, so a request already in flight for an off-screen key
+      // cannot land afterwards. Deleting the entry as well makes the next mount start loading:
+      // the cleared entry would otherwise keep its last `isLoading: false` for one render.
+      for (const serializedKey of offScreenKeys) {
+        cache.delete(serializedKey);
+      }
     },
     [cache, mutate]
   );
