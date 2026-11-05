@@ -12,7 +12,7 @@ const STATUS_URL = "https://api.test/pay/tok_1";
 
 const PAY_URL = "solana:https://api.test/pay/tok_1/tx";
 
-function respondWith(status: string, solanaPayUrl: string | null = PAY_URL) {
+function respondWith(status: string, solanaPayUrl: string | null) {
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(
@@ -20,7 +20,7 @@ function respondWith(status: string, solanaPayUrl: string | null = PAY_URL) {
     );
 }
 
-function renderWatch(status: "awaiting_payment" | "paid", payable = true) {
+function renderWatch(status: "awaiting_payment" | "paid", payable: boolean) {
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <PayStatusWatch statusUrl={STATUS_URL} status={status} payable={payable} />
@@ -41,8 +41,8 @@ afterEach(() => {
 
 describe("PayStatusWatch", () => {
   it("redraws the page once an open link is paid, reading the API from the browser", async () => {
-    const fetchMock = respondWith("paid");
-    renderWatch("awaiting_payment");
+    const fetchMock = respondWith("paid", PAY_URL);
+    renderWatch("awaiting_payment", true);
 
     // The page's own read is the first; the watch waits its interval before reading again.
     expect(fetchMock).not.toHaveBeenCalled();
@@ -53,8 +53,8 @@ describe("PayStatusWatch", () => {
   });
 
   it("keeps reading, without redrawing, while the link stays open", async () => {
-    const fetchMock = respondWith("awaiting_payment");
-    renderWatch("awaiting_payment");
+    const fetchMock = respondWith("awaiting_payment", PAY_URL);
+    renderWatch("awaiting_payment", true);
 
     await vi.advanceTimersByTimeAsync(20_000);
 
@@ -81,8 +81,8 @@ describe("PayStatusWatch", () => {
   });
 
   it("reads a link that is no longer open no more", async () => {
-    const fetchMock = respondWith("paid");
-    renderWatch("paid");
+    const fetchMock = respondWith("paid", PAY_URL);
+    renderWatch("paid", true);
 
     await vi.advanceTimersByTimeAsync(30_000);
 

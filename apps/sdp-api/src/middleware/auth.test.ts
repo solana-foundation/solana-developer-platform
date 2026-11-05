@@ -803,6 +803,19 @@ describe("Auth Middleware", () => {
       expect((await keyed("/context")).status).toBe(200);
     });
 
+    it("keeps a dead key's own refusal while its organization is suspended (HOO-2009)", async () => {
+      await updateKey("status", "revoked");
+      await getDb(env)
+        .prepare("UPDATE organizations SET status = 'suspended' WHERE id = ?")
+        .bind(TEST_ORG.id)
+        .run();
+
+      const res = await keyed("/context");
+      expect(res.status).toBe(401);
+      const body = errorBodySchema.parse(await res.json());
+      expect(body.error.code).toBe("REVOKED_API_KEY");
+    });
+
     const authReads = (prepare: { mock: { calls: unknown[][] } }) =>
       prepare.mock.calls.filter(([sql]) => String(sql).includes("FROM api_keys ak")).length;
 

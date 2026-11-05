@@ -1,13 +1,16 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
-import { organizationStatusMayStartMoney } from "@sdp/types/organizations";
 import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { assertMoneyStartAdmitted } from "@/lib/money-admission";
+import {
+  assertMoneyStartAdmitted,
+  decideMovement,
+  readMovementFactsWith,
+} from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import { issuePaymentRequestTransaction } from "@/services/payments/payment-request-sponsorship";
@@ -23,16 +26,20 @@ const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
 
 /**
- * Whether the request's organization may still start money. A suspended or
- * deleted organization's link stays readable, but the page offers no way to
- * pay it (HOO-2009); the transaction request refuses it the same way.
+ * Whether the transaction request would admit this payment now: the same
+ * decision and single read as its `assertMoneyStartAdmitted`, without the
+ * refusal event, so a suspended or deleted organization, a production request
+ * without the entitlement, or a disabled `payments.pay_request` withholds the
+ * link the wallet would then be refused (HOO-2009). Runs under the request's
+ * own money principal, set by `paymentRequestScope`.
  */
-async function organizationMayTakePayment(env: Env, organizationId: string): Promise<boolean> {
-  const row = await getDb(env)
-    .prepare("SELECT status FROM organizations WHERE id = ?")
-    .bind(organizationId)
-    .first<{ status: string }>();
-  return row !== null && organizationStatusMayStartMoney(row.status);
+async function paymentMayStart(
+  env: Env,
+  scope: { organizationId: string; projectId: string }
+): Promise<boolean> {
+  const subject = { custodyWalletId: null };
+  const facts = await readMovementFactsWith(getDb(env), scope, "payments.pay_request", subject);
+  return decideMovement("payments.pay_request", facts, subject).admitted;
 }
 
 /**
@@ -41,7 +48,7 @@ async function organizationMayTakePayment(env: Env, organizationId: string): Pro
  *
  * @param c - The request context, under `paymentRequestScope`.
  * @returns The request's amount, token, recipient, status, and Solana Pay URL (null while the
- *   request cannot be paid, including while its organization is suspended).
+ *   request cannot be paid, including while the transaction request would refuse it).
  */
 export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">) {
   const request = await findPaymentRequest(c.env, c.req.param("token"));
@@ -54,7 +61,11 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
       Date.now()
     ) &&
     request.custody_wallet_id !== null &&
-    (await organizationMayTakePayment(c.env, request.organization_id));
+    request.project_id !== null &&
+    (await paymentMayStart(c.env, {
+      organizationId: request.organization_id,
+      projectId: request.project_id,
+    }));
 
   let solanaPayUrl: string | null = null;
   if (payable) {

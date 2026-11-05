@@ -230,6 +230,22 @@ describe("Public payment request routes", () => {
     expect((await read()).solanaPayUrl).toMatch(/^solana:/);
   });
 
+  it("withholds the Solana Pay link the transaction request would refuse: production without the entitlement", async () => {
+    const request = await createAwaitingPaymentRequest(await seedProductionRequestWallet());
+    const read = async () => {
+      const response = await app.request(`/pay/${request.public_token}`, {}, env);
+      expect(response.status).toBe(200);
+      return z.object({ solanaPayUrl: z.string().nullable() }).parse(await response.json());
+    };
+    expect((await read()).solanaPayUrl).toMatch(/^solana:/);
+
+    await getDb(env)
+      .prepare("UPDATE organizations SET settings = NULL WHERE id = ?")
+      .bind(TEST_ORG.id)
+      .run();
+    expect((await read()).solanaPayUrl).toBeNull();
+  });
+
   it("refuses to build a transaction for a canceled request", async () => {
     const sponsorship = stubSponsorship();
     const request = await cancelSeededPaymentRequest(
