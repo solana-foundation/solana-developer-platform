@@ -1,7 +1,7 @@
 ---
 name: sdp-module-alignment
-description: Audit and plan bringing an SDP module (DvP, Issuance, Private Channels, Helius Rings, Compliance or a new one) fully onto the current SDP architecture and the 2026 refresh design, the way Earn was aligned in October 2026. Runs a scanner over the module's API, packages, dashboard, docs and sdp-infra, then walks a checklist (release-channel gate, cluster scope and RPC door, RPC budget, per-environment crons, actions, idempotency, money waists, errors, data model, reconcilers, tenant isolation, programs per cluster, refresh routes and page config, primitives, dialogs, skeletons, phone widths, copy, SWR polling, public surface, alerts) and produces a ledger plus a PR order. Use when asked to "bring DvP onto the latest architecture", "get Private Channels ready for stable", "what do we check before releasing Rings", "put Issuance fully on the refresh design", "promote a module", or "audit a module against SDP conventions". Not for a single bug fix or feature inside one module, or ramp provider work.
-compatibility: Run from the solana-developer-platform repo. scripts/scan-module.sh needs bash 4.3+, git and Node 24+; the pnpm check scripts need an installed workspace; an sdp-infra checkout is optional (SDP_INFRA_DIR, default ~/sdp-infra).
+description: Audit and plan bringing an SDP module (DvP, Issuance, Private Channels, Helius Rings, Compliance or a new one) fully onto the current SDP architecture and the 2026 design, the way Earn was aligned in October 2026. Runs a scanner over the module's API, packages, dashboard, docs and sdp-infra, then walks a checklist (release-channel gate, cluster scope and RPC door, RPC budget, per-environment crons, actions, idempotency, money waists, errors, data model, reconcilers, tenant isolation, programs per cluster, header page config, primitives, dialogs, skeletons, phone widths, copy, SWR polling, public surface, alerts) and produces a ledger plus a PR order. Use when asked to "bring DvP onto the latest architecture", "get Private Channels ready for stable", "what do we check before releasing Rings", "put Issuance fully on the 2026 design", "promote a module", or "audit a module against SDP conventions". Not for a single bug fix or feature inside one module, or ramp provider work.
+compatibility: Run from the solana-developer-platform repo. scripts/scan-module.sh needs bash 4.3+ and git; the pnpm check scripts need an installed workspace; an sdp-infra checkout is optional (SDP_INFRA_DIR, default ~/sdp-infra).
 ---
 
 # SDP module alignment
@@ -10,11 +10,11 @@ Checks one module against what the rest of SDP already does, then plans the
 PRs that close the gap. "Aligned" means two things: the module uses the shared
 mechanisms (cluster scope, one RPC door, per-environment crons, the shared
 idempotency step, the signing and sponsorship waists, release-channel gating),
-and its dashboard is on the refresh design with lean data fetching.
+and its dashboard is on the 2026 design with lean data fetching.
 
 ## When to use
 
-- Bringing a module onto the current architecture, the refresh design, or both.
+- Bringing a module onto the current architecture, the 2026 design, or both.
 - Before promoting a module's maturity (`experimental` to `beta` to `stable`)
   or releasing it to a deployment that has not run it.
 - Planning or reviewing the PR series for that work.
@@ -48,7 +48,7 @@ for ramp providers (`integrate-ramp-provider`).
   channel), and note the current exposure in the row: Critical (money or data
   on the wrong cluster, funds that can be lost or trapped), High (a money path,
   an AGENTS.md hard rule, no alerting on a money cron), Medium (a module copy
-  of shared infrastructure, a page off the refresh design), Low (code
+  of shared infrastructure, a page off the design), Low (code
   standards, copy style). The check index gives each check's default.
 - **Deliver the ledger in chat.** When it is long, also save it as an
   untracked markdown file outside the repo (a ledger is a dated snapshot, not
@@ -113,15 +113,14 @@ for ramp providers (`integrate-ramp-provider`).
 | A13 | Money path | Reconcilers: compare-and-set, terminal rules, proven expiry | High | partly | architecture.md |
 | A14 | Data and config | Forced RLS, cross-organization reads, tenant-scoped queries | Critical | partly | architecture.md |
 | A15 | Release and gates | Programs deployed and verified on every cluster, or refused | Critical | manual | architecture.md |
-| B1 | Redesign | Every rewritten page in `REFRESH_ROUTES`, siblings tested out | Medium | yes | redesign.md |
-| B2 | Redesign | Header page config: left title, page column, back and header actions | Medium | leads | redesign.md |
-| B3 | Redesign | Refresh primitives replace cards, stat cards, wide tables, banners | Medium | leads | redesign.md |
-| B4 | Redesign | Dialogs: `@sdp/ui/modal`, wizard progress, money never truncates | Medium | leads | redesign.md |
-| B5 | Redesign | Skeletons hold the ready footprint; CLS 0 at 1440 and 390 | Medium | partly | redesign.md |
-| B6 | Redesign | Copy in the area catalog, `check:i18n`, promises match the API | Low (Medium if copy promises behavior) | manual | redesign.md |
-| B7 | Redesign | Phone widths: actions on screen, no scrolling tables | Medium | manual | redesign.md |
-| B8 | Redesign | API Playground tab or a recorded reason it is blocked | Low | yes | redesign.md |
-| B9 | Redesign | Tests, flow matrix, stage smoke specs, doc sync | Medium | partly | redesign.md |
+| B1 | Redesign | Header page config: left title, page column, back and header actions | Medium | leads | redesign.md |
+| B2 | Redesign | The design's primitives replace cards, stat cards, wide tables, banners | Medium | leads | redesign.md |
+| B3 | Redesign | Dialogs: `@sdp/ui/modal`, wizard progress, money never truncates | Medium | leads | redesign.md |
+| B4 | Redesign | Skeletons hold the ready footprint; CLS 0 at 1440 and 390 | Medium | partly | redesign.md |
+| B5 | Redesign | Copy in the area catalog, `check:i18n`, promises match the API | Low (Medium if copy promises behavior) | manual | redesign.md |
+| B6 | Redesign | Phone widths: actions on screen, no scrolling tables | Medium | manual | redesign.md |
+| B7 | Redesign | API Playground tab or a recorded reason it is blocked | Low | yes | redesign.md |
+| B8 | Redesign | Tests, flow matrix, stage smoke specs, doc sync | Medium | partly | redesign.md |
 | C1-C4 | Dashboard data | Polling shape, keys and batching, focus, measured counts | Medium | leads | dashboard-data.md |
 | D1 | Docs and surface | Public OpenAPI and AI files follow the channel and holds | High (widening the surface) | partly | surfaces.md |
 | D2-D4 | Docs and surface | Docs gating, partner material, repo docs | Low | partly | surfaces.md |
@@ -150,10 +149,6 @@ worked example.
 **Cause:** the slug matches no directory. **Fix:** use the slug the
 module's folders use, or pass its paths explicitly.
 
-### Scanner prints "could not evaluate theme-scope-routes.ts"
-**Cause:** Node older than 24 cannot import a `.ts` file. **Fix:** use the
-repo's Node (`engines` floor) and re-run; B1 needs it.
-
 ### Scanner prints "sdp-infra not found"
 **Cause:** no checkout at `~/sdp-infra`. **Fix:** set `SDP_INFRA_DIR`, then
 `git -C "$SDP_INFRA_DIR" fetch origin main` so the E rows read today's main.
@@ -167,20 +162,16 @@ decide whether to refuse the environment or move the writers first.
 **Cause:** the release channel wins over the flag (A1). **Fix:** nothing in
 infra; promotion is a maturity change in `release-channels.ts`.
 
-### A rewritten page still renders the base design
-**Cause:** its path is not in `REFRESH_ROUTES`. **Fix:** add the regex and a
-unit test row (B1); check the header config too (B2).
-
 ### No API Playground tab can be added
 **Cause:** the family is not in the playground catalog, which follows the
-public OpenAPI document. **Fix:** record the hold (B8, D1); publishing the
+public OpenAPI document. **Fix:** record the hold (B7, D1); publishing the
 family is a security sign-off, not a dashboard change.
 
 ## References
 
 - `references/architecture.md`: A1-A15, API, packages, data, programs.
-- `references/redesign.md`: B1-B9, refresh pages, primitives map, dialogs,
-  skeletons, copy, tests.
+- `references/redesign.md`: B1-B8, the design's page composition, primitives
+  map, dialogs, skeletons, copy, tests.
 - `references/dashboard-data.md`: C1-C4, polling, batching, measurement.
 - `references/surfaces.md`: D1-D4 and E1-E3, public surface, docs, partner
   material, sdp-infra, live probes.
