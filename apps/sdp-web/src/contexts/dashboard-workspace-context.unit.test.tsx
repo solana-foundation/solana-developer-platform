@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearOrganizationSwitch } from "@/contexts/requested-organization-switch";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import type { DashboardCacheScope } from "@/lib/dashboard-cache-scope";
+import { clearOrganizationSwitch } from "@/lib/requested-organization-switch";
 import {
   dashboardRouter,
   resetDashboardNavigation,

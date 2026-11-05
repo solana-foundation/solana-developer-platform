@@ -362,7 +362,7 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         accountKind: "crypto_wallet",
         label: "second",
-        details: TEST_ACCOUNT_DETAILS,
+        details: { network: "solana", address: TEST_SOLANA_ADDRESSES.wallet2 },
       });
       await repo.archiveCounterpartyAccount({
         counterpartyAccountId: first?.id ?? "",
