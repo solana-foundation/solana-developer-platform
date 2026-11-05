@@ -8,12 +8,11 @@ import { z } from "zod";
 import generatedSurface from "@/generated/public-surface.json";
 
 /**
- * What this docs build may publish: the modules, ramp providers and custody
- * providers of the deployment's release channel, Earn's publication hold
- * included. The API decides it (`createPublicSurfaceManifest` in
- * apps/sdp-api/src/openapi/spec.ts, written by `openapi:generate` from
- * `SDP_RELEASE_CHANNEL`) and `generate:api` copies it to
- * src/generated/public-surface.json, committed at `experimental`.
+ * What this docs build may publish: the modules and ramp providers of the
+ * deployment's release channel, Earn's publication hold included. The API
+ * decides it (`createPublicSurfaceManifest` in apps/sdp-api/src/openapi/spec.ts,
+ * written by `openapi:generate` from `SDP_RELEASE_CHANNEL`) and `generate:api`
+ * copies it to src/generated/public-surface.json, committed at `experimental`.
  *
  * Free of runtime workspace imports (types only): the MDX pipeline
  * (source.config.ts) loads this file in a plain Node context.
@@ -22,7 +21,7 @@ export type PublicSurface = {
   releaseChannel: SdpReleaseChannel;
   modules: readonly SdpModule[];
   rampProviders: readonly RampProviderId[];
-  /** The custody providers the channel offers in at least one custody mode. */
+  /** The custody providers the public document names, which `<CustodyProviderTable />` lists. */
   custodyProviders: readonly CustodyProvider[];
   grantableActions: readonly { module: ActionModule; verbs: readonly ActionVerb[] }[];
   allModules: readonly SdpModule[];

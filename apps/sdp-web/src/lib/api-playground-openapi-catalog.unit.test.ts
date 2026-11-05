@@ -130,26 +130,18 @@ describe("API playground release channel", () => {
     expect(JSON.parse(body)).toMatchObject({ provider: expect.any(String) });
   });
 
-  it("offers only the custody providers the channel runs in the wallet forms", () => {
-    const wallets = buildWalletsPlaygroundEndpointConfigs({
-      connectedProviders: ["fireblocks", "privy"],
-      wallets: [],
-      t,
-    });
-    const providerOptions = (releaseChannel: "experimental" | "stable") =>
-      filterPlaygroundEndpointsToReleaseChannel(wallets, releaseChannel)
-        .find((endpoint) => endpoint.id === "create-wallet")
-        ?.bodyFields.find((field) => field.key === "provider")
+  it("offers only the custody providers the channel publishes", () => {
+    const providersIn = (releaseChannel: "stable" | "experimental") =>
+      filterPlaygroundEndpointsToReleaseChannel(
+        getOpenApiPlaygroundEndpoints("wallets"),
+        releaseChannel
+      )
+        .find((endpoint) => endpoint.id === "list-wallets")
+        ?.pathFields.find((field) => field.key === "provider")
         ?.options?.map((option) => option.value);
-    expect(providerOptions("experimental")).toEqual(["fireblocks", "privy"]);
-    expect(providerOptions("stable")).toEqual(["privy"]);
-
-    const initialize = filterPlaygroundEndpointsToReleaseChannel(
-      getOpenApiPlaygroundEndpoints("wallets"),
-      "stable"
-    ).find((endpoint) => endpoint.path === "/v1/wallets/initialize");
-    const body = initialize?.bodyFields.find((field) => field.key === "$body")?.defaultValue;
-    expect(JSON.parse(body ?? "null")).toEqual({ provider: "privy" });
+    expect(providersIn("stable")).toEqual(["privy"]);
+    expect(providersIn("experimental")).toContain("fireblocks");
+    expect(providersIn("experimental")).not.toContain("local");
   });
 
   it("uses the channel's generated transfer fields and response examples", () => {

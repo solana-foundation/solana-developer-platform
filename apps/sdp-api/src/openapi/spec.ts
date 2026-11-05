@@ -380,10 +380,11 @@ export function createPublicOpenApiDocument(options: PublicOpenApiDocumentOption
 
 /**
  * What a release channel's public surfaces may name, for consumers that cannot
- * load this package (the docs site's MDX pipeline): the modules, ramp providers
- * and custody providers the public document publishes, Earn's hold included,
- * the actions an API key may be granted in it (per module, in registry order),
- * the full vocabularies to validate tags against, and the rate limits every
+ * load this package (the docs site's MDX pipeline): the modules and ramp
+ * providers the public document publishes, Earn's hold included, the custody
+ * providers it names (in any mode), the actions
+ * an API key may be granted in it (per module, in registry order), the
+ * full vocabularies to validate tags against, and the rate limits every
  * channel enforces (`middleware/rate-limit.ts`), so the docs never restate them.
  */
 export type PublicSurfaceManifest = {

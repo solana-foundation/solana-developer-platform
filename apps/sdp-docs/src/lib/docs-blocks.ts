@@ -99,9 +99,9 @@ const BLOCKS = {
   CustodyProviderTable: (surface) =>
     table(
       ["Provider", "Description"],
-      DOCS_CUSTODY_PROVIDERS.filter((entry) =>
-        surface.custodyProviders.includes(entry.provider)
-      ).map((entry) => [`**${entry.name}**`, entry.description])
+      Object.entries(DOCS_CUSTODY_PROVIDERS)
+        .filter(([provider]) => surface.custodyProviders.some((id) => id === provider))
+        .map(([, entry]) => [`**${entry.name}**`, entry.description])
     ),
   ApiKeyGrantsTable: (surface) =>
     table(

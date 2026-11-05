@@ -35,7 +35,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"local\"\n}",
+            "defaultValue": "{\n  \"provider\": \"fireblocks\"\n}",
             "required": true
           }
         ],
@@ -102,13 +102,13 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"anchorage\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
+            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"privy_wallet_123\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
-            "walletId": "anchorage_wallet_123",
+            "walletId": "privy_wallet_123",
             "deleted": true
           },
           "meta": {
@@ -134,10 +134,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -276,10 +272,6 @@
             "required": false,
             "kind": "select",
             "options": [
-              {
-                "label": "local",
-                "value": "local"
-              },
               {
                 "label": "fireblocks",
                 "value": "fireblocks"
@@ -9761,35 +9753,6 @@
           "walletId": "privy_wallet_123"
         }
       },
-      "DELETE /v1/wallets": {
-        "id": "delete-wallet",
-        "operationId": "deleteWallet",
-        "title": "Delete wallet",
-        "method": "DELETE",
-        "path": "/v1/wallets",
-        "pathFields": [],
-        "bodyFields": [
-          {
-            "key": "$body",
-            "label": "JSON request body",
-            "description": "Generated from this operation's public OpenAPI request schema.",
-            "kind": "textarea",
-            "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"privy\",\n  \"walletId\": \"anchorage_wallet_123\"\n}",
-            "required": true
-          }
-        ],
-        "expectedResponse": {
-          "data": {
-            "walletId": "anchorage_wallet_123",
-            "deleted": true
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
-      },
       "GET /v1/wallets": {
         "id": "list-wallets",
         "operationId": "listWallets",
@@ -9932,11 +9895,6 @@
         "expectedResponse": {
           "data": {
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -10154,11 +10112,6 @@
         "expectedResponse": {
           "data": [
             {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -10221,11 +10174,6 @@
         "expectedResponse": {
           "data": {
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",
@@ -10320,11 +10268,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -10418,11 +10361,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -10516,11 +10454,6 @@
             ],
             "transfers": [
               {
-                "fireblocks": {
-                  "transactionId": "transaction_example",
-                  "status": "example",
-                  "subStatus": "example"
-                },
                 "id": "xfr_example",
                 "organizationId": "org_example",
                 "custodyWalletId": "cwlt_example",
@@ -10633,11 +10566,6 @@
               "updatedAt": "2025-01-01T00:00:00.000Z"
             },
             "transfer": {
-              "fireblocks": {
-                "transactionId": "transaction_example",
-                "status": "example",
-                "subStatus": "example"
-              },
               "id": "xfr_example",
               "organizationId": "org_example",
               "custodyWalletId": "cwlt_example",

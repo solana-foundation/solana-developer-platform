@@ -25,7 +25,6 @@ const CUSTODY_PARTNERS = {
   anchorage: { name: "Anchorage Digital", logo: "anchorage" },
   utila: { name: "Utila", logo: "utila" },
 } as const satisfies Record<CustodyProvider, Partner | null>;
-const PUBLISHED_CUSTODY_PROVIDERS = new Set(publicSurface.custodyProviders);
 
 const COMPLIANCE_PARTNERS = {
   range: { name: "Range", logo: "range" },
@@ -39,6 +38,9 @@ const RAMP_PARTNERS = {
   stripe: { name: "Stripe", logo: "stripe" },
 } as const satisfies Record<RampProviderId, Partner>;
 const PUBLISHED_RAMP_PROVIDERS = new Set(publicSurface.rampProviders);
+const PUBLISHED_CUSTODY_PROVIDERS: ReadonlySet<CustodyProvider> = new Set(
+  publicSurface.custodyProviders
+);
 
 const RPC_PARTNERS = {
   default: null,

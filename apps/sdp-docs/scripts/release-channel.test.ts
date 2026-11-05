@@ -33,7 +33,7 @@ const EXPERIMENTAL: PublicSurface = {
   releaseChannel: "experimental",
   modules: ["custody", "payments", "ramps", "issuance", "compliance"],
   rampProviders: ["stripe"],
-  custodyProviders: ["fireblocks", "privy"],
+  custodyProviders: ["fireblocks", "privy", "turnkey"],
   grantableActions: [
     { module: "transfers", verbs: ["read", "execute"] },
     { module: "onramp", verbs: ["read", "execute"] },
@@ -118,6 +118,21 @@ describe("docs follow the release channel", () => {
     assert.match(experimental, /issue-a-regulated-stablecoin/);
   });
 
+  it("tables only the custody providers the build publishes", () => {
+    const stable = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
+      surface: STABLE,
+    });
+    assert.match(stable, /\| \*\*Privy\*\* \|/);
+    assert.doesNotMatch(stable, /Fireblocks|Turnkey|Local/);
+
+    const experimental = expandDocsBlocks("<CustodyProviderTable />\n", "wallets.mdx", {
+      surface: EXPERIMENTAL,
+    });
+    assert.match(experimental, /\| \*\*Fireblocks\*\* \|/);
+    assert.match(experimental, /\| \*\*Turnkey\*\* \|/);
+    assert.doesNotMatch(experimental, /Anchorage/);
+  });
+
   it("tables the API's rate limits from the manifest", () => {
     const limits = expandDocsBlocks("<RateLimitTable />\n", "rate-limits.mdx", { surface: STABLE });
     assert.equal(
@@ -132,22 +147,6 @@ describe("docs follow the release channel", () => {
         "",
       ].join("\n")
     );
-  });
-
-  it("tables only the custody providers the build publishes", () => {
-    const block = "<CustodyProviderTable />\n";
-    assert.equal(
-      expandDocsBlocks(block, "setup-wallets.mdx", { surface: STABLE }),
-      [
-        "| Provider | Description |",
-        "| --- | --- |",
-        "| **Privy** | Embedded wallet infrastructure platform |",
-        "",
-      ].join("\n")
-    );
-    const experimental = expandDocsBlocks(block, "setup-wallets.mdx", { surface: EXPERIMENTAL });
-    assert.match(experimental, /\| \*\*Privy\*\* \|[^\n]*\n\| \*\*Fireblocks\*\* \|/);
-    assert.doesNotMatch(experimental, /Anchorage|Turnkey/);
   });
 
   it("renders the same blocks into the compiled page", () => {

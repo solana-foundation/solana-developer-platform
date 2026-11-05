@@ -1,5 +1,5 @@
 /**
- * Docs-owned descriptions of SDP's modules, ramp and custody providers and the action
+ * Docs-owned descriptions of SDP's modules, ramp providers and the action
  * modules an API key can be granted. Pages never list these by hand: the generated blocks in
  * docs-blocks.ts render them for whatever the build's release channel publishes
  * (src/generated/public-surface.json), so a module or provider appears in an
@@ -90,6 +90,29 @@ export const DOCS_TUTORIALS: readonly {
   },
 ];
 
+/**
+ * The custody providers `<CustodyProviderTable />` lists, in display order.
+ * Local signing is left out: it runs only in a self-hosted deployment, which
+ * the self-hosting pages cover.
+ */
+export const DOCS_CUSTODY_PROVIDERS = {
+  privy: { name: "Privy", description: "Embedded wallet infrastructure platform" },
+  fireblocks: { name: "Fireblocks", description: "Digital asset infrastructure company" },
+  coinbase_cdp: { name: "Coinbase CDP", description: "Embedded wallets for developers" },
+  para: { name: "Para", description: "Wallet and authentication suite" },
+  turnkey: { name: "Turnkey", description: "Non-custodial wallet infrastructure platform" },
+  dfns: { name: "DFNS", description: "Digital asset wallet infrastructure" },
+  ibm_haven: {
+    name: "IBM Digital Asset Haven",
+    description: "Institutional custody on IBM Digital Asset Haven",
+  },
+  anchorage: { name: "Anchorage", description: "Regulated institutional crypto custody" },
+  utila: { name: "Utila", description: "Vault-backed wallet signing through service accounts" },
+} as const satisfies Record<
+  Exclude<CustodyProvider, "local">,
+  { name: string; description: string }
+>;
+
 /** One ramp provider's capabilities; its page is /docs/payments/ramps-<provider>. */
 export type RampProviderEntry = {
   provider: RampProviderId;
@@ -131,40 +154,6 @@ export const DOCS_RAMP_PROVIDERS: readonly RampProviderEntry[] = [
  * the first published one (docs-blocks.ts).
  */
 export const ROTATE_PROVIDERS_TOKEN = '"moonpay"';
-
-/** One custody provider as the wallet guide describes it. */
-export type CustodyProviderEntry = {
-  provider: CustodyProvider;
-  name: string;
-  description: string;
-};
-
-/** The custody providers the wallet guide describes; the manifest picks which a build lists. */
-export const DOCS_CUSTODY_PROVIDERS: readonly CustodyProviderEntry[] = [
-  { provider: "privy", name: "Privy", description: "Embedded wallet infrastructure platform" },
-  {
-    provider: "fireblocks",
-    name: "Fireblocks",
-    description: "Digital asset infrastructure company",
-  },
-  {
-    provider: "coinbase_cdp",
-    name: "Coinbase CDP",
-    description: "Embedded wallets for developers",
-  },
-  { provider: "para", name: "Para", description: "Wallet and authentication suite" },
-  {
-    provider: "turnkey",
-    name: "Turnkey",
-    description: "Non-custodial wallet infrastructure platform",
-  },
-  { provider: "dfns", name: "DFNS", description: "Digital asset wallet infrastructure" },
-  {
-    provider: "anchorage",
-    name: "Anchorage",
-    description: "Regulated institutional crypto custody",
-  },
-];
 
 /** The ramp providers this build publishes, in catalog order. */
 export function publishedRampProviderIds(published: readonly RampProviderId[]): RampProviderId[] {

@@ -15,7 +15,6 @@
   ],
   "rampProviders": ["moonpay", "stripe"],
   "custodyProviders": [
-    "local",
     "fireblocks",
     "privy",
     "coinbase_cdp",

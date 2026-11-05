@@ -34,6 +34,9 @@ function publishedProviderAvailability(
     providers: availability.providers.filter((entry) => {
       if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
       if (entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) return false;
+      // "Offered", not the document's `isCustodyProviderPublished`: that never names
+      // `local`, which a self-hosted dashboard sets up through this route. The
+      // document's custody response enums are open, so a `local` entry still validates.
       if (entry.family === "custody" && !isCustodyProviderOffered(c.env, entry.provider)) {
         return false;
       }

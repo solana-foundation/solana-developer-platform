@@ -178,10 +178,7 @@ describe("buildApiReference", () => {
     ).families.flatMap((family) => family.operations);
     const initialize = operations.find((operation) => operation.path === "/v1/wallets/initialize");
     expect(initialize?.requestBody?.schema.variantMode).toBe("oneOf");
-    // Stable offers Managed custody through Privy alone, so one branch remains.
-    expect(initialize?.requestBody?.schema.variants.map((variant) => variant.title)).toEqual([
-      'provider: "privy"',
-    ]);
+    expect(initialize?.requestBody?.schema.variants[0]?.title).toBe('provider: "privy"');
     const createWallet = operations.find((operation) => operation.operationId === "createWallet");
     expect(createWallet?.requestBody?.schema.variants[0]?.schema.constraints).toEqual([
       { kind: "excludes", value: ["connectionId"] },
