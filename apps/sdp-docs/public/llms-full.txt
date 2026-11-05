@@ -28859,7 +28859,7 @@ Source: https://platform.solana.com/docs/reference/api/payments/simulate-sandbox
 
 To complete a sandbox on-ramp, pay in the provider's own hosted page or session with its test payment details.
 
-The checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.
+After the action check (`403`) and body validation (`400`), the checks run in order: a project outside Sandbox gets `403`, an unknown transfer `404`, a transfer that isn't an on-ramp `400`, one that isn't `awaiting_payment` `409`, and one whose provider the project can't use `403` or `503`.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `ramp_transfers.manage` action.
 
@@ -28881,7 +28881,7 @@ Names the sandbox on-ramp transfer. Only the transfer ID is accepted.
 
 ## Responses
 
-- **`400`** No ramp provider SDP integrates offers a simulated pay-in, or the transfer isn't an on-ramp.
+- **`400`** An invalid body, a transfer that isn't an on-ramp, or one that passes every check: no ramp provider SDP integrates offers a simulated pay-in.
 
   - **`error`** · `object` · required
 
