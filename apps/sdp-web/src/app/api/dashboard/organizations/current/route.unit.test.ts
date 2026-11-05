@@ -9,11 +9,11 @@ const mocks = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 
-import { GET } from "./route";
+import { GET as readProviderAccess } from "./provider-access/route";
+import { GET as readOrganization } from "./route";
 
 const ONBOARDING_PATH = "/v1/onboarding/status";
-const ORGANIZATION_PATH = "/v1/organizations/org_test%2F1";
-const ORGANIZATION = { id: "org_test/1", name: "Acme", settings: { alertEmails: false } };
+const UPSTREAM_READ = { id: "org_test/1", name: "Acme", settings: { alertEmails: false } };
 const LINKED = { linked: true, organization: { id: "org_test/1" } };
 const UPSTREAM_FAILURE = {
   error: { code: "SERVICE_UNAVAILABLE", message: "upstream unavailable" },
@@ -31,10 +31,6 @@ function upstreamPaths(fetchMock: MockInstance<typeof fetch>): string[] {
   return fetchMock.mock.calls.map(([input]) => pathOf(input));
 }
 
-function readCurrentOrganization(): Promise<Response> {
-  return GET(new Request("https://dashboard.example.com/api/dashboard/organizations/current"));
-}
-
 beforeEach(() => {
   vi.stubEnv("SDP_API_BASE_URL", "https://api.sdp.test");
   setApiRequest(SANDBOX_PROJECT.id);
@@ -49,22 +45,33 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("GET /api/dashboard/organizations/current", () => {
-  it("reads the onboarding status, then the organization it names, and answers with it", async () => {
+describe.each<[string, (request: Request) => Promise<Response>, string]>([
+  ["/api/dashboard/organizations/current", readOrganization, "/v1/organizations/org_test%2F1"],
+  [
+    "/api/dashboard/organizations/current/provider-access",
+    readProviderAccess,
+    "/v1/organizations/org_test%2F1/provider-access",
+  ],
+])("GET %s", (route, handle, readPath) => {
+  function readCurrentOrganization(): Promise<Response> {
+    return handle(new Request(`https://dashboard.example.com${route}`));
+  }
+
+  it("reads the onboarding status, then its path under the organization it names", async () => {
     const fetchMock = stubSdpApi((path) =>
-      Response.json({ data: path === ONBOARDING_PATH ? LINKED : ORGANIZATION })
+      Response.json({ data: path === ONBOARDING_PATH ? LINKED : UPSTREAM_READ })
     );
 
     const response = await readCurrentOrganization();
 
     expect(response.status).toBe(200);
     expectDashboardNoStore(response);
-    expect(await response.json()).toEqual({ data: ORGANIZATION });
-    expect(upstreamPaths(fetchMock)).toEqual([ONBOARDING_PATH, ORGANIZATION_PATH]);
+    expect(await response.json()).toEqual({ data: UPSTREAM_READ });
+    expect(upstreamPaths(fetchMock)).toEqual([ONBOARDING_PATH, readPath]);
   });
 
   it.each([[{ linked: false, organization: null }], [{ linked: true, organization: null }]])(
-    "answers 404 without reading an organization while onboarding says %j",
+    "answers 404 without reading under an organization while onboarding says %j",
     async (status) => {
       const fetchMock = stubSdpApi(() => Response.json({ data: status }));
 
@@ -78,13 +85,13 @@ describe("GET /api/dashboard/organizations/current", () => {
     }
   );
 
-  it.each([ONBOARDING_PATH, ORGANIZATION_PATH])(
+  it.each([ONBOARDING_PATH, readPath])(
     "passes sdp-api's refusal of %s through as it came",
     async (failingPath) => {
       stubSdpApi((path) =>
         path === failingPath
           ? Response.json(UPSTREAM_FAILURE, { status: 503 })
-          : Response.json({ data: path === ONBOARDING_PATH ? LINKED : ORGANIZATION })
+          : Response.json({ data: path === ONBOARDING_PATH ? LINKED : UPSTREAM_READ })
       );
 
       const response = await readCurrentOrganization();
