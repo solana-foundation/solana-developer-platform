@@ -25,11 +25,26 @@ test("output includes KEY=value lines for visible fields with values", () => {
 });
 
 test("UI-only selector keys are never emitted", () => {
-  const env = generateEnv(defaultValues());
+  const env = generateEnv({ ...defaultValues(), FEE_SPONSOR_CLUSTERS: "devnet" });
   assert.doesNotMatch(env, /^DATABASE_MODE=/m);
   assert.doesNotMatch(env, /^CACHE_MODE=/m);
   assert.doesNotMatch(env, /^SIGNING_PROVIDERS=/m);
   assert.doesNotMatch(env, /^POSTGRES_PASSWORD_MODE=/m);
+  assert.doesNotMatch(env, /^FEE_SPONSOR_CLUSTERS=/m);
+});
+
+test("the default .env names no Kora, and a chosen cluster gets its Kora pair", () => {
+  assert.doesNotMatch(generateEnv(defaultValues()), /^KORA_/m);
+
+  const env = generateEnv({
+    ...defaultValues(),
+    FEE_SPONSOR_CLUSTERS: "devnet",
+    KORA_DEVNET_URL: "https://kora.example.test",
+    KORA_DEVNET_RPC_URL: "https://devnet.rpc.example.test",
+  });
+  assert.match(env, /^KORA_DEVNET_URL=https:\/\/kora\.example\.test$/m);
+  assert.match(env, /^KORA_DEVNET_RPC_URL=https:\/\/devnet\.rpc\.example\.test$/m);
+  assert.doesNotMatch(env, /^KORA_MAINNET_/m);
 });
 
 test("deployment mode is emitted as the self_hosted constant", () => {
@@ -67,14 +82,16 @@ test("POSTGRES_PASSWORD is emitted even when the database is external", () => {
 });
 
 test("empty optional fields are omitted so runtime fallbacks apply", () => {
-  // local + native default: FEE_PAYER_PRIVATE_KEY is optional and blank here, so it
-  // must NOT be emitted (an empty value would defeat the native adapter's fallback).
+  // KORA_DEVNET_API_KEY is optional and blank here, so it must NOT be emitted
+  // (an empty KEY= defeats a runtime `env.KEY ?? default` fallback).
   const env = generateEnv({
     ...defaultValues(),
-    SIGNING_PROVIDER: "local",
-    CUSTODY_PRIVATE_KEY: "k",
+    FEE_SPONSOR_CLUSTERS: "devnet",
+    KORA_DEVNET_URL: "https://kora.example.test",
+    KORA_DEVNET_RPC_URL: "https://devnet.rpc.example.test",
+    KORA_DEVNET_API_KEY: "",
   });
-  assert.doesNotMatch(env, /^FEE_PAYER_PRIVATE_KEY=/m);
+  assert.doesNotMatch(env, /^KORA_DEVNET_API_KEY=/m);
 });
 
 test("Cloud KMS custody key is emitted when configured", () => {

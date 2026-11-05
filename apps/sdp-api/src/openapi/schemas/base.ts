@@ -133,6 +133,7 @@ const errorCodeSchema = z
     "NOT_FOUND",
     "CONFLICT",
     "RATE_LIMITED",
+    "PAYLOAD_TOO_LARGE",
     "SERVICE_UNAVAILABLE",
     "RPC_UNAVAILABLE",
     "INTERNAL_ERROR",

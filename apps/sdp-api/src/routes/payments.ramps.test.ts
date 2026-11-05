@@ -1235,6 +1235,68 @@ describe("Payments routes — ramps", () => {
     });
   });
 
+  describe("sandbox simulation", () => {
+    installStripeTestEnv();
+
+    async function seedAwaitingOnramp(transferId: string, provider: string): Promise<void> {
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers
+             (id, organization_id, project_id, wallet_id, custody_wallet_id, token, amount, type, direction, status, provider, provider_reference, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'USDC', '10', 'onramp', 'inbound', 'awaiting_payment', ?, ?, ?, ?)`
+        )
+        .bind(
+          transferId,
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
+          TEST_CUSTODY_WALLET_ID,
+          provider,
+          `${provider}_ref_simulate`,
+          now,
+          now
+        )
+        .run();
+    }
+
+    // The public document lists no 2xx for this route: pin that every live provider refuses.
+    it.each(["moonpay", "stripe"])(
+      "answers 400 for a %s on-ramp awaiting payment and leaves it unpaid",
+      async (provider) => {
+        const transferId = `xfr_simulate_${provider}`;
+        await seedAwaitingOnramp(transferId, provider);
+
+        const res = await app.request(
+          "/v1/payments/ramps/sandbox/simulate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({ transferId }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({
+          error: {
+            code: "BAD_REQUEST",
+            message: `Sandbox simulation is not available for provider: ${provider}.`,
+          },
+          meta: { requestId: expect.any(String) },
+        });
+        const row = await getDb(env)
+          .prepare("SELECT status FROM payment_transfers WHERE id = ?")
+          .bind(transferId)
+          .first<{ status: string }>();
+        expect(required(row).status).toBe("awaiting_payment");
+      }
+    );
+  });
+
   describe("metered quotas", () => {
     it("429s an estimate once the actor's metered quota is exhausted", async () => {
       await seedRateLimit(

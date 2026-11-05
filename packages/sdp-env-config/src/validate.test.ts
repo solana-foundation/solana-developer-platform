@@ -42,27 +42,25 @@ test("a valid select value has no error", () => {
   assert.equal(errors.ENVIRONMENT, undefined);
 });
 
-test("managed signing with native fees requires a fee payer key", () => {
+test("a Kora on a chosen cluster needs its RPC URL as well as its URL", () => {
   const errors = validateValues({
     ...defaultValues(),
-    SIGNING_PROVIDERS: "fireblocks",
-    SIGNING_PROVIDER: "fireblocks",
-    FEE_PAYMENT_PROVIDER: "native",
-    FEE_PAYER_PRIVATE_KEY: "",
+    FEE_SPONSOR_CLUSTERS: "devnet",
+    KORA_DEVNET_URL: "https://kora.example.test",
+    KORA_DEVNET_RPC_URL: "",
   });
-  assert.ok(errors.FEE_PAYER_PRIVATE_KEY);
+  assert.equal(errors.KORA_DEVNET_URL, undefined);
+  assert.ok(errors.KORA_DEVNET_RPC_URL);
+  // Mainnet was not chosen, so its required pair stays hidden and unvalidated.
+  assert.equal(errors.KORA_MAINNET_URL, undefined);
 });
 
-test("local signing with native fees does not require a fee payer key", () => {
-  const errors = validateValues({
-    ...defaultValues(),
-    SIGNING_PROVIDERS: "local",
-    SIGNING_PROVIDER: "local",
-    CUSTODY_PRIVATE_KEY: "k",
-    FEE_PAYMENT_PROVIDER: "native",
-    FEE_PAYER_PRIVATE_KEY: "",
-  });
-  assert.equal(errors.FEE_PAYER_PRIVATE_KEY, undefined);
+test("no Kora asks for no fee payment field", () => {
+  const errors = validateValues({ ...defaultValues(), FEE_SPONSOR_CLUSTERS: "" });
+  assert.deepEqual(
+    Object.keys(errors).filter((key) => key.startsWith("KORA_")),
+    []
+  );
 });
 
 test("utila signing requires Utila credentials", () => {
@@ -70,7 +68,6 @@ test("utila signing requires Utila credentials", () => {
     ...defaultValues(),
     SIGNING_PROVIDERS: "utila",
     SIGNING_PROVIDER: "utila",
-    FEE_PAYMENT_PROVIDER: "kora",
     UTILA_SERVICE_ACCOUNT_EMAIL: "",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY: "",
     UTILA_VAULT_ID: "",
@@ -88,7 +85,6 @@ test("valid utila signing config has no Utila field errors", () => {
     ...defaultValues(),
     SIGNING_PROVIDERS: "utila",
     SIGNING_PROVIDER: "utila",
-    FEE_PAYMENT_PROVIDER: "kora",
     UTILA_SERVICE_ACCOUNT_EMAIL: "service@vault.example.utilaserviceaccount.io",
     UTILA_SERVICE_ACCOUNT_PRIVATE_KEY:
       "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
