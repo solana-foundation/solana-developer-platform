@@ -112,10 +112,12 @@ describe("applyMembershipChange", () => {
       });
     });
     const staleRemoval = change(ADMIN_B, { kind: "remove", memberId: MEMBER_C.memberId });
+    // Observed before the commit: the refusal can land before `commit` returns.
+    const refused = expect(staleRemoval).rejects.toMatchObject(MISSING_MANAGE);
     await untilLockWaiters(db, { fragment: "ORDER BY id", count: 1 });
     await firstRemoval.commit();
 
-    await expect(staleRemoval).rejects.toMatchObject(MISSING_MANAGE);
+    await refused;
     expect(await activeAdminIds()).toEqual([{ id: ADMIN_A.memberId }, { id: MEMBER_C.memberId }]);
   });
 

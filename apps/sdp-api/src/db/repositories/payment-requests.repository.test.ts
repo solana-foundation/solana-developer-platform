@@ -647,6 +647,43 @@ describe("PaymentRequestsRepository (postgres)", () => {
       );
     });
 
+    it("refuses a signature once the request is paid and reports the paid status on its claim", async () => {
+      const request = await repo.createPaymentRequest(createInput({}));
+      await repo.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: ACCOUNT_A,
+        unsignedTransaction: "dHhB",
+        lastValidBlockHeight: 1_000n,
+        currentBlockHeight: 900n,
+      });
+      expect((await repo.getSponsoredTransactionClaim(request.id))?.requestStatus).toBe(
+        "awaiting_payment"
+      );
+      await seedTransfer("xfr_claim_paid");
+      await repo.markPaymentRequest({
+        requestId: request.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        status: "paid",
+        fulfilledByTransferId: "xfr_claim_paid",
+        paidLate: false,
+        chainRead: true,
+      });
+
+      expect(
+        await repo.storeSponsoredTransactionSignature({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhB",
+          signedTransaction: "c2lnQQ==",
+        })
+      ).toBe(false);
+      expect(await repo.getSponsoredTransactionClaim(request.id)).toMatchObject({
+        requestStatus: "paid",
+        signedTransaction: null,
+      });
+    });
+
     it("refuses a claim on a request that is not awaiting payment", async () => {
       const request = await repo.createPaymentRequest(createInput({}));
       await repo.cancelPaymentRequest(cancelInput(request, null));

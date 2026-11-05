@@ -9,8 +9,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
-import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
-import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
+import { isKnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/(session)/dashboard/[projectId]/custody/wallet-provider-mark";
 import {
   DashboardHeaderAction,
   DashboardTopBar,
@@ -428,7 +428,7 @@ export function DashboardShell({
     ramps: rampsEnabled,
   } = flags;
   const t = useTranslations();
-  const { isLoaded, isSignedIn, orgId } = useAuth();
+  const { isSignedIn, orgId } = useAuth();
   const pathname = useDashboardPathname();
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
@@ -502,6 +502,8 @@ export function DashboardShell({
       ? pageTitleOverride
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
+  // A page can insist on its title where the route hides it: a missing page has to say so.
+  const titleAlwaysVisible = activeTitleOverride?.alwaysVisible === true;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs && {
     ...pageConfig.headerTabs,
@@ -646,15 +648,9 @@ export function DashboardShell({
     }
   }, [pathname]);
 
-  if (!isLoaded) {
-    return (
-      <DashboardLoadingScreen pathname={pathname} flags={flags} isSidebarOpen={isSidebarOpen} />
-    );
-  }
-
   if (!isSignedIn) {
     return (
-      <main className="min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary">
+      <main className="min-h-dvh bg-[var(--sdp-shell-bg)] p-0 text-primary">
         <div className="mx-auto max-w-3xl border border-border-subtle bg-surface-raised/70 p-6">
           <h1 className="text-[34px] leading-[1.05] font-medium tracking-[-0.3px]">
             {t("Shared.dashboardShell.signInToContinue")}
@@ -694,10 +690,12 @@ export function DashboardShell({
       data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
-        "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
+        // dvh, not vh: a phone browser's vh is its height with the toolbars hidden, so a vh shell
+        // put a locked page's bottom (a flow's footer) under the toolbar while it shows.
+        "min-h-dvh bg-[var(--sdp-shell-bg)] p-0 text-primary",
         // clip, not hidden: a hidden box can still be scrolled by the browser (focusing a
         // control below the fold), which shifts the locked page up and leaves a gap under it.
-        shouldLockShellViewport ? "h-screen overflow-clip" : "",
+        shouldLockShellViewport ? "h-dvh overflow-clip" : "",
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
@@ -711,7 +709,7 @@ export function DashboardShell({
             <NetworkDebugPanel />
             <div
               className={[
-                "mx-auto grid min-h-screen w-full max-w-none gap-0",
+                "mx-auto grid min-h-dvh w-full max-w-none gap-0",
                 shouldLockViewportScroll ? "h-full" : "",
                 "md:grid-cols-[auto_1fr]",
               ].join(" ")}
@@ -721,7 +719,7 @@ export function DashboardShell({
                 style={{
                   width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
                 }}
-                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
+                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:justify-between"
               >
                 <ThemeScopeProvider scope={sidebarScope}>
                   <DashboardSidebarContent
@@ -804,14 +802,16 @@ export function DashboardShell({
                       : "px-3 py-5 md:p-6"
                 )}
               >
+                {/* One frame per route. Next already remounts the page on a route change, so the
+                header and content wrappers were the only nodes kept across it; the header's height
+                and column differ from route to route, and a kept frame moved under the new page
+                (a layout shift to the browser). Keyed, the browser sees a page replaced. */}
                 <div
+                  key={pathname}
+                  data-dashboard-page-frame=""
                   className={[
                     "min-w-0 w-full",
-                    shouldLockViewportScroll
-                      ? "flex min-h-0 flex-1 flex-col"
-                      : pageConfig.hideTitleOnMobile
-                        ? "space-y-4 sm:space-y-6"
-                        : "space-y-6",
+                    shouldLockViewportScroll ? "flex min-h-0 flex-1 flex-col" : "space-y-6",
                   ].join(" ")}
                 >
                   {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
@@ -823,7 +823,7 @@ export function DashboardShell({
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop
+                        pageConfig.flushTopOnDesktop && !titleAlwaysVisible
                           ? "pt-6 md:pt-0"
                           : stacksBackAboveTitle
                             ? "pt-6 md:pt-10"
@@ -849,11 +849,9 @@ export function DashboardShell({
                         <DashboardTopBar
                           setMobileSidebarOpen={setMobileSidebarOpen}
                           titleVisibility={
-                            pageConfig.hideTitle
+                            pageConfig.hideTitle && !titleAlwaysVisible
                               ? "screen-reader-only"
-                              : pageConfig.hideTitleOnMobile
-                                ? "desktop-only"
-                                : "visible"
+                              : "visible"
                           }
                           title={pageTitle}
                           titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}
@@ -861,7 +859,9 @@ export function DashboardShell({
                           hasHeaderTabs={hasHeaderTabs}
                           action={headerAction}
                           above={stacksBackAboveTitle ? backAction : undefined}
-                          mark={activeTitleOverride?.mark}
+                          mark={
+                            activeTitleOverride ? activeTitleOverride.mark : pageConfig.titleMark
+                          }
                           layout={isRefresh ? "refresh" : "base"}
                           utilities={
                             demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined

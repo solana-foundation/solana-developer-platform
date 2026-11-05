@@ -1,4 +1,5 @@
 import { expect, type Locator, test } from "@playwright/test";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   bootstrapLocalWalletFixtures,
   gotoProjectPage,
@@ -46,7 +47,13 @@ test.describe("overview census", () => {
             activityRows: [],
             activityError: null,
             activityNotice: null,
-            todaysVolume: 123_456_789,
+            // USDC is a well-known stablecoin, so the figure prices without a balance row.
+            todaysVolume: {
+              transferCount: 1,
+              amountByMint: { [WELL_KNOWN_TOKENS.USDC.mints.devnet.address]: "123456789" },
+              complete: true,
+              coversDay: true,
+            },
             todaysVolumeError: null,
           },
         },

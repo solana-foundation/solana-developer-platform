@@ -1,6 +1,8 @@
 import type { TokenTransactionListItem } from "@sdp/types/tokens";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import * as homePageData from "@/app/dashboard/[projectId]/home-page.data";
+import * as homePageData from "@/app/(session)/dashboard/[projectId]/home-page.data";
+import { expectDashboardNoStore } from "@/test/dashboard-response";
 
 const mocks = vi.hoisted(() => ({
   issuance: vi.fn(),
@@ -10,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
-vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
+vi.mock("@/app/(session)/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
   WALLET_TRANSFERS_DEADLINE_MS: 2_500,
@@ -32,10 +34,19 @@ import { GET } from "./route";
 
 const TODAY = "2026-10-23T09:00:00.000Z";
 const YESTERDAY = "2026-10-22T09:00:00.000Z";
+const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 /** A transfer with the fields the row builder and the volume read. */
-function transfer(id: string, createdAt: string, amount: string) {
-  return { id, createdAt, amount, status: "completed", direction: "outbound", destination: "D" };
+function transfer(id: string, createdAt: string, amount: string, status = "completed") {
+  return {
+    id,
+    createdAt,
+    amount,
+    status,
+    token: USDC_MINT,
+    direction: "outbound",
+    destination: "D",
+  };
 }
 
 const LISTED_MINT: TokenTransactionListItem = {
@@ -89,6 +100,8 @@ describe("GET /api/dashboard/home/activity", () => {
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
     expect(fetchOrgIssuanceActivity).not.toHaveBeenCalled();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).not.toHaveBeenCalled();
     expect(buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
@@ -161,7 +174,56 @@ describe("GET /api/dashboard/home/activity", () => {
 
     expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledOnce();
     expect(body.data.activityRows).toHaveLength(2);
-    expect(body.data).toMatchObject({ todaysVolume: 125, todaysVolumeError: null });
+    expect(body.data).toMatchObject({
+      todaysVolume: {
+        transferCount: 1,
+        amountByMint: { [USDC_MINT]: "125" },
+        complete: true,
+        coversDay: true,
+      },
+      todaysVolumeError: null,
+    });
+  });
+
+  it("leaves a failed transfer out of today's volume: it moved nothing", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [transfer("transfer_1", TODAY, "125"), transfer("transfer_2", TODAY, "50", "failed")],
+      walletsNotLoaded: 0,
+    });
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data.activityRows).toHaveLength(2);
+    expect(body.data.todaysVolume).toEqual({
+      transferCount: 1,
+      amountByMint: { [USDC_MINT]: "125" },
+      complete: true,
+      coversDay: true,
+    });
+  });
+
+  it("calls the volume a floor when the read's full window never leaves today", async () => {
+    // The read asks for 20; all 20 from today may have cut off earlier transfers from today.
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: Array.from({ length: 20 }, (_, index) => transfer(`transfer_${index}`, TODAY, "1")),
+      walletsNotLoaded: 0,
+    });
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledWith(expect.anything(), 20, {
+      walletDeadlineMs: 2_500,
+    });
+    expect(body.data.todaysVolume).toEqual({
+      transferCount: 20,
+      amountByMint: { [USDC_MINT]: "20" },
+      complete: true,
+      coversDay: false,
+    });
   });
 
   // The list can say it is partial; a total cannot, since a sum over some wallets is smaller.
@@ -223,6 +285,8 @@ describe("GET /api/dashboard/home/activity", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
+    expectDashboardNoStore(response);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe("trace_test");
     expect(body.error).toBe("client unavailable");
   });
 });

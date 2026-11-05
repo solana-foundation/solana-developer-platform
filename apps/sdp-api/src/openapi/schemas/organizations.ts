@@ -127,6 +127,11 @@ const invitationSchema = z
       description: "Invitation expiration timestamp.",
       example: "2025-02-01T00:00:00.000Z",
     }),
+    clerkInvitationId: z.string().nullable().openapi({
+      description:
+        "The emailed invitation's id, or null when the address already belongs to the organization's sign-in account, typically from accepting an earlier invitation that then expired. No email is sent then; the invitation admits them at their next sign-in.",
+      example: "orginv_2abc",
+    }),
   })
   .openapi({ description: "Invitation summary." });
 

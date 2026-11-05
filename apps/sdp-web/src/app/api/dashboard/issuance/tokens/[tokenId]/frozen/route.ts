@@ -1,6 +1,6 @@
 import type { FrozenAccount } from "@sdp/types/tokens";
-import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -17,7 +17,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     );
     if (!response.ok) {
       const body = await response.text();
-      return NextResponse.json(
+      return dashboardJson(
         {
           data: [],
           error: `Frozen accounts API ${response.status}: ${parseErrorMessage(body)}`,
@@ -31,13 +31,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       data?: FrozenAccount[];
       meta?: { total?: number };
     };
-    return NextResponse.json({
+    return dashboardJson({
       data: Array.isArray(payload.data) ? payload.data : [],
       error: null,
       total: typeof payload.meta?.total === "number" ? payload.meta.total : 0,
     });
   } catch (error) {
-    return NextResponse.json(
+    return dashboardJson(
       {
         data: [],
         error: error instanceof Error ? error.message : "Request failed",

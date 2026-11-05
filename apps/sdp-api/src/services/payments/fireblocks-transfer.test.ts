@@ -147,6 +147,9 @@ afterEach(() => vi.restoreAllMocks());
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+/** The custody policy refusal's safe message, shared with signing errors (HOO-2478). */
+const FIREBLOCKS_POLICY_REFUSAL =
+  "Fireblocks blocked signing due to a wallet policy. Review the policy in Fireblocks or adjust the request.";
 const paymentApp = createApp({
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
@@ -251,6 +254,10 @@ async function send(
     },
     testEnv
   );
+}
+/** Lets a same-key retry reach the transfer row, as one does once its stored answer expires. */
+async function expireIdempotencyKey(key: string) {
+  await getDb(env).execute("DELETE FROM idempotency_keys WHERE idempotency_key = ?", [key]);
 }
 async function refresh(id: string) {
   await getDb(env).execute(
@@ -553,8 +560,52 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(await refresh(transfer.id)).toMatchObject({
       status: "failed",
       signature: null,
-      error: expect.stringContaining("BLOCKED_BY_POLICY"),
+      error: FIREBLOCKS_POLICY_REFUSAL,
+      fireblocks: { status: "BLOCKED", subStatus: "BLOCKED_BY_POLICY" },
     });
+  });
+  it.each([
+    ["BLOCKED", "CUSTODY_POLICY_REFUSED", 422, FIREBLOCKS_POLICY_REFUSAL],
+    [
+      "REJECTED",
+      "TRANSACTION_FAILED",
+      400,
+      "Fireblocks REJECTED. Review this transaction in Fireblocks.",
+    ],
+  ])(
+    "records a %s refresh as %s and answers it again once the key expires",
+    async (status, code, httpStatus, error) => {
+      const mock = await ready();
+      const key = `fireblocks-refresh-${status}`;
+      const response = await send(key);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const transfer = (await response.json()).data.transfer;
+      providerStatus = status;
+      expect(await refresh(transfer.id)).toMatchObject({ status: "failed", error });
+      await expireIdempotencyKey(key);
+
+      const replay = await send(key);
+      expect(replay.status).toBe(httpStatus);
+      const replayError = (await replay.json()).error;
+      expect(replayError).toMatchObject({ code, message: expect.stringContaining(error) });
+      expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+  it("answers an immediate policy block as CUSTODY_POLICY_REFUSED and replays it without another POST", async () => {
+    const mock = await ready();
+    providerStatus = "BLOCKED";
+    createResultPatch = { subStatus: "BLOCKED_BY_POLICY", note: "private provider text" };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await send();
+      expect(response.status).toBe(422);
+      const raw = await response.text();
+      expect(JSON.parse(raw).error).toEqual({
+        code: "CUSTODY_POLICY_REFUSED",
+        message: FIREBLOCKS_POLICY_REFUSAL,
+      });
+      expect(raw).not.toContain("private provider text");
+    }
+    expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
   it("does not expose credentials and blocks another project from reading or executing this wallet", async () => {
     const mock = await ready();
@@ -740,8 +791,8 @@ describe("native Fireblocks BYOK payment routes", () => {
         grants: ["transfers.execute"],
       });
       token = raw;
-      const original = AuditService.prototype.beginCritical;
-      vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+      const original = AuditService.prototype.beginCriticalWithin;
+      vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
         this: AuditService,
         ...args
       ) {
@@ -788,8 +839,8 @@ describe("native Fireblocks BYOK payment routes", () => {
   ] as const)("refuses %s changed during preparation without a provider POST", async (change) => {
     const mock = await ready();
     const db = getDb(env);
-    const original = AuditService.prototype.beginCritical;
-    vi.spyOn(AuditService.prototype, "beginCritical").mockImplementation(async function (
+    const original = AuditService.prototype.beginCriticalWithin;
+    vi.spyOn(AuditService.prototype, "beginCriticalWithin").mockImplementation(async function (
       this: AuditService,
       ...args
     ) {

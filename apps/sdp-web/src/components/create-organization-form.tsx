@@ -6,7 +6,7 @@ import { Input } from "@sdp/ui/input";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { createOrganization } from "@/app/dashboard/create-organization-actions";
+import { createOrganization } from "@/app/(session)/dashboard/create-organization-actions";
 import { useTranslations } from "@/i18n/provider";
 
 /**
@@ -63,10 +63,13 @@ export function CreateOrganizationForm() {
           onChange={(event) => setName(event.target.value)}
         />
       </div>
-      <Button type="submit" className="w-full" disabled={isPending || trimmedName.length === 0}>
-        {isPending
-          ? t("Shared.SharedComponents.creatingOrganization")
-          : t("Shared.SharedComponents.createOrganizationSubmit")}
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={trimmedName.length === 0}
+        loading={isPending}
+      >
+        {t("Shared.SharedComponents.createOrganizationSubmit")}
       </Button>
     </form>
   );

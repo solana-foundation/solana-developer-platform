@@ -57,8 +57,22 @@ const CREDENTIAL_KEYS = new Set([
 // separators from the `x-api-key` header to `xapikey`, which an exact match
 // would miss — and that header is exactly what lands in a Sentry
 // `request.headers` payload. `passphrase` rides here rather than the exact set
-// alone so `walletPassphrase` is covered too.
-const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "passphrase", "token", "pem", "apikey"];
+// alone so `walletPassphrase` is covered too. `authorization`, `cookie` and
+// `credential` are suffixes so a prefixed header (`proxy-authorization`,
+// `x-session-cookie`) is caught in an object exactly as it is in a string.
+const CREDENTIAL_KEY_SUFFIXES = [
+  "secret",
+  "password",
+  "passphrase",
+  "token",
+  "pem",
+  "apikey",
+  "authorization",
+  "cookie",
+  "cookies",
+  "credential",
+  "credentials",
+];
 
 // Key-material names that no suffix or exact rule above catches. `secretKey`
 // is the literal field a Solana keypair JSON file uses for the full 64-byte
@@ -267,6 +281,20 @@ export function isCredentialKey(key: string): boolean {
     CREDENTIAL_KEYS.has(normalized) ||
     CREDENTIAL_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix)) ||
     CREDENTIAL_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))
+  );
+}
+
+// Credentials whose canonical value is whitespace-separated words — a BIP-39
+// mnemonic, a passphrase — so an assignment in free text (`seed=word word`)
+// redacts every word, not only the first. Bare `seed` is exact here too.
+const FREE_TEXT_CREDENTIAL_FRAGMENTS = ["mnemonic", "passphrase", "password", "seedphrase"];
+
+/** A credential key whose value may be several space-separated words. */
+export function isFreeTextCredentialKey(key: string): boolean {
+  const normalized = normalizeKey(key);
+  return (
+    normalized === "seed" ||
+    FREE_TEXT_CREDENTIAL_FRAGMENTS.some((fragment) => normalized.includes(fragment))
   );
 }
 

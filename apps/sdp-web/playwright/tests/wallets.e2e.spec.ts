@@ -333,14 +333,14 @@ test.describe
       expect(await pageGeometry()).toEqual(mobileBaseline);
     });
 
-    test("wallet setup routes preserve provider selection and aliases", async ({
+    test("wallet setup asks everything on one screen and keeps its footer in place", async ({
       browser,
       page,
     }, testInfo) => {
       const projectId = (await provisionLinkedOrgProjects(browser)).sandbox;
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       const setupActions = page.locator("[data-wallet-setup-flow] [data-wizard-actions]");
@@ -348,10 +348,13 @@ test.describe
         "[data-wallet-setup-flow] [data-wizard-scroll-region]"
       );
       const cancelButton = page.getByRole("button", { name: "Cancel" });
-      const nextButton = page.getByRole("button", { name: "Continue", exact: true });
+      const createButton = page.getByRole("button", { name: /^Create wallet/ });
+      const walletLabelInput = page.getByLabel("Wallet label");
       await expect(setupActions).toBeVisible();
       await expect(cancelButton).toBeVisible();
-      await expect(nextButton).toBeDisabled();
+      await expect(createButton).toBeDisabled();
+      // The label is asked from the start, so no answer above it pops it in.
+      await expect(walletLabelInput).toBeVisible();
 
       const desktopScreenshotPath = testInfo.outputPath("wallet-create-desktop.png");
       await page.screenshot({ path: desktopScreenshotPath });
@@ -374,17 +377,19 @@ test.describe
       const scrolledActionsBox = await setupActions.boundingBox();
       expect(scrolledActionsBox?.y).toBe(desktopActionsBox?.y);
 
-      const privyProvider = page.getByRole("radio", { name: /Privy/ });
+      const privyProvider = page.getByRole("radio", { name: /^Privy/ });
       await privyProvider.focus();
       await page.keyboard.press("Space");
       await expect(privyProvider).toBeChecked();
-      await expect(nextButton).toBeEnabled();
-      await nextButton.click();
-      await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
-      const custodyModeSelect = page.getByRole("combobox", { name: "Custody mode" });
-      await custodyModeSelect.click();
-      await page.getByRole("option", { name: "Managed", exact: true }).click();
-      await expect(page.getByLabel("Wallet label")).toBeVisible();
+      // A fresh project offers Privy either way, so whose account holds the keys is asked next.
+      const managedAnswer = page.getByRole("radio", { name: /^SDP's Privy account/ });
+      await expect(managedAnswer).toBeVisible();
+      await walletLabelInput.fill("Setup layout check");
+      await expect(createButton).toBeDisabled();
+      await managedAnswer.focus();
+      await page.keyboard.press("Space");
+      await expect(managedAnswer).toBeChecked();
+      await expect(createButton).toBeEnabled();
 
       const detailsScreenshotPath = testInfo.outputPath("wallet-create-details-desktop.png");
       await page.screenshot({ path: detailsScreenshotPath });
@@ -393,23 +398,20 @@ test.describe
         contentType: "image/png",
       });
 
-      await page.getByRole("button", { name: "Back", exact: true }).click();
-      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible();
-      await expect(privyProvider).toBeChecked();
+      // Something was typed, so Cancel asks before throwing it away.
       await cancelButton.click();
+      await page.getByRole("button", { name: "Leave", exact: true }).click();
       await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"));
 
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup?provider=privy");
-      await expect(custodyModeSelect).toBeVisible({
+      await expect(managedAnswer).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await custodyModeSelect.click();
-      await page.getByRole("option", { name: "Managed", exact: true }).click();
-      await expect(page.getByLabel("Wallet label")).toBeVisible();
+      await expect(privyProvider).toBeChecked();
 
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       await expect(setupActions).toBeVisible();
@@ -433,10 +435,7 @@ test.describe
       const mobileActionsAfterScroll = await setupActions.boundingBox();
       expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
       // Every provider the project can use is a choice in the list; the last one stays reachable.
-      const lastProvider = setupScrollRegion
-        .getByRole("radio")
-        .last()
-        .locator("xpath=ancestor::label");
+      const lastProvider = setupScrollRegion.locator("[data-wallet-provider]").last();
       await expect(lastProvider).toBeVisible();
       const mobileScrollBox = await setupScrollRegion.boundingBox();
       const lastProviderBox = await lastProvider.boundingBox();
@@ -452,7 +451,7 @@ test.describe
       });
     });
 
-    test("wallet setup Enter advances without creating and final Enter creates once", async ({
+    test("wallet setup Enter on a choice creates nothing and Enter in the label creates once", async ({
       browser,
       page,
     }) => {
@@ -488,29 +487,36 @@ test.describe
         }
       });
 
-      const advanceProviderWithEnter = async () => {
-        const privyProvider = page.getByRole("radio", { name: /Privy/ });
+      // Choosing is not confirming: Enter on a provider, or on whose account, leaves the page
+      // as it is.
+      const choosePrivyWithEnter = async () => {
+        const privyProvider = page.getByRole("radio", { name: /^Privy/ });
         await privyProvider.focus();
         await page.keyboard.press("Space");
         await expect(privyProvider).toBeChecked();
         await page.keyboard.press("Enter");
-        await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
+        await expect(page.getByLabel("Wallet label")).toBeVisible();
+        const managedAnswer = page.getByRole("radio", { name: /^SDP's Privy account/ });
+        await managedAnswer.focus();
+        await page.keyboard.press("Space");
+        await expect(managedAnswer).toBeChecked();
+        await page.keyboard.press("Enter");
         expect(serverActionRequestCount).toBe(0);
       };
 
       await page.setViewportSize({ width: 390, height: 844 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await advanceProviderWithEnter();
+      await choosePrivyWithEnter();
 
       await page.setViewportSize({ width: 1280, height: 900 });
       await gotoProjectPage(page, projectId, "/dashboard/wallets/setup");
-      await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
+      await expect(page.getByRole("heading", { level: 2, name: "Create wallet" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      await advanceProviderWithEnter();
+      await choosePrivyWithEnter();
 
       const walletLabelInput = page.getByLabel("Wallet label");
       await walletLabelInput.fill(walletLabel);
@@ -518,7 +524,8 @@ test.describe
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
 
-      await expect(page).toHaveURL(projectHref(projectId, "/dashboard/wallets"), {
+      // The new wallet opens on its own page.
+      await expect(page).toHaveURL(new RegExp(`/dashboard/${projectId}/wallets/[^/?#]+$`), {
         timeout: E2E_POLL_TIMEOUT_MS,
       });
       expect(serverActionRequestCount).toBe(1);

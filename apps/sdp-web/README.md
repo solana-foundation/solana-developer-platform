@@ -158,14 +158,14 @@ Changes to `src/app/`, `src/components/`, and `src/lib/` automatically reload in
 
 ### Adding a New Page
 
-1. Create file in `src/app/dashboard/your-page/page.tsx`
+1. Create file in `src/app/(session)/dashboard/your-page/page.tsx`
 2. Use Clerk's `useAuth()` hook for authentication
 3. Proxy requests to SDP API via `/api/dashboard/*`
 
 Example:
 
 ```typescript
-// src/app/dashboard/users/page.tsx
+// src/app/(session)/dashboard/users/page.tsx
 "use client";
 import { useAuth } from "@clerk/nextjs";
 

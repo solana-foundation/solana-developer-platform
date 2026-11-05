@@ -447,5 +447,5 @@ pnpm --filter @sdp/earn typecheck
 
 API-layer earn tests (routes, repository, availability) live in
 `apps/sdp-api` and run under vitest + testcontainers. Canonical web route files
-live in `apps/sdp-web/src/app/dashboard/markets/embedded-yield`; shared internal
-module tests remain in `apps/sdp-web/src/app/dashboard/markets/earn`.
+live in `apps/sdp-web/src/app/(session)/dashboard/markets/embedded-yield`; shared internal
+module tests remain in `apps/sdp-web/src/app/(session)/dashboard/markets/earn`.

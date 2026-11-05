@@ -1,7 +1,7 @@
 # Refresh design checks (B1-B9)
 
 Dashboard checks for putting a module's pages on the 2026 refresh design.
-`web/` = `apps/sdp-web/src/`, `dash/` = `web/app/dashboard/[projectId]/`,
+`web/` = `apps/sdp-web/src/`, `dash/` = `web/app/(session)/dashboard/[projectId]/`,
 `ui/` = `packages/sdp-ui/src/`. Visual values come from
 `packages/sdp-design-tokens` (README: layers, the `refresh:` variant, page
 column); structural taste comes from `.agents/skills/sdp-ui-designer` (its CSS

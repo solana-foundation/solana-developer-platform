@@ -613,6 +613,38 @@ export function criticalOutcomeEntry(
   };
 }
 
+/** Refuses an intent filed under an organization other than the authenticated caller's. */
+function assertIntentOrganization(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): void {
+  const auth = getOptionalAuth(c);
+  if (
+    auth !== null &&
+    entry.organizationId !== undefined &&
+    entry.organizationId !== auth.organizationId
+  ) {
+    throw forbidden("Audit intent names an organization other than the caller's");
+  }
+}
+
+/** The ledger record that admits the critical operation `entry` describes under `intentId`. */
+function criticalIntentRecord(entry: AuditLogEntry, intentId: string): AuditLogEntry {
+  return {
+    organizationId: entry.organizationId,
+    action: "maintenance",
+    resourceType: "audit_ledger",
+    resourceId: intentId,
+    metadata: {
+      auditPhase: "intent",
+      target: {
+        action: entry.action,
+        resourceType: entry.resourceType,
+        resourceId: entry.resourceId ?? null,
+        metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
+      },
+    },
+    status: "success",
+  };
+}
+
 export class AuditService {
   constructor(
     private db: DatabaseClient,
@@ -746,32 +778,37 @@ export class AuditService {
     entry: AuditLogEntry,
     options: { intentId?: string } = {}
   ): Promise<AuditIntent> {
-    const auth = getOptionalAuth(c);
-    if (
-      auth !== null &&
-      entry.organizationId !== undefined &&
-      entry.organizationId !== auth.organizationId
-    ) {
-      throw forbidden("Audit intent names an organization other than the caller's");
-    }
+    assertIntentOrganization(c, entry);
     const intentId = options.intentId ?? `aint_${crypto.randomUUID()}`;
-    await this.log(c, {
-      organizationId: entry.organizationId,
-      action: "maintenance",
-      resourceType: "audit_ledger",
-      resourceId: intentId,
-      metadata: {
-        auditPhase: "intent",
-        target: {
-          action: entry.action,
-          resourceType: entry.resourceType,
-          resourceId: entry.resourceId ?? null,
-          metadata: entry.metadata ? scrubAuditMetadata(entry.metadata) : null,
-        },
-      },
-      status: "success",
-    });
+    await this.log(c, criticalIntentRecord(entry, intentId));
     return { id: intentId, entry };
+  }
+
+  /**
+   * `beginCritical` whose intent commits in one transaction with `link`, the
+   * write that records the intent where a later job finds it to close it
+   * (`logWithin` rules apply to `link`). The intent and its link are durable
+   * together or not at all, so no crash between them strands an intent.
+   *
+   * @param c - The request context, for the actor and the authenticated organization.
+   * @param entry - The operation the intent admits.
+   * @param link - Records the intent id; false when there was nothing to record it on.
+   * @returns The durable intent, or null when `link` returned false and nothing was written.
+   * @throws AppError `FORBIDDEN` when the entry names an organization other than the
+   *   authenticated caller's.
+   */
+  async beginCriticalWithin(
+    c: Context<{ Bindings: Env }>,
+    entry: AuditLogEntry,
+    link: (tx: DatabaseClient, intentId: string) => Promise<boolean>
+  ): Promise<AuditIntent | null> {
+    assertIntentOrganization(c, entry);
+    const intentId = `aint_${crypto.randomUUID()}`;
+    const linked = await this.logWithin(c, async (tx) => {
+      const recorded = await link(tx, intentId);
+      return { entry: recorded ? criticalIntentRecord(entry, intentId) : null, result: recorded };
+    });
+    return linked ? { id: intentId, entry } : null;
   }
 
   /**

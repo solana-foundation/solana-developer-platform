@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
+import { dashboardJson } from "@/lib/dashboard-response";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
@@ -18,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
 
     if (!response.ok) {
       const body = await response.text();
-      return NextResponse.json(
+      return dashboardJson(
         {
           labels: [],
           total: 0,
@@ -32,13 +32,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       data?: { labels?: string[]; total?: number };
     };
 
-    return NextResponse.json({
+    return dashboardJson({
       labels: Array.isArray(payload.data?.labels) ? payload.data.labels : [],
       total: typeof payload.data?.total === "number" ? payload.data.total : 0,
       error: null,
     });
   } catch (error) {
-    return NextResponse.json(
+    return dashboardJson(
       { labels: [], total: 0, error: error instanceof Error ? error.message : "Request failed" },
       { status: 500 }
     );
