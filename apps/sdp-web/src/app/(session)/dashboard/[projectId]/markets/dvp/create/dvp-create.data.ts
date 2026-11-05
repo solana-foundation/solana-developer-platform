@@ -4,7 +4,11 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { useMemo } from "react";
 import { z } from "zod";
 import { dvpQueryKeys } from "@/app/(session)/dashboard/[projectId]/markets/dvp/dvp-query-key";
-import { useWalletSummaries } from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
+import {
+  type IssuedTokenSymbol,
+  useIssuedTokens,
+  useWalletSummaries,
+} from "@/app/(session)/dashboard/[projectId]/payments/shared-reads";
 import { useDashboardKeyScope, useDashboardRead } from "@/lib/dashboard-swr";
 
 /**
@@ -82,22 +86,8 @@ export interface DvpCreateContext {
   error: string | null;
 }
 
-/**
- * The subset of the issuance token listing this form uses. The list carries no token program and
- * its `extensions` is an object about the permanent delegate, NOT the Token-2022 extension set. So
- * it cannot tell us whether DvP will accept a mint, and pretending otherwise would put a confident
- * wrong answer in front of someone.
- */
-const tokenRowSchema = z.object({
-  mintAddress: z.string().nullable(),
-  name: z.string().nullable(),
-  symbol: z.string().nullable(),
-  decimals: z.number().int().nonnegative().nullable(),
-});
-
-type TokenRow = z.infer<typeof tokenRowSchema>;
-
-const tokensResponseSchema = z.object({ data: z.array(tokenRowSchema) });
+/** A deployment without Issuance has no issued tokens to offer, and the listing is never read. */
+const NO_ISSUED_TOKENS: readonly IssuedTokenSymbol[] = [];
 
 const counterpartyAccountRowSchema = z.object({
   counterpartyAccountId: z.string().optional(),
@@ -138,20 +128,20 @@ function mapCounterpartyAccounts(rows: readonly CounterpartyAccountRow[]) {
  * seven seconds, and no field shows one. Funding still refuses a short balance with the amount
  * named.
  */
-export function useDvpCreateContext(): {
+export function useDvpCreateContext(issuanceEnabled: boolean): {
   context: DvpCreateContext | undefined;
   retry: () => void;
 } {
   const scope = useDashboardKeyScope();
   const walletsRead = useWalletSummaries({ includeBalances: false });
-  const tokensRead = useDashboardRead(dvpQueryKeys.createTokens(scope), tokensResponseSchema);
+  const tokensRead = useIssuedTokens(issuanceEnabled);
   const accountsRead = useDashboardRead(
     dvpQueryKeys.createCounterpartyAccounts(scope),
     counterpartyAccountsResponseSchema
   );
   const wallets = walletsRead.data;
   const walletsError = walletsRead.error;
-  const tokenRows = tokensRead.data;
+  const tokenRows = issuanceEnabled ? tokensRead.data : NO_ISSUED_TOKENS;
   const tokensError = tokensRead.error;
   const accountRows = accountsRead.data;
   const accountsError = accountsRead.error;
@@ -197,7 +187,7 @@ export function useDvpCreateContext(): {
     // Only deployed tokens have a mint to trade. A draft has nothing to put in escrow, so offering
     // it would be an invitation to a 400. Whether DvP will ACCEPT a mint is deliberately not
     // decided here: create reads the mint on chain and refuses with the offending extension named.
-    const tokens = tokenRows.data.flatMap(toTokenOption);
+    const tokens = tokenRows.map(toTokenOption);
     if (accountRows === undefined) {
       return {
         wallets: walletOptions,
@@ -223,17 +213,17 @@ export function useDvpCreateContext(): {
  */
 export const TOKEN_2022_PROGRAM = SPL_TOKEN_PROGRAMS["token-2022"];
 
-function toTokenOption(token: TokenRow) {
-  return token.mintAddress
-    ? [
-        {
-          mint: token.mintAddress,
-          label: token.symbol || token.name || token.mintAddress,
-          name: token.name ? token.name : null,
-          decimals: typeof token.decimals === "number" ? token.decimals : null,
-          // Every SDP-issued asset is minted under Token-2022.
-          tokenProgram: TOKEN_2022_PROGRAM,
-        },
-      ]
-    : [];
+/**
+ * The listing carries no token program and its `extensions` is an object about the permanent
+ * delegate, NOT the Token-2022 extension set, so it cannot tell us whether DvP will accept a mint.
+ */
+function toTokenOption(token: IssuedTokenSymbol): DvpCreateOption {
+  return {
+    mint: token.mintAddress,
+    label: token.symbol || token.name || token.mintAddress,
+    name: token.name ? token.name : null,
+    decimals: token.decimals,
+    // Every SDP-issued asset is minted under Token-2022.
+    tokenProgram: TOKEN_2022_PROGRAM,
+  };
 }

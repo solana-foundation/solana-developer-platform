@@ -16,7 +16,6 @@ export const EARN_PAGE_SIZE = 100;
 const readsEarn = readsUnderPath(EARN_PATH);
 const readsEarnCatalogue = readsUnderPath(`${EARN_PATH}/strategies`);
 const readsKaminoAllocations = readsUnderPath(`${EARN_PATH}/kamino-allocations`);
-const readsEarnProviderAccess = readsUnderPath(`${EARN_PATH}/provider-access`);
 const readsWallets = readsUnderPath("/api/dashboard/wallets");
 const readsWalletBalances = readsUnderPath("/api/dashboard/payments/wallets");
 
@@ -88,17 +87,14 @@ export const earnQueryKeys = {
       cluster: "mainnet-beta",
     }),
   providerAccess: (scope: DashboardKeyScope) =>
-    dashboardRequestKey(scope, `${EARN_PATH}/provider-access`),
+    dashboardRequestKey(scope, "/api/dashboard/organizations/current/provider-access"),
   /**
    * Every read an Earn money write can change: the Earn ledgers, positions and programs, and the
-   * wallet balances the money moves between. Not the strategy catalogue, the Kamino allocations or
-   * provider access, which no movement changes.
+   * wallet balances the money moves between. Not the strategy catalogue or the Kamino allocations,
+   * which no movement changes.
    */
   isMoneyMovementRead: (key: DashboardRequestKey) =>
-    (readsEarn(key) &&
-      !readsEarnCatalogue(key) &&
-      !readsKaminoAllocations(key) &&
-      !readsEarnProviderAccess(key)) ||
+    (readsEarn(key) && !readsEarnCatalogue(key) && !readsKaminoAllocations(key)) ||
     readsWallets(key) ||
     readsWalletBalances(key),
 };

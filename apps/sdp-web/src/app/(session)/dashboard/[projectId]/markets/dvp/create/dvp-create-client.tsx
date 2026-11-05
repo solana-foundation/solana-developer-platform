@@ -12,9 +12,9 @@ import { DvpCreateWorkspace } from "./dvp-create-workspace";
  * decides which stablecoin mints exist, and reading it from context inside the
  * form would make the form untestable without the whole dashboard workspace.
  */
-export function DvpCreateClient() {
+export function DvpCreateClient({ issuanceEnabled }: { issuanceEnabled: boolean }) {
   const cluster = useSolanaCluster();
-  const { context, retry } = useDvpCreateContext();
+  const { context, retry } = useDvpCreateContext(issuanceEnabled);
   if (context === undefined) {
     return <DvpCreateSkeleton />;
   }

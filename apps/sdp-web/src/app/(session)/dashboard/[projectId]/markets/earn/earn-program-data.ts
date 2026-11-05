@@ -59,10 +59,10 @@ import {
 } from "@/lib/dashboard-request-key";
 import { useDashboardKeyScope, useDashboardSWR } from "@/lib/dashboard-swr";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { useCadencedDashboardSWR } from "@/lib/use-cadenced-swr";
 import { EARN_PAGE_SIZE, earnQueryKeys } from "./earn-query-key";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
-import { useCadencedDashboardSWR } from "./use-cadenced-dashboard-swr";
 
 /**
  * Live Earn data access for the dashboard, over the /api/dashboard/markets/earn
@@ -111,10 +111,11 @@ async function requestJson<T>(
   scope: DashboardKeyScope,
   path: string
 ): Promise<{ status: number; body: T | undefined }> {
-  const response = await dashboardReadRequest(path, {
-    projectId: scope.projectId,
-    demo: scope.mode === "demo",
-  });
+  const response = await dashboardReadRequest(
+    path,
+    { projectId: scope.projectId, demo: scope.mode === "demo" },
+    undefined
+  );
   let body: T | undefined;
   try {
     body = (await response.json()) as T;

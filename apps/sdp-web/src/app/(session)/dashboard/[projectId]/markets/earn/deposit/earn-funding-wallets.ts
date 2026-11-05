@@ -88,7 +88,11 @@ const fundingWalletBalanceResponseSchema = z.object({
 export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
 
 function sendRead(scope: DashboardKeyScope, url: string): Promise<Response> {
-  return dashboardReadRequest(url, { projectId: scope.projectId, demo: scope.mode === "demo" });
+  return dashboardReadRequest(
+    url,
+    { projectId: scope.projectId, demo: scope.mode === "demo" },
+    undefined
+  );
 }
 
 /**

@@ -84,9 +84,6 @@ api/dashboard/markets/earn/
   vault-positions/route.ts           GET list (keyset cursor)
   movements/route.ts                 GET the cross-provider ledger feed
                                      (keyset cursor + equality filters)
-  provider-access/route.ts           GET this organization's Earn provider
-                                     access: runs `loadEarnProviderAccess()`
-                                     per request, null when unverifiable
 ```
 
 `provider-query.ts` holds SEVEN validators with deliberately different failure
@@ -164,11 +161,11 @@ nothing else; the program create still sends the body `requestId` form.
   handoff page and its `/v1/earn/button-configurations/*` API; migration 0074
   dropped its table. Do not reintroduce persisted presentation state here.)
 - Pages await no sdp-api call. Both routes read provider access in the browser
-  (`useEarnProviderAccess`, `./earn-provider-access.ts`) from the
-  `provider-access` BFF route, which resolves `loadEarnProviderAccess()` per
-  request. Provider access is organization-scoped: the read is keyed by
-  Project and mode like every dashboard read, and the cache is dropped when
-  the identity changes.
+  (`useEarnProviderAccess`, `./earn-provider-access.ts`) from the shared
+  `/api/dashboard/organizations/current/provider-access` route, parsing only
+  `providers.earn`. A failed read is no access and disables every deposit.
+  Provider access is organization-scoped: the cache is dropped when the
+  identity changes.
 - Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
   surface shares, and each Earn segment (`../embedded-yield`,
   `../treasury-solutions`) holds `earn()` in its own layout (`notFound()`), so
@@ -196,13 +193,10 @@ nothing else; the program create still sends the body `requestId` form.
   sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
   is hand-set here**. Carries no
   `"use client"` directive, on purpose (see "The client/server boundary bug").
-- `earn-provider-access.server.ts` — `loadEarnProviderAccess()`: reads the
-  onboarding status through `requestOnboardingStatus()` (`@/lib/sdp-api`, one
-  `/v1/onboarding/status` call per request, shared with the layout's quick
-  start) then provider availability for that organization.
-  Every failure path returns `null`, and `null` disables deposit actions. A
-  catalogue row says a strategy EXISTS; it never says this organization may
-  fund it.
+- `earn-provider-access.ts` — `useEarnProviderAccess()`: the organization's
+  Earn entries from its provider access. A failed read answers `null`, and
+  `null` disables deposit actions. A catalogue row says a strategy EXISTS; it
+  never says this organization may fund it.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
   visible but disabled, with the reason beside their APY. The selected
@@ -569,7 +563,7 @@ Two rules hold it together:
   style and environment are static facts and may be read in the browser.
   Organization entitlement and provider configuration are request-scoped and
   must not be guessed there — they arrive as `providerAccess` from the server
-  (the `provider-access` read), and `null` or a failed read disables the
+  (the organization's provider-access read), and a failed read disables the
   action.
 - **Disabled with an explanation beats hidden.** An unavailable strategy still
   renders its row, its APY and a badge naming why. Hiding it makes a customer
