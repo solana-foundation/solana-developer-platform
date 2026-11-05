@@ -1,5 +1,5 @@
 import { RecordSection } from "@/app/(session)/dashboard/[projectId]/payments/payments-record";
-import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { getRequestLocale, getRequestTimeZone, getTranslations } from "@/i18n/server";
 import { formatDate } from "@/lib/date-format";
 import { readableApiError } from "@/lib/sdp-api-error";
 import { InviteMemberForm } from "./invite-member-form";
@@ -9,7 +9,11 @@ import { listMembers, type Member, type PendingInvitation } from "./members-load
 import { MembersPagination } from "./members-pagination";
 
 export async function MembersSection({ page }: { page: number }) {
-  const [t, locale] = await Promise.all([getTranslations(), getRequestLocale()]);
+  const [t, locale, timeZone] = await Promise.all([
+    getTranslations(),
+    getRequestLocale(),
+    getRequestTimeZone(),
+  ]);
 
   let members: Member[] = [];
   let invitations: PendingInvitation[] = [];
@@ -33,7 +37,6 @@ export async function MembersSection({ page }: { page: number }) {
         <InviteMemberForm />
       </RecordSection>
 
-      {/* Anchored so the retired /dashboard/members route can deep-link here. */}
       <RecordSection id="members" title={t("Shared.members.title")}>
         {loadError ? (
           <p role="alert" className="text-body text-error">
@@ -45,7 +48,7 @@ export async function MembersSection({ page }: { page: number }) {
               id: member.id,
               identity: resolveMemberIdentity(member.user, t("Shared.members.unnamedMember")),
               role: member.role,
-              joinedOn: formatDate(locale, member.createdAt),
+              joinedOn: formatDate(locale, timeZone, member.createdAt),
               isSelf: Boolean(member.isSelf),
               isLastAdmin: member.role === "admin" && meta.activeAdminCount <= 1,
             }))}
@@ -53,7 +56,7 @@ export async function MembersSection({ page }: { page: number }) {
               id: invitation.id,
               email: invitation.email,
               role: invitation.role,
-              invitedOn: formatDate(locale, invitation.createdAt),
+              invitedOn: formatDate(locale, timeZone, invitation.createdAt),
             }))}
           />
         )}

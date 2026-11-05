@@ -56,18 +56,15 @@ const FIT_CLASS = {
 >;
 
 /**
- * A label and its value on one rule. A record row is 40px: 13px, then 14px. A summary row may
- * carry an icon, shown in a round tile beside the label outside the refresh scope only. `fit`
- * says how a long value gives way.
+ * A label and its value on one rule. A record row is 40px: 13px, then 14px. `fit` says how a long
+ * value gives way.
  */
 export function DetailRow({
   label,
-  icon,
   fit = "truncate",
   children,
 }: {
   label: ReactNode;
-  icon?: ReactNode;
   fit?: DetailRowFit;
   children: ReactNode;
 }) {
@@ -75,26 +72,16 @@ export function DetailRow({
   const fitClass = FIT_CLASS[fit];
   if (variant === "summary") {
     return (
-      <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 refresh:py-3.5 refresh:first:pt-3.5">
+      <div className="flex items-center justify-between gap-4 py-3.5 last:pb-0">
         <dt
           className={cn(
-            "flex items-center gap-2.5 text-sm text-tertiary refresh:text-body refresh:text-secondary",
+            "flex items-center gap-2.5 text-body text-secondary",
             fitClass.summaryLabel
           )}
         >
-          {icon === undefined ? null : (
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary refresh:hidden">
-              {icon}
-            </span>
-          )}
           {label}
         </dt>
-        <dd
-          className={cn(
-            fitClass.value,
-            "text-right text-sm font-medium text-primary refresh:text-body refresh:font-normal"
-          )}
-        >
+        <dd className={cn(fitClass.value, "text-right text-body font-normal text-primary")}>
           {children}
         </dd>
       </div>

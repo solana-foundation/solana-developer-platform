@@ -1,6 +1,6 @@
 import { KORA_ENV_KEYS } from "@sdp/fee-payment";
 import type { FeePaymentEnv } from "@sdp/fee-payment/port";
-import type { CustodyMode, CustodyProvider } from "@sdp/types/custody";
+import { CUSTODY_MODES, type CustodyMode, type CustodyProvider } from "@sdp/types/custody";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
   isCustodyProviderInReleaseChannel,
@@ -59,6 +59,21 @@ export function isCustodyProviderAvailable(
     provider,
     mode
   );
+}
+
+/**
+ * Whether the deployment's release channel offers custody `provider` in at least one
+ * custody mode, which is when its public API document names the provider.
+ *
+ * @param env - Process environment naming the release channel.
+ * @param provider - The custody provider.
+ * @returns True when some (provider, mode) pair is in the release channel.
+ */
+export function isCustodyProviderOffered(
+  env: Pick<Env, "SDP_RELEASE_CHANNEL">,
+  provider: CustodyProvider
+): boolean {
+  return CUSTODY_MODES.some((mode) => isCustodyProviderAvailable(env, provider, mode));
 }
 
 /** Whether the deployment's release channel includes ramp `provider` (see `SDP_RAMP_PROVIDER_MATURITY`). */

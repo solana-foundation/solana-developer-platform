@@ -435,7 +435,7 @@ function OperationButtons({
             className={cn(
               "shrink-0",
               OPERATION_BUTTON_HEIGHT,
-              DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
+              DANGER_OPERATIONS.has(row.id) && "text-error border-error/40"
             )}
             disabled={disabled}
             onClick={row.onAction}
@@ -558,7 +558,7 @@ function OperationRows({
               className={cn(
                 "shrink-0",
                 OPERATION_BUTTON_HEIGHT,
-                DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
+                DANGER_OPERATIONS.has(row.id) && "text-error border-error/40"
               )}
               disabled={pending || Boolean(row.disabledReason)}
               onClick={row.onAction}

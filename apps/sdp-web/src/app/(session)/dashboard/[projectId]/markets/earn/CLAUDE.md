@@ -128,9 +128,8 @@ nothing else; the program create still sends the body `requestId` form.
   wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
-  live APY and liquidity, and code that updates in place. The legacy
-  `/integrate` deep link renders the same surface for bookmarked strategy URLs
-  (`?strategy=` only; the former `?cluster=` toggle is gone). No network
+  live APY and liquidity, and code that updates in place (`?strategy=`
+  selects the strategy). No network
   toggle: sandbox reads both shelves (`useIntegrationCatalogue`) and lists the
   devnet rows first, then the mirrored mainnet rows disabled as "Mainnet only",
   the same posture as the Treasury table. There is no mainnet "preview" mode
@@ -166,9 +165,9 @@ nothing else; the program create still sends the body `requestId` form.
   organization-scoped; caching it would hand one org's entitlement to another.
 - Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
   surface shares, and each Earn segment (`../embedded-yield`,
-  `../treasury-solutions`, and this directory's legacy alias routes) holds
-  `earn()` in its own layout (`notFound()`), so DvP is not hidden by it. Pages
-  hold no flag checks: a new Earn route goes under one of those segments.
+  `../treasury-solutions`) holds `earn()` in its own layout (`notFound()`), so
+  DvP is not hidden by it. Pages hold no flag checks: a new Earn route goes
+  under one of those segments.
 - Loading states come from `../markets-route-skeletons`, with distinct portfolio,
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
@@ -651,7 +650,7 @@ are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint
 sees nothing. Any future server-side read of a dashboard constant belongs in a
 directive-free module for the same reason — and a surfacing change wants one
 browser pass on `/dashboard/markets/embedded-yield` and
-`/dashboard/markets/embedded-yield/integrate`.
+`/dashboard/markets/embedded-yield/configure`.
 
 ## Rules
 
@@ -683,9 +682,8 @@ browser pass on `/dashboard/markets/embedded-yield` and
   (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both so the DB stays
   a truthful provider inventory. Do not reimplement either here: a client-side
   copy would drift, and a hidden row never reaches the browser to begin with.
-- Design system: the 2026 refresh on the routes `lib/theme-scope-routes.ts`
-  lists. Type, colour and shapes come from `@sdp/design-tokens` in the
-  `refresh` scope; pages compose the shared refresh blocks (`RecordStack` and
+- Design system: type, colour and shapes come from `@sdp/design-tokens`; pages
+  compose the shared blocks (`RecordStack` and
   `RecordBlock`, `StatusText` for status as words, the borderless design-system
   `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
   bordered cards. Treasury and Embedded Yield share their summary hero and a

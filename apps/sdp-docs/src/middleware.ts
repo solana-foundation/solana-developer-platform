@@ -57,7 +57,8 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Only handle docs content pages, the home included; skip assets, API routes, explicit extensions
-  const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
+  const isDocsPage =
+    (pathname === "/docs" || pathname.startsWith("/docs/")) && !pathname.startsWith("/docs/api/");
   if (!isDocsPage || pathname.match(/\.[a-z]{2,5}$/i)) {
     return NextResponse.next();
   }

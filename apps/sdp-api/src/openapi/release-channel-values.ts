@@ -1,4 +1,5 @@
 import { ACTIONS, actionOwnerOf, actionsInModule, HIDDEN_ACTION_MODULES } from "@sdp/types/actions";
+import { CUSTODY_PROVIDERS, type CustodyProvider } from "@sdp/types/custody";
 import { RAMP_ONLY_TRANSFER_STATUSES, RAMP_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
   ORGANIZATION_PROVIDER_FAMILIES,
@@ -7,6 +8,7 @@ import {
   RETIRED_RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import {
+  isCustodyProviderPublished,
   isRampProviderInReleaseChannel,
   SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
@@ -27,10 +29,14 @@ import { z } from "zod";
  * catalogs in `@sdp/types`, and `pruneUnpublishedValues` drops the ones the
  * document's channel does not publish. Actions carry their owner in the
  * registry, and wallet purposes in `WALLET_PURPOSE_OWNERS`, which the dashboard
- * filters its purpose pickers by too.
+ * filters its purpose pickers by too. A custody provider publishes where the
+ * channel offers it in either custody mode.
  */
 
-export type Owner = { module: SdpModule } | { rampProvider: RampProviderId };
+export type Owner =
+  | { module: SdpModule }
+  | { rampProvider: RampProviderId }
+  | { custodyProvider: CustodyProvider };
 
 function buildOwners(): ReadonlyMap<string, Owner> {
   const owners = new Map<string, Owner>();
@@ -61,6 +67,7 @@ function buildOwners(): ReadonlyMap<string, Owner> {
   for (const provider of RAMP_PROVIDERS) own(provider, { rampProvider: provider });
   // Retired providers have no stage; their stored rows read under Ramps.
   for (const provider of RETIRED_RAMP_PROVIDERS) own(provider, { module: "ramps" });
+  for (const provider of CUSTODY_PROVIDERS) own(provider, { custodyProvider: provider });
   return owners;
 }
 
@@ -97,6 +104,11 @@ export function isValuePublished(
   const owner = VALUE_OWNERS.get(value);
   if (!owner) return true;
   if ("module" in owner) return modules.has(owner.module);
+  if ("custodyProvider" in owner) {
+    return (
+      modules.has("custody") && isCustodyProviderPublished(releaseChannel, owner.custodyProvider)
+    );
+  }
   return (
     modules.has("ramps") &&
     isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
@@ -113,7 +125,7 @@ export function hiddenValues(): readonly string[] {
   return [...HIDDEN_VALUES];
 }
 
-/** The module or ramp provider that owns a value, for consumers that filter by channel. */
+/** The module, ramp provider or custody provider that owns a value, for consumers that filter by channel. */
 export function valueGates(): Record<string, Owner> {
   return Object.fromEntries(VALUE_OWNERS);
 }
@@ -182,7 +194,11 @@ function pruneExample(value: Json, published: Published): Json | undefined {
  * channel accepts; response schemas must also accept what a deployment already
  * stores, such as an API key saved with a scope the channel now leaves out.
  */
-type Context = { published: Published; inResponse: boolean; modules: ReadonlySet<SdpModule> };
+type Context = {
+  published: Published;
+  inResponse: boolean;
+  modules: ReadonlySet<SdpModule>;
+};
 
 /** Schema ownership is contextual: `transferId` also names ordinary transfer rows. */
 export const MODULE_GATE = "x-sdp-module";
@@ -190,6 +206,16 @@ export const MODULE_GATE = "x-sdp-module";
 export const TRANSFER_STATUS_GATE = "x-sdp-transfer-status";
 /** Alternate prose for a shared operation when its channel excludes a module. */
 export const DESCRIPTION_GATE = "x-sdp-description-without-module";
+/** Schema ownership by one custody provider, such as its own tracking fields on a transfer. */
+export const CUSTODY_PROVIDER_GATE = "x-sdp-custody-provider";
+
+const GATE_KEYS: ReadonlySet<string> = new Set([
+  MODULE_GATE,
+  TRANSFER_STATUS_GATE,
+  DESCRIPTION_GATE,
+  CUSTODY_PROVIDER_GATE,
+]);
+const custodyProviderGateSchema = z.enum(CUSTODY_PROVIDERS).optional();
 
 const moduleNameSchema = z.enum(SDP_RELEASE_CHANNELS.experimental);
 const moduleGateSchema = moduleNameSchema.optional();
@@ -235,7 +261,10 @@ function pruneProperties(
   for (const [name, schema] of Object.entries(value)) {
     const kept = pruneNode(schema, context);
     if (kept === EMPTY) {
-      if (!isJsonObject(schema) || schema[MODULE_GATE] === undefined) dropped.add(name);
+      const gated =
+        isJsonObject(schema) &&
+        (schema[MODULE_GATE] !== undefined || schema[CUSTODY_PROVIDER_GATE] !== undefined);
+      if (!gated) dropped.add(name);
     } else properties[name] = kept;
   }
   // A required property with no publishable value leaves no publishable object.
@@ -270,6 +299,8 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
 
   const module = moduleGateSchema.parse(node[MODULE_GATE]);
   if (module !== undefined && !context.modules.has(module)) return EMPTY;
+  const custodyProvider = custodyProviderGateSchema.parse(node[CUSTODY_PROVIDER_GATE]);
+  if (custodyProvider !== undefined && !context.published(custodyProvider)) return EMPTY;
   if (node[TRANSFER_STATUS_GATE] === true && !context.modules.has("ramps")) {
     const published = context.published;
     context = {
@@ -281,7 +312,7 @@ function pruneNode(node: Json, context: Context): Json | typeof EMPTY {
   const alternateDescription = descriptionGateSchema.parse(node[DESCRIPTION_GATE]);
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(node)) {
-    if (key === MODULE_GATE || key === TRANSFER_STATUS_GATE || key === DESCRIPTION_GATE) continue;
+    if (GATE_KEYS.has(key)) continue;
     if (
       key === "description" &&
       alternateDescription !== undefined &&

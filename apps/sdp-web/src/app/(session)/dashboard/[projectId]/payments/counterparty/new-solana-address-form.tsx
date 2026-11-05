@@ -174,7 +174,7 @@ export function NewSolanaAddressForm({
           size="xl"
           autoComplete="off"
           spellCheck={false}
-          inputClassName="font-mono refresh:text-body placeholder:font-sans"
+          inputClassName="font-mono text-body! placeholder:font-sans"
           placeholder={t("DashboardPayments.counterparty.addressPlaceholder")}
           value={address}
           disabled={busy}
@@ -218,7 +218,7 @@ export function NewSolanaAddressForm({
           size="sm"
           disabled={!hasAddress}
           loading={busy}
-          className={cn(!hasAddress && "opacity-100 text-tertiary refresh:bg-fill")}
+          className={cn(!hasAddress && "opacity-100 text-tertiary bg-fill")}
           onClick={() => void (flagged ? save() : screenAndSave())}
         >
           {primaryLabel}

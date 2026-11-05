@@ -6,7 +6,7 @@ import { createContext, type ReactNode } from "react";
 export interface DashboardPageTitleOverride {
   pathname: string;
   title: string;
-  /** Set before the title on a refresh page, as a wallet's provider mark is. */
+  /** Set before the page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
   /** The page's own actions, before the route's header action (a wallet's favorite star). */
   actions?: ReactNode;

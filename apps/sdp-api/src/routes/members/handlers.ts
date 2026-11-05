@@ -1,4 +1,4 @@
-import { INVITATION_STATUSES } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, INVITEE_NOT_ALLOWED_REASON } from "@sdp/types/organizations";
 import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -18,12 +18,15 @@ import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext, ValidatedContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { listActiveApiKeysCreatedBy } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
+import { ClerkRequestError } from "@/services/clerk-error";
 import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
+  isClerkAccessRefusal,
 } from "@/services/clerk-organizations.service";
 import {
   applyMembershipChange,
@@ -406,12 +409,41 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   }
 
   const clerk = new ClerkOrganizationsService(c.env);
-  const clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
-    organizationId: clerkOrgId,
-    emailAddress: normalizedEmail,
-    expiresInDays: INVITATION_TTL_DAYS,
-    redirectUrl,
-  });
+  let clerkInvitation: Pick<ClerkOrganizationInvitation, "id"> | null;
+  try {
+    clerkInvitation = await clerk.createOrganizationInvitationUnlessMember({
+      organizationId: clerkOrgId,
+      emailAddress: normalizedEmail,
+      expiresInDays: INVITATION_TTL_DAYS,
+      redirectUrl,
+      sdpInvitationId: invitationId,
+    });
+  } catch (error) {
+    const clerkError = error instanceof ClerkRequestError ? error : null;
+    const invitation = { id: invitationId, email: normalizedEmail };
+    if (isClerkRefusal(clerkError)) {
+      await failUnsentInvitation(c, invitation, clerkError);
+      if (isClerkAccessRefusal(clerkError)) {
+        throw badRequest("This email's domain isn't approved yet. Contact us to get it added.", {
+          reason: INVITEE_NOT_ALLOWED_REASON,
+        });
+      }
+      throw error;
+    }
+    // Clerk may have created the invitation before the call failed.
+    let delivered: { id: string } | null = null;
+    try {
+      delivered = await findDeliveredInvitation(clerk, clerkOrgId, invitationId);
+    } finally {
+      if (delivered === null) {
+        await failUnsentInvitation(c, invitation, clerkError);
+      }
+    }
+    if (delivered === null) {
+      throw error;
+    }
+    clerkInvitation = delivered;
+  }
 
   // The address already holds the Clerk membership, typically from accepting
   // an earlier Clerk invitation whose SDP invitation then expired or was
@@ -480,6 +512,71 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     },
   });
 };
+
+/** Clerk answered 4xx: it refused the invitation, so it created and sent nothing. */
+function isClerkRefusal(clerkError: ClerkRequestError | null): clerkError is ClerkRequestError {
+  return clerkError !== null && clerkError.clerkStatus >= 400 && clerkError.clerkStatus < 500;
+}
+
+/**
+ * The invitation a create that threw may still have made: Clerk can commit it
+ * and send its email when its answer never arrives.
+ */
+async function findDeliveredInvitation(
+  clerk: ClerkOrganizationsService,
+  clerkOrgId: string,
+  sdpInvitationId: string
+): Promise<{ id: string } | null> {
+  const tagged = await clerk.listSdpTaggedPendingInvitations(clerkOrgId);
+  const match = tagged.find((entry) => entry.sdpInvitationId === sdpInvitationId);
+  return match === undefined ? null : { id: match.clerkInvitationId };
+}
+
+/**
+ * A pending row would still admit its address at sign-in, so an invitation
+ * Clerk did not deliver is failed, which also frees the address for a retry.
+ */
+async function failUnsentInvitation(
+  c: AppContext,
+  invitation: { id: string; email: string },
+  clerkError: ClerkRequestError | null
+): Promise<void> {
+  const { organizationId, userId } = resolveActor(c);
+  const clerkCode = clerkError === null ? null : clerkError.clerkCode;
+  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const failed = await tx
+      .prepare(
+        `UPDATE invitations SET status = 'failed'
+          WHERE id = ? AND organization_id = ? AND status = 'pending'`
+      )
+      .bind(invitation.id, organizationId)
+      .run();
+    return {
+      entry:
+        failed === 0
+          ? null
+          : {
+              action: "invite",
+              resourceType: "invitation",
+              resourceId: invitation.id,
+              metadata: { email: invitation.email, clerkCode },
+              organizationId,
+              userId,
+              status: "failure",
+            },
+      result: undefined,
+    };
+  });
+  getLogger().warn(
+    {
+      organizationId,
+      invitationId: invitation.id,
+      clerkStatus: clerkError === null ? null : clerkError.clerkStatus,
+      clerkCode,
+    },
+    "sdp_api_invitation_failed"
+  );
+}
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
   const { organizationId, userId } = resolveActor(c);

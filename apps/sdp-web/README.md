@@ -10,8 +10,6 @@ SDP Web is a Next.js application with two main surfaces:
 
 - **Landing page** (`/`) — Product overview and marketing
 - **Sign-up / Sign-in** (`/sign-up`, `/sign-in`) — Clerk authentication
-- **Allowlist form** (`/allowlist`) — Request access form
-- **Member invite** (`/members`) — Token-gated invite acceptance
 
 ### Internal Surface (Authenticated Dashboard)
 

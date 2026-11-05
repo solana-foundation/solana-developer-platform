@@ -28,6 +28,8 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
+import { copyPendingText } from "@/lib/copy-pending-text";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
@@ -91,8 +93,9 @@ function PaymentRequestsTable({
   onCopyLink: ((request: PaymentRequest) => void) | null;
 }) {
   const t = useTranslations();
+  const timeZone = useTimeZone();
   return (
-    <div className="overflow-x-auto refresh:-mx-3">
+    <div className="overflow-x-auto -mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
         <PaymentsTableHeader
           columns={[
@@ -149,7 +152,7 @@ function PaymentRequestsTable({
               <TableCell
                 className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
               >
-                {formatDateTime(request.createdAt, locale)}
+                {formatDateTime(request.createdAt, locale, timeZone)}
               </TableCell>
               {onCopyLink ? (
                 <TableCell className="text-right whitespace-nowrap">
@@ -428,9 +431,7 @@ export function PaymentRequestsWorkspace({
       return;
     }
     // Reads never carry the pay link (APE-849); the link read returns it only to a
-    // member whose role may manage payment requests. Safari lets a clipboard
-    // write start only inside the click, so the write starts now with the link
-    // read as its pending contents.
+    // member whose role may manage payment requests.
     let refusal: string | null = null;
     const link = dashboardFetch<{ data: PaymentRequestLink }>(
       `/api/dashboard/payments/requests/${encodeURIComponent(row.id)}/link`
@@ -440,12 +441,12 @@ export function PaymentRequestsWorkspace({
           res.status === 403 ? t("DashboardPayments.requests.paymentLinkNotPermitted") : res.error;
         throw new Error(refusal);
       }
-      const url = `${window.location.origin}/pay/${res.data.data.publicToken}`;
-      return new Blob([url], { type: "text/plain" });
+      return `${window.location.origin}/pay/${res.data.data.publicToken}`;
     });
-    navigator.clipboard.write([new ClipboardItem({ "text/plain": link })]).then(
-      () => toast.success(t("DashboardPayments.requests.paymentLinkCopied")),
-      () => toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
+    void copyPendingText(link).then((copied) =>
+      copied
+        ? toast.success(t("DashboardPayments.requests.paymentLinkCopied"))
+        : toast.error(refusal ?? t("DashboardPayments.requests.paymentLinkCopyFailed"))
     );
   };
 

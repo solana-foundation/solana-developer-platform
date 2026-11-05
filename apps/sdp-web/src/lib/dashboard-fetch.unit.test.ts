@@ -60,7 +60,7 @@ afterEach(() => {
 
 describe("dashboardFetch", () => {
   it("merges explicitly supplied headers with the JSON content type", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/markets/earn`);
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/markets/embedded-yield`);
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(JSON.stringify({ data: { ok: true } }), {
@@ -83,7 +83,7 @@ describe("dashboardFetch", () => {
   });
 
   it("does not overwrite an explicitly selected content type", async () => {
-    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/custody`);
+    setWindowPathname(`/dashboard/${SANDBOX_PROJECT.id}/wallets`);
     const fetchMock = noContentFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 

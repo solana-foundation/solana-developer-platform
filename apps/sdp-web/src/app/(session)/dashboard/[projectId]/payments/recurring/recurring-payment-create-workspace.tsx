@@ -28,6 +28,7 @@ import {
 } from "@/app/(session)/dashboard/[projectId]/payments/ramps/components/payment-form-fields";
 import { RampWizardShell } from "@/app/(session)/dashboard/[projectId]/payments/ramps/components/ramp-wizard-shell";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
 import {
   amountErrorMessage,
@@ -120,7 +121,6 @@ function ContactFields({ form }: StepProps) {
         counterpartiesResult={liveCounterparties}
         onChange={selectCounterparty}
         value={fields.counterpartyId}
-        hint={t("DashboardPayments.payForm.contactHint")}
         footer={(close) => (
           <button
             type="button"
@@ -355,6 +355,7 @@ function WhenStep({ form }: StepProps) {
 function ReviewStep({ form }: StepProps) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const {
     fields,
     schedulePresets,
@@ -370,7 +371,7 @@ function ReviewStep({ form }: StepProps) {
   const reviewAmount = `${formatReviewAmount(fields.amount, locale)} ${assetLabel}`.trim();
   // The first run is picked on the When step in the browser, so it is never formatted on the
   // server; it is a day (its run is due at the start of it), in the list's "Aug 5, 2026" form.
-  const firstRunDate = formatDate(fields.firstCollectionAt || null, locale);
+  const firstRunDate = formatDate(fields.firstCollectionAt || null, locale, timeZone);
   const firstRunDetail = firstRunDate
     ? t("DashboardPayments.recurring.firstRun", { date: firstRunDate })
     : t("DashboardPayments.recurring.firstRunAfterActivation");

@@ -11,7 +11,7 @@ import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@sdp/ui/f
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
-import { ReceiptTextIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
@@ -368,7 +368,6 @@ export function TransactionsWorkspace({
         ) : null}
         {error !== undefined ? (
           <ListEmptyState
-            icon={<ReceiptTextIcon className="size-5" />}
             message={t("DashboardPayments.transactions.loadFailed")}
             description={error.message}
           />

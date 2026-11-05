@@ -1,20 +1,15 @@
 "use client";
 
-import {
-  TableCell as DesignSystemTableCell,
-  type TableCellProps,
-} from "@solana/design-system/table";
+import type { TableCellProps } from "@solana/design-system/table";
 import type { Ref } from "react";
 import { cn } from "./cn";
-import { useThemeScope } from "./theme-scope";
 
 /**
- * A table cell. The design-system cell merges classes with its own tailwind-merge, which does not
- * know the app's ink names, so a cell's `text-primary` or `text-secondary` kept its default
- * `text-text-high` beside it, and that one comes later in the stylesheet: every column read in
- * one grey. On a refresh surface this is the same `td` with the same classes, merged with the
- * app's `cn`, so a cell's own ink wins, as the design's tables set names and amounts in full ink
- * and dates and assets in the secondary one. Other surfaces keep the design-system cell as it is.
+ * A table cell: the design-system cell's `td` and classes, merged with the app's `cn`. The
+ * design-system cell merges with its own tailwind-merge, which does not know the app's ink names,
+ * so a cell's `text-primary` or `text-secondary` would keep its default `text-text-high` beside it,
+ * and that one comes later in the stylesheet. Here a cell's own ink wins, as the design's tables
+ * set names and amounts in full ink and dates and assets in the secondary one.
  */
 export function TableCell({
   ref,
@@ -25,20 +20,6 @@ export function TableCell({
   pinned,
   ...props
 }: TableCellProps & { ref?: Ref<HTMLTableCellElement> }) {
-  const refresh = useThemeScope() === "refresh";
-  if (!refresh) {
-    return (
-      <DesignSystemTableCell
-        ref={ref}
-        className={className}
-        align={align}
-        mono={mono}
-        numeric={numeric}
-        pinned={pinned}
-        {...props}
-      />
-    );
-  }
   return (
     <td
       ref={ref}

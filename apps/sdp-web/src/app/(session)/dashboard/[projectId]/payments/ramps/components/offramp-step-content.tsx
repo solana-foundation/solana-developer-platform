@@ -1,7 +1,6 @@
 "use client";
 
 import { Combobox } from "@sdp/ui/combobox";
-import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import type { OfframpWizard } from "@/app/(session)/dashboard/[projectId]/payments/ramps/hooks/use-offramp-wizard";
 import { getRampTransferState } from "@/app/(session)/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
@@ -42,7 +41,6 @@ function OfframpWalletStep({ wizard }: { wizard: OfframpWizard }) {
         options={walletOptions}
         placeholder={t("DashboardPayments.ramps.selectSourceWallet")}
         searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
-        icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
         isLoading={walletsLoading}
       />
       <p hidden={!sourceWalletHint} className="text-sm text-warning">

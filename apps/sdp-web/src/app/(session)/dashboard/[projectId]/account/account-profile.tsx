@@ -91,7 +91,7 @@ function ProfilePhotoSection({ user }: { user: UserResource }) {
         <UserAvatar
           name={userDisplayName(user)}
           imageUrl={user.hasImage ? user.imageUrl : ""}
-          className="size-16 text-body refresh:size-16 refresh:text-body"
+          className="size-16 text-body"
         />
         <input
           ref={fileInputRef}

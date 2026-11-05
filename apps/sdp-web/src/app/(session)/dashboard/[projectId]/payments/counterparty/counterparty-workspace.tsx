@@ -22,17 +22,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { shortenAddress } from "@/app/(session)/dashboard/[projectId]/payments/payments-overview.utils";
 import { formatDate } from "@/app/(session)/dashboard/[projectId]/payments/payments-presentation";
 import {
   PAYMENTS_TABLE_CELL,
   PAYMENTS_TABLE_HEAD,
 } from "@/app/(session)/dashboard/[projectId]/payments/payments-table";
+import { WalletMetadataCopyButton } from "@/app/(session)/dashboard/[projectId]/wallets/wallet-address-copy-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { useTimeZone } from "@/i18n/time-zone";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
@@ -299,6 +300,7 @@ function CounterpartyRow({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const timeZone = useTimeZone();
   const router = useRouter();
   const toProjectHref = useProjectHref();
   const href = toProjectHref(counterpartyHref(counterparty.id));
@@ -333,7 +335,7 @@ function CounterpartyRow({
       <TableCell
         className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
       >
-        {formatDate(counterparty.createdAt, locale)}
+        {formatDate(counterparty.createdAt, locale, timeZone)}
       </TableCell>
       <TableCell className="text-right">
         <DropdownMenu>
@@ -491,7 +493,7 @@ export function CounterpartyWorkspace({
           {t("DashboardPayments.counterparty.noMatches")}
         </p>
       ) : (
-        <div className="overflow-x-auto refresh:-mx-3">
+        <div className="overflow-x-auto -mx-3">
           <Table className="min-w-[760px] rounded-none border-0" data-counterparty-directory-table>
             <TableHeader>
               <TableRow>

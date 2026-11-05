@@ -1,9 +1,9 @@
 import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
-import type { KnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/custody/provider-catalog";
+import type { KnownCustodyProvider } from "@/app/(session)/dashboard/[projectId]/wallets/provider-catalog";
 import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
-} from "@/app/(session)/dashboard/[projectId]/custody/provider-display-status";
+} from "@/app/(session)/dashboard/[projectId]/wallets/provider-display-status";
 import type { MessageKey } from "@/i18n/messages";
 import type { ProjectCustodyAvailability } from "@/lib/provider-availability";
 
